@@ -8,13 +8,22 @@ import { Select } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { ArtifactFileContent } from "@checkfu/sdk/Api"
+
 import type { JsonArtifact } from "@checkfu/sdk/client"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ExternalLinkIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
-import { byteSize, expiry, fileView, publicationLabel, webUrl } from "../artifact-view.ts"
+import {
+	byteSize,
+	downloadUrl,
+	expiry,
+	fileView,
+	previewable,
+	publicationLabel,
+	webUrl,
+} from "../artifact-view.ts"
 import { checkfu, errorMessage, isSignedOut } from "../api.ts"
 import type { JsonArtifactLink } from "../api.ts"
 import { Pager } from "../pager.tsx"
@@ -232,13 +241,26 @@ function ArtifactView({
 				<Description label="Created">{timeAgo(artifact.created_at)}</Description>
 				<Description label="Updated">{timeAgo(artifact.updated_at)}</Description>
 			</DescriptionList>
-			<FilesSection artifact={artifact} version={version} path={path} />
-			<LinkSection key={`${artifact.id}@${version}`} artifactId={artifact.id} version={version} />
-			<PublicationSection
-				key={artifact.publication?.address ?? "unpublished"}
-				artifact={artifact}
-				version={version}
-			/>
+			{artifact.version === 0 ? (
+				<Callout>
+					No versions yet. Upload its files, then add version 1 that names them, and its files,
+					viewing links and publishing appear here.
+				</Callout>
+			) : (
+				<>
+					<FilesSection artifact={artifact} version={version} path={path} />
+					<LinkSection
+						key={`${artifact.id}@${version}`}
+						artifactId={artifact.id}
+						version={version}
+					/>
+					<PublicationSection
+						key={artifact.publication?.address ?? "unpublished"}
+						artifact={artifact}
+						version={version}
+					/>
+				</>
+			)}
 		</>
 	)
 }
@@ -378,16 +400,29 @@ function FileContent({
 	readonly version: number
 	readonly file: ArtifactFile
 }): React.JSX.Element {
-	const content = useQuery(artifactFileQuery(artifactId, version, file.path))
+	const preview = previewable(file)
+	const content = useQuery({
+		...artifactFileQuery(artifactId, version, file.path),
+		enabled: preview,
+	})
 	return (
 		<div className="space-y-2">
 			<div className="flex flex-wrap items-baseline justify-between gap-2">
 				<h3 className="min-w-0 truncate font-mono text-xs font-medium">{file.path}</h3>
-				<span className="text-xs text-muted-foreground">
+				<span className="flex items-baseline gap-3 text-xs text-muted-foreground">
 					{file.content_type} · {byteSize(file.size)}
+					<a
+						href={downloadUrl(artifactId, version, file.path)}
+						download={file.path.slice(file.path.lastIndexOf("/") + 1)}
+						className="font-medium text-foreground hover:underline"
+					>
+						Download
+					</a>
 				</span>
 			</div>
-			{content.data === undefined ? (
+			{!preview ? (
+				<Callout>Too large to preview here, {byteSize(file.size)}. Download it instead.</Callout>
+			) : content.data === undefined ? (
 				content.error === null || isSignedOut(content.error) ? (
 					<p className="text-control text-muted-foreground">Loading…</p>
 				) : (

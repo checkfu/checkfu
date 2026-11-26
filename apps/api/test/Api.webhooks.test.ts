@@ -1,7 +1,9 @@
+import { unwrapWebhookEvent } from "@checkfu/sdk"
 import { describe, expect, it } from "@effect/vitest"
 import * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { WebhookListingQuery, WebhookListingTimeout } from "../src/Http/Listing.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	WebhookDeliveryStore,
@@ -603,6 +605,224 @@ describe("Webhooks HTTP API", () => {
 						headers: AUTH_HEADERS,
 					})
 					expect(missingDeleteRes.status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(testLayer)),
+			)
+		} finally {
+			await harness.closeAll()
+		}
+	})
+
+	it("returns 202 PendingWebhook with committed id and secret on listing timeout, isolates concurrent unkeyed secret rotations, and fans out vault/credential lifecycle events", async () => {
+		const harness = makePiDurableTestLayer(
+			async (model) => makeAssistantReply(model, null, "ok", 5, 3),
+			undefined,
+			undefined,
+			undefined,
+			{
+				webhookSender: {
+					send: () => Effect.succeed({ kind: "response", status: 200 }),
+				},
+				webhookAutoDrain: true,
+			},
+		)
+
+		let forceListingTimeout = true
+		const FlakyListing = Layer.effect(
+			WebhookListingQuery,
+			Effect.map(WebhookListingQuery, (inner) => ({
+				page: (order, options) => inner.page(order, options),
+				waitFor: (receipt) =>
+					forceListingTimeout
+						? Effect.fail(new WebhookListingTimeout({ receipt }))
+						: inner.waitFor(receipt),
+			})),
+		)
+		const testLayer = FlakyListing.pipe(Layer.provideMerge(harness.layer))
+
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+
+					// 1) Unkeyed create whose listing wait times out returns 202 PendingWebhook
+					//    carrying BOTH the committed id and the signing_secret (recoverable!).
+					const pendingRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/webhooks",
+						headers: AUTH_HEADERS,
+						body: {
+							url: "https://hooks.example.com/vault-sink",
+							description: "Vault listener",
+							event_types: ["*"],
+						},
+					})
+					expect(pendingRes.status).toBe(202)
+					const pendingBody = (yield* Effect.promise(() => pendingRes.json())) as {
+						readonly id: string
+						readonly type: string
+						readonly pending: boolean
+						readonly signing_secret: string
+					}
+					expect(pendingBody.id.startsWith("whe_")).toBe(true)
+					expect(pendingBody.type).toBe("webhook")
+					expect(pendingBody.pending).toBe(true)
+					expect(pendingBody.signing_secret.startsWith("whsec_")).toBe(true)
+
+					// 2) Concurrent unkeyed rotations return each caller's OWN distinct revision & secret.
+					const [rotA, rotB] = yield* Effect.all(
+						[
+							sendRequest(apiFetch, {
+								method: "POST",
+								path: `/v1/webhooks/${pendingBody.id}/rotate-secret`,
+								headers: AUTH_HEADERS,
+							}),
+							sendRequest(apiFetch, {
+								method: "POST",
+								path: `/v1/webhooks/${pendingBody.id}/rotate-secret`,
+								headers: AUTH_HEADERS,
+							}),
+						],
+						{ concurrency: 2 },
+					)
+					expect(rotA.status).toBe(200)
+					expect(rotB.status).toBe(200)
+					const bodyA = (yield* Effect.promise(() => rotA.json())) as WebhookJson
+					const bodyB = (yield* Effect.promise(() => rotB.json())) as WebhookJson
+					expect([bodyA.secret_revision, bodyB.secret_revision].toSorted((a, b) => a - b)).toEqual([
+						2, 3,
+					])
+					expect(bodyA.signing_secret).not.toBe(bodyB.signing_secret)
+					const activeSecret =
+						bodyA.secret_revision === 3
+							? (bodyA.signing_secret ?? "")
+							: (bodyB.signing_secret ?? "")
+
+					// 3) Wait for the committed pending webhook to become visible in the listing
+					//    projection, then exercise Vault & Credential lifecycle -> vault.created,
+					//    vault_credential.created, vault.archived + vault_credential.archived,
+					//    vault.deleted + vault_credential.deleted!
+					forceListingTimeout = false
+					let listedPending = false
+					for (let attempt = 0; attempt < 100; attempt++) {
+						const listRes = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: "/v1/webhooks?limit=20",
+							headers: AUTH_HEADERS,
+						})
+						const listed = (yield* Effect.promise(() => listRes.json())) as {
+							readonly data: ReadonlyArray<WebhookJson>
+						}
+						if (listed.data.some((hook) => hook.id === pendingBody.id)) {
+							listedPending = true
+							break
+						}
+						yield* Effect.sleep("25 millis")
+					}
+					expect(listedPending).toBe(true)
+
+					const vaultCreateRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/vaults",
+						headers: AUTH_HEADERS,
+						body: { display_name: "Prod Secrets" },
+					})
+					expect(vaultCreateRes.status).toBe(201)
+					const vault = (yield* Effect.promise(() => vaultCreateRes.json())) as {
+						readonly id: string
+					}
+
+					const credCreateRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/vaults/${vault.id}/credentials`,
+						headers: AUTH_HEADERS,
+						body: {
+							display_name: "GitHub MCP",
+							auth: {
+								type: "static_bearer",
+								token: "tok_secret_never_in_webhook_12345",
+								mcp_server_url: "https://mcp.example.com/github",
+							},
+						},
+					})
+					expect(credCreateRes.status).toBe(201)
+					const credential = (yield* Effect.promise(() => credCreateRes.json())) as {
+						readonly id: string
+					}
+
+					const vaultArchiveRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/vaults/${vault.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(vaultArchiveRes.status).toBe(200)
+
+					// Wait for ArchiveVault's cascaded vault_credential.archived before deleting the vault.
+					for (let attempt = 0; attempt < 100; attempt++) {
+						const res = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/webhooks/${pendingBody.id}/deliveries?limit=50`,
+							headers: AUTH_HEADERS,
+						})
+						const list = (yield* Effect.promise(() => res.json())) as {
+							readonly data: ReadonlyArray<WebhookDeliveryJson>
+						}
+						if (list.data.some((d) => d.event_type === "vault_credential.archived")) {
+							break
+						}
+						yield* Effect.sleep("25 millis")
+					}
+
+					const vaultDeleteRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: `/v1/vaults/${vault.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(vaultDeleteRes.status).toBe(200)
+
+					// Poll until all 6 vault/credential webhook events have been delivered.
+					let deliveredTypes: Array<string> = []
+					for (let attempt = 0; attempt < 100; attempt++) {
+						const res = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/webhooks/${pendingBody.id}/deliveries?limit=50`,
+							headers: AUTH_HEADERS,
+						})
+						const list = (yield* Effect.promise(() => res.json())) as {
+							readonly data: ReadonlyArray<WebhookDeliveryJson>
+						}
+						deliveredTypes = list.data.map((d) => d.event_type)
+						if (
+							deliveredTypes.includes("vault.deleted") &&
+							deliveredTypes.includes("vault_credential.deleted")
+						) {
+							break
+						}
+						yield* Effect.sleep("25 millis")
+					}
+					expect(deliveredTypes).toEqual(
+						expect.arrayContaining([
+							"vault.created",
+							"vault_credential.created",
+							"vault.archived",
+							"vault_credential.archived",
+							"vault.deleted",
+							"vault_credential.deleted",
+						]),
+					)
+
+					// Verify every delivered vault/credential payload with SDK unwrapWebhookEvent
+					// and confirm the credential secret never appears in any body!
+					for (const req of harness.webhookDeliveries.sentRequests) {
+						expect(req.body).not.toContain("tok_secret_never_in_webhook_12345")
+						const unwrapped = yield* Effect.promise(() =>
+							unwrapWebhookEvent(req.body, req.headers, { secret: activeSecret }),
+						)
+						expect(unwrapped.type).toBe("event")
+						if (unwrapped.data.type.startsWith("vault_credential.")) {
+							expect(unwrapped.data.id).toBe(credential.id)
+							expect(unwrapped.data.vault_id).toBe(vault.id)
+						}
+					}
 				}).pipe(Effect.scoped, Effect.provide(testLayer)),
 			)
 		} finally {

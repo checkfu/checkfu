@@ -3,6 +3,11 @@ import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.extern
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
+import {
+	CredentialSecretsLive,
+	makeConnectionExecutorLayer,
+} from "@checkfu/api/Connection/CredentialCustody"
+import { vaultListingQueriesFrom } from "@checkfu/api/Http/Listing"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
@@ -20,7 +25,9 @@ import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
+import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Clock from "effect/Clock"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -43,6 +50,14 @@ import { runCli } from "../../src/Cli.ts"
 import { Checkout } from "../../src/Commands/Deploy.ts"
 import { SigintCoordinator, makeSigintController } from "../../src/Signals.ts"
 import type { SigintController } from "../../src/Signals.ts"
+
+const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+	Type: "Test",
+	id: "test",
+	env: {},
+	get: () => Effect.undefined,
+	set: (id: string) => Effect.succeed(id),
+})
 
 export const TEST_API_KEY = "ck_cli_test_secret"
 
@@ -162,8 +177,23 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				Layer.provide(HarnessLive),
 			),
 		)
+		const VaultsLive = Vaults.layer(
+			VaultsHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(WebhookEventsNoop)),
+		).pipe(
+			Layer.provideMerge(CredentialSecretsLive),
+			Layer.provide(
+				makeConnectionExecutorLayer({
+					put: () => Effect.succeed({ refused: null }),
+					erase: () => Effect.void,
+					seal: () => Effect.void,
+					usable: () => Effect.succeed(true),
+				}),
+			),
+		)
 		const ServerLayer = Layer.mergeAll(
 			webhooksTest.layer,
+			VaultsLive,
+			vaultListingQueriesFrom(VaultsLive),
 			CheckfuLive,
 			makeArtifactStoreMemory().layer,
 			ArtifactLinksTest,
@@ -174,6 +204,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			Layer.provideMerge(
 				ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: TEST_API_KEY })),
 			),
+			Layer.provideMerge(TestRuntimeContext),
 		)
 
 		const apiContext = yield* Layer.build(ServerLayer)

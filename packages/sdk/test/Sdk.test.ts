@@ -996,6 +996,188 @@ describe("@checkfu/sdk", () => {
 				}),
 		)
 
+		it.live("waitForPending settles a credential archive only once its secret is erased", () =>
+			Effect.gen(function* () {
+				let polls = 0
+				const credential = {
+					id: "vcrd_archived",
+					type: "vault_credential",
+					vault_id: "vlt_1",
+					auth: { type: "static_bearer", mcp_server_url: "https://mcp.example/mcp" },
+					display_name: null,
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+					archived_at: ISO_NOW,
+				}
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (
+						req.method === "POST" &&
+						url.pathname === "/v1/vaults/vlt_1/credentials/vcrd_archived/archive"
+					) {
+						return jsonResponse(
+							{ id: "vcrd_archived", type: "vault_credential", vault_id: "vlt_1", pending: true },
+							202,
+						)
+					}
+					if (
+						req.method === "GET" &&
+						url.pathname === "/v1/vaults/vlt_1/credentials/vcrd_archived"
+					) {
+						polls += 1
+						return jsonResponse({ ...credential, custody: polls === 1 ? "erasing" : "erased" })
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const archived = yield* client.vaults.credentials.archive("vlt_1", "vcrd_archived")
+					expect(isPendingResource(archived)).toBe(true)
+					const ready = yield* client.waitForPending(archived, {
+						initialDelay: "1 millis",
+						maxDelay: "2 millis",
+						timeout: "2 seconds",
+						requestOptions: { maxRetries: 0 },
+					})
+					expect(ready.custody).toBe("erased")
+					expect(polls).toBe(2)
+				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
+			}),
+		)
+
+		it.effect("waitForPending fails with a configuration error for an unknown receipt type", () =>
+			Effect.gen(function* () {
+				const client = yield* CheckfuClient
+				const unknown = { id: "res_1", type: "widget", pending: true } as unknown as Parameters<
+					typeof client.waitForPending
+				>[0]
+				const error = yield* Effect.flip(
+					client.waitForPending(unknown, { until: () => true, timeout: "1 second" }),
+				)
+				expect(error._tag).toBe("CheckfuConfigError")
+			}).pipe(
+				Effect.provide(
+					makeEffectLayer(
+						async () => jsonResponse(apiErrorBody("not_found_error", "not found"), 404),
+						{ maxRetries: 0 },
+					),
+				),
+			),
+		)
+
+		it.live("waitForPending settles a credential create only once its secret is held", () =>
+			Effect.gen(function* () {
+				let polls = 0
+				const credential = {
+					id: "vcrd_storing",
+					type: "vault_credential",
+					vault_id: "vlt_1",
+					auth: { type: "static_bearer", mcp_server_url: "https://mcp.example/mcp" },
+					display_name: null,
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+					archived_at: null,
+				}
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (req.method === "POST" && url.pathname === "/v1/vaults/vlt_1/credentials") {
+						return jsonResponse(
+							{ id: "vcrd_storing", type: "vault_credential", vault_id: "vlt_1", pending: true },
+							202,
+						)
+					}
+					if (
+						req.method === "GET" &&
+						url.pathname === "/v1/vaults/vlt_1/credentials/vcrd_storing"
+					) {
+						polls += 1
+						return jsonResponse({ ...credential, custody: polls === 1 ? "storing" : "held" })
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const created = yield* client.vaults.credentials.create("vlt_1", {
+						auth: {
+							type: "static_bearer",
+							token: Redacted.make("tok_test_value"),
+							mcp_server_url: "https://mcp.example/mcp",
+						},
+					})
+					expect(isPendingResource(created)).toBe(true)
+					const ready = yield* client.waitForPending(created, {
+						initialDelay: "1 millis",
+						maxDelay: "2 millis",
+						timeout: "2 seconds",
+						requestOptions: { maxRetries: 0 },
+					})
+					expect(ready.custody).toBe("held")
+					expect(polls).toBe(2)
+				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
+			}),
+		)
+
+		it.live("waitForPending settles a pending credential create without an until", () =>
+			Effect.gen(function* () {
+				let polls = 0
+				const credential = {
+					id: "vcrd_pending",
+					type: "vault_credential",
+					vault_id: "vlt_1",
+					auth: { type: "static_bearer", mcp_server_url: "https://mcp.example/mcp" },
+					display_name: null,
+					custody: "held",
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+					archived_at: null,
+				}
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (req.method === "POST" && url.pathname === "/v1/vaults/vlt_1/credentials") {
+						return jsonResponse(
+							{ id: "vcrd_pending", type: "vault_credential", vault_id: "vlt_1", pending: true },
+							202,
+						)
+					}
+					if (
+						req.method === "GET" &&
+						url.pathname === "/v1/vaults/vlt_1/credentials/vcrd_pending"
+					) {
+						polls += 1
+						return polls === 1
+							? jsonResponse(apiErrorBody("service_unavailable", "projection warming"), 503)
+							: jsonResponse(credential)
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const created = yield* client.vaults.credentials.create("vlt_1", {
+						auth: {
+							type: "static_bearer",
+							token: Redacted.make("tok_test_value"),
+							mcp_server_url: "https://mcp.example/mcp",
+						},
+					})
+					expect(isPendingResource(created)).toBe(true)
+					const ready = yield* client.waitForPending(created, {
+						initialDelay: "1 millis",
+						maxDelay: "2 millis",
+						timeout: "2 seconds",
+						requestOptions: { maxRetries: 0 },
+					})
+					expect(ready.id).toBe("vcrd_pending")
+					expect(polls).toBe(2)
+				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
+			}),
+		)
+
 		it.live("waitForPending times out on artifacts and refuses receipts it cannot resolve", () =>
 			Effect.gen(function* () {
 				let fetches = 0
@@ -1368,11 +1550,13 @@ describe("@checkfu/sdk", () => {
 
 		it("exports complete Forge-generated SDK_OPERATION_BINDINGS and Op type helpers", () => {
 			const ungenerated = new Set(["health", "auth"])
+			const rawBytes = new Set(["artifacts.getFileContent", "artifacts.uploadBlob"])
 			const expectedEndpoints = Object.entries(CheckfuApi.groups)
 				.filter(([group]) => !ungenerated.has(group))
 				.flatMap(([group, apiGroup]) =>
 					Object.keys(apiGroup.endpoints).map((endpoint) => `${group}.${endpoint}`),
 				)
+				.filter((endpoint) => !rawBytes.has(endpoint))
 				.sort()
 			const boundEndpoints = SDK_OPERATION_BINDINGS.map(
 				(binding) => `${binding.apiGroup}.${binding.apiEndpoint}`,

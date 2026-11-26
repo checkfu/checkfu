@@ -23,9 +23,10 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { optionalSecret } from "../Secrets.ts"
-import { MAX_ARTIFACT_BODY_BYTES } from "../Artifacts/ArtifactFiles.ts"
+import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "../Artifacts/ArtifactFiles.ts"
 import {
 	AgentBodyLimit,
+	ArtifactBlobLimit,
 	ArtifactBodyLimit,
 	Authentication,
 	EventBatchBodyLimit,
@@ -281,6 +282,39 @@ export const createCommandId = (
 		stringifyCanonicalJson(payload),
 	])
 
+export const createIdentity = (
+	digest: Digest.Digest["Service"],
+	random: SecureRandom.SecureRandom["Service"],
+	create: {
+		readonly resource: PendingResourceType
+		readonly prefix: string
+		readonly key: string | undefined
+		readonly body: unknown
+		readonly scope?: ReadonlyArray<string>
+	},
+): Effect.Effect<{
+	readonly id: string
+	readonly options: { readonly commandId: string } | undefined
+}> =>
+	Effect.gen(function* () {
+		if (create.key === undefined) {
+			return { id: yield* randomId(random, create.prefix), options: undefined }
+		}
+		const id = yield* idempotentId(digest, create.prefix, [
+			"create",
+			create.resource,
+			"id",
+			...(create.scope ?? []),
+			create.key,
+		])
+		return {
+			id,
+			options: {
+				commandId: yield* createCommandId(digest, create.resource, create.key, create.body),
+			},
+		}
+	})
+
 const prepareConfiguredCredential = (mac: Mac.Mac["Service"], secret: Redacted.Redacted<string>) =>
 	Effect.gen(function* () {
 		const key = yield* mac.generateKey(Mac.hmacSha256)
@@ -346,6 +380,17 @@ export const ArtifactBodyLimitLive = Layer.succeed(ArtifactBodyLimit, (httpEffec
 			isBodyTooLarge(defect) ? reject(413, ARTIFACT_BODY_TOO_LARGE_MESSAGE) : Effect.die(defect),
 		),
 		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_BODY_BYTES)),
+	),
+)
+
+export const ArtifactBlobLimitLive = Layer.succeed(ArtifactBlobLimit, (httpEffect) =>
+	httpEffect.pipe(
+		Effect.catchDefect((defect) =>
+			isBodyTooLarge(defect)
+				? reject(413, `An upload may be at most ${MAX_ARTIFACT_FILE_BYTES} bytes.`)
+				: Effect.die(defect),
+		),
+		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_FILE_BYTES)),
 	),
 )
 

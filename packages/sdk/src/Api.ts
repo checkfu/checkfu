@@ -34,17 +34,27 @@ import {
 	AutomationSchedule,
 	CronExpression,
 	AutomationSnapshot,
+	CredentialCustody,
+	CredentialDisplayName,
+	CredentialId,
+	CredentialSecret,
+	CredentialSnapshot,
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
 	MAX_ARTIFACT_BODY_BYTES,
+	MAX_INLINE_FILE_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
+	NonNegativeInt,
 	MAX_ARTIFACT_TOTAL_BYTES,
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_FILES,
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
+	MAX_MCP_SERVER_URL_LENGTH,
+	McpServerUrl,
 	NonEmptyString,
 	PositiveInt,
 	PublicationAddress,
@@ -57,6 +67,10 @@ import {
 	SessionTitle,
 	Sha256Hex,
 	TextBlocks,
+	VaultCustody,
+	VaultDisplayName,
+	VaultId,
+	VaultSnapshot,
 	MAX_WEBHOOK_EVENT_TYPES,
 	WebhookDeliveryId,
 	WebhookDeliveryOutcome,
@@ -319,6 +333,11 @@ export class ArtifactBodyLimit extends HttpApiMiddleware.Service<ArtifactBodyLim
 	{ error: ERRORS[413] },
 ) {}
 
+export class ArtifactBlobLimit extends HttpApiMiddleware.Service<ArtifactBlobLimit>()(
+	"@checkfu/api/ArtifactBlobLimit",
+	{ error: ERRORS[413] },
+) {}
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -395,17 +414,22 @@ const ArtifactFilesField = ArtifactFilesInput.annotate({
 
 export const CreateArtifactBody = Schema.Struct({
 	name: ArtifactName.annotate({ description: "Human-readable artifact name" }),
-	files: ArtifactFilesField,
+	files: Schema.optionalKey(
+		ArtifactFilesField.annotate({
+			description:
+				"Every file of version 1. Leave it out to create an empty artifact at version 0, upload large files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}, then add version 1",
+		}),
+	),
 })
 export type CreateArtifactBody = typeof CreateArtifactBody.Type
 
 export const CreateArtifactVersionBody = Schema.Struct({
-	version: PositiveInt.annotate({
-		description: "Current artifact version for optimistic concurrency",
+	version: NonNegativeInt.annotate({
+		description: "Current artifact version for optimistic concurrency (0 for an empty artifact)",
 	}),
 	files: ArtifactVersionFilesInput.annotate({
 		description:
-			"Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again",
+			"Every file of the version; a new version replaces the whole set. Send a small file's content inline, or name bytes the artifact already holds by their sha256",
 	}),
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
@@ -555,6 +579,99 @@ export const EnvironmentDeleted = Schema.Struct({
 })
 export type EnvironmentDeleted = typeof EnvironmentDeleted.Type
 
+export const CreateVaultBody = Schema.Struct({
+	display_name: VaultDisplayName.annotate({ description: "Human-readable vault name" }),
+})
+export type CreateVaultBody = typeof CreateVaultBody.Type
+
+export const UpdateVaultBody = Schema.Struct({
+	display_name: Schema.optionalKey(
+		Schema.NullOr(VaultDisplayName).annotate({ description: "Updated vault name" }),
+	),
+})
+export type UpdateVaultBody = typeof UpdateVaultBody.Type
+
+const MCP_SERVER_URL =
+	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
+
+export const canonicalMcpServerUrl = (input: string): string => {
+	const url = new URL(input)
+	url.hash = ""
+	return url.href
+}
+
+const McpServerUrlInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
+	Schema.makeFilter((input) => URL.canParse(input) || "a URL that can be parsed"),
+).pipe(
+	Schema.decodeTo(McpServerUrl, {
+		decode: SchemaGetter.transform(canonicalMcpServerUrl),
+		encode: SchemaGetter.passthrough(),
+	}),
+)
+
+export const CreateCredentialBody = Schema.Struct({
+	auth: Schema.Union([
+		Schema.Struct({
+			type: Schema.Literal("static_bearer"),
+			token: CredentialSecret.annotate({
+				description: "Bearer token sent to the MCP server. Never returned.",
+			}),
+			mcp_server_url: McpServerUrlInput.annotate({
+				description: "URL of the MCP server this credential authenticates against",
+			}),
+		}),
+	]).annotate({ description: "What the credential authenticates against, and its secret" }),
+	display_name: Schema.optionalKey(
+		Schema.NullOr(CredentialDisplayName).annotate({
+			description: "Human-readable credential name",
+		}),
+	),
+})
+export type CreateCredentialBody = typeof CreateCredentialBody.Type
+
+export const UpdateCredentialBody = Schema.Struct({
+	auth: Schema.optionalKey(
+		Schema.Union([
+			Schema.Struct({
+				type: Schema.Literal("static_bearer"),
+				token: Schema.optionalKey(
+					Schema.NullOr(CredentialSecret).annotate({
+						description: "Replacement bearer token. Never returned.",
+					}),
+				),
+			}),
+		]).annotate({ description: "Replacement secret. The MCP server URL cannot change." }),
+	),
+	display_name: Schema.optionalKey(
+		Schema.NullOr(CredentialDisplayName).annotate({
+			description: "Updated credential name, or null to clear it",
+		}),
+	),
+})
+export type UpdateCredentialBody = typeof UpdateCredentialBody.Type
+
+export const VaultResource = VaultSnapshot.annotate({ identifier: "Vault" })
+export type Vault = typeof VaultResource.Type
+
+export const CredentialResource = CredentialSnapshot.annotate({ identifier: "VaultCredential" })
+export type VaultCredential = typeof CredentialResource.Type
+
+export const VaultDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("vault_deleted"),
+	custody: VaultCustody,
+})
+export type VaultDeleted = typeof VaultDeleted.Type
+
+export const CredentialDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("vault_credential_deleted"),
+	custody: CredentialCustody,
+})
+export type CredentialDeleted = typeof CredentialDeleted.Type
+
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
@@ -624,7 +741,9 @@ export const ArtifactResource = Schema.Struct({
 	id: ArtifactId,
 	type: Schema.Literal("artifact"),
 	name: Schema.String,
-	version: PositiveInt,
+	version: NonNegativeInt.annotate({
+		description: "Current version; 0 while an artifact has no versions yet",
+	}),
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),
@@ -819,6 +938,9 @@ export type PendingResourceType =
 	| "automation"
 	| "artifact"
 	| "artifact_version"
+	| "vault"
+	| "vault_credential"
+	| "webhook"
 
 const pendingResource = <const T extends PendingResourceType>(type: T) =>
 	Schema.Struct({
@@ -849,6 +971,28 @@ export const PendingArtifactVersion = Schema.Struct({
 }).pipe(HttpApiSchema.status(202))
 export type PendingArtifactVersion = typeof PendingArtifactVersion.Type
 
+export const PendingVault = pendingResource("vault")
+export type PendingVault = typeof PendingVault.Type
+
+export const PendingCredential = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("vault_credential"),
+	vault_id: VaultId,
+	pending: Schema.Literal(true),
+}).pipe(HttpApiSchema.status(202))
+export type PendingCredential = typeof PendingCredential.Type
+
+export const PendingWebhook = Schema.Struct({
+	id: WebhookId,
+	type: Schema.Literal("webhook"),
+	pending: Schema.Literal(true),
+	signing_secret: NonEmptyString.annotate({
+		description:
+			"Standard Webhooks signing secret (whsec_...). Shown once while registration finishes propagating.",
+	}),
+}).pipe(HttpApiSchema.status(202))
+export type PendingWebhook = typeof PendingWebhook.Type
+
 export const PendingResource = Schema.Union([
 	PendingAgent,
 	PendingEnvironment,
@@ -856,7 +1000,11 @@ export const PendingResource = Schema.Union([
 	PendingAutomation,
 	PendingArtifact,
 	PendingArtifactVersion,
+	PendingVault,
+	PendingCredential,
+	PendingWebhook,
 ])
+
 export type PendingResource = typeof PendingResource.Type
 
 export const isPendingResource = <T extends { readonly type: string }>(
@@ -1010,6 +1158,12 @@ export type ListSessionsResponse = typeof ListSessionsResponse.Type
 export const ListArtifactsResponse = listResponse(ArtifactSummaryResource, ResourceListCursor)
 export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
 
+export const ListVaultsResponse = listResponse(VaultResource, ResourceListCursor)
+export type ListVaultsResponse = typeof ListVaultsResponse.Type
+
+export const ListCredentialsResponse = listResponse(CredentialResource, ResourceListCursor)
+export type ListCredentialsResponse = typeof ListCredentialsResponse.Type
+
 export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
@@ -1118,6 +1272,11 @@ const automationParams = {
 }
 const artifactParams = { artifact_id: ArtifactId.annotate({ description: "Artifact ID" }) }
 const artifactVersionParams = { ...artifactParams, version: ArtifactVersionFromString }
+const vaultParams = { vault_id: VaultId.annotate({ description: "Vault ID" }) }
+const credentialParams = {
+	...vaultParams,
+	credential_id: CredentialId.annotate({ description: "Credential ID" }),
+}
 const webhookParams = { webhook_id: WebhookId.annotate({ description: "Webhook ID" }) }
 const webhookDeliveryParams = {
 	...webhookParams,
@@ -1818,7 +1977,15 @@ const Automations = HttpApiGroup.make("automations")
 	.annotate(OpenApi.Description, "Manage automations")
 	.middleware(Authentication)
 
-const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. The JSON request body may be at most ${MAX_ARTIFACT_BODY_BYTES} bytes; send large or heavily escaped file content with "encoding": "base64".`
+const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. Content sent inline in JSON is at most ${MAX_INLINE_FILE_BYTES / 1024 / 1024} MiB per file and ${MAX_INLINE_TOTAL_BYTES / 1024 / 1024} MiB per request, in a body of at most ${MAX_ARTIFACT_BODY_BYTES} bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.`
+
+export const ArtifactBlobResource = Schema.Struct({
+	type: Schema.Literal("artifact_blob"),
+	artifact_id: ArtifactId,
+	sha256: Sha256Hex,
+	size: NonNegativeInt,
+})
+export type ArtifactBlob = typeof ArtifactBlobResource.Type
 
 const Artifacts = HttpApiGroup.make("artifacts")
 	.add(
@@ -1975,6 +2142,50 @@ const Artifacts = HttpApiGroup.make("artifacts")
 			}),
 	)
 	.add(
+		HttpApiEndpoint.get("getFileContent", "/v1/artifacts/:artifact_id/versions/:version/content", {
+			params: artifactVersionParams,
+			query: {
+				file: ArtifactPath.annotate({
+					description: "Path of the file inside the version, for example index.html",
+				}),
+			},
+			success: HttpApiSchema.StreamUint8Array(),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Download an artifact file")
+			.annotate(
+				OpenApi.Description,
+				"Download one file of an artifact version as its raw bytes, with its content type",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-skip": true,
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "getFileContent" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.put("uploadBlob", "/v1/artifacts/:artifact_id/blobs/:sha256", {
+			params: {
+				...artifactParams,
+				sha256: Sha256Hex.annotate({ description: "sha256 of the bytes, as lowercase hex" }),
+			},
+			payload: Schema.Uint8Array.pipe(
+				HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" }),
+			),
+			success: ArtifactBlobResource,
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Upload file bytes to an artifact")
+			.annotate(
+				OpenApi.Description,
+				`Store raw bytes in an artifact under their sha256, so a version can name them by sha256 without sending them inline. The request needs a Content-Length header, and the bytes must match the sha256 and be at most ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB. Uploading bytes the artifact already holds checks them and stores nothing new.`,
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-skip": true,
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "uploadBlob" },
+			})
+			.middleware(ArtifactBlobLimit),
+	)
+	.add(
 		HttpApiEndpoint.post("createLink", "/v1/artifacts/:artifact_id/versions/:version/links", {
 			params: artifactVersionParams,
 			payload: CreateArtifactLinkBody,
@@ -2052,12 +2263,227 @@ const Artifacts = HttpApiGroup.make("artifacts")
 	.annotate(OpenApi.Description, "Manage artifacts")
 	.middleware(Authentication)
 
+const Vaults = HttpApiGroup.make("vaults")
+	.add(
+		HttpApiEndpoint.post("create", "/v1/vaults", {
+			headers: IdempotencyHeaders,
+			payload: CreateVaultBody,
+			success: [VaultResource.pipe(HttpApiSchema.status(201)), PendingVault],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a vault")
+			.annotate(OpenApi.Description, "Create a vault to hold credentials for agents to use")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "create" },
+				"x-checkfu-mcp": { name: "vaults_createVault", destructive: false },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/vaults", {
+			query: resourceListQuery,
+			success: ListVaultsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List vaults")
+			.annotate(
+				OpenApi.Description,
+				"List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "list" },
+				"x-checkfu-mcp": { name: "vaults_listVaults" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/vaults/:vault_id", {
+			params: vaultParams,
+			success: VaultResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a vault")
+			.annotate(OpenApi.Description, "Retrieve a vault by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "get" },
+				"x-checkfu-mcp": { name: "vaults_getVault" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("update", "/v1/vaults/:vault_id", {
+			params: vaultParams,
+			payload: UpdateVaultBody,
+			success: [VaultResource, PendingVault],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a vault")
+			.annotate(OpenApi.Description, "Rename a vault")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "update" },
+				"x-checkfu-mcp": { name: "vaults_updateVault" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/v1/vaults/:vault_id", {
+			params: vaultParams,
+			success: VaultDeleted,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a vault")
+			.annotate(
+				OpenApi.Description,
+				"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "vaults_deleteVault" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("archive", "/v1/vaults/:vault_id/archive", {
+			params: vaultParams,
+			success: [VaultResource, PendingVault],
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Archive a vault")
+			.annotate(
+				OpenApi.Description,
+				"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "archive" },
+				"x-checkfu-mcp": { name: "vaults_archiveVault" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("createCredential", "/v1/vaults/:vault_id/credentials", {
+			params: vaultParams,
+			headers: IdempotencyHeaders,
+			payload: CreateCredentialBody,
+			success: [CredentialResource.pipe(HttpApiSchema.status(201)), PendingCredential],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a credential")
+			.annotate(OpenApi.Description, "Store a credential in a vault. Its secret is never returned.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "createCredential" },
+				"x-checkfu-mcp": false,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listCredentials", "/v1/vaults/:vault_id/credentials", {
+			params: vaultParams,
+			query: resourceListQuery,
+			success: ListCredentialsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List credentials")
+			.annotate(
+				OpenApi.Description,
+				"List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "listCredentials" },
+				"x-checkfu-mcp": { name: "vaults_listCredentials" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
+			params: credentialParams,
+			success: CredentialResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a credential")
+			.annotate(OpenApi.Description, "Retrieve a credential by ID. Its secret is never returned.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "getCredential" },
+				"x-checkfu-mcp": { name: "vaults_getCredential" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("updateCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
+			params: credentialParams,
+			payload: UpdateCredentialBody,
+			success: [CredentialResource, PendingCredential],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a credential")
+			.annotate(OpenApi.Description, "Rename a credential or replace its secret")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "updateCredential" },
+				"x-checkfu-mcp": false,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("deleteCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
+			params: credentialParams,
+			success: CredentialDeleted,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a credential")
+			.annotate(
+				OpenApi.Description,
+				"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "deleteCredential" },
+				"x-checkfu-mcp": { name: "vaults_deleteCredential" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post(
+			"archiveCredential",
+			"/v1/vaults/:vault_id/credentials/:credential_id/archive",
+			{
+				params: credentialParams,
+				success: [CredentialResource, PendingCredential],
+				error: HandlerErrors,
+			},
+		)
+			.annotate(OpenApi.Summary, "Archive a credential")
+			.annotate(
+				OpenApi.Description,
+				"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "archiveCredential" },
+				"x-checkfu-mcp": { name: "vaults_archiveCredential" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage vaults and the credentials they hold")
+	.middleware(Authentication)
+
 const Webhooks = HttpApiGroup.make("webhooks")
 	.add(
 		HttpApiEndpoint.post("create", "/v1/webhooks", {
 			headers: IdempotencyHeaders,
 			payload: CreateWebhookBody,
-			success: WebhookCreatedResource.pipe(HttpApiSchema.status(201)),
+			success: [WebhookCreatedResource.pipe(HttpApiSchema.status(201)), PendingWebhook],
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Create a webhook")
@@ -2295,12 +2721,13 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Sessions)
 	.add(Automations)
 	.add(Artifacts)
+	.add(Vaults)
 	.add(Webhooks)
 	.annotate(OpenApi.Title, "Checkfu API")
 	.annotate(OpenApi.Version, "0.0.1")
 	.annotate(
 		OpenApi.Description,
-		"Managed agents API for managing agents, environments, sessions, automations, artifacts, and outbound webhooks.",
+		"Managed agents API for managing agents, environments, sessions, automations, artifacts, vaults, and outbound webhooks.",
 	)
 	.annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
 	.middleware(RequestValidation)

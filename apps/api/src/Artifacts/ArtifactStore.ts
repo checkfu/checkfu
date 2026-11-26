@@ -6,6 +6,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { JURISDICTION_ENV, placement, storageScope } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import type { ArtifactManifest, BuiltArtifactVersion } from "./ArtifactFiles.ts"
@@ -19,7 +20,7 @@ export class ArtifactStoreError extends Schema.TaggedError<
 export interface ArtifactStoreService {
 	readonly stage: (
 		artifactId: string,
-		version: BuiltArtifactVersion,
+		version: BuiltArtifactVersion | null,
 		reservation: number | null,
 	) => Effect.Effect<void, ArtifactStoreError | ArtifactPurged | ArtifactReservationStale>
 	readonly getManifest: (
@@ -34,6 +35,20 @@ export interface ArtifactStoreService {
 		artifactId: string,
 		sha256: string,
 	) => Effect.Effect<boolean, ArtifactStoreError>
+	readonly blobSize: (
+		artifactId: string,
+		sha256: string,
+	) => Effect.Effect<number | null, ArtifactStoreError>
+	readonly blobStream: (
+		artifactId: string,
+		sha256: string,
+	) => Effect.Effect<Stream.Stream<Uint8Array, ArtifactStoreError> | null, ArtifactStoreError>
+	readonly putBlob: (
+		artifactId: string,
+		sha256: string,
+		body: Stream.Stream<Uint8Array, ArtifactStoreError>,
+		size: number,
+	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError | ArtifactPurged>
 	readonly purge: (artifactId: string) => Effect.Effect<void, ArtifactStoreError>
 	readonly release: (
 		artifactId: string,
@@ -47,7 +62,7 @@ export class ArtifactStore extends Context.Service<ArtifactStore, ArtifactStoreS
 
 export type ArtifactReaderService = Pick<
 	ArtifactStoreService,
-	"getManifest" | "getBlob" | "hasBlob"
+	"getManifest" | "getBlob" | "hasBlob" | "blobSize" | "blobStream"
 >
 
 export class ArtifactReader extends Context.Service<ArtifactReader, ArtifactReaderService>()(
@@ -135,7 +150,24 @@ export const artifactReads = (
 				(object) => object !== null,
 			),
 		),
+	blobSize: (artifactId, sha256) =>
+		run(
+			Effect.map(bucket.head(artifactBlobKey(scope, artifactId, sha256)), (object) =>
+				object === null ? null : object.size,
+			),
+		),
+	blobStream: (artifactId, sha256) =>
+		run(
+			Effect.map(bucket.get(artifactBlobKey(scope, artifactId, sha256)), (object) =>
+				object === null
+					? null
+					: object.body.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
+			),
+		),
 })
+
+export const isChecksumMismatch = (cause: unknown): boolean =>
+	/sha-?256|checksum|digest/i.test(String(cause))
 
 export const ArtifactReaderR2 = Layer.effect(
 	ArtifactReader,

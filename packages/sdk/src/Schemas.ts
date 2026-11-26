@@ -331,16 +331,28 @@ export const AutomationSnapshot = Schema.Struct({
 })
 export type AutomationSnapshot = typeof AutomationSnapshot.Type
 
-export const MAX_ARTIFACT_NAME_LENGTH = 256
-export const MAX_ARTIFACT_FILES = 64
-export const MAX_ARTIFACT_FILE_BYTES = 1024 * 1024
-export const MAX_ARTIFACT_TOTAL_BYTES = 4 * 1024 * 1024
-export const MAX_ARTIFACT_PATH_LENGTH = 512
-export const MAX_ARTIFACT_CONTENT_TYPE_LENGTH = 128
+import {
+	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
+	MAX_ARTIFACT_FILES,
+	MAX_ARTIFACT_NAME_LENGTH,
+	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_INLINE_TOTAL_BYTES,
+} from "./Limits.ts"
+
+export {
+	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
+	MAX_ARTIFACT_FILES,
+	MAX_ARTIFACT_FILE_BYTES,
+	MAX_ARTIFACT_NAME_LENGTH,
+	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_INLINE_FILE_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
+} from "./Limits.ts"
 
 const JSON_ESCAPE_ALLOWANCE = 3
 export const MAX_ARTIFACT_BODY_BYTES =
-	MAX_ARTIFACT_TOTAL_BYTES * JSON_ESCAPE_ALLOWANCE +
+	MAX_INLINE_TOTAL_BYTES * JSON_ESCAPE_ALLOWANCE +
 	MAX_ARTIFACT_FILES * (MAX_ARTIFACT_PATH_LENGTH * 6 + 512) +
 	16 * 1024
 
@@ -418,7 +430,7 @@ export const ArtifactKeptFileInput = Schema.Struct({
 	}),
 	sha256: Sha256Hex.annotate({
 		description:
-			"sha256 of a file in the version being replaced, to keep its bytes without sending them again",
+			"sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}",
 	}),
 	content_type: Schema.optionalKey(
 		ArtifactContentType.annotate({
@@ -503,6 +515,12 @@ export const WEBHOOK_EVENT_TYPES = [
 	"artifact.published",
 	"artifact.unpublished",
 	"artifact.deleted",
+	"vault.created",
+	"vault.archived",
+	"vault.deleted",
+	"vault_credential.created",
+	"vault_credential.archived",
+	"vault_credential.deleted",
 	"webhook.test",
 ] as const
 
@@ -534,3 +552,96 @@ export const WebhookDeliveryOutcome = Schema.Literals([
 	"invalid_destination",
 ])
 export type WebhookDeliveryOutcome = typeof WebhookDeliveryOutcome.Type
+
+export const MAX_VAULT_DISPLAY_NAME_LENGTH = 255
+export const MAX_CREDENTIAL_DISPLAY_NAME_LENGTH = 255
+export const MAX_MCP_SERVER_URL_LENGTH = 2048
+export const MAX_CREDENTIAL_SECRET_LENGTH = 16_384
+export const MAX_VAULT_CREDENTIALS = 20
+
+export const VaultId = Schema.String.check(Schema.isMinLength(1), SinglePathSegmentCheck).pipe(
+	Schema.brand("VaultId"),
+)
+export type VaultId = typeof VaultId.Type
+
+export const CredentialId = Schema.String.check(Schema.isMinLength(1), SinglePathSegmentCheck).pipe(
+	Schema.brand("CredentialId"),
+)
+export type CredentialId = typeof CredentialId.Type
+
+export const VaultDisplayName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_VAULT_DISPLAY_NAME_LENGTH),
+)
+export const CredentialDisplayName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_CREDENTIAL_DISPLAY_NAME_LENGTH),
+)
+export const McpServerUrl = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+)
+
+export const StaticBearerAuth = Schema.Struct({
+	type: Schema.Literal("static_bearer"),
+	mcp_server_url: McpServerUrl,
+})
+
+export const CredentialAuth = Schema.Union([StaticBearerAuth])
+export type CredentialAuth = typeof CredentialAuth.Type
+
+export const MIN_CREDENTIAL_SECRET_LENGTH = 8
+
+export const CredentialSecret = Schema.Redacted(
+	Schema.String.check(
+		Schema.isMinCodePoints(MIN_CREDENTIAL_SECRET_LENGTH),
+		Schema.isMaxLength(MAX_CREDENTIAL_SECRET_LENGTH),
+		Schema.isPattern(/^[!-~]+$/u, {
+			description: "visible ASCII characters, with no spaces or line breaks",
+		}),
+	),
+)
+export type CredentialSecret = typeof CredentialSecret.Type
+
+export const CredentialCustody = Schema.Literals(["storing", "held", "erasing", "erased"]).annotate(
+	{
+		description:
+			"Where the secret stands: storing until its storage confirms the secret, held while the credential is active, erasing once it is archived or deleted, erased once its storage confirmed the secret is gone",
+	},
+)
+export type CredentialCustody = typeof CredentialCustody.Type
+
+export const VaultCustody = Schema.Struct({
+	storing: NonNegativeInt.annotate({
+		description: "Active credentials whose secrets are not yet confirmed stored",
+	}),
+	held: NonNegativeInt.annotate({ description: "Active credentials whose secrets are held" }),
+	erasing: NonNegativeInt.annotate({
+		description: "Archived or deleted credentials whose secrets are not yet confirmed erased",
+	}),
+})
+export type VaultCustody = typeof VaultCustody.Type
+
+export const VaultSnapshot = Schema.Struct({
+	id: VaultId,
+	type: Schema.Literal("vault"),
+	display_name: NonEmptyString,
+	custody: VaultCustody,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type VaultSnapshot = typeof VaultSnapshot.Type
+
+export const CredentialSnapshot = Schema.Struct({
+	id: CredentialId,
+	type: Schema.Literal("vault_credential"),
+	vault_id: VaultId,
+	auth: CredentialAuth,
+	display_name: Schema.NullOr(Schema.String),
+	custody: CredentialCustody,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type CredentialSnapshot = typeof CredentialSnapshot.Type

@@ -8,13 +8,18 @@ import type { WebhookEventPublication } from "@checkfu/domain/Webhook/WebhookEve
 import { matchesWebhookSubscription } from "@checkfu/domain/Webhook/WebhookTypes"
 import { WebhookDeliveryId, WebhookEventId, WebhookId } from "@checkfu/sdk/Schemas"
 import { RuntimeContext } from "alchemy/RuntimeContext"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
-import { WebhookDeliveryStore, buildWebhookEventEnvelopeJson } from "./WebhookDeliveryStore.ts"
-import type { WebhookDeliveryStoreError } from "./WebhookDeliveryStore.ts"
+import {
+	WebhookDeliveryStore,
+	WebhookDeliveryStoreError,
+	buildWebhookEventEnvelopeJson,
+} from "./WebhookDeliveryStore.ts"
 
 export const WEBHOOK_FANOUT_CONCURRENCY = 10
 export const WEBHOOK_FANOUT_PAGE_SIZE = 15
@@ -30,10 +35,15 @@ export const deterministicDeliveryId = (
 		WebhookDeliveryId.make(`wdel_${hash.slice(0, 24)}`),
 	)
 
+export interface WebhookFanoutWork {
+	readonly afterCursor: string | null
+	readonly retryWebhookIds: ReadonlyArray<WebhookId>
+}
+
 export interface WebhookFanoutContinuationService {
 	readonly continueFanout: (
 		event: WebhookEventPublication,
-		afterCursor: string,
+		work: WebhookFanoutWork,
 	) => Effect.Effect<void, WebhookDeliveryStoreError>
 }
 
@@ -53,6 +63,11 @@ export interface FanoutWebhookPageDeps {
 	readonly digest: Digest.Digest["Service"]
 }
 
+export interface FanoutWebhookPageResult {
+	readonly failedWebhookIds: ReadonlyArray<WebhookId>
+	readonly reachedEventTimeBound: boolean
+}
+
 export const WEBHOOK_FANOUT_LISTING_FILTER: ListingFilter = {
 	kind: "webhook",
 	include_archived: false,
@@ -61,54 +76,83 @@ export const WEBHOOK_FANOUT_LISTING_FILTER: ListingFilter = {
 }
 
 /**
- * Enqueues a single page of registered webhooks for `event`. Fails on the first
- * enqueue error so the caller (either `PublishWebhookEvents` policy retry or a
- * durable `WebhookFanout` continuation pass) retries the page safely using
- * deterministic delivery IDs.
+ * Enqueues a single event for one subscriber, enforcing the event-time registration
+ * bound (`endpoint.created_at <= event.occurred_at`), active status, and subscription filter.
+ */
+export const enqueueWebhookSubscriber = (
+	event: WebhookEventPublication,
+	webhookId: WebhookId,
+	payloadJson: string,
+	deps: FanoutWebhookPageDeps,
+): Effect.Effect<void, WebhookDeliveryStoreError> =>
+	Effect.gen(function* () {
+		const endpoint = yield* deps.webhooks.get(webhookId)
+		if (
+			endpoint.status !== "active" ||
+			endpoint.created_at > event.occurred_at ||
+			!matchesWebhookSubscription(endpoint.event_types, event.event_type)
+		) {
+			return
+		}
+		const deliveryId = yield* deterministicDeliveryId(deps.digest, webhookId, event.event_id)
+		yield* deps.deliveries.enqueue(webhookId, {
+			delivery_id: deliveryId,
+			event_id: WebhookEventId.make(event.event_id),
+			event_type: event.event_type,
+			dedupe_key: event.event_id,
+			payload_json: payloadJson,
+		})
+	})
+
+/**
+ * Enqueues a single page of registered webhooks for `event`, bounded to endpoints
+ * registered at or before `event.occurred_at`. Individual subscriber failures
+ * (such as a saturated pending queue or transient deliverer failure) are captured
+ * in `failedWebhookIds` for independent retry so one receiver never blocks other
+ * subscribers on this page or later pages.
  */
 export const fanoutWebhookPage = (
 	event: WebhookEventPublication,
 	entries: ReadonlyArray<ListingEntry>,
 	deps: FanoutWebhookPageDeps,
-): Effect.Effect<void, WebhookDeliveryStoreError> => {
+): Effect.Effect<FanoutWebhookPageResult> => {
 	if (entries.length === 0) {
-		return Effect.void
+		return Effect.succeed({ failedWebhookIds: [], reachedEventTimeBound: false })
+	}
+	const eligible = entries.filter((entry) => entry.created_at <= event.occurred_at)
+	const reachedEventTimeBound = eligible.length < entries.length
+	if (eligible.length === 0) {
+		return Effect.succeed({ failedWebhookIds: [], reachedEventTimeBound })
 	}
 	const payloadJson = buildWebhookEventEnvelopeJson(event)
-	return Stream.fromIterable(entries).pipe(
+	const failedWebhookIds: Array<WebhookId> = []
+	return Stream.fromIterable(eligible).pipe(
 		Stream.mapEffect(
 			(entry) =>
 				Effect.gen(function* () {
 					const webhookId = WebhookId.make(entry.id)
-					const endpoint = yield* deps.webhooks.get(webhookId)
-					if (
-						endpoint.status !== "active" ||
-						!matchesWebhookSubscription(endpoint.event_types, event.event_type)
-					) {
-						return
-					}
-					const deliveryId = yield* deterministicDeliveryId(deps.digest, webhookId, event.event_id)
-					yield* deps.deliveries
-						.enqueue(webhookId, {
-							delivery_id: deliveryId,
-							event_id: WebhookEventId.make(event.event_id),
-							event_type: event.event_type,
-							dedupe_key: event.event_id,
-							payload_json: payloadJson,
-						})
-						.pipe(
-							Effect.tapError((error) =>
-								Effect.logError("Failed to enqueue webhook delivery", {
-									webhook_id: webhookId,
-									event_id: event.event_id,
-									cause: error.cause,
-								}),
-							),
+					const outcome = yield* Effect.exit(
+						enqueueWebhookSubscriber(event, webhookId, payloadJson, deps),
+					)
+					if (Exit.isFailure(outcome)) {
+						if (Cause.hasInterruptsOnly(outcome.cause)) {
+							return yield* Effect.interrupt
+						}
+						yield* Effect.logError(
+							"Failed to enqueue webhook delivery; scheduling isolated retry",
+							{
+								webhook_id: webhookId,
+								event_id: event.event_id,
+								cause: Cause.squash(outcome.cause),
+							},
 						)
+						failedWebhookIds.push(webhookId)
+					}
 				}),
 			{ concurrency: WEBHOOK_FANOUT_CONCURRENCY },
 		),
 		Stream.runDrain,
+		Effect.as({ failedWebhookIds, reachedEventTimeBound }),
 	)
 }
 
@@ -124,9 +168,10 @@ export const makeInlineWebhookFanoutContinuation = (
 			const digest = yield* Digest.Digest
 			const deps: FanoutWebhookPageDeps = { webhooks, deliveries, digest }
 			return {
-				continueFanout: (event, initialCursor) =>
+				continueFanout: (event, work) =>
 					Effect.gen(function* () {
-						let after: string | null = initialCursor
+						const failed = new Set<WebhookId>(work.retryWebhookIds)
+						let after: string | null = work.afterCursor
 						while (after !== null) {
 							const page: Query.Page<ListingEntry> = yield* readPage(
 								WEBHOOK_FANOUT_LISTING_FILTER,
@@ -135,8 +180,31 @@ export const makeInlineWebhookFanoutContinuation = (
 									after,
 								},
 							)
-							yield* fanoutWebhookPage(event, page.entries, deps)
-							after = page.cursor
+							const result = yield* fanoutWebhookPage(event, page.entries, deps)
+							for (const id of result.failedWebhookIds) {
+								failed.add(id)
+							}
+							after = result.reachedEventTimeBound ? null : page.cursor
+						}
+						if (failed.size > 0) {
+							const payloadJson = buildWebhookEventEnvelopeJson(event)
+							let firstError: WebhookDeliveryStoreError | undefined
+							for (const webhookId of failed) {
+								const retryExit = yield* Effect.exit(
+									enqueueWebhookSubscriber(event, webhookId, payloadJson, deps),
+								)
+								if (Exit.isFailure(retryExit) && firstError === undefined) {
+									if (Cause.hasInterruptsOnly(retryExit.cause)) {
+										return yield* Effect.interrupt
+									}
+									firstError = new WebhookDeliveryStoreError({
+										cause: Cause.squash(retryExit.cause),
+									})
+								}
+							}
+							if (firstError !== undefined) {
+								return yield* firstError
+							}
 						}
 					}),
 			}
@@ -166,9 +234,13 @@ export const makeWebhookEventsLive = (
 						if (firstPage.entries.length === 0) {
 							return
 						}
-						yield* fanoutWebhookPage(event, firstPage.entries, deps)
-						if (firstPage.cursor !== null) {
-							yield* continuation.continueFanout(event, firstPage.cursor)
+						const result = yield* fanoutWebhookPage(event, firstPage.entries, deps)
+						const nextCursor = result.reachedEventTimeBound ? null : firstPage.cursor
+						if (nextCursor !== null || result.failedWebhookIds.length > 0) {
+							yield* continuation.continueFanout(event, {
+								afterCursor: nextCursor,
+								retryWebhookIds: result.failedWebhookIds,
+							})
 						}
 					}).pipe(Effect.orDie),
 			}

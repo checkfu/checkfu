@@ -84,7 +84,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(7)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(10)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -102,6 +102,16 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"event:Webhooks.WebhookEndpoint/webhook.created",
 						"scheduled-command:Webhooks.WebhookEndpoint/ExpirePreviousWebhookSecret",
 						"webhook-table:webhook_deliveries",
+						"state:Vaults.Vault",
+						"state:Vaults.Credential",
+						"state:Vaults.CredentialUrlClaim",
+						"event:Vaults.CredentialUrlClaim/vault_credential_url.claimed",
+						"event:Vaults.Vault/vault.credential_released",
+						"event:Vaults.Credential/vault_credential.secret_erased",
+						"event:Vaults.Vault/vault.credential_attached",
+						"event:Vaults.Credential/vault_credential.created",
+						"command-reply:Vaults/CreateCredential",
+						"view:Vaults.CredentialView@v0",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
 					]),
@@ -401,10 +411,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				[
 					"abortTurn",
 					"discardWorkspace",
+					"eraseSecret",
 					"listOutputs",
+					"putSecret",
 					"readOutputs",
 					"recoverTurn",
 					"runTurn",
+					"sealVault",
+					"secretUsable",
 				].flatMap((method) => [
 					`harness-call:PiHarness.${method}/args`,
 					`harness-call:PiHarness.${method}/result`,

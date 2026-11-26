@@ -83,6 +83,8 @@ export interface WebhookEventEnvelopeInput {
 	readonly resource_type: string
 	readonly resource_id: string
 	readonly occurred_at: number
+	readonly vault_id?: string
+	readonly automation_id?: string
 	readonly data_json?: string
 }
 
@@ -102,7 +104,12 @@ export const buildWebhookEventEnvelopeJson = (input: WebhookEventEnvelopeInput):
 			type: "event",
 			id: input.event_id,
 			created_at,
-			data: { type: input.event_type, id: input.resource_id },
+			data: {
+				type: input.event_type,
+				id: input.resource_id,
+				...(input.vault_id === undefined ? {} : { vault_id: input.vault_id }),
+				...(input.automation_id === undefined ? {} : { automation_id: input.automation_id }),
+			},
 		})
 	}
 	const head = JSON.stringify({
@@ -116,9 +123,5 @@ export const buildWebhookEventEnvelopeJson = (input: WebhookEventEnvelopeInput):
 	return `${head.slice(0, -1)},"data":${dataJson}}`
 }
 
-export const signingIdForDelivery = (delivery: {
-	readonly event_id: string
-	readonly delivery_id: string
-	readonly payload_json: string
-}): string =>
-	delivery.payload_json.startsWith('{"type":"event",') ? delivery.event_id : delivery.delivery_id
+export const signingIdForDelivery = (delivery: { readonly event_id: string }): string =>
+	delivery.event_id

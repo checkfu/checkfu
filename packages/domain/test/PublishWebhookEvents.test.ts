@@ -13,6 +13,10 @@ import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSessio
 import { Harness } from "../src/Session/Harness.external.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
+import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
+import { CredentialId } from "../src/Vault/Credential.id.ts"
+import { VaultId } from "../src/Vault/Vault.id.ts"
+import { Vaults, VaultsApi, VaultsHandlersLive } from "../src/Vaults.model.ts"
 import { WebhookEvents } from "../src/Webhook/WebhookEvents.external.ts"
 import type { WebhookEventPublication } from "../src/Webhook/WebhookEvents.external.ts"
 
@@ -112,6 +116,166 @@ describe("PublishWebhookEvents policy", () => {
 				expect(artifactPub?.event_id).toMatch(/^evt_artifact_art_pub_1_\d+$/)
 				expect(artifactPub?.resource_id).toBe(artifactId)
 				expect(artifactPub?.data_json).toBeUndefined()
+			}).pipe(Effect.scoped, Effect.provide(layer))
+		},
+	)
+
+	it.effect(
+		"forwards vault and credential lifecycle events including archive/delete cascades without exposing secrets",
+		() => {
+			const published: Array<WebhookEventPublication> = []
+			const eventsLayer = Layer.succeed(WebhookEvents, {
+				publish: (event) =>
+					Effect.sync(() => {
+						published.push(event)
+					}),
+			})
+			const secretsStub = CredentialSecrets.toLayer(
+				Effect.succeed({
+					put: () => Effect.succeed({ refused: null }),
+					erase: () => Effect.void,
+					seal: () => Effect.void,
+				}),
+			)
+			const layer = Vaults.layer(
+				VaultsHandlersLive.pipe(Layer.provide([ListingStore.memory, eventsLayer, secretsStub])),
+			).pipe(Layer.provide(Domain.InMemory))
+
+			return Effect.gen(function* () {
+				const domain = yield* VaultsApi.clientInProcess
+				const vaultId = VaultId.make("vlt_pub_1")
+				const credA = CredentialId.make("vcrd_pub_1")
+				const credB = CredentialId.make("vcrd_pub_2")
+
+				yield* domain.CreateVault({
+					vault_id: vaultId,
+					display_name: "Prod Vault",
+				})
+				yield* domain.UpdateVault({
+					vault_id: vaultId,
+					changes: { display_name: "Renamed Vault" },
+				})
+				yield* domain.CreateCredential({
+					vault_id: vaultId,
+					credential_id: credA,
+					auth: { type: "static_bearer", mcp_server_url: "https://mcp.example.com/a" },
+					display_name: "Cred A",
+				})
+				yield* domain.CreateCredential({
+					vault_id: vaultId,
+					credential_id: credB,
+					auth: { type: "static_bearer", mcp_server_url: "https://mcp.example.com/b" },
+					display_name: "Cred B",
+				})
+				yield* domain.UpdateCredential({
+					vault_id: vaultId,
+					credential_id: credA,
+					changes: { display_name: "Cred A Renamed" },
+				})
+				// Direct credential archive + delete on credA, then vault archive + delete cascading credB.
+				yield* domain.ArchiveCredential({
+					vault_id: vaultId,
+					credential_id: credA,
+					mcp_server_url: "https://mcp.example.com/a",
+				})
+				yield* domain.DeleteCredential({
+					vault_id: vaultId,
+					credential_id: credA,
+					mcp_server_url: "https://mcp.example.com/a",
+				})
+				yield* domain.ArchiveVault({ vault_id: vaultId })
+				// Allow ArchiveVault cascade (RetireReleasedCredentials -> CredentialArchived) to settle before DeleteVault.
+				for (let i = 0; i < 200; i++) {
+					if (
+						published.some(
+							(e) => e.event_type === "vault_credential.archived" && e.resource_id === credB,
+						)
+					) {
+						break
+					}
+					yield* Effect.yieldNow
+				}
+				yield* domain.DeleteVault({ vault_id: vaultId })
+
+				// Wait for async policies (including RetireReleasedCredentials -> PublishVaultWebhookEvents).
+				for (let i = 0; i < 200; i++) {
+					if (
+						published.some((e) => e.event_type === "vault.deleted" && e.resource_id === vaultId) &&
+						published.some(
+							(e) => e.event_type === "vault_credential.deleted" && e.resource_id === credB,
+						)
+					) {
+						break
+					}
+					yield* Effect.yieldNow
+				}
+
+				const summary = published.map((e) => ({
+					event_type: e.event_type,
+					resource_type: e.resource_type,
+					resource_id: e.resource_id,
+					vault_id: e.vault_id,
+				}))
+				expect(summary).toEqual(
+					expect.arrayContaining([
+						{
+							event_type: "vault.created",
+							resource_type: "vault",
+							resource_id: vaultId,
+							vault_id: undefined,
+						},
+						{
+							event_type: "vault_credential.created",
+							resource_type: "vault_credential",
+							resource_id: credA,
+							vault_id: vaultId,
+						},
+						{
+							event_type: "vault_credential.created",
+							resource_type: "vault_credential",
+							resource_id: credB,
+							vault_id: vaultId,
+						},
+						{
+							event_type: "vault_credential.archived",
+							resource_type: "vault_credential",
+							resource_id: credA,
+							vault_id: vaultId,
+						},
+						{
+							event_type: "vault_credential.deleted",
+							resource_type: "vault_credential",
+							resource_id: credA,
+							vault_id: vaultId,
+						},
+						{
+							event_type: "vault.archived",
+							resource_type: "vault",
+							resource_id: vaultId,
+							vault_id: undefined,
+						},
+						{
+							event_type: "vault_credential.archived",
+							resource_type: "vault_credential",
+							resource_id: credB,
+							vault_id: vaultId,
+						},
+						{
+							event_type: "vault.deleted",
+							resource_type: "vault",
+							resource_id: vaultId,
+							vault_id: undefined,
+						},
+						{
+							event_type: "vault_credential.deleted",
+							resource_type: "vault_credential",
+							resource_id: credB,
+							vault_id: vaultId,
+						},
+					]),
+				)
+				// Rename / update does not emit unsupported update events.
+				expect(published.some((e) => e.event_type.includes("updated"))).toBe(false)
 			}).pipe(Effect.scoped, Effect.provide(layer))
 		},
 	)

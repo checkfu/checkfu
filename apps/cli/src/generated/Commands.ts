@@ -332,7 +332,7 @@ const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 	apiGroup: "artifacts",
 	apiEndpoint: "create",
 	hasBody: true,
-	maxInputBytes: 12_828_672,
+	maxInputBytes: 16_183_296,
 	flags: [
 		{
 			propName: "name",
@@ -348,9 +348,9 @@ const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "files",
 			location: "body",
 			kind: "repeat-structured",
-			required: true,
+			required: false,
 			min: 0,
-			max: 64,
+			max: 1000,
 		},
 		{
 			propName: "idempotencyKey",
@@ -375,7 +375,7 @@ const artifactsCreateCommand = CommandMake(
 			FlagWithDescription(
 				"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
 			),
-			FlagBetween(0, 64),
+			FlagBetween(0, 1000),
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
@@ -386,7 +386,7 @@ const artifactsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		'Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
+		"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{
@@ -630,7 +630,7 @@ const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
 	apiGroup: "artifacts",
 	apiEndpoint: "createVersion",
 	hasBody: true,
-	maxInputBytes: 12_828_672,
+	maxInputBytes: 16_183_296,
 	flags: [
 		{
 			propName: "artifactId",
@@ -656,7 +656,7 @@ const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "repeat-structured",
 			required: true,
 			min: 0,
-			max: 64,
+			max: 1000,
 		},
 	],
 }
@@ -670,7 +670,9 @@ const artifactsVersionsCreateCommand = CommandMake(
 		),
 		version: FlagInt("current-version").pipe(
 			FlagWithMetavar("INT"),
-			FlagWithDescription("Current artifact version for optimistic concurrency"),
+			FlagWithDescription(
+				"Current artifact version for optimistic concurrency (0 for an empty artifact)",
+			),
 			FlagOptional,
 		),
 		files: FlagString("file").pipe(
@@ -678,13 +680,13 @@ const artifactsVersionsCreateCommand = CommandMake(
 			FlagWithDescription(
 				"File as JSON, YAML, or @file with path and content (optional encoding and content_type), or path and the sha256 of a file to keep from the version being replaced (repeatable)",
 			),
-			FlagBetween(0, 64),
+			FlagBetween(0, 1000),
 		),
 	},
 	(flags) => invokeGeneratedOperation(artifactsVersionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		'Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
+		"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. (accepts flags and/or JSON/YAML on stdin)",
 	),
 )
 
@@ -2220,6 +2222,579 @@ const sessionsOutputsRetrieveCommand = CommandMake(
 	),
 )
 
+const vaultsArchiveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults archive",
+	apiGroup: "vaults",
+	apiEndpoint: "archive",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsArchiveCommand = CommandMake(
+	"archive",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsArchiveCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+	),
+)
+
+const vaultsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults create",
+	apiGroup: "vaults",
+	apiEndpoint: "create",
+	hasBody: true,
+	flags: [
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsCreateCommand = CommandMake(
+	"create",
+	{
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Human-readable vault name"),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Create a vault to hold credentials for agents to use (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const vaultsDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults delete",
+	apiGroup: "vaults",
+	apiEndpoint: "delete",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsDeleteCommand = CommandMake(
+	"delete",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsDeleteCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+	),
+)
+
+const vaultsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults list",
+	apiGroup: "vaults",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const vaultsListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true.",
+	),
+)
+
+const vaultsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults retrieve",
+	apiGroup: "vaults",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a vault by ID"))
+
+const vaultsUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults update",
+	apiGroup: "vaults",
+	apiEndpoint: "update",
+	hasBody: true,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsUpdateCommand = CommandMake(
+	"update",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Updated vault name"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsUpdateCommandSpec, flags),
+).pipe(CommandWithDescription("Rename a vault (accepts flags and/or JSON/YAML on stdin)"))
+
+const vaultsCredentialsArchiveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials archive",
+	apiGroup: "vaults",
+	apiEndpoint: "archiveCredential",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsArchiveCommand = CommandMake(
+	"archive",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsArchiveCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+	),
+)
+
+const vaultsCredentialsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials create",
+	apiGroup: "vaults",
+	apiEndpoint: "createCredential",
+	hasBody: true,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "auth",
+			flagName: "auth",
+			wireName: "auth",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsCredentialsCreateCommand = CommandMake(
+	"create",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		auth: FlagString("auth").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"What the credential authenticates against, and its secret (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Human-readable credential name"),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Store a credential in a vault. Its secret is never returned. (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const vaultsCredentialsDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials delete",
+	apiGroup: "vaults",
+	apiEndpoint: "deleteCredential",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsDeleteCommand = CommandMake(
+	"delete",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsDeleteCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+	),
+)
+
+const vaultsCredentialsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials list",
+	apiGroup: "vaults",
+	apiEndpoint: "listCredentials",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const vaultsCredentialsListCommand = CommandMake(
+	"list",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagString("limit").pipe(
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true.",
+	),
+)
+
+const vaultsCredentialsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials retrieve",
+	apiGroup: "vaults",
+	apiEndpoint: "getCredential",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a credential by ID. Its secret is never returned."))
+
+const vaultsCredentialsUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials update",
+	apiGroup: "vaults",
+	apiEndpoint: "updateCredential",
+	hasBody: true,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "auth",
+			flagName: "auth",
+			wireName: "auth",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsCredentialsUpdateCommand = CommandMake(
+	"update",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+		auth: FlagString("auth").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Replacement secret. The MCP server URL cannot change. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Updated credential name, or null to clear it"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Rename a credential or replace its secret (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
 const webhooksCreateCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "webhooks create",
 	apiGroup: "webhooks",
@@ -2793,6 +3368,8 @@ export const buildGeneratedResourceCommands = <
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsOutputsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const VaultsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const VaultsCredentialsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const WebhooksExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const WebhooksDeliveriesExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
@@ -2805,6 +3382,8 @@ export const buildGeneratedResourceCommands = <
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
 	readonly "sessions:outputs"?: SessionsOutputsExtras
+	readonly vaults?: VaultsExtras
+	readonly "vaults:credentials"?: VaultsCredentialsExtras
 	readonly webhooks?: WebhooksExtras
 	readonly "webhooks:deliveries"?: WebhooksDeliveriesExtras
 }) =>
@@ -2900,6 +3479,30 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				sessionsOutputsRetrieveCommand,
 				...(extras?.["sessions:outputs"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("vaults").pipe(
+			CommandWithDescription("Manage vaults"),
+			CommandWithSubcommands([
+				vaultsArchiveCommand,
+				vaultsCreateCommand,
+				vaultsDeleteCommand,
+				vaultsListCommand,
+				vaultsRetrieveCommand,
+				vaultsUpdateCommand,
+				...(extras?.["vaults"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("vaults:credentials").pipe(
+			CommandWithDescription("Manage vaults:credentials"),
+			CommandWithSubcommands([
+				vaultsCredentialsArchiveCommand,
+				vaultsCredentialsCreateCommand,
+				vaultsCredentialsDeleteCommand,
+				vaultsCredentialsListCommand,
+				vaultsCredentialsRetrieveCommand,
+				vaultsCredentialsUpdateCommand,
+				...(extras?.["vaults:credentials"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("webhooks").pipe(

@@ -76,6 +76,7 @@ interface WebhookNotification {
 	readonly event_type: WebhookEventType
 	readonly resource_type: WebhookResourceType
 	readonly resource_id: string
+	readonly automation_id?: string
 }
 
 const notificationOf = ({
@@ -127,6 +128,7 @@ const notificationOf = ({
 							: "automation_run.failed",
 				resource_type: "automation_run",
 				resource_id: automationRunId(source.id, event.run),
+				automation_id: source.id,
 			}
 		case "artifact.created":
 		case "artifact.version_added":

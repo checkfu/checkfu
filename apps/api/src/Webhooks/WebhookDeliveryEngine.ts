@@ -102,6 +102,7 @@ export type WebhookHttpResult =
 	| { readonly kind: "timeout" }
 	| { readonly kind: "invalid_destination"; readonly message: string }
 	| { readonly kind: "network_error"; readonly message: string }
+	| { readonly kind: "egress_error"; readonly message: string }
 
 export interface WebhookHttpSender {
 	readonly send: (request: WebhookHttpRequest) => Effect.Effect<WebhookHttpResult>
@@ -291,7 +292,7 @@ export interface EnqueueWebhookResult {
 
 interface ClassifiedHttpResult {
 	readonly deliveryOutcome: WebhookDeliveryOutcome
-	readonly healthOutcome: WebhookOutcomeKind
+	readonly healthOutcome: WebhookOutcomeKind | null
 	readonly httpStatus: number | null
 	readonly errorMessage: string | null
 	readonly retryable: boolean
@@ -314,6 +315,15 @@ const classifyHttpResult = (result: WebhookHttpResult): ClassifiedHttpResult => 
 			httpStatus: null,
 			errorMessage: truncateError(result.message),
 			retryable: false,
+		}
+	}
+	if (result.kind === "egress_error") {
+		return {
+			deliveryOutcome: "network_error",
+			healthOutcome: null,
+			httpStatus: null,
+			errorMessage: truncateError(result.message),
+			retryable: true,
 		}
 	}
 	if (result.kind === "network_error") {
@@ -382,6 +392,10 @@ export class WebhookDeliveryEngine {
 		this.#sql = sql
 	}
 
+	ensureSchema(): void {
+		this.#ensureSchema()
+	}
+
 	#ensureSchema(): void {
 		if (this.#initialized) {
 			return
@@ -395,7 +409,13 @@ export class WebhookDeliveryEngine {
 	}
 
 	#transaction<A>(fn: () => A): A {
-		return this.#sql.transaction === undefined ? fn() : this.#sql.transaction(fn)
+		const wasInitialized = this.#initialized
+		try {
+			return this.#sql.transaction === undefined ? fn() : this.#sql.transaction(fn)
+		} catch (error) {
+			this.#initialized = wasInitialized
+			throw error
+		}
 	}
 
 	nextAlarmAt(): number | null {
@@ -927,22 +947,26 @@ export class WebhookDeliveryEngine {
 							row.delivery_id,
 						)
 					}
-					self.#recordPendingHealthOutcome({
-						outcome_id: outcomeId,
-						definition_revision: attemptRevision,
-						outcome: "failed",
-						observed_at: finishedAt,
-						created_at: finishedAt,
-					})
+					if (classified.healthOutcome !== null) {
+						self.#recordPendingHealthOutcome({
+							outcome_id: outcomeId,
+							definition_revision: attemptRevision,
+							outcome: classified.healthOutcome,
+							observed_at: finishedAt,
+							created_at: finishedAt,
+						})
+					}
 				})
-				endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
-				if (endpoint.status === "" || endpoint.status === "deleted") {
-					self.purge()
-					return { processed, purged: true, nextAlarmAt: null }
-				}
-				if (endpoint.status !== "active") {
-					self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
-					break
+				if (classified.healthOutcome !== null) {
+					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+					if (endpoint.status === "" || endpoint.status === "deleted") {
+						self.purge()
+						return { processed, purged: true, nextAlarmAt: null }
+					}
+					if (endpoint.status !== "active") {
+						self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
+						break
+					}
 				}
 			}
 

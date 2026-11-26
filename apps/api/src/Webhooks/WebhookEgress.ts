@@ -21,8 +21,8 @@ export {
 	WEBHOOK_EGRESS_TIMEOUT_HEADER,
 	WEBHOOK_EGRESS_TOKEN_ENV,
 	WEBHOOK_EGRESS_URL_ENV,
-	WEBHOOK_LOCAL_DEV_ENV,
-	WEBHOOK_LOCAL_DEV_VALUE,
+	WEBHOOK_LOCAL_RUNTIME_ENV,
+	WEBHOOK_LOCAL_RUNTIME_VALUE,
 	apiWorkerWebhookEgressProps,
 	parseWebhookEgressUrl,
 	readWebhookEgressConfig,
@@ -129,18 +129,22 @@ const sendViaPublicEgress = (
 					if (response.status !== 200) {
 						yield* cancelResponseBody(response)
 						return {
-							kind: "network_error" as const,
+							kind: "egress_error" as const,
 							message: truncateError(`Webhook egress proxy returned HTTP ${response.status}.`),
 						}
 					}
 					const text = yield* response.text
 					const parsed = yield* decodeEgressEnvelope(text).pipe(
 						Effect.orElseSucceed((): WebhookHttpResult => ({
-							kind: "network_error",
+							kind: "egress_error",
 							message: "Webhook egress proxy returned a malformed response.",
 						})),
 					)
-					if (parsed.kind === "invalid_destination" || parsed.kind === "network_error") {
+					if (
+						parsed.kind === "invalid_destination" ||
+						parsed.kind === "network_error" ||
+						parsed.kind === "egress_error"
+					) {
 						return { kind: parsed.kind, message: truncateError(parsed.message) }
 					}
 					return parsed
@@ -148,14 +152,17 @@ const sendViaPublicEgress = (
 			),
 			Effect.catch((error) =>
 				Effect.succeed<WebhookHttpResult>({
-					kind: "network_error",
+					kind: "egress_error",
 					message: truncateError(error.message || "Webhook egress proxy request failed."),
 				}),
 			),
 			Effect.timeoutOption(Duration.millis(outerTimeoutMs)),
 		)
 		if (Option.isNone(outcome)) {
-			return { kind: "timeout" as const }
+			return {
+				kind: "egress_error" as const,
+				message: "Webhook egress proxy timed out before reporting a delivery outcome.",
+			}
 		}
 		return outcome.value
 	})
@@ -174,11 +181,11 @@ export const makeConfiguredWebhookHttpSender = (
 		if (config.egressUrl !== null) {
 			return sendViaPublicEgress(client, config.egressUrl, config.egressToken, request)
 		}
-		if (config.localDev) {
+		if (config.localRuntime) {
 			return Effect.succeed<WebhookHttpResult>({
 				kind: "invalid_destination",
 				message:
-					"Direct webhook delivery is disabled in local dev because local workerd allows private addresses; configure CHECKFU_WEBHOOK_EGRESS_URL.",
+					"Direct webhook delivery is disabled in local workerd because it allows private addresses; configure CHECKFU_WEBHOOK_EGRESS_URL.",
 			})
 		}
 		return sendDirectPublicFetch(client, request)

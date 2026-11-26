@@ -33,10 +33,12 @@ import {
 	readSseUntil,
 	sendAndSettle,
 	sendRequest,
+	TestRuntimeContext,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Anthropic Messages refusals and stream errors", () => {
 	it("keeps a published Anthropic refusal in the next turn's model context through the real Messages codec", async () => {
@@ -202,6 +204,8 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
+			Layer.provideMerge(VaultsTestLive),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -474,6 +478,8 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
+			Layer.provideMerge(VaultsTestLive),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1070,6 +1076,8 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
+				Layer.provideMerge(VaultsTestLive),
+				Layer.provideMerge(TestRuntimeContext),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
@@ -1288,6 +1296,8 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
+				Layer.provideMerge(VaultsTestLive),
+				Layer.provideMerge(TestRuntimeContext),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

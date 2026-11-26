@@ -26,6 +26,7 @@ import { ArtifactsLive } from "./ArtifactsHandlers.ts"
 import { EnvironmentsLive } from "./EnvironmentsHandlers.ts"
 import {
 	AgentBodyLimitLive,
+	ArtifactBlobLimitLive,
 	ArtifactBodyLimitLive,
 	AuthenticationLive,
 	EventBatchBodyLimitLive,
@@ -36,6 +37,7 @@ import {
 	requestPath,
 } from "./HttpHelpers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
+import { VaultsLive } from "./VaultsHandlers.ts"
 import { WebhooksLive } from "./WebhooksHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
@@ -49,6 +51,7 @@ export {
 	SseKeepaliveInterval,
 	SseMaxConnectionDuration,
 } from "./SessionsHandlers.ts"
+export { VaultReadWaitTimeout } from "./VaultsHandlers.ts"
 
 const HealthLive = HttpApiBuilder.group(CheckfuApi, "health", (handlers) =>
 	handlers.handle("health", () => Effect.succeed({ status: "ok" as const })),
@@ -89,12 +92,14 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		SessionsLive,
 		AutomationsLive,
 		ArtifactsLive,
+		VaultsLive,
 		WebhooksLive,
 	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 		RequestValidationLive,
 		AgentBodyLimitLive,
+		ArtifactBlobLimitLive,
 		ArtifactBodyLimitLive,
 		EventBatchBodyLimitLive,
 	]),

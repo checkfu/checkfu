@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest"
 import {
 	artifactSearch,
 	byteSize,
+	downloadUrl,
 	expiry,
 	fileView,
+	previewable,
 	publicationLabel,
 	webUrl,
 } from "../src/artifact-view.ts"
@@ -94,5 +96,18 @@ describe("artifact page search", () => {
 		expect(artifactSearch({ version: 0, path: "" })).toEqual({})
 		expect(artifactSearch({ version: 1.5 })).toEqual({})
 		expect(artifactSearch({ version: "2", path: 3 })).toEqual({})
+	})
+})
+
+describe("artifact file downloads", () => {
+	it("previews a file only up to the size the JSON read returns", () => {
+		expect(previewable({ size: 1024 * 1024 })).toBe(true)
+		expect(previewable({ size: 1024 * 1024 + 1 })).toBe(false)
+	})
+
+	it("downloads raw bytes through the signed-in proxy", () => {
+		expect(downloadUrl("art_1", 2, "data/a b.csv")).toBe(
+			"/v1/artifacts/art_1/versions/2/content?file=data%2Fa%20b.csv",
+		)
 	})
 })

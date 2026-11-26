@@ -10,9 +10,9 @@ import {
 	ArtifactPath,
 	MAX_ARTIFACT_BODY_BYTES,
 	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
-	MAX_ARTIFACT_FILE_BYTES,
+	MAX_INLINE_FILE_BYTES,
 	MAX_ARTIFACT_PATH_LENGTH,
-	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
 } from "@checkfu/sdk/Schemas"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/domain/Agent/AgentTypes"
 import { describe, expect, it } from "@effect/vitest"
@@ -203,6 +203,16 @@ describe("Checkfu MCP server", () => {
 				"sessions_listEvents",
 				"sessions_listSessions",
 				"sessions_sendSessionEvents",
+				"vaults_archiveCredential",
+				"vaults_archiveVault",
+				"vaults_createVault",
+				"vaults_deleteCredential",
+				"vaults_deleteVault",
+				"vaults_getCredential",
+				"vaults_getVault",
+				"vaults_listCredentials",
+				"vaults_listVaults",
+				"vaults_updateVault",
 				"webhooks_createWebhook",
 				"webhooks_deleteWebhook",
 				"webhooks_getDelivery",
@@ -269,6 +279,16 @@ describe("Checkfu MCP server", () => {
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
+				vaults_archiveCredential: "writes, destructive, repeatable",
+				vaults_archiveVault: "writes, destructive, repeatable",
+				vaults_createVault: "writes, additive, not repeatable",
+				vaults_deleteCredential: "writes, destructive, repeatable",
+				vaults_deleteVault: "writes, destructive, repeatable",
+				vaults_getCredential: "read-only, additive, repeatable",
+				vaults_getVault: "read-only, additive, repeatable",
+				vaults_listCredentials: "read-only, additive, repeatable",
+				vaults_listVaults: "read-only, additive, repeatable",
+				vaults_updateVault: "writes, destructive, not repeatable",
 				webhooks_createWebhook: "writes, additive, not repeatable",
 				webhooks_deleteWebhook: "writes, destructive, repeatable",
 				webhooks_getDelivery: "read-only, additive, repeatable",
@@ -284,6 +304,15 @@ describe("Checkfu MCP server", () => {
 			})
 		}).pipe(Effect.scoped),
 	)
+
+	it("offers no tool that takes a credential's secret", () => {
+		const names = GENERATED_TOOLS.map((tool) => tool.name)
+		expect(names).not.toContain("vaults_createCredential")
+		expect(names).not.toContain("vaults_updateCredential")
+		expect(
+			GENERATED_TOOLS.filter((tool) => JSON.stringify(tool.inputSchema).includes('"token"')),
+		).toEqual([])
+	})
 
 	it.live("runs a conversation end to end through tools", () =>
 		Effect.gen(function* () {
@@ -427,6 +456,8 @@ describe("Checkfu MCP server", () => {
 				const webhook = { path: { webhook_id: "whe_1" } }
 				const webhookDelivery = { path: { webhook_id: "whe_1", delivery_id: "wdel_1" } }
 				const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
+				const vault = { path: { vault_id: "vault_1" } }
+				const credential = { path: { vault_id: "vault_1", credential_id: "cred_1" } }
 				const calls = {
 					agents_archiveAgent: agent,
 					agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
@@ -484,6 +515,16 @@ describe("Checkfu MCP server", () => {
 							events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
 						},
 					},
+					vaults_archiveCredential: credential,
+					vaults_archiveVault: vault,
+					vaults_createVault: { body: { display_name: "Team" } },
+					vaults_deleteCredential: credential,
+					vaults_deleteVault: vault,
+					vaults_getCredential: credential,
+					vaults_getVault: vault,
+					vaults_listCredentials: vault,
+					vaults_listVaults: { query: { limit: "5", include_archived: "true" } },
+					vaults_updateVault: { ...vault, body: { display_name: "Team" } },
 					webhooks_createWebhook: {
 						body: { url: "https://hooks.example.com/events", event_types: ["*"] },
 					},
@@ -579,6 +620,7 @@ describe("Checkfu MCP server", () => {
 			"environments_createEnvironment",
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
+			"vaults_createVault",
 			"webhooks_createWebhook",
 			"webhooks_rotateWebhookSecret",
 		])
@@ -1073,20 +1115,20 @@ describe("Checkfu MCP server", () => {
 			expect(largest["type"]).toBe("agent")
 
 			expect(MAX_MCP_BODY_BYTES).toBeGreaterThanOrEqual(MAX_ARTIFACT_BODY_BYTES + 64 * 1024)
-			const escaped = `${String.fromCodePoint(0x5c)}u0436`.repeat(MAX_ARTIFACT_FILE_BYTES / 2)
+			const escaped = `${String.fromCodePoint(0x5c)}u0436`.repeat(MAX_INLINE_FILE_BYTES / 2)
 			const files = Array.from(
-				{ length: MAX_ARTIFACT_TOTAL_BYTES / MAX_ARTIFACT_FILE_BYTES },
+				{ length: MAX_INLINE_TOTAL_BYTES / MAX_INLINE_FILE_BYTES },
 				(_, index) => `{"path":"f${index}.txt","content":"${escaped}"}`,
 			)
 			const upload = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"artifacts_createArtifact","arguments":{"body":{"name":"A","files":[${files.join(",")}]}},"_meta":${JSON.stringify(CLIENT_META)}}}`
-			expect(upload.length).toBeGreaterThan(MAX_ARTIFACT_TOTAL_BYTES * 2.9)
+			expect(upload.length).toBeGreaterThan(MAX_INLINE_TOTAL_BYTES * 2.9)
 			const template = callToolRequest("artifacts_createArtifact", {}, { authorization })
 			const uploaded = yield* server.fetch(
 				new Request(template.url, { method: "POST", headers: template.headers, body: upload }),
 			)
 			expect(uploaded.status).toBe(200)
 			const uploadedText = yield* Effect.promise(() => uploaded.text())
-			expect(uploadedText).toContain(`"total_bytes":${MAX_ARTIFACT_TOTAL_BYTES}`)
+			expect(uploadedText).toContain(`"total_bytes":${MAX_INLINE_TOTAL_BYTES}`)
 		}).pipe(Effect.scoped),
 	)
 

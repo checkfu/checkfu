@@ -71,115 +71,114 @@ const parseTimeoutMs = (header: string | undefined): number => {
 	return Math.min(MAX_TIMEOUT_MS, Math.max(500, Math.floor(parsed)))
 }
 
-/**
- * Executes a single outbound HTTPS webhook POST while enforcing public-only
- * destinations at actual connection time:
- * 1. Validates and canonicalizes the HTTPS destination URL.
- * 2. Resolves DNS and verifies EVERY returned A/AAAA record is publicly routable.
- * 3. Pins the TCP connection to a verified public IP while preserving the
- *    original hostname for TLS SNI and certificate verification.
- * 4. Re-verifies `socket.remoteAddress` upon TCP/TLS connect before writing bytes.
- * 5. Never follows HTTP redirects.
- */
-export const deliverThroughPublicHttps = async (input: {
-	readonly targetUrl: string
-	readonly headers: Readonly<Record<string, string>>
-	readonly body: Buffer
-	readonly timeoutMs: number
-	readonly lookupAll?: DnsLookupAll
-	readonly httpsRequest?: typeof https.request
-}): Promise<WebhookHttpResult> => {
-	const canonical = parsePublicHttpsWebhookUrl(input.targetUrl)
-	if (canonical === null) {
-		return {
-			kind: "invalid_destination",
-			message: "Webhook destination URL is not a permitted public HTTPS address.",
-		}
-	}
-	const parsed = new URL(canonical)
-	const hostname =
-		parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]")
-			? parsed.hostname.slice(1, -1)
-			: parsed.hostname
-	const ipFamily = net.isIP(hostname)
-	const port = parsed.port.length > 0 ? Number(parsed.port) : 443
-	const lookupAll = input.lookupAll ?? defaultLookupAll
-	const requestFn = input.httpsRequest ?? https.request
+type LookupWithDeadlineResult =
+	| { readonly kind: "ok"; readonly addresses: ReadonlyArray<LookupAddress> }
+	| { readonly kind: "timeout" }
+	| { readonly kind: "error"; readonly message: string }
 
-	// Resolve and validate every IP upfront so a host with any private record is refused.
-	let addresses: ReadonlyArray<LookupAddress>
-	if (ipFamily !== 0) {
-		addresses = [{ address: hostname, family: ipFamily }]
-	} else {
-		try {
-			addresses = await lookupAll(hostname)
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			return { kind: "network_error", message: `DNS resolution failed: ${message}` }
-		}
+const lookupWithinDeadline = (
+	lookupAll: DnsLookupAll,
+	hostname: string,
+	timeoutMs: number,
+): Promise<LookupWithDeadlineResult> => {
+	if (timeoutMs <= 0) {
+		return Promise.resolve({ kind: "timeout" })
 	}
-	if (addresses.length === 0) {
-		return { kind: "network_error", message: "DNS resolution returned no addresses." }
-	}
-	for (const entry of addresses) {
-		if (!isPublicIpAddress(entry.address)) {
-			return {
-				kind: "invalid_destination",
-				message: `Refusing webhook connection to non-public IP address (${entry.address}).`,
-			}
-		}
-	}
-	const [chosen] = addresses
-	if (chosen === undefined) {
-		return { kind: "network_error", message: "DNS resolution returned no addresses." }
-	}
-
-	return await new Promise<WebhookHttpResult>((resolve) => {
+	return new Promise<LookupWithDeadlineResult>((resolve) => {
 		let settled = false
-		const finish = (result: WebhookHttpResult) => {
+		const timer = setTimeout(() => {
 			if (!settled) {
 				settled = true
-				resolve(result)
+				resolve({ kind: "timeout" })
+			}
+		}, timeoutMs)
+		void lookupAll(hostname).then(
+			(addresses) => {
+				clearTimeout(timer)
+				if (!settled) {
+					settled = true
+					resolve({ kind: "ok", addresses })
+				}
+			},
+			(error: unknown) => {
+				clearTimeout(timer)
+				if (!settled) {
+					settled = true
+					resolve({
+						kind: "error",
+						message: error instanceof Error ? error.message : String(error),
+					})
+				}
+			},
+		)
+	})
+}
+
+interface SingleAttemptOutcome {
+	readonly result: WebhookHttpResult
+	readonly retryableConnectError: boolean
+}
+
+const attemptPublicHttpsRequest = (input: {
+	readonly requestFn: typeof https.request
+	readonly parsed: URL
+	readonly hostname: string
+	readonly ipFamily: number
+	readonly port: number
+	readonly outboundHeaders: http.OutgoingHttpHeaders
+	readonly body: Buffer
+	readonly candidates: ReadonlyArray<LookupAddress>
+	readonly remainingMs: number
+}): Promise<SingleAttemptOutcome> => {
+	const [primary] = input.candidates
+	if (primary === undefined || input.remainingMs <= 0) {
+		return Promise.resolve({ result: { kind: "timeout" }, retryableConnectError: false })
+	}
+	return new Promise<SingleAttemptOutcome>((resolve) => {
+		let settled = false
+		let secured = false
+		const finish = (outcome: SingleAttemptOutcome) => {
+			if (!settled) {
+				settled = true
+				clearTimeout(deadlineTimer)
+				resolve(outcome)
 			}
 		}
 
-		const outboundHeaders: http.OutgoingHttpHeaders = {
-			host: parsed.host,
-			"content-length": String(input.body.byteLength),
-		}
-		for (const key of FORWARDED_HEADERS) {
-			const value = input.headers[key]
-			if (value !== undefined) {
-				outboundHeaders[key] = value
-			}
-		}
-
-		const req = requestFn(
+		const req = input.requestFn(
 			{
 				protocol: "https:",
-				hostname,
-				port,
-				path: `${parsed.pathname}${parsed.search}`,
+				hostname: input.hostname,
+				port: input.port,
+				path: `${input.parsed.pathname}${input.parsed.search}`,
 				method: "POST",
-				headers: outboundHeaders,
+				headers: input.outboundHeaders,
 				agent: false,
-				...(ipFamily === 0 ? { servername: hostname } : {}),
+				...(input.ipFamily === 0 ? { servername: input.hostname } : {}),
 				rejectUnauthorized: true,
 				lookup: (_hostname, options, callback) => {
 					if (typeof options === "object" && options !== null && options.all === true) {
-						callback(null, [{ address: chosen.address, family: chosen.family }])
+						callback(
+							null,
+							input.candidates.map((entry) => ({ address: entry.address, family: entry.family })),
+						)
 						return
 					}
-					callback(null, chosen.address, chosen.family)
+					callback(null, primary.address, primary.family)
 				},
 			},
 			(res) => {
 				const status = res.statusCode ?? 502
 				res.resume()
 				res.destroy()
-				finish({ kind: "response", status })
+				finish({ result: { kind: "response", status }, retryableConnectError: false })
 			},
 		)
+
+		const deadlineTimer = setTimeout(() => {
+			req.destroy()
+			finish({ result: { kind: "timeout" }, retryableConnectError: false })
+		}, input.remainingMs)
 
 		req.on("socket", (socket) => {
 			const verifyPeerAddress = () => {
@@ -196,27 +195,137 @@ export const deliverThroughPublicHttps = async (input: {
 				verifyPeerAddress()
 			}
 			socket.once("connect", verifyPeerAddress)
-			socket.once("secureConnect", verifyPeerAddress)
-		})
-
-		req.setTimeout(input.timeoutMs, () => {
-			req.destroy()
-			finish({ kind: "timeout" })
+			socket.once("secureConnect", () => {
+				verifyPeerAddress()
+				if (!socket.destroyed) {
+					secured = true
+				}
+			})
 		})
 
 		req.on("error", (error) => {
 			if (error instanceof BlockedDestinationError) {
-				finish({ kind: "invalid_destination", message: error.message })
+				finish({
+					result: { kind: "invalid_destination", message: error.message },
+					retryableConnectError: false,
+				})
 				return
 			}
 			finish({
-				kind: "network_error",
-				message: error instanceof Error ? error.message : String(error),
+				result: {
+					kind: "network_error",
+					message: error instanceof Error ? error.message : String(error),
+				},
+				retryableConnectError: !secured,
 			})
 		})
 
 		req.end(input.body)
 	})
+}
+
+/**
+ * Executes a single outbound HTTPS webhook POST while enforcing public-only
+ * destinations at actual connection time under a single end-to-end deadline:
+ * 1. Validates and canonicalizes the HTTPS destination URL.
+ * 2. Resolves DNS within the end-to-end deadline and verifies EVERY returned
+ *    A/AAAA record is publicly routable.
+ * 3. Supplies all verified public addresses for family selection / fallback
+ *    while preserving the original hostname for TLS SNI and cert verification.
+ * 4. Re-verifies `socket.remoteAddress` upon TCP/TLS connect before writing bytes.
+ * 5. Never follows HTTP redirects and aborts in-flight work when the deadline expires.
+ */
+export const deliverThroughPublicHttps = async (input: {
+	readonly targetUrl: string
+	readonly headers: Readonly<Record<string, string>>
+	readonly body: Buffer
+	readonly timeoutMs: number
+	readonly lookupAll?: DnsLookupAll
+	readonly httpsRequest?: typeof https.request
+}): Promise<WebhookHttpResult> => {
+	const canonical = parsePublicHttpsWebhookUrl(input.targetUrl)
+	if (canonical === null) {
+		return {
+			kind: "invalid_destination",
+			message: "Webhook destination URL is not a permitted public HTTPS address.",
+		}
+	}
+	const deadlineAt = Date.now() + Math.max(1, input.timeoutMs)
+	const remainingMs = () => deadlineAt - Date.now()
+
+	const parsed = new URL(canonical)
+	const hostname =
+		parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]")
+			? parsed.hostname.slice(1, -1)
+			: parsed.hostname
+	const ipFamily = net.isIP(hostname)
+	const port = parsed.port.length > 0 ? Number(parsed.port) : 443
+	const lookupAll = input.lookupAll ?? defaultLookupAll
+	const requestFn = input.httpsRequest ?? https.request
+
+	// Resolve and validate every IP upfront within the end-to-end deadline.
+	let addresses: ReadonlyArray<LookupAddress>
+	if (ipFamily !== 0) {
+		addresses = [{ address: hostname, family: ipFamily }]
+	} else {
+		const resolved = await lookupWithinDeadline(lookupAll, hostname, remainingMs())
+		if (resolved.kind === "timeout") {
+			return { kind: "timeout" }
+		}
+		if (resolved.kind === "error") {
+			return { kind: "network_error", message: `DNS resolution failed: ${resolved.message}` }
+		}
+		addresses = resolved.addresses
+	}
+	if (addresses.length === 0) {
+		return { kind: "network_error", message: "DNS resolution returned no addresses." }
+	}
+	for (const entry of addresses) {
+		if (!isPublicIpAddress(entry.address)) {
+			return {
+				kind: "invalid_destination",
+				message: `Refusing webhook connection to non-public IP address (${entry.address}).`,
+			}
+		}
+	}
+
+	const outboundHeaders: http.OutgoingHttpHeaders = {
+		host: parsed.host,
+		"content-length": String(input.body.byteLength),
+	}
+	for (const key of FORWARDED_HEADERS) {
+		const value = input.headers[key]
+		if (value !== undefined) {
+			outboundHeaders[key] = value
+		}
+	}
+
+	let lastResult: WebhookHttpResult = {
+		kind: "network_error",
+		message: "Unable to connect to any verified webhook address.",
+	}
+	for (let index = 0; index < addresses.length; index++) {
+		const left = remainingMs()
+		if (left <= 0) {
+			return { kind: "timeout" }
+		}
+		const attempt = await attemptPublicHttpsRequest({
+			requestFn,
+			parsed,
+			hostname,
+			ipFamily,
+			port,
+			outboundHeaders,
+			body: input.body,
+			candidates: addresses.slice(index),
+			remainingMs: left,
+		})
+		lastResult = attempt.result
+		if (!attempt.retryableConnectError) {
+			return attempt.result
+		}
+	}
+	return lastResult
 }
 
 const sendJson = (res: http.ServerResponse, status: number, payload: unknown): void => {

@@ -290,7 +290,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifact",
 		title: "Create an artifact",
 		description:
-			'Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64".',
+			"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
 		method: "POST",
 		path: "/v1/artifacts",
 		readOnly: false,
@@ -344,11 +344,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								additionalProperties: false,
 							},
 							minItems: 1,
-							maxItems: 64,
-							description: "Every file of the version; a new version replaces the whole set",
+							maxItems: 1000,
+							description:
+								"Every file of version 1. Leave it out to create an empty artifact at version 0, upload large files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}, then add version 1",
 						},
 					},
-					required: ["name", "files"],
+					required: ["name"],
 					additionalProperties: false,
 				},
 				idempotency_key: {
@@ -417,7 +418,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifactVersion",
 		title: "Create an artifact version",
 		description:
-			'Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64".',
+			"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
 		method: "POST",
 		path: "/v1/artifacts/{artifact_id}/versions",
 		readOnly: false,
@@ -444,9 +445,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						version: {
 							type: "integer",
-							minimum: 1,
+							minimum: 0,
 							maximum: 9007199254740991,
-							description: "Current artifact version for optimistic concurrency",
+							description:
+								"Current artifact version for optimistic concurrency (0 for an empty artifact)",
 						},
 						files: {
 							type: "array",
@@ -501,7 +503,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												type: "string",
 												pattern: "^[0-9a-f]{64}$",
 												description:
-													"sha256 of a file in the version being replaced, to keep its bytes without sending them again",
+													"sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}",
 											},
 											content_type: {
 												type: "string",
@@ -518,9 +520,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								],
 							},
 							minItems: 1,
-							maxItems: 64,
+							maxItems: 1000,
 							description:
-								"Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again",
+								"Every file of the version; a new version replaces the whole set. Send a small file's content inline, or name bytes the artifact already holds by their sha256",
 						},
 					},
 					required: ["version", "files"],
@@ -2240,6 +2242,400 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "vaults_archiveCredential",
+		title: "Archive a credential",
+		description:
+			"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_archiveVault",
+		title: "Archive a vault",
+		description:
+			"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_createVault",
+		title: "Create a vault",
+		description: "Create a vault to hold credentials for agents to use",
+		method: "POST",
+		path: "/v1/vaults",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				body: {
+					type: "object",
+					properties: {
+						display_name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 255,
+							description: "Human-readable vault name",
+						},
+					},
+					required: ["display_name"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_deleteCredential",
+		title: "Delete a credential",
+		description:
+			"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		method: "DELETE",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_deleteVault",
+		title: "Delete a vault",
+		description:
+			"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		method: "DELETE",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_getCredential",
+		title: "Retrieve a credential",
+		description: "Retrieve a credential by ID. Its secret is never returned.",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_getVault",
+		title: "Retrieve a vault",
+		description: "Retrieve a vault by ID",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_listCredentials",
+		title: "List credentials",
+		description:
+			"List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true.",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}/credentials",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_listVaults",
+		title: "List vaults",
+		description:
+			"List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true.",
+		method: "GET",
+		path: "/v1/vaults",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_updateVault",
+		title: "Update a vault",
+		description: "Rename a vault",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						display_name: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 255,
+								},
+								{
+									type: "null",
+								},
+							],
+							description: "Updated vault name",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "webhooks_createWebhook",
 		title: "Create a webhook",
 		description:
@@ -2296,6 +2692,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									"artifact.published",
 									"artifact.unpublished",
 									"artifact.deleted",
+									"vault.created",
+									"vault.archived",
+									"vault.deleted",
+									"vault_credential.created",
+									"vault_credential.archived",
+									"vault_credential.deleted",
 									"webhook.test",
 								],
 							},
@@ -2752,6 +3154,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									"artifact.published",
 									"artifact.unpublished",
 									"artifact.deleted",
+									"vault.created",
+									"vault.archived",
+									"vault.deleted",
+									"vault_credential.created",
+									"vault_credential.archived",
+									"vault_credential.deleted",
 									"webhook.test",
 								],
 							},

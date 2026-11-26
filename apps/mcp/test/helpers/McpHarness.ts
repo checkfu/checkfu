@@ -3,14 +3,21 @@ import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.extern
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
+import {
+	CredentialSecretsLive,
+	makeConnectionExecutorLayer,
+} from "@checkfu/api/Connection/CredentialCustody"
+import { vaultListingQueriesFrom } from "@checkfu/api/Http/Listing"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
+import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -22,6 +29,14 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import { ApiBinding } from "../../src/GeneratedRuntime.ts"
 import { CREDENTIAL_CHECK_PATH, MCP_PATH, makeMcpWebHandler } from "../../src/Server.ts"
+
+const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+	Type: "Test",
+	id: "test",
+	env: {},
+	get: () => Effect.undefined,
+	set: (id: string) => Effect.succeed(id),
+})
 
 export const TEST_API_KEY = "ck_mcp_test_secret"
 export const MCP_ORIGIN = "http://mcp.test"
@@ -47,8 +62,24 @@ export const makeTestServer = Effect.gen(function* () {
 	)
 	const listingStore = ListingStore.memory
 	const webhooksTest = makeWebhooksTestSupport(listingStore)
+	const VaultsLive = Vaults.layer(
+		VaultsHandlersLive.pipe(Layer.provide(listingStore), Layer.provide(WebhookEventsNoop)),
+	).pipe(
+		Layer.provideMerge(CredentialSecretsLive),
+		Layer.provide(
+			makeConnectionExecutorLayer({
+				put: () => Effect.succeed({ refused: null }),
+				erase: () => Effect.void,
+				seal: () => Effect.void,
+				usable: () => Effect.succeed(true),
+			}),
+		),
+		Layer.provide(Domain.InMemory),
+	)
 	const ApiLayer = Layer.mergeAll(
-		webhooksTest.layer,
+		webhooksTest.layer.pipe(Layer.provide(Domain.InMemory)),
+		VaultsLive,
+		vaultListingQueriesFrom(VaultsLive),
 		Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
@@ -57,16 +88,17 @@ export const makeTestServer = Effect.gen(function* () {
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(HarnessLive),
 			),
+		).pipe(Layer.provide(Domain.InMemory)),
+		Layer.mergeAll(makeArtifactStoreMemory().layer, ArtifactLinksTest).pipe(
+			Layer.provide(Domain.InMemory),
 		),
-		makeArtifactStoreMemory().layer,
-		ArtifactLinksTest,
 	).pipe(
-		Layer.provide(Domain.InMemory),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(
 			ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: TEST_API_KEY })),
 		),
+		Layer.provideMerge(TestRuntimeContext),
 	)
 	const apiContext = yield* Layer.build(ApiLayer)
 	const api = yield* makeApiHandler.pipe(Effect.provide(apiContext))

@@ -158,10 +158,11 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				const req = sent[0]!
 				const sig = req.headers[STANDARD_WEBHOOK_HEADERS.signature] ?? ""
 				const ts = Number(req.headers[STANDARD_WEBHOOK_HEADERS.timestamp] ?? "0")
+				expect(req.headers[STANDARD_WEBHOOK_HEADERS.id]).toBe("evt_1")
 				expect(
 					yield* verifyStandardWebhook(mac, {
 						secret: currentSecret,
-						webhookId: "wdel_1",
+						webhookId: "evt_1",
 						timestampSeconds: ts,
 						signatureHeader: sig,
 						payload: req.body,
@@ -170,7 +171,7 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				expect(
 					yield* verifyStandardWebhook(mac, {
 						secret: prevSecret,
-						webhookId: "wdel_1",
+						webhookId: "evt_1",
 						timestampSeconds: ts,
 						signatureHeader: sig,
 						payload: req.body,
@@ -203,10 +204,11 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 					},
 				})
 				const postGrace = sent[1]!
+				expect(postGrace.headers[STANDARD_WEBHOOK_HEADERS.id]).toBe("evt_2")
 				expect(
 					yield* verifyStandardWebhook(mac, {
 						secret: currentSecret,
-						webhookId: "wdel_2",
+						webhookId: "evt_2",
 						timestampSeconds: Number(postGrace.headers[STANDARD_WEBHOOK_HEADERS.timestamp] ?? "0"),
 						signatureHeader: postGrace.headers[STANDARD_WEBHOOK_HEADERS.signature] ?? "",
 						payload: postGrace.body,
@@ -215,7 +217,7 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				expect(
 					yield* verifyStandardWebhook(mac, {
 						secret: prevSecret,
-						webhookId: "wdel_2",
+						webhookId: "evt_2",
 						timestampSeconds: Number(postGrace.headers[STANDARD_WEBHOOK_HEADERS.timestamp] ?? "0"),
 						signatureHeader: postGrace.headers[STANDARD_WEBHOOK_HEADERS.signature] ?? "",
 						payload: postGrace.body,
@@ -682,6 +684,158 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				})
 				expect(purged).toEqual({ processed: 0, purged: true, nextAlarmAt: null })
 				expect(engine.listDeliveries({ limit: 50 }).data).toEqual([])
+				db.close()
+			}).pipe(Effect.provide(CryptoLive)),
+	)
+
+	it.effect(
+		"preserves signed webhook-id across manual redeliveries, isolates egress proxy outages from endpoint health, and recovers from rolled-back schema init",
+		() =>
+			Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				const db = new DatabaseSync(":memory:")
+				const webhookId = WebhookId.make("whe_sqlite_regressions")
+				const baseSql = sqliteStorage(db)
+
+				// 1) Simulate a rolled-back first transaction after DDL: schema init cache must reset.
+				let forceRollback = true
+				const flakySql: WebhookSqlStorage = {
+					exec: (query, ...bindings) => baseSql.exec(query, ...bindings),
+					transaction: <A>(fn: () => A): A => {
+						db.exec("BEGIN IMMEDIATE")
+						try {
+							const result = fn()
+							if (forceRollback) {
+								forceRollback = false
+								throw new Error("simulated alarm schedule failure")
+							}
+							db.exec("COMMIT")
+							return result
+						} catch (error) {
+							db.exec("ROLLBACK")
+							throw error
+						}
+					},
+				}
+				const engine = new WebhookDeliveryEngine(webhookId, flakySql)
+				expect(() =>
+					engine.enqueue(
+						{
+							delivery_id: WebhookDeliveryId.make("wdel_rollback_1"),
+							event_id: WebhookEventId.make("evt_stable_msg_1"),
+							event_type: "agent.created",
+							dedupe_key: "evt_stable_msg_1",
+							payload_json: JSON.stringify({ custom: "payload" }),
+						},
+						T0,
+					),
+				).toThrow(/simulated alarm schedule failure/)
+
+				// Retry succeeds and creates the schema cleanly without "no such table".
+				const original = engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_orig_1"),
+						event_id: WebhookEventId.make("evt_stable_msg_1"),
+						event_type: "agent.created",
+						dedupe_key: "evt_stable_msg_1",
+						payload_json: JSON.stringify({ custom: "payload" }),
+					},
+					T0,
+				)
+				expect(original.record.id).toBe("wdel_orig_1")
+
+				const mac = yield* Mac.Mac
+				const masterKey = yield* makeWebhookMasterKey("regression-master")
+				const endpoint = activeEndpoint()
+				const secret = yield* deriveWebhookSigningSecret(mac, masterKey, {
+					webhookId,
+					secretRevision: endpoint.secret_revision,
+					secretSalt: endpoint.secret_salt,
+				})
+				const healthOutcomes: Array<string> = []
+				const sent: Array<WebhookHttpRequest> = []
+
+				// 2) Egress proxy outage retries delivery WITHOUT degrading endpoint health.
+				yield* engine.drainDue({
+					readEndpoint: Effect.succeed(endpoint),
+					recordOutcome: (input) =>
+						Effect.sync(() => {
+							healthOutcomes.push(input.outcome)
+							return endpoint
+						}),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: (req) =>
+							Effect.sync(() => {
+								sent.push(req)
+								return { kind: "egress_error", message: "Webhook egress proxy returned HTTP 503." }
+							}),
+					},
+				})
+				expect(healthOutcomes).toEqual([])
+				expect(engine.pendingHealthOutcomesCount()).toBe(0)
+				const afterProxyOutage = engine.getDelivery(WebhookDeliveryId.make("wdel_orig_1"), T0)
+				expect(afterProxyOutage?.status).toBe("pending")
+				expect(afterProxyOutage?.attempt_count).toBe(1)
+
+				// 3) Next attempt succeeds; then manual redelivery creates a new delivery_id
+				//    while keeping the exact same Standard Webhooks webhook-id & signature input.
+				yield* TestClock.setTime(afterProxyOutage!.next_attempt_at!)
+				yield* engine.drainDue({
+					readEndpoint: Effect.succeed(endpoint),
+					recordOutcome: (input) =>
+						Effect.sync(() => {
+							healthOutcomes.push(input.outcome)
+							return endpoint
+						}),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: (req) =>
+							Effect.sync(() => {
+								sent.push(req)
+								return { kind: "response", status: 200 }
+							}),
+					},
+				})
+				expect(healthOutcomes).toEqual([])
+
+				const redelivered = engine.redeliver(
+					WebhookDeliveryId.make("wdel_orig_1"),
+					WebhookDeliveryId.make("wdel_replay_2"),
+					afterProxyOutage!.next_attempt_at! + 1000,
+				)
+				expect(redelivered?.record.id).toBe("wdel_replay_2")
+				expect(redelivered?.record.event_id).toBe("evt_stable_msg_1")
+
+				yield* TestClock.setTime(afterProxyOutage!.next_attempt_at! + 1000)
+				yield* engine.drainDue({
+					readEndpoint: Effect.succeed(endpoint),
+					recordOutcome: () => Effect.succeed(endpoint),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: (req) =>
+							Effect.sync(() => {
+								sent.push(req)
+								return { kind: "response", status: 200 }
+							}),
+					},
+				})
+				const firstSend = sent[1]!
+				const replaySend = sent[2]!
+				expect(firstSend.headers[STANDARD_WEBHOOK_HEADERS.id]).toBe("evt_stable_msg_1")
+				expect(replaySend.headers[STANDARD_WEBHOOK_HEADERS.id]).toBe("evt_stable_msg_1")
+				expect(
+					yield* verifyStandardWebhook(mac, {
+						secret,
+						webhookId: "evt_stable_msg_1",
+						timestampSeconds: Number(replaySend.headers[STANDARD_WEBHOOK_HEADERS.timestamp] ?? "0"),
+						signatureHeader: replaySend.headers[STANDARD_WEBHOOK_HEADERS.signature] ?? "",
+						payload: replaySend.body,
+					}),
+				).toBe(true)
 				db.close()
 			}).pipe(Effect.provide(CryptoLive)),
 	)

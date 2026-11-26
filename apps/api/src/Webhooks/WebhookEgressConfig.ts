@@ -1,5 +1,4 @@
 import { parsePublicHttpsWebhookUrl } from "@checkfu/domain/Webhook/WebhookUrl"
-import { parseLoopbackBaseUrl } from "@checkfu/pi-providers/fetch"
 import { AlchemyContext } from "alchemy/AlchemyContext"
 import { Stage } from "alchemy/Stage"
 import * as Config from "effect/Config"
@@ -9,8 +8,8 @@ import * as Redacted from "effect/Redacted"
 
 export const WEBHOOK_EGRESS_URL_ENV = "CHECKFU_WEBHOOK_EGRESS_URL"
 export const WEBHOOK_EGRESS_TOKEN_ENV = "CHECKFU_WEBHOOK_EGRESS_TOKEN"
-export const WEBHOOK_LOCAL_DEV_ENV = "CHECKFU_WEBHOOK_LOCAL_DEV"
-export const WEBHOOK_LOCAL_DEV_VALUE = "local-dev"
+export const WEBHOOK_LOCAL_RUNTIME_ENV = "CHECKFU_WEBHOOK_LOCAL_RUNTIME"
+export const WEBHOOK_LOCAL_RUNTIME_VALUE = "local-workerd"
 
 export const WEBHOOK_EGRESS_TARGET_HEADER = "x-checkfu-egress-target"
 export const WEBHOOK_EGRESS_TIMEOUT_HEADER = "x-checkfu-egress-timeout-ms"
@@ -18,7 +17,7 @@ export const WEBHOOK_EGRESS_TIMEOUT_HEADER = "x-checkfu-egress-timeout-ms"
 export interface WebhookEgressConfig {
 	readonly egressUrl: string | null
 	readonly egressToken: Redacted.Redacted<string> | null
-	readonly localDev: boolean
+	readonly localRuntime: boolean
 }
 
 const optionalTrimmedString = (name: string): Config.Config<string | null> =>
@@ -44,6 +43,22 @@ const optionalTrimmedSecret = (name: string): Config.Config<Redacted.Redacted<st
 		),
 	)
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"])
+
+const parseLoopbackHttpEgressUrl = (parsed: URL): string => {
+	if (
+		parsed.username.length > 0 ||
+		parsed.password.length > 0 ||
+		parsed.hash.length > 0 ||
+		!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())
+	) {
+		throw new TypeError(
+			`Invalid ${WEBHOOK_EGRESS_URL_ENV}: local http:// egress URL must target loopback (127.0.0.1, localhost, or [::1]) without credentials or fragments.`,
+		)
+	}
+	return parsed.toString()
+}
+
 export const parseWebhookEgressUrl = (
 	raw: string,
 	options: { readonly allowLoopbackHttp: boolean },
@@ -58,10 +73,10 @@ export const parseWebhookEgressUrl = (
 	if (parsed.protocol === "http:") {
 		if (!options.allowLoopbackHttp) {
 			throw new TypeError(
-				`Invalid ${WEBHOOK_EGRESS_URL_ENV}: must use https:// (loopback http:// is allowed only in local dev).`,
+				`Invalid ${WEBHOOK_EGRESS_URL_ENV}: must use https:// (loopback http:// is allowed only in local non-production dev).`,
 			)
 		}
-		return parseLoopbackBaseUrl(trimmed, WEBHOOK_EGRESS_URL_ENV)
+		return parseLoopbackHttpEgressUrl(parsed)
 	}
 	const canonical = parsePublicHttpsWebhookUrl(trimmed)
 	if (canonical === null) {
@@ -74,11 +89,12 @@ export const parseWebhookEgressUrl = (
 
 /**
  * Plan-time Worker props for `ApiWorker`:
- * - Marks local Alchemy dev (`CHECKFU_WEBHOOK_LOCAL_DEV="local-dev"`) so the
- *   deliverer refuses direct `fetch()` through Alchemy's private-permitting
- *   `InternetLive` unless a public-only egress URL is configured.
- * - Forwards optional `CHECKFU_WEBHOOK_EGRESS_URL` and secret
- *   `CHECKFU_WEBHOOK_EGRESS_TOKEN` when configured.
+ * - Marks EVERY local Alchemy runtime (`alchemyContext.dev === true`, regardless
+ *   of stage name) via `CHECKFU_WEBHOOK_LOCAL_RUNTIME="local-workerd"` so the
+ *   deliverer refuses direct `fetch()` through local `workerd`'s private-permitting
+ *   egress unless a public-only egress URL is configured.
+ * - Keeps the rule for allowing a loopback `http://` proxy URL separate: allowed
+ *   only in local non-production stages.
  */
 export const apiWorkerWebhookEgressProps = Effect.gen(function* () {
 	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
@@ -86,16 +102,16 @@ export const apiWorkerWebhookEgressProps = Effect.gen(function* () {
 		return {}
 	}
 	const stage = yield* Effect.serviceOption(Stage)
-	const localDev =
-		alchemyContext.value.dev && !(Option.isSome(stage) && stage.value === "production")
+	const localRuntime = alchemyContext.value.dev
+	const allowLoopbackHttp = localRuntime && !(Option.isSome(stage) && stage.value === "production")
 	const rawUrl = yield* optionalTrimmedString(WEBHOOK_EGRESS_URL_ENV)
 	const token = yield* optionalTrimmedSecret(WEBHOOK_EGRESS_TOKEN_ENV)
 	const env: Record<string, string | Redacted.Redacted<string>> = {}
-	if (localDev) {
-		env[WEBHOOK_LOCAL_DEV_ENV] = WEBHOOK_LOCAL_DEV_VALUE
+	if (localRuntime) {
+		env[WEBHOOK_LOCAL_RUNTIME_ENV] = WEBHOOK_LOCAL_RUNTIME_VALUE
 	}
 	if (rawUrl !== null) {
-		env[WEBHOOK_EGRESS_URL_ENV] = parseWebhookEgressUrl(rawUrl, { allowLoopbackHttp: localDev })
+		env[WEBHOOK_EGRESS_URL_ENV] = parseWebhookEgressUrl(rawUrl, { allowLoopbackHttp })
 	}
 	if (token !== null) {
 		env[WEBHOOK_EGRESS_TOKEN_ENV] = token
@@ -105,11 +121,11 @@ export const apiWorkerWebhookEgressProps = Effect.gen(function* () {
 
 export const readWebhookEgressConfig: Effect.Effect<WebhookEgressConfig> = Effect.gen(function* () {
 	const runtimeStage = yield* optionalTrimmedString("ALCHEMY_STAGE")
-	const localSignal = yield* optionalTrimmedString(WEBHOOK_LOCAL_DEV_ENV)
-	const localDev = runtimeStage !== "production" && localSignal === WEBHOOK_LOCAL_DEV_VALUE
+	const localSignal = yield* optionalTrimmedString(WEBHOOK_LOCAL_RUNTIME_ENV)
+	const localRuntime = localSignal === WEBHOOK_LOCAL_RUNTIME_VALUE
+	const allowLoopbackHttp = localRuntime && runtimeStage !== "production"
 	const rawUrl = yield* optionalTrimmedString(WEBHOOK_EGRESS_URL_ENV)
 	const egressToken = yield* optionalTrimmedSecret(WEBHOOK_EGRESS_TOKEN_ENV)
-	const egressUrl =
-		rawUrl === null ? null : parseWebhookEgressUrl(rawUrl, { allowLoopbackHttp: localDev })
-	return { egressUrl, egressToken, localDev }
+	const egressUrl = rawUrl === null ? null : parseWebhookEgressUrl(rawUrl, { allowLoopbackHttp })
+	return { egressUrl, egressToken, localRuntime }
 }).pipe(Effect.orDie)

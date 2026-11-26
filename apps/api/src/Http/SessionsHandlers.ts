@@ -40,15 +40,13 @@ import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
-	createCommandId,
+	createIdentity,
 	currentRequestId,
 	handled,
 	idempotentCommandId,
-	idempotentId,
 	isPending,
 	orPending,
 	present,
-	randomId,
 	reject,
 	settled,
 	sha256Json,
@@ -341,23 +339,19 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
-					let id: SessionId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						id = SessionId.make(
-							yield* idempotentId(digest, "sess", ["create", "session", "id", idempotencyKey]),
-						)
-						sendOptions = {
-							commandId: yield* createCommandId(digest, "session", idempotencyKey, {
-								agent_id: agentId,
-								agent_version: agentVersion,
-								environment_id: environmentId,
-								title,
-							}),
-						}
-					} else {
-						id = SessionId.make(yield* randomId(random, "sess"))
-					}
+					const identity = yield* createIdentity(digest, random, {
+						resource: "session",
+						prefix: "sess",
+						key: idempotencyKey,
+						body: {
+							agent_id: agentId,
+							agent_version: agentVersion,
+							environment_id: environmentId,
+							title,
+						},
+					})
+					const id = SessionId.make(identity.id)
+					const sendOptions = identity.options
 					const receipt = yield* admitSession
 						.send(
 							new AdmitSession({

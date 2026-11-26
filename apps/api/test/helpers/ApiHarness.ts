@@ -65,6 +65,8 @@ import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.t
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
+import { makeVaultsTestLayer } from "./VaultsHarness.ts"
+import type { VaultsTestLive } from "./VaultsHarness.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -213,6 +215,7 @@ export const makePiDurableTestLayer = (
 		readonly env?: ExecutionEnv
 		readonly webhookSender?: WebhookHttpSender
 		readonly webhookAutoDrain?: boolean
+		readonly vaults?: typeof VaultsTestLive
 	} = {},
 ) => {
 	interface SessionObject {
@@ -497,6 +500,11 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
+	const vaultsLayer =
+		options.vaults ??
+		makeVaultsTestLayer({
+			webhookEvents: WebhookEventsRuntimeLive.pipe(Layer.provide(platform)),
+		}).layer
 	const layer = Layer.mergeAll(
 		WebhooksLive,
 		WebhookListingLive,
@@ -518,6 +526,7 @@ export const makePiDurableTestLayer = (
 		),
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
+		Layer.provideMerge(vaultsLayer),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),

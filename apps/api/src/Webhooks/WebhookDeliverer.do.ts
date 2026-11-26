@@ -21,7 +21,6 @@ import type {
 	WebhookDeliveryRecord,
 } from "./WebhookDeliveryStore.ts"
 import type * as WebhookEgressModule from "./WebhookEgress.ts"
-import { readWebhookEgressConfig } from "./WebhookEgressConfig.ts"
 import { WebhookSigningMasterKey } from "./WebhookSigning.ts"
 
 const storeError = (cause: unknown) => new WebhookDeliveryStoreError({ cause })
@@ -99,20 +98,28 @@ export const WebhookDelivererLive = WebhookDeliverer.make(
 				let inAsyncTx = false
 
 				const withStorageTx = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-					state.storage.transaction(
-						Effect.acquireUseRelease(
-							Effect.sync(() => {
-								const previous = inAsyncTx
-								inAsyncTx = true
-								return previous
-							}),
-							() => effect,
-							(previous) =>
+					state.storage
+						.transaction(
+							Effect.acquireUseRelease(
 								Effect.sync(() => {
-									inAsyncTx = previous
+									const previous = inAsyncTx
+									inAsyncTx = true
+									return previous
 								}),
-						),
-					)
+								() => effect,
+								(previous) =>
+									Effect.sync(() => {
+										inAsyncTx = previous
+									}),
+							),
+						)
+						.pipe(
+							Effect.tapError(() =>
+								Effect.sync(() => {
+									cachedEngine = undefined
+								}),
+							),
+						)
 
 				const loadEngineModule = () =>
 					Effect.promise(() => {
@@ -143,8 +150,8 @@ export const WebhookDelivererLive = WebhookDeliverer.make(
 					if (cachedSender !== undefined) {
 						return cachedSender
 					}
-					const config = yield* readWebhookEgressConfig
 					const mod = yield* loadEgressModule()
+					const config = yield* mod.readWebhookEgressConfig
 					cachedSender = yield* mod.makeDefaultWebhookHttpSender(config)
 					return cachedSender
 				})
@@ -218,6 +225,12 @@ export const WebhookDelivererLive = WebhookDeliverer.make(
 							Effect.gen(function* () {
 								const nowMillis = yield* Clock.currentTimeMillis
 								const engine = yield* engineFor(webhookId)
+								yield* Effect.try({
+									try: () => {
+										engine.ensureSchema()
+									},
+									catch: storeError,
+								})
 								return yield* withStorageTx(
 									Effect.gen(function* () {
 										const { record, nextAlarmAt } = yield* Effect.try({
@@ -257,6 +270,12 @@ export const WebhookDelivererLive = WebhookDeliverer.make(
 							Effect.gen(function* () {
 								const nowMillis = yield* Clock.currentTimeMillis
 								const engine = yield* engineFor(webhookId)
+								yield* Effect.try({
+									try: () => {
+										engine.ensureSchema()
+									},
+									catch: storeError,
+								})
 								return yield* withStorageTx(
 									Effect.gen(function* () {
 										const result = yield* Effect.try({
@@ -276,6 +295,12 @@ export const WebhookDelivererLive = WebhookDeliverer.make(
 						overWire(
 							Effect.gen(function* () {
 								const engine = yield* engineFor(webhookId)
+								yield* Effect.try({
+									try: () => {
+										engine.ensureSchema()
+									},
+									catch: storeError,
+								})
 								yield* withStorageTx(
 									Effect.gen(function* () {
 										yield* Effect.try({

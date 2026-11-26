@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactId } from "./Artifact.id.ts"
 import { ArtifactNotFound } from "./ArtifactNotFound.rejection.ts"
-import { NonNegativeInt, PositiveInt, PublicationToken } from "./ArtifactTypes.ts"
+import { NonNegativeInt, PublicationToken } from "./ArtifactTypes.ts"
 
 export class ArtifactPublished extends Domain.Event("artifact.published", {
 	token: PublicationToken,
@@ -10,7 +10,7 @@ export class ArtifactPublished extends Domain.Event("artifact.published", {
 
 export class ArtifactVersionNotFound extends Domain.Rejection(
 	"ArtifactVersionNotFound",
-	{ artifact_id: ArtifactId, version: PositiveInt },
+	{ artifact_id: ArtifactId, version: NonNegativeInt },
 	{ httpApiStatus: 404, description: "Artifact version does not exist." },
 ) {}
 

@@ -205,16 +205,6 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 								Effect.catchTag("WebhookAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
 							)
 
-						// Wait until WebhookListing commits this registration to ListingStore so
-						// subsequent lifecycle events are guaranteed to discover this endpoint.
-						yield* webhookListing
-							.waitFor(receipt)
-							.pipe(
-								Effect.catchTag("WebhookListingTimeout", () =>
-									reject(503, "Webhook registration is still propagating. Retry the request."),
-								),
-							)
-
 						const state = yield* requireLive(webhookId)
 						if (idempotencyKey !== undefined && state.secret_revision !== 1) {
 							return yield* reject(
@@ -223,6 +213,23 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 							)
 						}
 						const signingSecret = yield* deriveCurrentSecret(webhookId, state)
+
+						// Wait until WebhookListing commits this registration to ListingStore so
+						// 201 guarantees immediate fan-out visibility. On timeout, return 202
+						// PendingWebhook with the committed id and signing_secret so unkeyed
+						// callers never lose the webhook or create duplicates on retry.
+						const listingReady = yield* webhookListing.waitFor(receipt).pipe(
+							Effect.as(true),
+							Effect.catchTag("WebhookListingTimeout", () => Effect.succeed(false)),
+						)
+						if (!listingReady) {
+							return {
+								id: webhookId,
+								type: "webhook" as const,
+								pending: true as const,
+								signing_secret: signingSecret,
+							}
+						}
 						return { ...webhookResource(webhookId, state), signing_secret: signingSecret }
 					}),
 				),
@@ -364,14 +371,33 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 							return { ...webhookResource(params.webhook_id, state), signing_secret: signingSecret }
 						}
 
-						yield* webhooks.send(
+						const receipt = yield* webhooks.send(
 							new RotateWebhookSecret({
 								webhook_id: params.webhook_id,
 								next_secret_salt: nextSalt,
 								grace_until: graceUntil,
 							}),
 						)
+						const rotatedEvent = receipt.events.find(
+							(event) => event._tag === "webhook.secret_rotated",
+						)
 						const state = yield* requireLive(params.webhook_id)
+						if (rotatedEvent !== undefined) {
+							const masterKey = yield* masterKeyService.key
+							const signingSecret = yield* deriveWebhookSigningSecret(mac, masterKey, {
+								webhookId: params.webhook_id,
+								secretRevision: rotatedEvent.secret_revision,
+								secretSalt: rotatedEvent.secret_salt,
+							})
+							return {
+								...webhookResource(params.webhook_id, state),
+								secret_revision: rotatedEvent.secret_revision,
+								previous_secret_expires_at: DateTime.makeUnsafe(
+									rotatedEvent.previous_secret_expires_at,
+								),
+								signing_secret: signingSecret,
+							}
+						}
 						const signingSecret = yield* deriveCurrentSecret(params.webhook_id, state)
 						return { ...webhookResource(params.webhook_id, state), signing_secret: signingSecret }
 					}),

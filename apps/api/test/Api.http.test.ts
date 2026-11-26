@@ -400,6 +400,61 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
+	it("publishes the token rules the vault API enforces on credential create and update", () => {
+		interface Node {
+			readonly $ref?: string
+			readonly type?: string
+			readonly minLength?: number
+			readonly pattern?: string
+			readonly properties?: Readonly<Record<string, Node>>
+			readonly anyOf?: ReadonlyArray<Node>
+			readonly allOf?: ReadonlyArray<Node>
+		}
+		const spec = openApiDocument<{
+			readonly paths: Record<
+				string,
+				Record<
+					string,
+					{
+						readonly requestBody?: {
+							readonly content?: Record<string, { readonly schema?: Node }>
+						}
+					}
+				>
+			>
+			readonly components?: { readonly schemas?: Record<string, Node> }
+		}>()
+		const schemas = spec.components?.schemas ?? {}
+		const tokens = (node: Node | undefined, seen: Set<Node> = new Set()): ReadonlyArray<Node> => {
+			if (node === undefined || seen.has(node)) {
+				return []
+			}
+			seen.add(node)
+			if (node.$ref !== undefined) {
+				return tokens(schemas[node.$ref.replace(/^#\/components\/schemas\//u, "")], seen)
+			}
+			const own = node.properties?.["token"]
+			return [
+				...(own === undefined ? [] : [own]),
+				...Object.values(node.properties ?? {}).flatMap((child) => tokens(child, seen)),
+				...[...(node.anyOf ?? []), ...(node.allOf ?? [])].flatMap((child) => tokens(child, seen)),
+			]
+		}
+		const strings = (node: Node): ReadonlyArray<Node> =>
+			node.anyOf === undefined ? [node] : node.anyOf.filter((member) => member.type === "string")
+		for (const [path, method] of [
+			["/v1/vaults/{vault_id}/credentials", "post"],
+			["/v1/vaults/{vault_id}/credentials/{credential_id}", "post"],
+		] as const) {
+			const body = spec.paths[path]?.[method]?.requestBody?.content?.["application/json"]?.schema
+			const published = tokens(body).flatMap(strings)
+			expect(published.length, `${method} ${path}`).toBeGreaterThan(0)
+			for (const token of published) {
+				expect(token).toMatchObject({ type: "string", minLength: 8, pattern: "^[!-~]+$" })
+			}
+		}
+	})
+
 	it("rejects missing and wrong credentials on every operation outside the public allow-list", async () => {
 		const publicPaths = ["/health"]
 		const spec = openApiDocument<{
@@ -677,9 +732,11 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/agents/{agent_id}/archive",
 						"/v1/artifacts",
 						"/v1/artifacts/{artifact_id}",
+						"/v1/artifacts/{artifact_id}/blobs/{sha256}",
 						"/v1/artifacts/{artifact_id}/publication",
 						"/v1/artifacts/{artifact_id}/versions",
 						"/v1/artifacts/{artifact_id}/versions/{version}",
+						"/v1/artifacts/{artifact_id}/versions/{version}/content",
 						"/v1/artifacts/{artifact_id}/versions/{version}/file",
 						"/v1/artifacts/{artifact_id}/versions/{version}/links",
 						"/v1/auth/verify",
@@ -700,6 +757,12 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/sessions/{session_id}/events",
 						"/v1/sessions/{session_id}/events/stream",
 						"/v1/sessions/{session_id}/outputs",
+						"/v1/vaults",
+						"/v1/vaults/{vault_id}",
+						"/v1/vaults/{vault_id}/archive",
+						"/v1/vaults/{vault_id}/credentials",
+						"/v1/vaults/{vault_id}/credentials/{credential_id}",
+						"/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
 						"/v1/webhooks",
 						"/v1/webhooks/{webhook_id}",
 						"/v1/webhooks/{webhook_id}/deliveries",
