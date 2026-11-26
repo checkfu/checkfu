@@ -65,6 +65,7 @@ export const StartTurnLive = StartTurn.toLayer(
 				environment_id: state.environment_id,
 				turn: state.turn,
 				input: state.input,
+				...(state.system_context === undefined ? {} : { system_context: state.system_context }),
 				...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
 				...(segment === 1 ? {} : { segment }),
 			})

@@ -1,3 +1,4 @@
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import * as Verify from "@alchemy.run/domain/Verify"
 import {
 	decodeAgentTools,
@@ -29,6 +30,7 @@ describe("Sessions Z3 formal verification", () => {
 						decodeAgentTools,
 						addToolUseId,
 						removeToolUseId,
+						decodeSystemMessage,
 					],
 					lock: "./Sessions.verify.lock.json",
 					require: { proved: PROVED },

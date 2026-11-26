@@ -15,6 +15,7 @@ export const TurnInputState = Schema.Struct({
 	environment_id: ResourceId,
 	turn: NonNegativeInt,
 	input: Schema.Array(MessageText),
+	system_context: Schema.optionalKey(Schema.String),
 	unsent: Schema.Array(MessageText),
 	last_reply_turn: Schema.optionalKey(NonNegativeInt),
 	segment: Schema.optionalKey(PositiveInt),
@@ -22,7 +23,7 @@ export const TurnInputState = Schema.Struct({
 export type TurnInputState = typeof TurnInputState.Type
 
 export class TurnInput extends Domain.View("TurnInput", {
-	version: 4,
+	version: 5,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(TurnInputState),
@@ -49,6 +50,17 @@ export class TurnInput extends Domain.View("TurnInput", {
 						last_reply_turn: 0,
 						segment: 1,
 					},
+		"system.message": (state, event) => {
+			if (state === null) {
+				return null
+			}
+			const text = event.content.map((block) => block.text).join("\n")
+			return {
+				...state,
+				system_context:
+					state.system_context === undefined ? text : `${state.system_context}\n\n${text}`,
+			}
+		},
 		"user.message": (state, e) =>
 			state === null
 				? null

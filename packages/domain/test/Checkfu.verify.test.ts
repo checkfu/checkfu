@@ -9,6 +9,7 @@ import {
 } from "../src/Mcp/McpServers.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import * as Verify from "@alchemy.run/domain/Verify"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -97,6 +98,8 @@ const STANDING = {
 	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"SystemContext.LengthStaysWithinCapacity": "proved",
+	"SendSystemMessage.SystemContextGrowsOnAnActiveSession": "proved",
 	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
@@ -274,6 +277,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"DeleteEnvironment",
 			"AdmitSession",
 			"SendUserMessage",
+			"SendSystemMessage",
 			"SendUserInterrupt",
 			"ConfirmTool",
 			"ReturnCustomToolResult",
@@ -325,6 +329,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					decodeAgentTools,
 					addToolUseId,
 					removeToolUseId,
+					decodeSystemMessage,
 				],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },

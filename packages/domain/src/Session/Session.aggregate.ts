@@ -38,6 +38,7 @@ import {
 } from "./RecordToolCall.command.ts"
 import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import { RecordInitialMessage } from "./RecordInitialMessage.command.ts"
+import { SystemMessage } from "./SendSystemMessage.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -226,7 +227,7 @@ export class Session extends Domain.Aggregate("Session", {
 		ArchiveSession,
 		ClaimIdempotencyKey,
 	],
-	events: [AgentCustomToolUse, UserToolConfirmation, UserCustomToolResult],
+	events: [AgentCustomToolUse, UserToolConfirmation, UserCustomToolResult, SystemMessage],
 	keyOf: (cmd) => cmd.session_id,
 	invariants: {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
@@ -781,6 +782,7 @@ export class Session extends Domain.Aggregate("Session", {
 					}
 				: state
 		},
+		"system.message": (state) => state,
 		"user.interrupt": (state) =>
 			state._tag === "Running" ? { ...state, interrupted: true } : state,
 		"user.tool_confirmation": (state, e) =>

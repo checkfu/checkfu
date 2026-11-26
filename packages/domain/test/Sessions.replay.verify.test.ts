@@ -10,6 +10,7 @@ import {
 	decodeMcpServers,
 } from "../src/Mcp/McpServers.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi, SessionsHandlersLive } from "../src/Sessions.model.ts"
 import {
@@ -43,6 +44,7 @@ describe("Sessions Z3 formal verification, replayed", () => {
 						decodeAgentTools,
 						addToolUseId,
 						removeToolUseId,
+						decodeSystemMessage,
 					],
 					require: { proved: PROVED },
 				})

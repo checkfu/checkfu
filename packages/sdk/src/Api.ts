@@ -76,6 +76,7 @@ import {
 	SessionSnapshot,
 	SessionTitle,
 	Sha256Hex,
+	SystemMessageContent,
 	TextBlocks,
 	VaultCustody,
 	VaultDisplayName,
@@ -718,6 +719,11 @@ export const SendSessionEventsBody = Schema.Struct({
 			}),
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("system.message"),
+				content: SystemMessageContent,
+			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.tool_confirmation"),
 				tool_use_id: ToolUseEventId.annotate({
 					description: "The agent.mcp_tool_use event that waits for this answer",
@@ -1117,7 +1123,15 @@ export const UserCustomToolResultEventReceipt = Schema.Struct({
 })
 export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
 
+export const SystemMessageEventReceipt = Schema.Struct({
+	type: Schema.Literal("system.message"),
+	id: Schema.String,
+	processed_at: Schema.DateTimeUtc,
+	content: TextBlocks,
+})
+
 export const SendSessionEventReceipt = Schema.Union([
+	SystemMessageEventReceipt,
 	UserMessageEventReceipt,
 	UserInterruptEventReceipt,
 	UserToolConfirmationEventReceipt,
@@ -1142,6 +1156,11 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		processed_at: Schema.NullOr(Schema.DateTimeUtc),
 		...fields,
 	})
+
+export const SystemMessageSessionEvent = wireSessionEvent(
+	"system.message",
+	SessionEventFields["system.message"],
+).annotate({ description: "Privileged context appended to the session's system instructions." })
 
 export const UserMessageSessionEvent = wireSessionEvent(
 	"user.message",
@@ -1229,6 +1248,7 @@ export const SessionArchivedEvent = wireSessionEvent(
 )
 
 export const SessionEvent = Schema.Union([
+	SystemMessageSessionEvent,
 	UserMessageSessionEvent,
 	UserInterruptSessionEvent,
 	UserToolConfirmationSessionEvent,

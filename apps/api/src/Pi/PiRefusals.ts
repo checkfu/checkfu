@@ -1,3 +1,4 @@
+import { SessionSystemContext } from "./PiDocRegistry.ts"
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import {
@@ -60,6 +61,30 @@ export const createCheckfuRegistry = () => {
 		),
 	)
 	registry.install(rejectionProvenanceExtension)
+	registry.install(
+		defineExtension({
+			name: "checkfu-session-system-context",
+			hooks: [
+				hook(GenerationTask, {
+					async beforeRequest(request, api, context) {
+						const stored = await api.snapshot(SessionSystemContext, context)
+						if (stored === undefined || stored.text.length === 0) {
+							return undefined
+						}
+						const messages = [...request.messages]
+						const lastUser = messages.findLastIndex((message) => message.role === "user")
+						messages.splice(lastUser < 0 ? messages.length : lastUser, 0, {
+							role: "system",
+							content: stored.text,
+							timestamp: stored.updated_at,
+						})
+						return { messages }
+					},
+				}),
+			],
+		}),
+	)
+
 	registry.install(
 		defineExtension({
 			name: "checkfu-refusal-normalization",

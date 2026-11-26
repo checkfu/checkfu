@@ -1,6 +1,8 @@
 export const STANDING = {
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"SystemContext.LengthStaysWithinCapacity": "proved",
+	"SendSystemMessage.SystemContextGrowsOnAnActiveSession": "proved",
 	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",

@@ -2537,6 +2537,42 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											},
 											type: {
 												type: "string",
+												enum: ["system.message"],
+											},
+											content: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["text"],
+														},
+														text: {
+															type: "string",
+														},
+													},
+													required: ["type", "text"],
+													additionalProperties: false,
+												},
+												minItems: 1,
+												maxItems: 1000,
+											},
+										},
+										required: ["type", "content"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											id: {
+												type: "string",
+												pattern: "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+												minLength: 1,
+												maxLength: 128,
+											},
+											type: {
+												type: "string",
 												enum: ["user.tool_confirmation"],
 											},
 											tool_use_id: {
