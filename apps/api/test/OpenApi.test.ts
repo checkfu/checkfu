@@ -662,8 +662,16 @@ describe("importOpenApi", () => {
 			const descriptors = catalog.operations.map(({ name }) => describeTool(catalog, name))
 
 			expect(catalog.title).toBe("Checkfu API")
-			expect(catalog.skipped).toEqual([])
-			expect(descriptors.length).toBe(document.split('"operationId"').length - 1)
+			expect(catalog.skipped).toEqual([
+				{
+					method: "put",
+					path: "/v1/artifacts/{artifact_id}/blobs/{sha256}",
+					reason: "The request body is not JSON.",
+				},
+			])
+			expect(descriptors.length + catalog.skipped.length).toBe(
+				document.split('"operationId"').length - 1,
+			)
 			expect(descriptors.every((descriptor) => Schema.is(ToolName)(descriptor.name))).toBe(true)
 			expect(JSON.stringify(descriptors)).not.toContain("#/components/")
 			const declarations = renderDeclarations({
