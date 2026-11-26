@@ -96,20 +96,24 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const session = yield* createIdleSession(apiFetch, "You are an assistant.")
 					const path = `/v1/sessions/${session.id}/events`
-					const send = (type: "system.message" | "user.message", text: string) =>
+					const send = (type: "system.message" | "user.message", ...texts: ReadonlyArray<string>) =>
 						sendRequest(apiFetch, {
 							method: "POST",
 							path,
 							headers: AUTH_HEADERS,
-							body: { events: [{ type, content: [{ type: "text", text }] }] },
+							body: { events: [{ type, content: texts.map((text) => ({ type: "text", text })) }] },
 						})
-					const system = yield* send("system.message", "Stay brief.")
+					const system = yield* send("system.message", "Stay brief.", "Be precise.")
 					expect(system.status).toBe(200)
 					const receipt = (yield* Effect.promise(() => system.json())) as {
 						data: ReadonlyArray<{ type: string; id: string; processed_at: string }>
 					}
 					expect(receipt.data[0]).toMatchObject({
 						type: "system.message",
+						content: [
+							{ type: "text", text: "Stay brief." },
+							{ type: "text", text: "Be precise." },
+						],
 						processed_at: expect.any(String),
 					})
 					expect(threadInstructions).toEqual([])
@@ -122,7 +126,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					yield* Effect.promise(() =>
 						readSseUntil(stream, (event) => event.type === "session.status_idle"),
 					)
-					expect(threadInstructions[0]).toContain("You are an assistant.\n\nStay brief.")
+					expect(threadInstructions[0]).toContain("You are an assistant.")
+					expect(threadInstructions[0]).toContain("Stay brief.\nBe precise.")
 					expect((yield* send("system.message", "Use metric units.")).status).toBe(200)
 					const next = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -133,7 +138,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					yield* Effect.promise(() =>
 						readSseUntil(next, (event) => event.type === "session.status_idle" && event.turn === 2),
 					)
-					expect(threadInstructions[1]).toContain("Stay brief.\n\nUse metric units.")
+					expect(threadInstructions[1]).toContain("Stay brief.\nBe precise.\n\nUse metric units.")
 					const listed = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path,
@@ -2700,6 +2705,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SystemMessage({
 					content: [{ type: "text", text: "Stay brief." }],
+					context_length: 13,
 					processed_at: at,
 				}),
 				expectedJson: {

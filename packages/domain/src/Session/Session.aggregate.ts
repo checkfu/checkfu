@@ -36,7 +36,13 @@ import {
 	RecordToolCall,
 	RecordToolResult,
 } from "./RecordToolCall.command.ts"
-import { SendSystemMessage, SystemContextFull, SystemMessage } from "./SendSystemMessage.command.ts"
+import {
+	SendSystemMessage,
+	SystemContextFull,
+	SystemContextLength,
+	SystemMessage,
+	systemMessageText,
+} from "./SendSystemMessage.command.ts"
 import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import { RecordInitialMessage } from "./RecordInitialMessage.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
@@ -70,7 +76,7 @@ export const SESSION_STATE_SCHEMA_VERSION = 4 as const
 
 const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
 const IdleV2 = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
-const systemContext = { system_context_length: Schema.optionalKey(NonNegativeInt) }
+const systemContext = { system_context_length: Schema.optionalKey(SystemContextLength) }
 const IdleV3 = Schema.TaggedStruct("Idle", {
 	...IdleV2.fields,
 	initial_messages_remaining: Schema.optionalKey(NonNegativeInt),
@@ -476,11 +482,17 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag === "Running" && active.paused) {
 				return new SessionAwaitingAction({ session_id: ctx.id })
 			}
-			if ((active.system_context_length ?? 0) + cmd.text.length + 2 > MAX_AGENT_SYSTEM_LENGTH) {
+			const contextLength =
+				(active.system_context_length ?? 0) + systemMessageText(cmd.content).length + 2
+			if (contextLength > MAX_AGENT_SYSTEM_LENGTH) {
 				return new SystemContextFull({ session_id: ctx.id })
 			}
 			return [
-				new SystemMessage({ content: [{ type: "text", text: cmd.text }], processed_at: ctx.now }),
+				new SystemMessage({
+					content: cmd.content,
+					context_length: contextLength,
+					processed_at: ctx.now,
+				}),
 			]
 		},
 		RecordInitialMessage: (state, cmd) => {
@@ -829,8 +841,7 @@ export class Session extends Domain.Aggregate("Session", {
 			state._tag === "Idle" || state._tag === "Running"
 				? {
 						...state,
-						system_context_length:
-							(state.system_context_length ?? 0) + (event.content[0]?.text.length ?? 0) + 2,
+						system_context_length: event.context_length,
 					}
 				: state,
 		"user.interrupt": (state) =>

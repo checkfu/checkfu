@@ -33,6 +33,7 @@ import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { deliverAnswer, parkedActions, waitedOnAnAnswer } from "./PiActions.ts"
 import type { ActionAnswer, ParkedAction } from "./PiActions.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
+import { SessionSystemContext } from "./PiDocRegistry.ts"
 import { rejectionIn } from "./PiRejection.ts"
 import { beginTurnUsage, pauseTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
@@ -562,6 +563,16 @@ const admitPiTurnUnderWay = (
 					}
 					if (backend.isCancelled(operationId)) {
 						return false
+					}
+					const system = request.systemContext
+					if (system !== undefined) {
+						await pi.commit(async (tx) => {
+							const stored = await tx.doc(SessionSystemContext)
+							if (stored.text !== system) {
+								stored.text = system
+								stored.updated_at = Date.now()
+							}
+						}, BACKGROUND_CONTEXT)
 					}
 					await backend.submit(request.text, operationId)
 					return true
