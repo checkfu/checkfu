@@ -199,7 +199,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 				Story.then(call, new ToolConfirmationAnswered({ result: "allow", deny_message: "" })),
 				Story.then(
 					session,
-					new UserToolConfirmation({ tool_use_id: "tu_7", result: "allow" }),
+					new UserToolConfirmation({ processed_at: t0, tool_use_id: "tu_7", result: "allow" }),
 					new SessionStatusRunning({ turn: 1 }),
 					new TurnContinued({ turn: 1, segment: 2 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
@@ -275,7 +275,12 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.then(call, new ToolConfirmationAnswered({ result: "deny", deny_message: "Not now" })),
 			Story.then(
 				session,
-				new UserToolConfirmation({ tool_use_id: "tu_1", result: "deny", deny_message: "Not now" }),
+				new UserToolConfirmation({
+					processed_at: t0,
+					tool_use_id: "tu_1",
+					result: "deny",
+					deny_message: "Not now",
+				}),
 			),
 			Story.fail(Harness.runTurn, {
 				_tag: "TurnPaused",
@@ -463,6 +468,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.then(
 				session,
 				new UserCustomToolResult({
+					processed_at: t0,
 					custom_tool_use_id: "tu_c",
 					content: [{ type: "text", text: "shipped" }],
 				}),
@@ -742,7 +748,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.then(call, new ToolConfirmationAnswered({ result: "allow", deny_message: "" })),
 			Story.then(
 				session,
-				new UserToolConfirmation({ tool_use_id: "tu_5", result: "allow" }),
+				new UserToolConfirmation({ processed_at: t0, tool_use_id: "tu_5", result: "allow" }),
 				new SessionStatusRunning({ turn: 1 }),
 				new TurnContinued({ turn: 1, segment: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
@@ -810,7 +816,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.then(call, new ToolConfirmationAnswered({ result: "allow", deny_message: "" })),
 			Story.then(
 				session,
-				new UserToolConfirmation({ tool_use_id: "tu_7", result: "allow" }),
+				new UserToolConfirmation({ processed_at: t0, tool_use_id: "tu_7", result: "allow" }),
 				new SessionStatusRunning({ turn: 1 }),
 				new TurnContinued({ turn: 1, segment: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),

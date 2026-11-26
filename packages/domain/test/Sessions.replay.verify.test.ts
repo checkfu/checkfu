@@ -10,6 +10,7 @@ import {
 	decodeMcpServers,
 } from "../src/Mcp/McpServers.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi, SessionsHandlersLive } from "../src/Sessions.model.ts"
 import {
@@ -43,6 +44,7 @@ describe("Sessions Z3 formal verification, replayed", () => {
 						decodeAgentTools,
 						addToolUseId,
 						removeToolUseId,
+						decodeSystemMessage,
 					],
 					require: { proved: PROVED },
 				})
@@ -50,7 +52,13 @@ describe("Sessions Z3 formal verification, replayed", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
-				expect(report.explored.aside).toEqual([])
+				expect(report.explored.aside).toEqual([
+					{
+						kind: "view",
+						name: "SessionTurnCompletion",
+						reason: "no rule reads it and no policy reacts to it",
+					},
+				])
 				expect(report.explored.truncated).toBe(false)
 				expect(report.explored.complete).toBe(2)
 				expect(report.unrun).toBe(0)

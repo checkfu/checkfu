@@ -68,12 +68,7 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 					}),
 				)
 				.pipe(
-					Effect.map((receipt) => ({
-						opened: true as const,
-						agent_version:
-							receipt.events.find((created) => created._tag === "session.created")?.agent_version ??
-							null,
-					})),
+					Effect.as({ opened: true as const }),
 					Effect.catchTag("SessionAlreadyExists", () =>
 						Effect.succeed(refused(SESSION_CONFLICT, SESSION_CONFLICT_MESSAGE, false)),
 					),
@@ -88,16 +83,11 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 				yield* fail(outcome.error_type, outcome.message, outcome.unrecoverable)
 				return
 			}
-			if (outcome.agent_version === null) {
-				return yield* Effect.die(
-					new Error("An opened automation session records its agent version."),
-				)
-			}
 			yield* automations.send(
 				new RecordAutomationRunStarted({
 					...run,
 					agent_id: state.agent_id,
-					agent_version: outcome.agent_version,
+					agent_version: state.agent_version,
 				}),
 			)
 		})
