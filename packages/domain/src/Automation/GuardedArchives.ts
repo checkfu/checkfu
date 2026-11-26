@@ -77,7 +77,6 @@ const referenceConflict = (
 		: new AutomationDependencyInUse({ automation_id: conflict.id })
 }
 
-// Separate decision names make an older Durable Object refuse the command before writing.
 export class ArchiveAgentIfCurrent extends Domain.Command("ArchiveAgentIfCurrent", {
 	input: { agent_id: AgentId, expected_version: PositiveInt, inventory: archiveInventory },
 	events: [AgentArchived],

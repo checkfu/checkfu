@@ -34,17 +34,16 @@ interface PlannedResource {
 
 export const hashOf = (remote: Resource): string => fingerprint(remoteBody(remote))
 
-export const pendingDefinition = (
-	source: ProjectResource,
-	pending: PendingCreate,
-	applied: ReadonlyMap<string, AppliedReference>,
-) => {
+export const pendingDefinition = (source: ProjectResource, pending: PendingCreate) => {
+	if (source.definition.kind !== pending.kind) {
+		return undefined
+	}
 	const lookup = ({ field, target }: ProjectResource["references"][number]) => {
-		if (pending.dependencies !== undefined) {
-			const binding = pending.dependencies[field]
-			return binding.path === target ? binding : undefined
+		if (pending.kind !== "automation") {
+			return undefined
 		}
-		return pending.references === undefined ? applied.get(target) : pending.references[target]
+		const binding = pending.dependencies[field]
+		return binding.path === target ? binding : undefined
 	}
 	if (source.references.some((reference) => lookup(reference) === undefined)) {
 		return undefined
@@ -78,10 +77,7 @@ export const planProject = (
 					id: entry.id,
 					reason: `File changed type from ${entry.kind} to ${definition.kind}.`,
 				}
-			} else if (
-				pending !== undefined &&
-				pendingDefinition(source, pending, applied) === undefined
-			) {
+			} else if (pending !== undefined && pendingDefinition(source, pending) === undefined) {
 				row = {
 					file,
 					action: "blocked",
@@ -240,21 +236,9 @@ export const planProject = (
 				}
 			}
 			for (const [file, pending] of Object.entries(state.pending_creates ?? {})) {
-				if (selected.has(file) || (pending.kind !== undefined && pending.kind !== "automation")) {
-					continue
-				}
-				if (pending.dependencies !== undefined) {
+				if (!selected.has(file) && pending.kind === "automation") {
 					const { agent, environment_id } = pending.dependencies
 					checkDependencies(file, [agent.id, environment_id.id])
-				} else {
-					const known = Object.values(pending.references ?? {}).map(({ id }) => id)
-					checkDependencies(file, known)
-					for (const id of archivedDependencies.keys()) {
-						const prefix = id.startsWith("agent_") ? "agent_" : "env_"
-						if (!known.some((reference) => reference.startsWith(prefix))) {
-							checkDependencies(`${file} (unresolved pending create)`, [id])
-						}
-					}
 				}
 			}
 		}

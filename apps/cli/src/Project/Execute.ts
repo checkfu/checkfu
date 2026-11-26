@@ -1,4 +1,4 @@
-import type { ProjectLockfile } from "@checkfu/authoring/lockfile"
+import type { PendingCreate, ProjectLockfile } from "@checkfu/authoring/lockfile"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import type { CheckfuClient } from "../Client.ts"
@@ -40,14 +40,22 @@ const isRejectedCreate = (error: unknown, fresh: boolean): boolean =>
 const matchesDefinition = (hash: string) => (resource: Resource) =>
 	resource.archived_at === null && hashOf(resource) === hash
 
-const freezeReferences = (source: ProjectResource, definition: Definition) => {
+const pendingCreate = (
+	source: ProjectResource,
+	definition: Definition,
+	key: string,
+	hash: string,
+): PendingCreate => {
 	if (definition.kind !== "automation") {
-		return {}
+		return { kind: definition.kind, key, hash }
 	}
 	const bindings = automationBindings(definition.body)
 	const agentPath = source.references.find(({ field }) => field === "agent")?.target
 	const environmentPath = source.references.find(({ field }) => field === "environment_id")?.target
 	return {
+		kind: "automation",
+		key,
+		hash,
 		dependencies: {
 			agent: { ...bindings.agent, ...(agentPath === undefined ? {} : { path: agentPath }) },
 			environment_id: {
@@ -140,8 +148,7 @@ export const executePlan = (
 			const hash = fingerprint(desired)
 			let confirmed: Resource
 			if (row.action === "create") {
-				const requestBody =
-					pending === undefined ? desired : pendingDefinition(source, pending, applied)
+				const requestBody = pending === undefined ? desired : pendingDefinition(source, pending)
 				if (requestBody === undefined) {
 					return yield* usageError(
 						`${file}: a create is awaiting confirmation with a different definition. Restore the original definition and apply it once.`,
@@ -149,16 +156,8 @@ export const executePlan = (
 				}
 				const key = pending?.key ?? (yield* client.generateIdempotencyKey)
 				const requestHash = pending?.hash ?? hash
-				if (
-					pending === undefined ||
-					(requestBody.kind === "automation" && pending.dependencies === undefined)
-				) {
-					pendingCreates[file] = {
-						key,
-						hash: requestHash,
-						kind: requestBody.kind,
-						...freezeReferences(source, requestBody),
-					}
+				if (pending === undefined) {
+					pendingCreates[file] = pendingCreate(source, requestBody, key, requestHash)
 					yield* save
 				}
 				const clearPending = () => {

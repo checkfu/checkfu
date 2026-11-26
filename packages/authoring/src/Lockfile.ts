@@ -18,26 +18,21 @@ const LockEntry = Schema.Struct({
 })
 export type LockEntry = typeof LockEntry.Type
 
-const PendingCreate = Schema.Struct({
-	kind: Schema.optionalKey(Schema.Literals(resourceKinds)),
+const pendingIdentity = {
 	key: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/u)),
 	hash: fingerprint,
-	dependencies: Schema.optionalKey(
-		Schema.Struct({
+}
+const PendingCreate = Schema.Union([
+	Schema.Struct({ kind: Schema.Literals(["agent", "environment"]), ...pendingIdentity }),
+	Schema.Struct({
+		kind: Schema.Literal("automation"),
+		...pendingIdentity,
+		dependencies: Schema.Struct({
 			agent: Schema.Struct({ id: ResourceId, version, path: Schema.optionalKey(resourceKey) }),
 			environment_id: Schema.Struct({ id: ResourceId, path: Schema.optionalKey(resourceKey) }),
 		}),
-	),
-	references: Schema.optionalKey(
-		Schema.Record(
-			resourceKey,
-			Schema.Struct({
-				id: resourceId,
-				version,
-			}),
-		),
-	),
-})
+	}),
+])
 export type PendingCreate = typeof PendingCreate.Type
 
 export const ProjectLockfile = Schema.fromJsonString(
