@@ -21,6 +21,7 @@ import {
 	UpdateAgent,
 } from "../src/Agent/UpdateAgent.command.ts"
 import { Agents } from "../src/Agents.model.ts"
+import { encodeAgentTools, encodeMcpServers } from "../src/Mcp/McpServers.ts"
 
 const story = Story.make(Agents)
 
@@ -29,6 +30,128 @@ const t1 = DateTime.makeUnsafe("2026-01-01T00:05:00.000Z")
 const t2 = DateTime.makeUnsafe("2026-01-01T00:10:00.000Z")
 
 describe("Agents", () => {
+	it.effect(
+		"keeps each version's MCP permissions and custom tools through edits, no-ops and archive",
+		() => {
+			const agent = Agent.ref("agent_capabilities")
+			const v1 = AgentVersionId.make("aver_capabilities_1")
+			const v2 = AgentVersionId.make("aver_capabilities_2")
+			const v3 = AgentVersionId.make("aver_capabilities_3")
+			const servers = [
+				{ type: "url", name: "support", url: "https://mcp.example.com/mcp" },
+			] as const
+			const tools = [
+				{
+					type: "mcp_toolset",
+					mcp_server_name: "support",
+					default_config: { permission_policy: { type: "always_ask" } },
+				},
+				{
+					type: "custom",
+					name: "lookup_status",
+					description: "Read a ticket's status",
+					input_schema: { type: "object", properties: { ticket: { type: "string" } } },
+				},
+			] as const
+			const changedTools = [
+				{
+					...tools[0],
+					default_config: { permission_policy: { type: "always_allow" } },
+				},
+				{
+					...tools[1],
+					description: "Read an order's status",
+					input_schema: { type: "object", properties: { order: { type: "integer" } } },
+				},
+			] as const
+			const mcp_servers = encodeMcpServers(servers)!
+			const initialTools = encodeAgentTools(tools)!
+			const updatedTools = encodeAgentTools(changedTools)!
+			const initial = {
+				name: "Support",
+				model: { id: "gpt-5.4" },
+				system: null,
+				description: null,
+				mcp_servers,
+				tools: initialTools,
+			}
+			return story(
+				Story.when(
+					new CreateAgent({
+						agent_id: agent.id,
+						version_id: v1,
+						...initial,
+					}),
+				),
+				Story.when(
+					new UpdateAgent({
+						agent_id: agent.id,
+						expected_version: 1,
+						next_version_id: v2,
+						changes: { system: "Be concise." },
+					}),
+				),
+				Story.state(agent, { version: 2, mcp_servers, tools: initialTools }),
+				Story.when(
+					new UpdateAgent({
+						agent_id: agent.id,
+						expected_version: 2,
+						next_version_id: v3,
+						changes: { tools: updatedTools },
+					}),
+				),
+				Story.state(agent, { version: 3, mcp_servers, tools: updatedTools }),
+				Story.then(
+					agent,
+					new AgentCreated({ ...initial, version: 1, version_id: v1 }),
+					new AgentUpdated({ ...initial, version: 2, version_id: v2, system: "Be concise." }),
+					new AgentUpdated({
+						...initial,
+						version: 3,
+						version_id: v3,
+						system: "Be concise.",
+						tools: updatedTools,
+					}),
+				),
+				Story.when(
+					new UpdateAgent({
+						agent_id: agent.id,
+						expected_version: 3,
+						next_version_id: AgentVersionId.make("aver_capabilities_unused"),
+						changes: { mcp_servers, tools: updatedTools },
+					}),
+				),
+				Story.then(agent),
+				Story.replied({ version: 3, version_id: v3 }),
+				Story.when(new ArchiveAgent({ agent_id: agent.id })),
+				Story.then(agent, new AgentArchived()),
+				Story.state(agent, { status: "archived", version: 3, mcp_servers, tools: updatedTools }),
+				Story.view(AgentView, agent, { version: 3, mcp_servers: servers, tools: changedTools }),
+				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 1), {
+					id: v1,
+					version: 1,
+					system: null,
+					mcp_servers: servers,
+					tools,
+				}),
+				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 2), {
+					id: v2,
+					version: 2,
+					system: "Be concise.",
+					mcp_servers: servers,
+					tools,
+				}),
+				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 3), {
+					id: v3,
+					version: 3,
+					system: "Be concise.",
+					mcp_servers: servers,
+					tools: changedTools,
+				}),
+			)
+		},
+	)
+
 	it.effect("is well defined", () =>
 		Effect.scoped(Layer.build(Agents.layer(Layer.empty))).pipe(Effect.provide(Domain.InMemory)),
 	)
