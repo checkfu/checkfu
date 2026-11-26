@@ -10,9 +10,13 @@
 				"kind": "invariant",
 				"source": "(s) => s._tag !== \"Idle\" || s.turn >= 0"
 			},
-			"Session.SystemContextIsBounded": {
+			"SystemContext.LengthStaysWithinCapacity": {
 				"kind": "invariant",
-				"source": "(s) =>\n\t\t\t(s._tag !== \"Idle\" && s._tag !== \"Running\") ||\n\t\t\ts.system_context_length === undefined ||\n\t\t\ts.system_context_length <= MAX_AGENT_SYSTEM_LENGTH"
+				"source": "(state) => state.length <= MAX_AGENT_SYSTEM_LENGTH"
+			},
+			"SendSystemMessage.SystemContextGrowsOnAnActiveSession": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t((before.session._tag === \"Idle\" && !before.session.initial_messages_remaining) ||\n\t\t\t\t(before.session._tag === \"Running\" && !before.session.paused)) &&\n\t\t\tafter.system.length > before.system.length"
 			},
 			"Session.ModelRequestsStartedNonNegative": {
 				"kind": "invariant",

@@ -1,3 +1,5 @@
+import { SendSystemMessageDecision } from "./Session/SendSystemMessage.decision.ts"
+import { SystemContext } from "./Session/SystemContext.aggregate.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
@@ -15,8 +17,13 @@ import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 
 export class Sessions extends Domain.Model("Sessions", {
-	aggregates: [Session, ToolConfirmation],
-	decisions: [RequestToolActionDecision, ConfirmToolDecision, ReturnCustomToolResultDecision],
+	aggregates: [Session, ToolConfirmation, SystemContext],
+	decisions: [
+		RequestToolActionDecision,
+		ConfirmToolDecision,
+		ReturnCustomToolResultDecision,
+		SendSystemMessageDecision,
+	],
 	views: [SessionView, SessionTurnCompletion, TurnInput],
 	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
 	sagas: [RunTurn],

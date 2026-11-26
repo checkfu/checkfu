@@ -3048,7 +3048,7 @@ describe("Sessions", () => {
 		},
 	)
 
-	it("encodes and decodes SessionState snapshots at explicit schema_version 2, migrates version 1, and rejects unknown versions", () => {
+	it("round-trips current session snapshots, migrates older versions, and rejects unknown versions", () => {
 		const encode = Schema.encodeSync(SessionStateSnapshot)
 		const decode = Schema.decodeUnknownSync(SessionStateSnapshot)
 		const running = {
@@ -3066,6 +3066,7 @@ describe("Sessions", () => {
 		const wire = encode(running)
 		expect(wire).toEqual({ schema_version: SESSION_STATE_SCHEMA_VERSION, state: running })
 		expect(decode(wire)).toEqual(running)
+		expect(decode({ schema_version: 2, state: running })).toEqual(running)
 		expect(
 			decode({
 				schema_version: 1,
@@ -3081,7 +3082,7 @@ describe("Sessions", () => {
 		expect(
 			Exit.isFailure(
 				Schema.decodeExit(SessionStateSnapshot)({
-					schema_version: 3,
+					schema_version: SESSION_STATE_SCHEMA_VERSION + 1,
 					state: { _tag: "Idle", turn: 0 },
 				}),
 			),

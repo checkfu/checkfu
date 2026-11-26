@@ -15,6 +15,7 @@ import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
 import { recordInitialMessages } from "@checkfu/domain/Session/RecordInitialMessages.policy"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
+import { SendSystemMessageDecision } from "@checkfu/domain/Session/SendSystemMessage.decision"
 import { SendSystemMessage } from "@checkfu/domain/Session/SendSystemMessage.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
@@ -371,6 +372,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const startSession = yield* OpenAutomationSessionDecision
 		const confirmTool = yield* ConfirmToolDecision
 		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
+		const sendSystem = yield* SendSystemMessageDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
 		const completions = yield* SessionTurnCompletion
@@ -876,7 +878,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								? yield* settled(
 										claimed.pipe(
 											Effect.andThen(
-												sessions.send(
+												sendSystem.send(
 													new SendSystemMessage({ session_id: id, content: item.content }),
 													sendOptions,
 												),
