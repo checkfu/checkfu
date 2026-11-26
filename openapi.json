@@ -27597,6 +27597,11 @@
 											"type": "string",
 											"enum": ["vault_deleted"]
 										},
+										"secrets": {
+											"type": "string",
+											"enum": ["erased"],
+											"description": "erased once the vault's storage confirmed every secret gone; erasing while that finishes in the background"
+										},
 										"custody": {
 											"type": "object",
 											"properties": {
@@ -27623,7 +27628,58 @@
 											"additionalProperties": false
 										}
 									},
-									"required": ["id", "type", "custody"],
+									"required": ["id", "type", "secrets", "custody"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["vault_deleted"]
+										},
+										"secrets": {
+											"type": "string",
+											"enum": ["erasing"],
+											"description": "erased once the vault's storage confirmed every secret gone; erasing while that finishes in the background"
+										},
+										"custody": {
+											"type": "object",
+											"properties": {
+												"storing": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991,
+													"description": "Active credentials whose secrets are not yet confirmed stored"
+												},
+												"held": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991,
+													"description": "Active credentials whose secrets are held"
+												},
+												"erasing": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991,
+													"description": "Archived or deleted credentials whose secrets are not yet confirmed erased"
+												}
+											},
+											"required": ["storing", "held", "erasing"],
+											"additionalProperties": false
+										}
+									},
+									"required": ["id", "type", "secrets", "custody"],
 									"additionalProperties": false
 								}
 							}
@@ -27966,7 +28022,7 @@
 						}
 					}
 				},
-				"description": "Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"description": "Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 				"summary": "Delete a vault",
 				"x-forge-group-name": "vaults",
 				"x-forge-method-name": "delete",
@@ -28376,7 +28432,7 @@
 						}
 					}
 				},
-				"description": "Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"description": "Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
 				"summary": "Archive a vault",
 				"x-forge-group-name": "vaults",
 				"x-forge-method-name": "archive",
@@ -30426,8 +30482,32 @@
 										},
 										"custody": {
 											"type": "string",
-											"enum": ["storing", "held", "erasing", "erased"],
-											"description": "Where the secret stands: storing until its storage confirms the secret, held while the credential is active, erasing once it is archived or deleted, erased once its storage confirmed the secret is gone"
+											"enum": ["erased"]
+										}
+									},
+									"required": ["id", "type", "custody"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["vault_credential_deleted"]
+										},
+										"custody": {
+											"type": "string",
+											"enum": ["erasing"]
 										}
 									},
 									"required": ["id", "type", "custody"],
@@ -30773,7 +30853,7 @@
 						}
 					}
 				},
-				"description": "Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"description": "Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
 				"summary": "Delete a credential",
 				"x-forge-group-name": "vaults.credentials",
 				"x-forge-method-name": "delete",
@@ -31197,7 +31277,7 @@
 						}
 					}
 				},
-				"description": "Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"description": "Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
 				"summary": "Archive a credential",
 				"x-forge-group-name": "vaults.credentials",
 				"x-forge-method-name": "archive",

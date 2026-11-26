@@ -26,6 +26,9 @@ import { Route as AppEnvironmentsNewRouteImport } from './routes/_app/environmen
 import { Route as AppSessionsIndexRouteImport } from './routes/_app/sessions/index'
 import { Route as AppSessionsSessionIdRouteImport } from './routes/_app/sessions/$sessionId'
 import { Route as AppSessionsNewRouteImport } from './routes/_app/sessions/new'
+import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
+import { Route as AppVaultsVaultIdRouteImport } from './routes/_app/vaults/$vaultId'
+import { Route as AppVaultsNewRouteImport } from './routes/_app/vaults/new'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -113,6 +116,21 @@ const AppSessionsNewRoute = AppSessionsNewRouteImport.update({
   path: '/sessions/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
+  id: '/vaults/',
+  path: '/vaults/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppVaultsVaultIdRoute = AppVaultsVaultIdRouteImport.update({
+  id: '/vaults/$vaultId',
+  path: '/vaults/$vaultId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppVaultsNewRoute = AppVaultsNewRouteImport.update({
+  id: '/vaults/new',
+  path: '/vaults/new',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -126,11 +144,14 @@ export interface FileRoutesByFullPath {
   '/environments/new': typeof AppEnvironmentsNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
+  '/vaults/$vaultId': typeof AppVaultsVaultIdRoute
+  '/vaults/new': typeof AppVaultsNewRoute
   '/agents/': typeof AppAgentsIndexRoute
   '/artifacts/': typeof AppArtifactsIndexRoute
   '/automations/': typeof AppAutomationsIndexRoute
   '/environments/': typeof AppEnvironmentsIndexRoute
   '/sessions/': typeof AppSessionsIndexRoute
+  '/vaults/': typeof AppVaultsIndexRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
@@ -144,11 +165,14 @@ export interface FileRoutesByTo {
   '/environments/new': typeof AppEnvironmentsNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
+  '/vaults/$vaultId': typeof AppVaultsVaultIdRoute
+  '/vaults/new': typeof AppVaultsNewRoute
   '/agents': typeof AppAgentsIndexRoute
   '/artifacts': typeof AppArtifactsIndexRoute
   '/automations': typeof AppAutomationsIndexRoute
   '/environments': typeof AppEnvironmentsIndexRoute
   '/sessions': typeof AppSessionsIndexRoute
+  '/vaults': typeof AppVaultsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -164,11 +188,14 @@ export interface FileRoutesById {
   '/_app/environments/new': typeof AppEnvironmentsNewRoute
   '/_app/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/_app/sessions/new': typeof AppSessionsNewRoute
+  '/_app/vaults/$vaultId': typeof AppVaultsVaultIdRoute
+  '/_app/vaults/new': typeof AppVaultsNewRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
   '/_app/artifacts/': typeof AppArtifactsIndexRoute
   '/_app/automations/': typeof AppAutomationsIndexRoute
   '/_app/environments/': typeof AppEnvironmentsIndexRoute
   '/_app/sessions/': typeof AppSessionsIndexRoute
+  '/_app/vaults/': typeof AppVaultsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -184,11 +211,14 @@ export interface FileRouteTypes {
     | '/environments/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
+    | '/vaults/$vaultId'
+    | '/vaults/new'
     | '/agents/'
     | '/artifacts/'
     | '/automations/'
     | '/environments/'
     | '/sessions/'
+    | '/vaults/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
@@ -202,11 +232,14 @@ export interface FileRouteTypes {
     | '/environments/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
+    | '/vaults/$vaultId'
+    | '/vaults/new'
     | '/agents'
     | '/artifacts'
     | '/automations'
     | '/environments'
     | '/sessions'
+    | '/vaults'
   id:
     | '__root__'
     | '/_app'
@@ -221,11 +254,14 @@ export interface FileRouteTypes {
     | '/_app/environments/new'
     | '/_app/sessions/$sessionId'
     | '/_app/sessions/new'
+    | '/_app/vaults/$vaultId'
+    | '/_app/vaults/new'
     | '/_app/agents/'
     | '/_app/artifacts/'
     | '/_app/automations/'
     | '/_app/environments/'
     | '/_app/sessions/'
+    | '/_app/vaults/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -354,6 +390,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSessionsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/vaults/': {
+      id: '/_app/vaults/'
+      path: '/vaults'
+      fullPath: '/vaults/'
+      preLoaderRoute: typeof AppVaultsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/vaults/$vaultId': {
+      id: '/_app/vaults/$vaultId'
+      path: '/vaults/$vaultId'
+      fullPath: '/vaults/$vaultId'
+      preLoaderRoute: typeof AppVaultsVaultIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/vaults/new': {
+      id: '/_app/vaults/new'
+      path: '/vaults/new'
+      fullPath: '/vaults/new'
+      preLoaderRoute: typeof AppVaultsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -368,11 +425,14 @@ interface AppRouteChildren {
   AppEnvironmentsNewRoute: typeof AppEnvironmentsNewRoute
   AppSessionsSessionIdRoute: typeof AppSessionsSessionIdRoute
   AppSessionsNewRoute: typeof AppSessionsNewRoute
+  AppVaultsVaultIdRoute: typeof AppVaultsVaultIdRoute
+  AppVaultsNewRoute: typeof AppVaultsNewRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
   AppArtifactsIndexRoute: typeof AppArtifactsIndexRoute
   AppAutomationsIndexRoute: typeof AppAutomationsIndexRoute
   AppEnvironmentsIndexRoute: typeof AppEnvironmentsIndexRoute
   AppSessionsIndexRoute: typeof AppSessionsIndexRoute
+  AppVaultsIndexRoute: typeof AppVaultsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -386,11 +446,14 @@ const AppRouteChildren: AppRouteChildren = {
   AppEnvironmentsNewRoute: AppEnvironmentsNewRoute,
   AppSessionsSessionIdRoute: AppSessionsSessionIdRoute,
   AppSessionsNewRoute: AppSessionsNewRoute,
+  AppVaultsVaultIdRoute: AppVaultsVaultIdRoute,
+  AppVaultsNewRoute: AppVaultsNewRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
   AppArtifactsIndexRoute: AppArtifactsIndexRoute,
   AppAutomationsIndexRoute: AppAutomationsIndexRoute,
   AppEnvironmentsIndexRoute: AppEnvironmentsIndexRoute,
   AppSessionsIndexRoute: AppSessionsIndexRoute,
+  AppVaultsIndexRoute: AppVaultsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

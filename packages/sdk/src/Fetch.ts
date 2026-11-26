@@ -3,7 +3,7 @@ import { CLIENT_EVENT_ID_MESSAGE, isClientEventId } from "./IdempotencyKey.ts"
 import { SDK_OPERATION_BINDINGS } from "./generated/OperationBindings.ts"
 import type { CheckfuOperations } from "./generated/Resources.ts"
 import { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./PathSegment.ts"
-import type { BodyOf, JsonResultOf, PathOf, QueryOf } from "./Runtime.ts"
+import type { JsonBodyOf, JsonResultOf, PathOf, QueryOf } from "./Runtime.ts"
 
 type Binding = (typeof SDK_OPERATION_BINDINGS)[number]
 type BindingOf<Op extends OperationId> = Extract<Binding, { readonly operationId: Op }>
@@ -30,8 +30,8 @@ type QueryField<Op extends OperationId> = BindingOf<Op>["queryParams"] extends r
 type BodyField<Op extends OperationId> = BindingOf<Op>["hasBody"] extends false
 	? { readonly body?: never }
 	: BindingOf<Op>["bodyRequired"] extends true
-		? { readonly body: BodyOf<Shape<Op>> }
-		: { readonly body?: BodyOf<Shape<Op>> }
+		? { readonly body: JsonBodyOf<Shape<Op>> }
+		: { readonly body?: JsonBodyOf<Shape<Op>> }
 
 type KeyField<Op extends OperationId> = BindingOf<Op>["requiresIdempotencyKey"] extends true
 	? { readonly idempotencyKey: string }
@@ -226,7 +226,8 @@ export const operationUrl = <Op extends OperationId>(
 ): string => urlOf(bindingOf(operationId), checkedOptions(operationId, input ?? {}, URL_OPTIONS))
 
 export const createFetchClient = (options: FetchClientOptions = {}): FetchClient => {
-	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
+	const send: typeof globalThis.fetch =
+		options.fetch ?? ((input, init) => globalThis.fetch(input, init))
 	const defaults = new Headers(options.headers)
 	if (defaults.has("idempotency-key")) {
 		throw new Error(
