@@ -1131,4 +1131,43 @@ describe("A session's outputs", () => {
 					expect(warnings).toEqual([`Outputs not published ${OUTPUTS} is a file, not a directory.`])
 				}),
 		))
+
+	it("publishes a turn once, so a replay leaves a newer version alone", () =>
+		withSessions(
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, publishOutputs, onTurn, createSession, outputs },
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "one"))
+					yield* replyAndPublish(session.id, ["Write it."], 1)
+					const artifact = yield* json<ArtifactBody>(yield* outputs(session.id))
+					yield* request(apiFetch, "POST", `/v1/artifacts/${artifact.id}/versions`, {
+						version: 1,
+						files: [{ path: "theirs.txt", content: "theirs" }],
+					})
+
+					yield* publishOutputs({ session_id: SessionId.make(session.id), turn: 1 })
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 2,
+						files: [fileOf("theirs.txt", "theirs", "text/plain")],
+					})
+				}),
+		))
+
+	it("reads the files it lacks in calls that stay within the read budget", () =>
+		withSessions(
+			(apiFetch, { replyAndPublish, workspaceFiles, outputReads, onTurn, createSession }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					onTurn(() => {
+						for (const name of ["a", "b", "c"]) {
+							workspaceFiles(session.id).set(`${OUTPUTS}/${name}.txt`, name.repeat(990_000))
+						}
+					})
+					yield* replyAndPublish(session.id, ["Write them."], 1)
+					expect(outputReads.map((read) => read.paths)).toEqual([["a.txt", "b.txt"], ["c.txt"]])
+				}),
+		))
 })

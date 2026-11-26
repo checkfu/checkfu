@@ -83,11 +83,11 @@ export const makeSessionOutputsPublisher = Effect.gen(function* () {
 				}
 			})
 			for (const file of wanted) {
-				batch.push(file)
-				batchBytes += file.size
-				if (batchBytes >= OUTPUTS_READ_BATCH_BYTES) {
+				if (batchBytes + file.size > OUTPUTS_READ_BATCH_BYTES) {
 					yield* flush
 				}
+				batch.push(file)
+				batchBytes += file.size
 			}
 			yield* flush
 			return blobs
@@ -139,7 +139,7 @@ export const makeSessionOutputsPublisher = Effect.gen(function* () {
 			total_bytes: sealed.success.total_bytes,
 		}
 		const sendOptions = {
-			commandId: `outputs:${sessionId}:${turn}:${current.version}:${manifest_hash}`,
+			commandId: `outputs:${sessionId}:${turn}`,
 		}
 		if (current.status === "active") {
 			yield* artifactStore.stage(artifactId, built, null)
