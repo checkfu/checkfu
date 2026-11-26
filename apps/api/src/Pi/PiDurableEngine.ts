@@ -348,6 +348,7 @@ type AdmitPiTurnResult =
 	| boolean
 	| { readonly _tag: "missing_key"; readonly message: string | undefined }
 	| { readonly _tag: "credential_timeout"; readonly message: string }
+	| { readonly _tag: "credential_error"; readonly message: string }
 
 type AdmitLockOutcome =
 	| AdmitPiTurnResult
@@ -393,11 +394,11 @@ const admitPiTurnUnderWay = (
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
 		const credentialTimeout = yield* CredentialCheckTimeout
-		const checkCredentials = backend.checkCredentials
+		const hasCheckCredentials = backend.checkCredentials !== undefined
 		let finalizedPrevious: string | undefined
-		let credentialsVerified = checkCredentials === undefined
+		let credentialsVerified = !hasCheckCredentials
 		while (true) {
-			if (!credentialsVerified && checkCredentials !== undefined) {
+			if (!credentialsVerified && hasCheckCredentials) {
 				const credentialOutcome = yield* Effect.acquireUseRelease(
 					Effect.sync(() => {
 						const entry: PendingCredentialCheck = {
@@ -441,10 +442,20 @@ const admitPiTurnUnderWay = (
 							}
 							return yield* Effect.raceFirst(
 								Deferred.await(entry.wake).pipe(Effect.as("woken" as const)),
-								Effect.promise(async (signal): Promise<AdmitPiTurnResult> => {
-									const check = await checkCredentials(request.provider, signal)
-									return check.ok ? true : { _tag: "missing_key", message: check.message }
-								}),
+								Effect.tryPromise({
+									try: async (signal): Promise<AdmitPiTurnResult> => {
+										if (backend.checkCredentials === undefined) {
+											return true
+										}
+										const check = await backend.checkCredentials(request.provider, signal)
+										return check.ok ? true : { _tag: "missing_key", message: check.message }
+									},
+									catch: () =>
+										({
+											_tag: "credential_error",
+											message: `Failed to check credentials for provider "${request.provider}".`,
+										}) as const,
+								}).pipe(Effect.catch((error) => Effect.succeed<AdmitPiTurnResult>(error))),
 							).pipe(
 								Effect.timeoutOrElse({
 									duration: credentialTimeout,
@@ -527,7 +538,7 @@ const admitPiTurnUnderWay = (
 						) {
 							return false
 						}
-						if (checkCredentials === undefined && !backend.hasApiKey(request.provider)) {
+						if (!hasCheckCredentials && !backend.hasApiKey(request.provider)) {
 							return {
 								_tag: "missing_key",
 								message: backend.missingCredentialsMessage?.(request.provider),
@@ -691,6 +702,17 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 				error: {
 					_tag: "TurnFailed",
 					error_type: "credential_check_timeout",
+					message: admitted.message,
+					terminal: false,
+				},
+			}
+		}
+		if (admitted._tag === "credential_error") {
+			return {
+				ok: false,
+				error: {
+					_tag: "TurnFailed",
+					error_type: "credential_check_error",
 					message: admitted.message,
 					terminal: false,
 				},

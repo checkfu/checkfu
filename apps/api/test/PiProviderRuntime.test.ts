@@ -520,6 +520,149 @@ describe("PiProviderRuntime", () => {
 	)
 
 	it.live(
+		"returns a nonterminal TurnFailed when checkCredentials rejects and preserves submission precedence",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) =>
+							makeAssistantReply(model, null, "submitted before failure", 5, 2),
+						),
+					),
+				)
+				const offlineBackend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: () => Promise.reject(new Error("credential service offline")),
+				}
+
+				try {
+					const outcome = yield* runPiDurableTurn(offlineBackend, makeTurnRequest(1, "openai"))
+					expect(outcome).toEqual({
+						ok: false,
+						error: {
+							_tag: "TurnFailed",
+							error_type: "credential_check_error",
+							message: 'Failed to check credentials for provider "openai".',
+							terminal: false,
+						},
+					})
+					expect(yield* recoverPiDurableTurn(offlineBackend, "turn:1")).toBeNull()
+
+					let markEntered!: () => void
+					const entered = new Promise<void>((resolve) => {
+						markEntered = resolve
+					})
+					let releaseReject!: () => void
+					const gate = new Promise<void>((resolve) => {
+						releaseReject = resolve
+					})
+					let checkCall = 0
+					const racedBackend: PiDurableBackend = {
+						...rawBackend,
+						checkCredentials: async () => {
+							checkCall += 1
+							if (checkCall === 1) {
+								markEntered()
+								await gate
+								throw new Error("credential lookup failed after submit")
+							}
+							return { ok: true }
+						},
+					}
+
+					const failingTurn = yield* Effect.forkChild(
+						runPiDurableTurn(racedBackend, makeTurnRequest(1, "openai")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => entered)
+
+					const winningTurn = yield* runPiDurableTurn(racedBackend, makeTurnRequest(1, "openai"))
+					expect(winningTurn).toMatchObject({
+						ok: true,
+						reply: { text: "submitted before failure" },
+					})
+
+					releaseReject()
+					const delayedOutcome = yield* Fiber.join(failingTurn)
+					expect(delayedOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "submitted before failure" },
+					})
+				} finally {
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
+	it.effect(
+		"preserves the receiver when runPiDurableTurn invokes a class-based PiDurableBackend.checkCredentials",
+		() =>
+			Effect.gen(function* () {
+				let seenSignal: AbortSignal | undefined
+				const base = makePiHarnessBackend(
+					{
+						pi: async () => ({
+							commit: async () => undefined,
+							snapshot: async () => undefined,
+						}),
+					} as unknown as Parameters<typeof makePiHarnessBackend>[0],
+					{
+						isCancelled: () => false,
+						markCancelled: () => undefined,
+					} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+					{},
+					() => undefined,
+					() => Promise.resolve(true),
+				)
+
+				class ClassBackedDurableBackend implements PiDurableBackend {
+					readonly #allowedProvider: string
+					readonly withLock = base.withLock
+					readonly hasApiKey = base.hasApiKey
+					readonly isCancelled = base.isCancelled
+					readonly enterWorkspace = base.enterWorkspace
+					readonly pi = base.pi
+					readonly ensureRoot = base.ensureRoot
+					readonly submit = base.submit
+					readonly wait = base.wait
+					readonly abort = base.abort
+					readonly reset = base.reset
+
+					constructor(allowedProvider: string) {
+						this.#allowedProvider = allowedProvider
+					}
+
+					checkCredentials(provider: string, signal?: AbortSignal): ProviderCredentialCheck {
+						seenSignal = signal
+						if (provider === this.#allowedProvider) {
+							return { ok: true }
+						}
+						return {
+							ok: false,
+							missing: ["OPENAI_API_KEY"],
+							message: `Backend only allows "${this.#allowedProvider}".`,
+						}
+					}
+				}
+
+				const outcome = yield* runPiDurableTurn(
+					new ClassBackedDurableBackend("anthropic"),
+					makeTurnRequest(1, "openai"),
+				)
+				expect(seenSignal).toBeDefined()
+				expect(outcome).toEqual({
+					ok: false,
+					error: {
+						_tag: "TurnFailed",
+						error_type: "missing_api_key_error",
+						message: 'Backend only allows "anthropic".',
+						terminal: false,
+					},
+				})
+			}),
+	)
+
+	it.live(
 		"rejects a stale turn before reconfiguring the root agent when a newer turn submits during credential checks",
 		() =>
 			Effect.gen(function* () {
