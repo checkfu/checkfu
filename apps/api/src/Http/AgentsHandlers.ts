@@ -1,3 +1,9 @@
+import {
+	ArchiveAgentIfCurrent,
+	ArchiveAgentIfCurrentDecision,
+} from "@checkfu/domain/Automation/GuardedArchives"
+import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import { normalizeAgentCreateBody, normalizeAgentModel } from "@checkfu/sdk/AgentInput"
 import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
@@ -44,7 +50,6 @@ import {
 	handled,
 	idempotentId,
 	isPending,
-	normalizeModel,
 	orPending,
 	randomId,
 	readExisting,
@@ -63,10 +68,14 @@ export const IsSupportedAgentModel = Context.Reference<(modelId: string) => bool
 	{ defaultValue: () => defaultIsSupportedModel },
 )
 
-const unsupportedModel = (model: AgentModel) =>
-	model.id.length > MAX_MODEL_ID_LENGTH
-		? reject(400, `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`)
-		: reject(400, `Unsupported model "${model.id}".`)
+const unsupportedModel = (model: AgentModel, emptyCreate = false) =>
+	reject(
+		400,
+		model.id.length > MAX_MODEL_ID_LENGTH
+			? `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`
+			: `Unsupported model "${model.id}".`,
+		emptyCreate ? { code: "agent_model_unavailable" } : undefined,
+	)
 
 const versionPage = (id: AgentId, version: number): string =>
 	`page_${encodeURIComponent(id)}:${version}`
@@ -138,6 +147,8 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				? (modelId: string) => resolveCatalogModel(modelId, customProviders) !== null
 				: providedIsSupportedModel
 		const list = yield* makeLister
+		const automationViews = yield* AutomationView
+		const guardedArchive = yield* ArchiveAgentIfCurrentDecision
 
 		const retrieve = (id: AgentId) => {
 			const ref = Agent.ref(id)
@@ -260,24 +271,47 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 			})
 
+		const archiveCommit = Effect.fnUntraced(function* (id: AgentId, version?: number) {
+			if (version === undefined) {
+				return yield* agents.send(new ArchiveAgent({ agent_id: id }))
+			}
+			const { withArchiveInventory } = yield* Effect.promise(() => import("./ArchiveInventory.ts"))
+			const receipt = yield* withArchiveInventory(list, automationViews, (inventory) =>
+				guardedArchive.send(
+					new ArchiveAgentIfCurrent({ agent_id: id, expected_version: version, inventory }),
+				),
+			)
+			return commitForStream(receipt.commits, `Agent/${id}`)
+		})
+
+		const archive = (id: AgentId, version?: number) =>
+			archiveAndRead(id, "agent", "Agent", archiveCommit(id, version), (commit) =>
+				agentViews.get(Agent.ref(id), commit === undefined ? {} : { atLeast: commit }),
+			).pipe(handled)
+
 		return handlers
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
-					const model = normalizeModel(payload.model)
-					const system = payload.system ?? null
-					const description = payload.description ?? null
-					const mcpServers = yield* declaredMcpServers(payload.mcp_servers ?? [])
+					const {
+						name,
+						model,
+						system,
+						description,
+						mcp_servers,
+						tools: toolInput,
+					} = normalizeAgentCreateBody(payload)
+					const mcpServers = yield* declaredMcpServers(mcp_servers ?? [])
 					const tools = yield* declaredTools(
-						payload.tools ?? [],
-						(payload.mcp_servers ?? []).map((server) => server.name),
+						toolInput ?? [],
+						mcpServers.servers.map((server) => server.name),
 					)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "agent",
 						prefix: "agent",
 						key: idempotencyKey,
 						body: {
-							name: payload.name,
+							name,
 							model,
 							system,
 							description,
@@ -293,8 +327,11 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					)
 					if (idempotencyKey === undefined) {
 						yield* supported(model)
-					} else if (!isSupportedModel(model.id) && (yield* agents.get(id)).status === "") {
-						return yield* unsupportedModel(model)
+					} else if (
+						(model.id.length > MAX_MODEL_ID_LENGTH || !isSupportedModel(model.id)) &&
+						(yield* agents.get(id)).status === ""
+					) {
+						return yield* unsupportedModel(model, true)
 					}
 					const sendOptions = identity.options
 					const receipt = yield* createAgent
@@ -302,7 +339,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							new CreateAgent({
 								agent_id: id,
 								version_id: versionId,
-								name: payload.name,
+								name,
 								model,
 								system,
 								description,
@@ -311,7 +348,11 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							}),
 							sendOptions,
 						)
-						.pipe(Effect.catchTag("AgentAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)))
+						.pipe(
+							Effect.catchTag("AgentAlreadyExists", () =>
+								reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" }),
+							),
+						)
 					return yield* loadCommittedAgentVersion(
 						id,
 						receipt.reply.version,
@@ -367,7 +408,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						tools: toolsInput,
 						...named
 					} = payload
-					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
+					const model = modelInput === undefined ? undefined : normalizeAgentModel(modelInput)
 					if (model !== undefined) {
 						yield* supported(model)
 					}
@@ -419,14 +460,6 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					)
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) =>
-				archiveAndRead(
-					params.agent_id,
-					"agent",
-					"Agent",
-					agents.send(new ArchiveAgent({ agent_id: params.agent_id })),
-					(receipt) => agentViews.get(Agent.ref(params.agent_id), { atLeast: receipt }),
-				).pipe(handled),
-			)
+			.handle("archive", ({ params, query }) => archive(params.agent_id, query.version))
 	}),
 )

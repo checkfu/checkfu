@@ -94,6 +94,20 @@ describe("app worker", () => {
 		expect(forwarded?.headers.get("cookie")).toBeNull()
 	})
 
+	it("provides the underlying public API URL for a signed-in export", async () => {
+		const apiUrl = "https://api.example"
+		const { env } = makeEnv()
+		const configured = { ...env, CHECKFU_PUBLIC_API_URL: apiUrl }
+		const url = `${ORIGIN}/auth/deployment`
+		expect((await worker.fetch(new Request(url), configured)).status).toBe(401)
+		const cookie = await sessionCookie(env)
+		const exported = await worker.fetch(new Request(url, { headers: { cookie } }), configured)
+		expect(exported.status).toBe(200)
+		expect(exported.headers.get("cache-control")).toBe("no-store")
+		expect(await exported.json()).toEqual({ api_url: apiUrl })
+		expect((await worker.fetch(new Request(url, { headers: { cookie } }), env)).status).toBe(503)
+	})
+
 	it("forwards no credential without a valid session, whatever the cookie holds", async () => {
 		const { env, seen } = makeEnv()
 		const valid = await sessionCookie(env)

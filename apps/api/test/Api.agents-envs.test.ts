@@ -77,6 +77,8 @@ import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
+import { makeWebhooksTestSupport } from "../src/Webhooks/WebhookTestLayer.ts"
 import { CheckfuApi } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
@@ -1573,6 +1575,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
+				Layer.provide(WebhookEventsNoop),
 				Layer.provide(Layer.fresh(PiDurableHarnessLive)),
 			),
 		).pipe(Layer.provide(executorLayer))
@@ -1580,7 +1583,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
-		const layer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
+		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -1723,6 +1726,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					Layer.provide(ArtifactBytesKept),
 					Layer.provide(SessionOutputsUnpublished),
 					Layer.provide(ListingStore.memory),
+					Layer.provide(WebhookEventsNoop),
 					Layer.provide(Layer.fresh(PiDurableHarnessLive)),
 				),
 			).pipe(Layer.provide(executorLayer))
@@ -1730,7 +1734,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Layer.provide(executorLayer),
 				Layer.provide(CheckfuLive),
 			)
-			const layer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
+			const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, HarnessLive).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),

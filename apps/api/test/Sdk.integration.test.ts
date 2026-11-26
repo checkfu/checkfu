@@ -194,6 +194,7 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(automation.upcoming_runs_at).toHaveLength(5)
 							const queued = yield* client.automations.run(automation.id)
 							expect(queued).toEqual({
+								id: `arun_${automation.id}_1`,
 								type: "automation_run",
 								automation_id: automation.id,
 								run: 1,

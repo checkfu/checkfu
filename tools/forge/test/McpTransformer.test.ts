@@ -111,6 +111,9 @@ describe("MCP tool projection", () => {
 			"vaults_archiveVault",
 			"vaults_deleteCredential",
 			"vaults_deleteVault",
+			"webhooks_deleteWebhook",
+			"webhooks_pauseWebhook",
+			"webhooks_resumeWebhook",
 		])
 		expect(tools.filter((tool) => tool.readOnly && !tool.idempotent)).toEqual([])
 
@@ -127,6 +130,7 @@ describe("MCP tool projection", () => {
 			"memoryStores_createMemoryStore",
 			"sessions_createSession",
 			"vaults_createVault",
+			"webhooks_createWebhook",
 		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])
 	})

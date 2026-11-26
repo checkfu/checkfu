@@ -10,6 +10,7 @@ import {
 	BotIcon,
 	BoxIcon,
 	CalendarClockIcon,
+	DatabaseIcon,
 	FileStackIcon,
 	KeyRoundIcon,
 	LogOutIcon,
@@ -62,6 +63,11 @@ export function Layout(): React.JSX.Element {
 					<NavItem>
 						<Link to="/artifacts">
 							<FileStackIcon /> Artifacts
+						</Link>
+					</NavItem>
+					<NavItem>
+						<Link to="/memory-stores">
+							<DatabaseIcon /> Memory
 						</Link>
 					</NavItem>
 					<NavItem>

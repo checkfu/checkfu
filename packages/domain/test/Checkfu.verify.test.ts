@@ -30,6 +30,10 @@ import { AdmitAutomation } from "../src/Automation/AdmitAutomation.command.ts"
 import { AdmitAutomationDecision } from "../src/Automation/AdmitAutomation.decision.ts"
 import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
 import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
+import {
+	ArchiveAgentIfCurrentDecision,
+	ArchiveEnvironmentIfCurrentDecision,
+} from "../src/Automation/GuardedArchives.ts"
 import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 import { RunAutomation } from "../src/Automation/RunAutomation.command.ts"
 import { AutomationId, sessionIdOfNextRun } from "../src/Automation/Automation.id.ts"
@@ -63,6 +67,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 import { Memory } from "../src/Memory/Memory.aggregate.ts"
 import { MemoryIndex } from "../src/Memory/MemoryIndex.view.ts"
 import { MemoryStore } from "../src/Memory/MemoryStore.aggregate.ts"
@@ -86,6 +91,23 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 	],
 	views: ["AgentView", "AgentVersionByNumberView", "EnvironmentView", "SessionView"],
 }) {}
+
+// The archive decisions add preconditions to existing archive events. Their variable
+// participant lists have separate bounded proofs and an end-to-end Workerd race test.
+const CheckfuProofBase: Model.Any & (new (_: never) => object) = Checkfu
+class CheckfuInductiveModel extends CheckfuProofBase {
+	static override readonly decisions = Checkfu.decisions.filter(
+		(decision) =>
+			decision !== ArchiveAgentIfCurrentDecision &&
+			decision !== ArchiveEnvironmentIfCurrentDecision,
+	)
+	static override readonly commands = Checkfu.commands.filter(
+		(command) =>
+			command !== ArchiveAgentIfCurrentDecision.command &&
+			command !== ArchiveEnvironmentIfCurrentDecision.command,
+	)
+	static override readonly definitions = { ...Checkfu.definitions, decisions: this.decisions }
+}
 
 const REPOSITORY = {
 	id: SessionResourceId.make("sesrsc_post_1"),
@@ -362,7 +384,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"MemoryIndex",
 		])
 		const report = await Effect.runPromise(
-			Verify.model(Checkfu, {
+			Verify.model(CheckfuInductiveModel, {
 				apis: [CheckfuLifecycleApi],
 				instances: 1,
 				depth: 3,
@@ -370,7 +392,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 400, length: 12 },
 
-				allow: { skipped: ["EnsureTurnStarted"] },
+				allow: { skipped: ["EnsureTurnStarted", "PublishWebhookEvents"] },
 				opaque: [
 					sessionIdOfNextRun,
 					isUsableSchedule,
@@ -390,7 +412,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
-		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
+		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual([
+			"PublishWebhookEvents",
+			"EnsureTurnStarted",
+		])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",
@@ -422,8 +447,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const observedViewKeys = new Map<string, Set<string>>()
 		const layer = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
-				Layer.provide(ArtifactBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 				Layer.provide([HarnessStubLayer, ListingStore.memory]),
 			),
 		).pipe(

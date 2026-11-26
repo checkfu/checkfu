@@ -124,7 +124,7 @@ export const parseJsonOrYamlDocument = (
 		Effect.catch(() =>
 			Effect.try({
 				try: () => {
-					const doc = YAML.parseDocument(raw, { logLevel: "silent" })
+					const doc = YAML.parseDocument(raw, { logLevel: "error" })
 					if (doc.errors.length > 0) {
 						throw new Error(doc.errors[0]?.message ?? "Invalid YAML document.")
 					}

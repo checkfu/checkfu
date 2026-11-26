@@ -15,16 +15,27 @@ const session = {
 	title: "Triage",
 	status: "idle",
 	turn: 1,
-	agent: { id: "agent_1", version: 1 },
+	agent: {
+		type: "agent",
+		id: "agent_1",
+		version: 1,
+		name: "Triage",
+		model: { id: "fixture-model" },
+		system: null,
+		description: null,
+		mcp_servers: [],
+		tools: [],
+	},
 	environment_id: "env_1",
 	mcp_server_credentials: [],
+	resources: [],
 	usage: { input_tokens: 1, output_tokens: 1 },
 	created_at: AT,
 	updated_at: AT,
 	archived_at: null,
 }
 
-const envelope = (seq: number) => ({ id: `evt_${seq}`, seq, created_at: AT })
+const envelope = (seq: number) => ({ id: `evt_${seq}`, seq, created_at: AT, processed_at: AT })
 
 const waitingOnACall = [
 	{

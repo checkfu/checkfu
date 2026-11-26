@@ -1,11 +1,20 @@
 import {
+	ArchiveAutomationIfCurrent,
+	ArchiveAutomationIfCurrentDecision,
+} from "@checkfu/domain/Automation/GuardedArchives"
+import { AgentNotFound } from "@checkfu/domain/Agent/AgentNotFound.rejection"
+import { EnvironmentNotFound } from "@checkfu/domain/Environment/EnvironmentNotFound.rejection"
+import { AgentArchivedError } from "@checkfu/domain/Agent/AgentArchived.rejection"
+import { EnvironmentArchivedError } from "@checkfu/domain/Environment/EnvironmentArchived.rejection"
+import {
 	AdmitAutomation,
+	AutomationLimitReached,
 	AutomationScheduleUnusable,
 } from "@checkfu/domain/Automation/AdmitAutomation.command"
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
-import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import { AutomationId, automationRunId } from "@checkfu/domain/Automation/Automation.id"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
@@ -16,9 +25,16 @@ import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAuto
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
 import { firingsAhead, isUsableSchedule, sameSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
-import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
+import {
+	AutomationRevisionConflict,
+	UpdateAutomation,
+} from "@checkfu/domain/Automation/UpdateAutomation.command"
 import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
-import { BoundedAgentId, BoundedEnvironmentId } from "@checkfu/domain/Session/AdmitSession.command"
+import {
+	AgentVersionNotFound,
+	BoundedAgentId,
+	BoundedEnvironmentId,
+} from "@checkfu/domain/Session/AdmitSession.command"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
@@ -81,6 +97,7 @@ const automationRunResource = (
 	},
 ) => ({
 	type: "automation_run" as const,
+	id: automationRunId(automation_id, entry.event.run),
 	automation_id,
 	run: entry.event.run,
 	status:
@@ -139,6 +156,9 @@ const textOf = (
 		),
 	)
 
+const rejectUnavailableReference = (status: 404 | 409, description: string | undefined) =>
+	reject(status, description ?? "Request rejected.", { code: "automation_reference_unavailable" })
+
 const UPDATE_RETRIES = 3
 
 const present = (snapshot: AutomationSnapshot) =>
@@ -149,6 +169,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const admission = yield* AdmitAutomationDecision
 		const updates = yield* UpdateAutomationDecision
 		const automations = yield* Automation
+		const guardedArchive = yield* ArchiveAutomationIfCurrentDecision
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
 		const list = yield* makeLister
@@ -164,13 +185,23 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				return state
 			})
 
+		const findRun = (id: AutomationId, run: number) =>
+			Effect.gen(function* () {
+				const page = yield* automationRuns.list(Automation.ref(id), { after: run - 1, take: 1 })
+				const entry = page.entries[0]
+				if (entry === undefined || entry.event.run !== run) {
+					return yield* reject(404, `Run ${run} of automation ${id} not found.`)
+				}
+				return automationRunResource(id, entry)
+			})
+
 		const after = (
 			id: AutomationId,
-			receipt: { readonly stream: string; readonly version: number },
+			receipt: { readonly stream: string; readonly version: number } | undefined,
 		) =>
 			Effect.gen(function* () {
 				const result = yield* automationViews
-					.get(Automation.ref(id), { atLeast: receipt })
+					.get(Automation.ref(id), receipt === undefined ? {} : { atLeast: receipt })
 					.pipe(orPending(id, "automation"))
 				if (isPending(result)) {
 					return result
@@ -210,15 +241,29 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				return yield* projected(id)
 			})
 
+		const archive = (id: AutomationId, revision?: number) =>
+			Effect.gen(function* () {
+				const commit =
+					revision === undefined
+						? yield* automations.send(new ArchiveAutomation({ automation_id: id }))
+						: commitForStream(
+								(yield* guardedArchive.send(
+									new ArchiveAutomationIfCurrent({
+										automation_id: id,
+										expected_revision: revision,
+									}),
+								)).commits,
+								`Automation/${id}`,
+							)
+				return yield* after(id, commit)
+			}).pipe(handled)
+
 		return handlers
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
 					const { agent_id, agent_version } = yield* agentOf(payload.agent)
 					const environment_id = yield* environmentOf(payload.environment_id)
-					if (!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)) {
-						return yield* new AutomationScheduleUnusable(payload.schedule)
-					}
 					const command = {
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
@@ -239,7 +284,38 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const receipt = yield* admission
 						.send(new AdmitAutomation({ automation_id: id, ...command }), identity.options)
 						.pipe(
-							Effect.catchTag("AutomationAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+							Effect.catchTags({
+								AutomationAlreadyExists: () =>
+									isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)
+										? reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" })
+										: Effect.fail(new AutomationScheduleUnusable(payload.schedule)),
+								AutomationScheduleUnusable: () =>
+									reject(
+										400,
+										AutomationScheduleUnusable.annotations.description ?? "Invalid schedule.",
+										{
+											code: "automation_schedule_unusable",
+										},
+									),
+								AgentNotFound: () =>
+									rejectUnavailableReference(404, AgentNotFound.annotations.description),
+								AgentVersionNotFound: () =>
+									rejectUnavailableReference(404, AgentVersionNotFound.annotations.description),
+								EnvironmentNotFound: () =>
+									rejectUnavailableReference(404, EnvironmentNotFound.annotations.description),
+								AgentArchivedError: () =>
+									rejectUnavailableReference(409, AgentArchivedError.annotations.description),
+								EnvironmentArchivedError: () =>
+									rejectUnavailableReference(409, EnvironmentArchivedError.annotations.description),
+								AutomationLimitReached: () =>
+									reject(
+										429,
+										AutomationLimitReached.annotations.description ?? "Request rejected.",
+										{
+											code: "automation_capacity_reached",
+										},
+									),
+							}),
 						)
 					const committed = commitForStream(receipt.commits, `Automation/${id}`)
 					return committed === undefined
@@ -261,6 +337,13 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const timeout = yield* AutomationReadWaitTimeout
 					const send = Effect.gen(function* () {
 						const current = yield* currentOf(id)
+						if (payload.revision !== undefined && payload.revision !== current.revision) {
+							return yield* new AutomationRevisionConflict({
+								automation_id: id,
+								expected_revision: payload.revision,
+								current_revision: current.revision,
+							})
+						}
 						const next = {
 							name: payload.name ?? current.name,
 							description:
@@ -305,6 +388,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const committed = yield* Effect.retry(send, {
 						schedule: Schedule.recurs(UPDATE_RETRIES),
 						while: (error) =>
+							payload.revision === undefined &&
 							Predicate.isTagged(error, "AutomationRevisionConflict")
 								? automationViews
 										.waitFor(ref, { revision: { gte: error.current_revision } }, { timeout })
@@ -342,21 +426,14 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					)
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.automation_id
-					return yield* after(
-						id,
-						yield* automations.send(new ArchiveAutomation({ automation_id: id })),
-					)
-				}).pipe(handled),
-			)
+			.handle("archive", ({ params, query }) => archive(params.automation_id, query.revision))
 			.handle("run", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.automation_id
 					const receipt = yield* automations.send(new RunAutomation({ automation_id: id }))
 					return {
 						type: "automation_run" as const,
+						id: automationRunId(id, receipt.reply.run),
 						automation_id: id,
 						run: receipt.reply.run,
 						status: "queued" as const,
@@ -381,18 +458,43 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				}).pipe(handled),
 			)
 			.handle("getRun", ({ params }) =>
+				Effect.andThen(
+					committed(params.automation_id),
+					findRun(params.automation_id, params.run),
+				).pipe(handled),
+			)
+			.handle("getRunById", ({ params }) =>
 				Effect.gen(function* () {
-					const id = params.automation_id
-					yield* committed(id)
-					const page = yield* automationRuns.list(Automation.ref(id), {
-						after: params.run - 1,
-						take: 1,
-					})
-					const entry = page.entries[0]
-					if (entry === undefined || entry.event.run !== params.run) {
-						return yield* reject(404, `Run ${params.run} of automation ${id} not found.`)
+					const raw = params.automation_run_id
+					const separator = raw.lastIndexOf("_")
+					const id = Schema.decodeOption(AutomationId)(raw.slice("arun_".length, separator))
+					const run = Number(raw.slice(separator + 1))
+					if (
+						Option.isNone(id) ||
+						!Number.isSafeInteger(run) ||
+						run < 1 ||
+						automationRunId(id.value, run) !== raw
+					) {
+						return yield* reject(404, `Automation run ${raw} not found.`)
 					}
-					return automationRunResource(id, entry)
+					const state = yield* committed(id.value)
+					if (run > state.runs) {
+						return yield* reject(404, `Automation run ${raw} not found.`)
+					}
+					yield* automationRuns
+						.waitFor(
+							Automation.ref(id.value),
+							{ recorded: { gte: run } },
+							{
+								timeout: yield* AutomationReadWaitTimeout,
+							},
+						)
+						.pipe(
+							Effect.catchTag("WaitTimeout", () =>
+								reject(503, `Automation run ${raw} is still starting.`),
+							),
+						)
+					return yield* findRun(id.value, run)
 				}).pipe(handled),
 			)
 	}),

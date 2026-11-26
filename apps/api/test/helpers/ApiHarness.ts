@@ -17,6 +17,7 @@ import type { JsonObject, Registry } from "@earendil-works/pi-durable"
 import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
+import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -30,8 +31,9 @@ import * as Layer from "effect/Layer"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { Webhooks, WebhooksHandlersLive } from "@checkfu/domain/Webhooks.model"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
-import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { ListingStore, makeListingStoreMemory } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
 import { CustomToolFaults } from "../../src/Http/ToolSchemas.ts"
@@ -66,6 +68,14 @@ import {
 } from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
+import type { WebhookHttpSender } from "../../src/Webhooks/WebhookDeliveryEngine.ts"
+import { makeWebhookDeliveryStoreMemory } from "../../src/Webhooks/WebhookDeliveryStoreMemory.ts"
+import {
+	makeInlineWebhookFanoutContinuation,
+	makeWebhookEventsLive,
+} from "../../src/Webhooks/WebhookEventsLive.ts"
+import { WebhookListingQueryLive } from "../../src/Http/Listing.ts"
+import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
 import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
 import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
@@ -85,7 +95,8 @@ import { SkillReader } from "../../src/Skills/SkillReader.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
-import { VaultsTestLive } from "./VaultsHarness.ts"
+import { makeVaultsTestLayer } from "./VaultsHarness.ts"
+import type { VaultsTestLive } from "./VaultsHarness.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -266,9 +277,11 @@ export const makePiDurableTestLayer = (
 		platform = Domain.InMemory,
 		registry,
 		executionEnv,
-		vaults = VaultsTestLive,
+		vaults,
 		harnessSessions = (sessions) => sessions,
 		mcpTools,
+		webhookSender,
+		webhookAutoDrain,
 	}: {
 		readonly env?: Record<string, string>
 		readonly platform?: typeof Domain.InMemory
@@ -277,6 +290,8 @@ export const makePiDurableTestLayer = (
 		readonly vaults?: typeof VaultsTestLive
 		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
 		readonly mcpTools?: ReadonlyArray<TestMcpTool>
+		readonly webhookSender?: WebhookHttpSender
+		readonly webhookAutoDrain?: boolean
 	} = {},
 ) => {
 	const agentToolsBySession = new Map<string, string>()
@@ -740,6 +755,30 @@ export const makePiDurableTestLayer = (
 	)
 
 	const artifactStore = makeArtifactStoreMemory()
+	const listingMemory = makeListingStoreMemory()
+	const listingStore = listingMemory.layer
+	const WebhooksLive = Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(listingStore)))
+	const WebhookListingLive = WebhookListingQueryLive.pipe(Layer.provide(WebhooksLive))
+	const webhookDeliveries = makeWebhookDeliveryStoreMemory({
+		...(webhookSender === undefined ? {} : { sender: webhookSender }),
+		...(webhookAutoDrain === undefined ? {} : { autoDrain: webhookAutoDrain }),
+	})
+	const WebhookDeliveriesLive = webhookDeliveries.layer.pipe(
+		Layer.provide(WebhooksLive),
+		Layer.provide(WebhookSigningMasterKeyTest),
+		Layer.provide(Mac.layerWebCrypto),
+	)
+	const WebhookFanoutRuntimeLive = makeInlineWebhookFanoutContinuation(listingMemory.page).pipe(
+		Layer.provide(WebhooksLive),
+		Layer.provide(WebhookDeliveriesLive),
+		Layer.provide(Digest.layerWebCrypto),
+	)
+	const WebhookEventsRuntimeLive = makeWebhookEventsLive(listingMemory.page).pipe(
+		Layer.provide(WebhooksLive),
+		Layer.provide(WebhookDeliveriesLive),
+		Layer.provide(WebhookFanoutRuntimeLive),
+		Layer.provide(Digest.layerWebCrypto),
+	)
 	const HarnessLive = PiDurableHarnessLive.pipe(
 		Layer.provide(
 			Layer.effect(
@@ -752,10 +791,11 @@ export const makePiDurableTestLayer = (
 	)
 	const CheckfuLive = Checkfu.layer(
 		CheckfuHandlersLive.pipe(
-			Layer.provide(ListingStore.memory),
+			Layer.provide(listingStore),
 			Layer.provide(HarnessLive),
 			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
 			Layer.provide(SessionOutputsRecorded.pipe(Layer.provide(artifactStore.layer))),
+			Layer.provide(WebhookEventsRuntimeLive),
 		),
 	).pipe(Layer.provide(executorLayer))
 	const PiProviderLive = PiDurableHarnessLive.pipe(
@@ -779,10 +819,20 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
+	const vaultsLayer =
+		vaults ??
+		makeVaultsTestLayer({
+			webhookEvents: WebhookEventsRuntimeLive.pipe(Layer.provide(platform)),
+		}).layer
 	const CustomToolFaultsLive = Layer.succeed(CustomToolFaults, (tools, taken) =>
 		Effect.succeed(customToolFaults(tools, taken)),
 	)
 	const base = Layer.mergeAll(
+		WebhooksLive,
+		WebhookListingLive,
+		WebhookDeliveriesLive,
+		WebhookSigningMasterKeyTest,
+		Mac.layerWebCrypto,
 		CheckfuLive,
 		PiProviderLive,
 		CustomToolFaultsLive,
@@ -802,7 +852,7 @@ export const makePiDurableTestLayer = (
 		),
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
-		Layer.provideMerge(vaults),
+		Layer.provideMerge(vaultsLayer),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
@@ -832,6 +882,7 @@ export const makePiDurableTestLayer = (
 		conversations,
 		resets,
 		artifactStore,
+		webhookDeliveries,
 		discardedWorkspaces,
 		workspaceFiles,
 		outputReads,
