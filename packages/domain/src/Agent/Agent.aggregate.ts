@@ -101,6 +101,22 @@ export class Agent extends Domain.Aggregate("Agent", {
 			].some((ok) => ok),
 	},
 	transitions: {
+		ConfigurationIsStableWithinAVersion: ({ before, after }) =>
+			[
+				before.status === "",
+				after.version !== before.version,
+				[
+					after.current_version_id === before.current_version_id,
+					after.name === before.name,
+					after.model_id === before.model_id,
+					after.has_system === before.has_system,
+					after.system === before.system,
+					after.has_description === before.has_description,
+					after.description === before.description,
+					after.mcp_servers === before.mcp_servers,
+					after.tools === before.tools,
+				].every((ok) => ok),
+			].some((ok) => ok),
 		CreatedAgentNeverReturnsToUninitialized: ({ before, after }) =>
 			[before.status === "", after.status !== ""].some((ok) => ok),
 		ArchivedAgentStaysArchived: ({ before, after }) =>
