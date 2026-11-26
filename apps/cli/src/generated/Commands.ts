@@ -1083,7 +1083,7 @@ const automationsCreateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
+				'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
 		),
@@ -1422,7 +1422,7 @@ const automationsUpdateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
+				'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
 		),

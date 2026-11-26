@@ -1225,7 +1225,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+								'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -1661,7 +1661,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+								'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",

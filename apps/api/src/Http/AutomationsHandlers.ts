@@ -92,10 +92,7 @@ const automationRunResource = (
 					type: "schedule" as const,
 					scheduled_at: DateTime.makeUnsafe(entry.event.scheduled_at),
 				},
-	agent:
-		entry.event.agent_id === null
-			? null
-			: { id: entry.event.agent_id, version: entry.event.agent_version },
+	agent: { id: entry.event.agent_id, version: entry.event.agent_version },
 	session_id: entry.event._tag === "automation.run_started" ? entry.event.session_id : null,
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,
@@ -282,12 +279,10 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						if (reschedule && !isUsableSchedule(next.schedule.expression, next.schedule.timezone)) {
 							return yield* new AutomationScheduleUnusable(next.schedule)
 						}
-						const agent_changed =
-							next.agent_id !== current.agent_id || next.agent_version !== current.agent_version
+						const agent_id_changed = next.agent_id !== current.agent_id
 						const environment_changed = next.environment_id !== current.environment_id
 						const changed = [
 							reschedule,
-							agent_changed,
 							environment_changed,
 							next.name !== current.name,
 							next.description !== current.description,
@@ -300,7 +295,8 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 								...next,
 								changed,
 								reschedule,
-								agent_changed,
+								agent_id_changed,
+								previous_agent_version: current.agent_version,
 								environment_changed,
 							}),
 						)

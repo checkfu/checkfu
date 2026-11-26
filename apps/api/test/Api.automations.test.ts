@@ -190,7 +190,7 @@ describe("Automations API", () => {
 				expect(created.body).toMatchObject({
 					type: "automation",
 					name: "Morning report",
-					agent: { id: agentId, version: null },
+					agent: { id: agentId, version: 1 },
 					environment_id: environmentId,
 					initial_events: message("Write the morning report."),
 					schedule: weekdayMornings,
@@ -227,6 +227,39 @@ describe("Automations API", () => {
 				})
 				expect(pinned.status).toBe(201)
 				expect(pinned.body.agent).toEqual({ id: agentId, version: 1 })
+			}),
+		))
+
+	it("pins the agent version and only changes it when the agent is selected again", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const { body: automation } = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					{
+						name: "Pinned report",
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message("Write a report."),
+						schedule: weekdayMornings,
+					},
+				)
+				const agent = yield* call(apiFetch, "POST", `/v1/agents/${agentId}`, {
+					version: 1,
+					system: "Use the current data.",
+				})
+				expect(agent.status).toBe(200)
+				const path = `/v1/automations/${automation.id}`
+				const renamed = yield* call<AutomationBody>(apiFetch, "POST", path, {
+					name: "Updated report",
+				})
+				expect(renamed.body.agent.version).toBe(1)
+				const repinned = yield* call<AutomationBody>(apiFetch, "POST", path, { agent: agentId })
+				expect(repinned.body.agent.version).toBe(2)
+				const unchanged = yield* call<AutomationBody>(apiFetch, "POST", path, { agent: agentId })
+				expect(unchanged.body).toEqual(repinned.body)
 			}),
 		))
 
@@ -1029,7 +1062,7 @@ describe("Automations API", () => {
 				expect(runs.body.data[0]).toMatchObject({
 					run: 1,
 					status: "failed",
-					agent: { id: agentId, version: null },
+					agent: { id: agentId, version: 1 },
 					session_id: null,
 					error: { type: "agent_unavailable" },
 				})
