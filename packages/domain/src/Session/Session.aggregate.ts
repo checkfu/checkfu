@@ -36,15 +36,9 @@ import {
 	RecordToolCall,
 	RecordToolResult,
 } from "./RecordToolCall.command.ts"
-import {
-	SendSystemMessage,
-	SystemContextFull,
-	SystemContextLength,
-	SystemMessage,
-	systemMessageText,
-} from "./SendSystemMessage.command.ts"
 import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import { RecordInitialMessage } from "./RecordInitialMessage.command.ts"
+import { SystemMessage } from "./SendSystemMessage.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -57,7 +51,6 @@ import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import {
-	MAX_AGENT_SYSTEM_LENGTH,
 	MAX_SESSION_INITIAL_EVENTS,
 	NO_TOOL_USE_IDS,
 	NonEmptyString,
@@ -72,16 +65,14 @@ import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
-export const SESSION_STATE_SCHEMA_VERSION = 4 as const
+export const SESSION_STATE_SCHEMA_VERSION = 3 as const
 
 const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
 const IdleV2 = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
-const systemContext = { system_context_length: Schema.optionalKey(SystemContextLength) }
-const IdleV3 = Schema.TaggedStruct("Idle", {
+const Idle = Schema.TaggedStruct("Idle", {
 	...IdleV2.fields,
 	initial_messages_remaining: Schema.optionalKey(NonNegativeInt),
 })
-const Idle = Schema.TaggedStruct("Idle", { ...IdleV3.fields, ...systemContext })
 const Terminated = Schema.TaggedStruct("Terminated", { archived: Schema.Boolean })
 const RunningV1 = Schema.TaggedStruct("Running", {
 	turn: PositiveInt,
@@ -90,7 +81,7 @@ const RunningV1 = Schema.TaggedStruct("Running", {
 	pending_user_messages: NonNegativeInt,
 })
 
-const RunningV2 = Schema.TaggedStruct("Running", {
+const Running = Schema.TaggedStruct("Running", {
 	...RunningV1.fields,
 	awaiting_calls: NonNegativeInt,
 	awaiting_ids: ToolUseIdsText,
@@ -99,7 +90,6 @@ const RunningV2 = Schema.TaggedStruct("Running", {
 	interrupted: Schema.Boolean,
 })
 
-const Running = Schema.TaggedStruct("Running", { ...RunningV2.fields, ...systemContext })
 export const SessionState = Schema.Union([Uninitialized, Idle, Running, Terminated])
 export type SessionState = typeof SessionState.Type
 
@@ -108,13 +98,8 @@ export const SessionStateSnapshot = versionedSnapshot({
 	schema: SessionState,
 	previous: [
 		snapshotVersion({
-			version: 3,
-			schema: Schema.Union([Uninitialized, IdleV3, RunningV2, Terminated]),
-			migrate: (state) => state,
-		}),
-		snapshotVersion({
 			version: 2,
-			schema: Schema.Union([Uninitialized, IdleV2, RunningV2, Terminated]),
+			schema: Schema.Union([Uninitialized, IdleV2, Running, Terminated]),
 			migrate: (state) => state,
 		}),
 		snapshotVersion({
@@ -235,7 +220,6 @@ export class Session extends Domain.Aggregate("Session", {
 	commands: [
 		CreateSession,
 		SendUserMessage,
-		SendSystemMessage,
 		RecordInitialMessage,
 		SendUserInterrupt,
 		RecordModelRequestStart,
@@ -249,15 +233,11 @@ export class Session extends Domain.Aggregate("Session", {
 		ArchiveSession,
 		ClaimIdempotencyKey,
 	],
-	events: [AgentCustomToolUse, UserToolConfirmation, UserCustomToolResult],
+	events: [AgentCustomToolUse, UserToolConfirmation, UserCustomToolResult, SystemMessage],
 	keyOf: (cmd) => cmd.session_id,
 	invariants: {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
 		IdleTurnIsNonNegative: (s) => s._tag !== "Idle" || s.turn >= 0,
-		SystemContextIsBounded: (s) =>
-			(s._tag !== "Idle" && s._tag !== "Running") ||
-			s.system_context_length === undefined ||
-			s.system_context_length <= MAX_AGENT_SYSTEM_LENGTH,
 		InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn: (s) =>
 			s._tag !== "Idle" ||
 			s.initial_messages_remaining === undefined ||
@@ -471,30 +451,6 @@ export class Session extends Domain.Aggregate("Session", {
 						}),
 					],
 
-		SendSystemMessage: (state, cmd, ctx) => {
-			const active = requireActive(state, ctx.id)
-			if (active._tag !== "Idle" && active._tag !== "Running") {
-				return active
-			}
-			if (active._tag === "Idle" && active.initial_messages_remaining) {
-				return new InitialMessagesPending({ session_id: ctx.id })
-			}
-			if (active._tag === "Running" && active.paused) {
-				return new SessionAwaitingAction({ session_id: ctx.id })
-			}
-			const contextLength =
-				(active.system_context_length ?? 0) + systemMessageText(cmd.content).length + 2
-			if (contextLength > MAX_AGENT_SYSTEM_LENGTH) {
-				return new SystemContextFull({ session_id: ctx.id })
-			}
-			return [
-				new SystemMessage({
-					content: cmd.content,
-					context_length: contextLength,
-					processed_at: ctx.now,
-				}),
-			]
-		},
 		RecordInitialMessage: (state, cmd) => {
 			if (state._tag !== "Idle" || state.initial_messages_remaining !== cmd.remaining) {
 				return []
@@ -832,13 +788,7 @@ export class Session extends Domain.Aggregate("Session", {
 					}
 				: state
 		},
-		"system.message": (state, event) =>
-			state._tag === "Idle" || state._tag === "Running"
-				? {
-						...state,
-						system_context_length: event.context_length,
-					}
-				: state,
+		"system.message": (state) => state,
 		"user.interrupt": (state) =>
 			state._tag === "Running" ? { ...state, interrupted: true } : state,
 		"user.tool_confirmation": (state, e) =>
@@ -871,9 +821,6 @@ export class Session extends Domain.Aggregate("Session", {
 						open_model_request_id: null,
 						model_requests_started: 0,
 						pending_user_messages: 0,
-						...(state.system_context_length === undefined
-							? {}
-							: { system_context_length: state.system_context_length }),
 						awaiting_calls: 0,
 						awaiting_ids: NO_TOOL_USE_IDS,
 						paused: false,
@@ -921,13 +868,7 @@ export class Session extends Domain.Aggregate("Session", {
 				: state,
 		"session.status_idle": (state, e) =>
 			state._tag === "Running" && e.stop_reason.type !== "requires_action"
-				? {
-						_tag: "Idle" as const,
-						turn: e.turn,
-						...(state.system_context_length === undefined
-							? {}
-							: { system_context_length: state.system_context_length }),
-					}
+				? { _tag: "Idle" as const, turn: e.turn }
 				: state,
 		"session.error": (state) => state,
 		"turn.abandoned": (state) => state,

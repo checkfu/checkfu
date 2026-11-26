@@ -2705,7 +2705,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SystemMessage({
 					content: [{ type: "text", text: "Stay brief." }],
-					context_length: 13,
 					processed_at: at,
 				}),
 				expectedJson: {
