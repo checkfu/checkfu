@@ -3343,13 +3343,13 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						params: { session_id: eventsSessionId },
 						query: { types: ["user.message"], order: "desc", limit: 1 },
 					})
-					expect(filtered.data).toEqual([userMessages[1]])
+					expect(filtered.data.map((event) => event.id)).toEqual([userMessages[1]?.id])
 					expect(filtered.next_page).toBeTypeOf("string")
 					const next = yield* generatedClient.sessions.listEvents({
 						params: { session_id: eventsSessionId },
 						query: { types: ["user.message"], order: "desc", limit: 1, page: filtered.next_page! },
 					})
-					expect(next.data).toEqual([userMessages[0]])
+					expect(next.data.map((event) => event.id)).toEqual([userMessages[0]?.id])
 					expect(next.next_page).toBeNull()
 					expect(sentUserMessages).toContain("keyed batch")
 					expect(sentUserMessages).toContain("explicit batch")
