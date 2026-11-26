@@ -27,7 +27,10 @@ import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurabl
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
 import { WebhookDelivererLive, WebhookDeliveryStoreDo } from "./Webhooks/WebhookDeliverer.do.ts"
+import { apiWorkerWebhookEgressProps } from "./Webhooks/WebhookEgressConfig.ts"
 import { WebhookEventsLive } from "./Webhooks/WebhookEventsLive.ts"
+import { WebhookFanoutContinuationDo, WebhookFanoutLive } from "./Webhooks/WebhookFanout.do.ts"
+import { WebhookListingQueryLive } from "./Http/Listing.ts"
 import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
@@ -75,6 +78,8 @@ const WebhooksLive = Webhooks.layer(
 	WebhooksHandlersLive.pipe(Layer.provide(ListingStoreLive)),
 ).pipe(Layer.provide(PlacedDurableObjects))
 
+const WebhookListingLive = WebhookListingQueryLive.pipe(Layer.provide(WebhooksLive))
+
 const WebhookMasterKeyLive = WebhookSigningMasterKeyLive
 
 const WebhookDeliveriesLive = WebhookDeliveryStoreDo.pipe(
@@ -83,6 +88,19 @@ const WebhookDeliveriesLive = WebhookDeliveryStoreDo.pipe(
 			Layer.provide(WebhooksLive),
 			Layer.provide(WebhookMasterKeyLive),
 			Layer.provide(Mac.layerWebCrypto),
+			Layer.provide(SecureRandom.layerWebCrypto),
+		),
+	),
+)
+
+const WebhookFanoutRuntimeLive = WebhookFanoutContinuationDo.pipe(
+	Layer.provide(
+		WebhookFanoutLive.pipe(
+			Layer.provide(ListingStoreLive),
+			Layer.provide(WebhooksLive),
+			Layer.provide(WebhookDeliveriesLive),
+			Layer.provide(Digest.layerWebCrypto),
+			Layer.provide(SecureRandom.layerWebCrypto),
 		),
 	),
 )
@@ -91,6 +109,7 @@ const WebhookEventsRuntimeLive = WebhookEventsLive.pipe(
 	Layer.provide(ListingStoreLive),
 	Layer.provide(WebhooksLive),
 	Layer.provide(WebhookDeliveriesLive),
+	Layer.provide(WebhookFanoutRuntimeLive),
 	Layer.provide(Digest.layerWebCrypto),
 )
 
@@ -110,6 +129,7 @@ const CheckfuLive = Checkfu.layer(
 
 const ApiWorkerLive = Layer.mergeAll(
 	WebhooksLive,
+	WebhookListingLive,
 	WebhookDeliveriesLive,
 	WebhookMasterKeyLive,
 	CheckfuLive,
@@ -123,7 +143,10 @@ const ApiWorkerLive = Layer.mergeAll(
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,
-	compatibility: { date: COMPATIBILITY_DATE },
+	compatibility: {
+		date: COMPATIBILITY_DATE,
+		flags: ["global_fetch_strictly_public"],
+	},
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	assets: fileURLToPath(new URL("../public", import.meta.url)),
 	observability: {
@@ -136,7 +159,16 @@ export default ApiWorker.make(
 	Effect.gen(function* () {
 		const { api } = yield* customDomains
 		const customCatalogProps = yield* apiWorkerCustomProvidersProps
-		return { ...API_WORKER_PROPS, ...api, ...customCatalogProps }
+		const webhookEgressProps = yield* apiWorkerWebhookEgressProps
+		const mergedEnv = {
+			...customCatalogProps.env,
+			...webhookEgressProps.env,
+		}
+		return {
+			...API_WORKER_PROPS,
+			...api,
+			...(Object.keys(mergedEnv).length === 0 ? {} : { env: mergedEnv }),
+		}
 	}),
 	Effect.gen(function* () {
 		const scope = Option.getOrUndefined(yield* Effect.serviceOption(Scope.Scope))

@@ -101,6 +101,10 @@
 			"Webhooks.AnEndpointIsDeleted": {
 				"kind": "sometimes",
 				"source": "(m) => m.WebhookEndpoint.some((w) => w.state.status === \"deleted\")"
+			},
+			"WebhookEndpoint.UpdateKeepsWhatItDoesNotName": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"UpdateWebhookEndpoint\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.url === (command.url === null ? before.url : command.url),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.description === null ? before.description : command.description),\n\t\t\t\tafter.event_types ===\n\t\t\t\t\t(command.event_types === null ? before.event_types : command.event_types),\n\t\t\t\tafter.status === (command.reactivate ? \"active\" : before.status),\n\t\t\t].every((ok) => ok)\n\t\t}"
 			}
 		}
 	}

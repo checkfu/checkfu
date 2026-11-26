@@ -4,6 +4,7 @@ import * as Mac from "effect/crypto/Mac"
 import * as Layer from "effect/Layer"
 import { makeWebhookDeliveryStoreMemory } from "./WebhookDeliveryStoreMemory.ts"
 import type { MemoryWebhookDeliveryOptions } from "./WebhookDeliveryStoreMemory.ts"
+import { WebhookListingQueryLive } from "../Http/Listing.ts"
 import { WebhookSigningMasterKeyTest } from "./WebhookSigning.ts"
 
 export const makeWebhooksTestSupport = (
@@ -11,6 +12,7 @@ export const makeWebhooksTestSupport = (
 	options: MemoryWebhookDeliveryOptions = {},
 ) => {
 	const webhooksLayer = Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(listingLayer)))
+	const listingQueryLayer = WebhookListingQueryLive.pipe(Layer.provide(webhooksLayer))
 	const deliveries = makeWebhookDeliveryStoreMemory(options)
 	const deliveriesLayer = deliveries.layer.pipe(
 		Layer.provide(webhooksLayer),
@@ -19,9 +21,10 @@ export const makeWebhooksTestSupport = (
 	)
 	const layer = Layer.mergeAll(
 		webhooksLayer,
+		listingQueryLayer,
 		deliveriesLayer,
 		WebhookSigningMasterKeyTest,
 		Mac.layerWebCrypto,
 	)
-	return { layer, webhooksLayer, deliveriesLayer, deliveries }
+	return { layer, webhooksLayer, listingQueryLayer, deliveriesLayer, deliveries }
 }

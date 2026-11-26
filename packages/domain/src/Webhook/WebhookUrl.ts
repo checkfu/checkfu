@@ -1,1 +1,5 @@
-export { isPublicHttpsWebhookUrl, parsePublicHttpsWebhookUrl } from "@checkfu/sdk/WebhookUrl"
+export {
+	isPublicHttpsWebhookUrl,
+	isPublicIpAddress,
+	parsePublicHttpsWebhookUrl,
+} from "@checkfu/sdk/WebhookUrl"

@@ -122,8 +122,6 @@ describe("MCP tool projection", () => {
 			"environments_createEnvironment",
 			"sessions_createSession",
 			"webhooks_createWebhook",
-			"webhooks_redeliver",
-			"webhooks_testWebhook",
 		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])
 	})

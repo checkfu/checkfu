@@ -16,9 +16,9 @@ export class WebhookEndpointUpdated extends Domain.Event("webhook.updated", {
 export class UpdateWebhookEndpoint extends Domain.Command("UpdateWebhookEndpoint", {
 	input: {
 		webhook_id: WebhookId,
-		url: WebhookUrl,
-		description: WebhookDescription,
-		event_types: WebhookEventFilterList,
+		url: Schema.NullOr(WebhookUrl),
+		description: Schema.NullOr(WebhookDescription),
+		event_types: Schema.NullOr(WebhookEventFilterList),
 		reactivate: Schema.Boolean,
 	},
 	events: [WebhookEndpointUpdated],

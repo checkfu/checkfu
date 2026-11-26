@@ -6,14 +6,16 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { ExpirePreviousWebhookSecrets } from "../src/Webhook/ExpirePreviousWebhookSecrets.policy.ts"
+import { ListWebhooksLive } from "../src/Webhook/ListWebhooks.query.ts"
 import { WebhookListingLive } from "../src/Webhook/WebhookListing.projection.ts"
 import { Webhooks, WebhooksDomainApi } from "../src/Webhooks.model.ts"
 
 const story = Story.make(Webhooks, {
 	layer: Layer.mergeAll(
 		ExpirePreviousWebhookSecrets.toLayer(Effect.succeed(() => Effect.void)),
-		WebhookListingLive.pipe(Layer.provide(ListingStore.memory)),
-	),
+		WebhookListingLive,
+		ListWebhooksLive,
+	).pipe(Layer.provide(ListingStore.memory)),
 })
 
 const STANDING = {
@@ -35,6 +37,7 @@ const STANDING = {
 	"WebhookEndpoint.SustainedFailureDisablesActiveEndpoint": "proved",
 	"WebhookEndpoint.StaleSecretExpiryLeavesPreviousSecretUntouched": "proved",
 	"WebhookEndpoint.ClaimingKeyChangesNoState": "proved",
+	"WebhookEndpoint.UpdateKeepsWhatItDoesNotName": "proved",
 	"Webhooks.AnEndpointIsCreated": "reached",
 	"Webhooks.AnEndpointRotatesItsSecret": "reached",
 	"Webhooks.AnEndpointExpiresItsPreviousSecret": "reached",

@@ -57,9 +57,10 @@ import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import type { WebhookHttpSender } from "../../src/Webhooks/WebhookDeliveryEngine.ts"
 import { makeWebhookDeliveryStoreMemory } from "../../src/Webhooks/WebhookDeliveryStoreMemory.ts"
 import {
-	listWebhookIdsFromPage,
+	makeInlineWebhookFanoutContinuation,
 	makeWebhookEventsLive,
 } from "../../src/Webhooks/WebhookEventsLive.ts"
+import { WebhookListingQueryLive } from "../../src/Http/Listing.ts"
 import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -434,6 +435,7 @@ export const makePiDurableTestLayer = (
 	const listingMemory = makeListingStoreMemory()
 	const listingStore = listingMemory.layer
 	const WebhooksLive = Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(listingStore)))
+	const WebhookListingLive = WebhookListingQueryLive.pipe(Layer.provide(WebhooksLive))
 	const webhookDeliveries = makeWebhookDeliveryStoreMemory({
 		...(options.webhookSender === undefined ? {} : { sender: options.webhookSender }),
 		...(options.webhookAutoDrain === undefined ? {} : { autoDrain: options.webhookAutoDrain }),
@@ -443,11 +445,15 @@ export const makePiDurableTestLayer = (
 		Layer.provide(WebhookSigningMasterKeyTest),
 		Layer.provide(Mac.layerWebCrypto),
 	)
-	const WebhookEventsRuntimeLive = makeWebhookEventsLive(
-		listWebhookIdsFromPage(listingMemory.page),
-	).pipe(
+	const WebhookFanoutRuntimeLive = makeInlineWebhookFanoutContinuation(listingMemory.page).pipe(
 		Layer.provide(WebhooksLive),
 		Layer.provide(WebhookDeliveriesLive),
+		Layer.provide(Digest.layerWebCrypto),
+	)
+	const WebhookEventsRuntimeLive = makeWebhookEventsLive(listingMemory.page).pipe(
+		Layer.provide(WebhooksLive),
+		Layer.provide(WebhookDeliveriesLive),
+		Layer.provide(WebhookFanoutRuntimeLive),
 		Layer.provide(Digest.layerWebCrypto),
 	)
 	const wrapSessions = options.harnessSessions ?? ((sessions) => sessions)
@@ -493,6 +499,7 @@ export const makePiDurableTestLayer = (
 
 	const layer = Layer.mergeAll(
 		WebhooksLive,
+		WebhookListingLive,
 		WebhookDeliveriesLive,
 		WebhookSigningMasterKeyTest,
 		Mac.layerWebCrypto,

@@ -4,6 +4,7 @@ import {
 	ExpirePreviousWebhookSecrets,
 	ExpirePreviousWebhookSecretsLive,
 } from "./Webhook/ExpirePreviousWebhookSecrets.policy.ts"
+import { ListWebhooks, ListWebhooksLive } from "./Webhook/ListWebhooks.query.ts"
 import { WebhookEndpoint } from "./Webhook/WebhookEndpoint.aggregate.ts"
 import { WebhookListing, WebhookListingLive } from "./Webhook/WebhookListing.projection.ts"
 
@@ -11,6 +12,7 @@ export class Webhooks extends Domain.Model("Webhooks", {
 	aggregates: [WebhookEndpoint],
 	policies: [ExpirePreviousWebhookSecrets],
 	projections: [WebhookListing],
+	queries: [ListWebhooks],
 	sometimes: {
 		AnEndpointIsCreated: (m) => m.WebhookEndpoint.some((w) => w.state.status === "active"),
 		AnEndpointRotatesItsSecret: (m) =>
@@ -51,9 +53,11 @@ export class WebhooksDomainApi extends Domain.Api("WebhooksDomainApi", {
 		"DeleteWebhookEndpoint",
 		"ClaimWebhookIdempotencyKey",
 	],
+	queries: ["ListWebhooks"],
 }) {}
 
 export const WebhooksHandlersLive = Layer.mergeAll(
 	ExpirePreviousWebhookSecretsLive,
 	WebhookListingLive,
+	ListWebhooksLive,
 )

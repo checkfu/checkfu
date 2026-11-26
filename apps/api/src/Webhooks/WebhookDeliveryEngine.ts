@@ -10,13 +10,7 @@ import {
 import type { WebhookId } from "@checkfu/sdk/Schemas"
 import * as Clock from "effect/Clock"
 import type * as Mac from "effect/crypto/Mac"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as FetchHttpClient from "effect/http/FetchHttpClient"
-import * as HttpClient from "effect/http/HttpClient"
-import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/http/HttpClientResponse"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type {
 	EnqueueWebhookDeliveryInput,
@@ -34,6 +28,7 @@ export const WEBHOOK_MAX_ATTEMPTS = 6
 export const WEBHOOK_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 3_600_000, 14_400_000] as const
 export const WEBHOOK_DELIVERY_TIMEOUT_MS = 10_000
 export const WEBHOOK_MAX_STORED_DELIVERIES = 500
+export const WEBHOOK_MAX_PENDING_DELIVERIES = 1000
 export const WEBHOOK_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 export const WEBHOOK_MAX_ERROR_LENGTH = 512
 export const WEBHOOK_BATCH_PER_ALARM = 25
@@ -59,6 +54,15 @@ export const WEBHOOK_DELIVERIES_TABLE =
 	"completed_at INTEGER" +
 	")"
 
+export const WEBHOOK_HEALTH_OUTCOMES_TABLE =
+	"CREATE TABLE IF NOT EXISTS webhook_health_outcomes (" +
+	"outcome_id TEXT PRIMARY KEY, " +
+	"definition_revision INTEGER NOT NULL, " +
+	"outcome TEXT NOT NULL, " +
+	"observed_at INTEGER NOT NULL, " +
+	"created_at INTEGER NOT NULL" +
+	")"
+
 const WEBHOOK_DELIVERIES_DUE_INDEX =
 	"CREATE INDEX IF NOT EXISTS webhook_deliveries_due " +
 	"ON webhook_deliveries (next_attempt_at, created_at) " +
@@ -67,6 +71,10 @@ const WEBHOOK_DELIVERIES_DUE_INDEX =
 const WEBHOOK_DELIVERIES_RECENT_INDEX =
 	"CREATE INDEX IF NOT EXISTS webhook_deliveries_recent " +
 	"ON webhook_deliveries (created_at DESC, delivery_id DESC)"
+
+const WEBHOOK_HEALTH_OUTCOMES_ORDER_INDEX =
+	"CREATE INDEX IF NOT EXISTS webhook_health_outcomes_order " +
+	"ON webhook_health_outcomes (created_at ASC, outcome_id ASC)"
 
 export type WebhookSqlBinding = string | number | null
 export type WebhookSqlValue = string | number | bigint | ArrayBuffer | Uint8Array | null
@@ -78,6 +86,7 @@ export interface WebhookSqlCursor {
 
 export interface WebhookSqlStorage {
 	exec(query: string, ...bindings: ReadonlyArray<WebhookSqlBinding>): WebhookSqlCursor
+	transaction?<A>(fn: () => A): A
 }
 
 export interface WebhookHttpRequest {
@@ -90,6 +99,7 @@ export interface WebhookHttpRequest {
 export type WebhookHttpResult =
 	| { readonly kind: "response"; readonly status: number }
 	| { readonly kind: "timeout" }
+	| { readonly kind: "invalid_destination"; readonly message: string }
 	| { readonly kind: "network_error"; readonly message: string }
 
 export interface WebhookHttpSender {
@@ -100,53 +110,6 @@ const truncateError = (message: string): string =>
 	message.length <= WEBHOOK_MAX_ERROR_LENGTH
 		? message
 		: `${message.slice(0, WEBHOOK_MAX_ERROR_LENGTH - 1)}…`
-
-const cancelResponseBody = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<void> =>
-	Effect.ignore(
-		Effect.promise(async () => {
-			const web = HttpClientResponse.toWeb(response)
-			if (Option.isSome(web) && web.value.body !== null) {
-				await web.value.body.cancel()
-			}
-		}),
-	)
-
-export const makeFetchWebhookHttpSender = (client: HttpClient.HttpClient): WebhookHttpSender => ({
-	send: (request) =>
-		Effect.gen(function* () {
-			let httpRequest = HttpClientRequest.post(request.url).pipe(
-				HttpClientRequest.bodyText(request.body, "application/json; charset=utf-8"),
-			)
-			for (const [key, value] of Object.entries(request.headers)) {
-				httpRequest = HttpClientRequest.setHeader(httpRequest, key, value)
-			}
-			const outcome = yield* client.execute(httpRequest).pipe(
-				Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-				Effect.flatMap((response) =>
-					Effect.as(cancelResponseBody(response), {
-						kind: "response" as const,
-						status: response.status,
-					}),
-				),
-				Effect.catch((error) =>
-					Effect.succeed<WebhookHttpResult>({
-						kind: "network_error",
-						message: truncateError(error.message || "Network error delivering webhook."),
-					}),
-				),
-				Effect.timeoutOption(Duration.millis(request.timeoutMs)),
-			)
-			if (Option.isNone(outcome)) {
-				return { kind: "timeout" as const }
-			}
-			return outcome.value
-		}),
-})
-
-export const makeDefaultFetchWebhookHttpSender: Effect.Effect<WebhookHttpSender> = Effect.map(
-	HttpClient.HttpClient,
-	makeFetchWebhookHttpSender,
-).pipe(Effect.provide(FetchHttpClient.layer))
 
 export const retryDelayMsForAttempt = (
 	completedAttempts: number,
@@ -177,6 +140,14 @@ interface StoredRow {
 	readonly created_at: number
 	readonly updated_at: number
 	readonly completed_at: number | null
+}
+
+interface StoredHealthOutcome {
+	readonly outcome_id: string
+	readonly definition_revision: number
+	readonly outcome: WebhookOutcomeKind
+	readonly observed_at: number
+	readonly created_at: number
 }
 
 const isDeliveryStatus = Schema.is(WebhookDeliveryStatus)
@@ -212,6 +183,14 @@ const parseDeliveryOutcome = (
 	throw new Error(`Invalid stored webhook delivery outcome: ${raw}`)
 }
 
+const parseHealthOutcomeKind = (value: WebhookSqlValue | undefined): WebhookOutcomeKind => {
+	const raw = asString(value)
+	if (raw === "delivered" || raw === "failed" || raw === "redirect") {
+		return raw
+	}
+	throw new Error(`Invalid stored webhook health outcome: ${raw}`)
+}
+
 const rowFromRaw = (raw: WebhookSqlRow): StoredRow => ({
 	delivery_id: asString(raw.delivery_id),
 	event_id: asString(raw.event_id),
@@ -229,6 +208,14 @@ const rowFromRaw = (raw: WebhookSqlRow): StoredRow => ({
 	created_at: asNumber(raw.created_at),
 	updated_at: asNumber(raw.updated_at),
 	completed_at: asNullableNumber(raw.completed_at),
+})
+
+const healthOutcomeFromRaw = (raw: WebhookSqlRow): StoredHealthOutcome => ({
+	outcome_id: asString(raw.outcome_id),
+	definition_revision: asNumber(raw.definition_revision),
+	outcome: parseHealthOutcomeKind(raw.outcome),
+	observed_at: asNumber(raw.observed_at),
+	created_at: asNumber(raw.created_at),
 })
 
 const toRecord = (webhookId: WebhookId, row: StoredRow): WebhookDeliveryRecord => ({
@@ -271,13 +258,18 @@ const SELECT_COLUMNS =
 	"delivery_id, event_id, event_type, dedupe_key, payload_json, status, attempt_count, max_attempts, " +
 	"next_attempt_at, last_attempt_at, last_http_status, last_outcome, last_error, created_at, updated_at, completed_at"
 
+export interface RecordWebhookHealthOutcomeInput {
+	readonly outcome_id: string
+	readonly definition_revision: number
+	readonly outcome: WebhookOutcomeKind
+	readonly observed_at: number
+}
+
 export interface DrainWebhookDeliveriesDeps {
 	readonly readEndpoint: Effect.Effect<WebhookEndpointState>
-	readonly recordOutcome: (input: {
-		readonly definition_revision: number
-		readonly outcome: WebhookOutcomeKind
-		readonly observed_at: number
-	}) => Effect.Effect<WebhookEndpointState>
+	readonly recordOutcome: (
+		input: RecordWebhookHealthOutcomeInput,
+	) => Effect.Effect<WebhookEndpointState>
 	readonly mac: Mac.Mac["Service"]
 	readonly masterKey: Effect.Effect<Mac.Key>
 	readonly sender: WebhookHttpSender
@@ -312,6 +304,15 @@ const classifyHttpResult = (result: WebhookHttpResult): ClassifiedHttpResult => 
 			httpStatus: null,
 			errorMessage: `Webhook request timed out after ${WEBHOOK_DELIVERY_TIMEOUT_MS}ms.`,
 			retryable: true,
+		}
+	}
+	if (result.kind === "invalid_destination") {
+		return {
+			deliveryOutcome: "invalid_destination",
+			healthOutcome: "failed",
+			httpStatus: null,
+			errorMessage: truncateError(result.message),
+			retryable: false,
 		}
 	}
 	if (result.kind === "network_error") {
@@ -360,6 +361,16 @@ const classifyHttpResult = (result: WebhookHttpResult): ClassifiedHttpResult => 
 	}
 }
 
+const minTimestamp = (...values: ReadonlyArray<number | null>): number | null => {
+	let min: number | null = null
+	for (const value of values) {
+		if (value !== null && (min === null || value < min)) {
+			min = value
+		}
+	}
+	return min
+}
+
 export class WebhookDeliveryEngine {
 	readonly #webhookId: WebhookId
 	readonly #sql: WebhookSqlStorage
@@ -375,77 +386,116 @@ export class WebhookDeliveryEngine {
 			return
 		}
 		this.#sql.exec(WEBHOOK_DELIVERIES_TABLE)
+		this.#sql.exec(WEBHOOK_HEALTH_OUTCOMES_TABLE)
 		this.#sql.exec(WEBHOOK_DELIVERIES_DUE_INDEX)
 		this.#sql.exec(WEBHOOK_DELIVERIES_RECENT_INDEX)
+		this.#sql.exec(WEBHOOK_HEALTH_OUTCOMES_ORDER_INDEX)
 		this.#initialized = true
+	}
+
+	#transaction<A>(fn: () => A): A {
+		return this.#sql.transaction === undefined ? fn() : this.#sql.transaction(fn)
 	}
 
 	nextAlarmAt(): number | null {
 		this.#ensureSchema()
-		const rows = this.#sql
+		const pendingHealthRow = this.#sql
+			.exec("SELECT MIN(created_at) AS next_at FROM webhook_health_outcomes")
+			.toArray()[0]
+		const nextHealthAt =
+			pendingHealthRow === undefined ? null : asNullableNumber(pendingHealthRow.next_at)
+
+		const pendingDeliveryRow = this.#sql
 			.exec(
 				"SELECT MIN(next_attempt_at) AS next_at FROM webhook_deliveries WHERE status = 'pending' AND next_attempt_at IS NOT NULL",
 			)
-			.toArray()
-		const first = rows[0]
-		return first === undefined ? null : asNullableNumber(first.next_at)
+			.toArray()[0]
+		const nextDeliveryAt =
+			pendingDeliveryRow === undefined ? null : asNullableNumber(pendingDeliveryRow.next_at)
+
+		const retainedRow = this.#sql
+			.exec("SELECT MIN(created_at) AS oldest_at FROM webhook_deliveries WHERE status != 'pending'")
+			.toArray()[0]
+		const oldestTerminalAt =
+			retainedRow === undefined ? null : asNullableNumber(retainedRow.oldest_at)
+		const nextRetentionAt =
+			oldestTerminalAt === null ? null : oldestTerminalAt + WEBHOOK_RETENTION_MS
+
+		return minTimestamp(nextHealthAt, nextDeliveryAt, nextRetentionAt)
 	}
 
 	enqueue(input: EnqueueWebhookDeliveryInput, nowMillis: number): EnqueueWebhookResult {
 		this.#ensureSchema()
-		const existing = this.#sql
-			.exec(
-				`SELECT ${SELECT_COLUMNS} FROM webhook_deliveries WHERE dedupe_key = ?`,
+		return this.#transaction(() => {
+			const existing = this.#sql
+				.exec(
+					`SELECT ${SELECT_COLUMNS} FROM webhook_deliveries WHERE dedupe_key = ?`,
+					input.dedupe_key,
+				)
+				.toArray()[0]
+			if (existing !== undefined) {
+				return {
+					record: toRecord(this.#webhookId, rowFromRaw(existing)),
+					nextAlarmAt: this.nextAlarmAt(),
+				}
+			}
+			const pendingRow = this.#sql
+				.exec("SELECT COUNT(*) AS count FROM webhook_deliveries WHERE status = 'pending'")
+				.toArray()[0]
+			const pendingCount = pendingRow === undefined ? 0 : asNumber(pendingRow.count)
+			if (pendingCount >= WEBHOOK_MAX_PENDING_DELIVERIES) {
+				throw new Error(
+					`Webhook ${this.#webhookId} pending delivery queue is full (${WEBHOOK_MAX_PENDING_DELIVERIES}).`,
+				)
+			}
+			this.#sql.exec(
+				"INSERT INTO webhook_deliveries (" +
+					"delivery_id, event_id, event_type, dedupe_key, payload_json, status, " +
+					"attempt_count, max_attempts, next_attempt_at, created_at, updated_at" +
+					") VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)",
+				input.delivery_id,
+				input.event_id,
+				input.event_type,
 				input.dedupe_key,
+				input.payload_json,
+				WEBHOOK_MAX_ATTEMPTS,
+				nowMillis,
+				nowMillis,
+				nowMillis,
 			)
-			.toArray()[0]
-		if (existing !== undefined) {
+			this.prune(nowMillis)
+			const inserted = this.#sql
+				.exec(
+					`SELECT ${SELECT_COLUMNS} FROM webhook_deliveries WHERE delivery_id = ?`,
+					input.delivery_id,
+				)
+				.toArray()[0]
+			if (inserted === undefined) {
+				throw new Error(`Failed to read inserted delivery ${input.delivery_id}.`)
+			}
 			return {
-				record: toRecord(this.#webhookId, rowFromRaw(existing)),
+				record: toRecord(this.#webhookId, rowFromRaw(inserted)),
 				nextAlarmAt: this.nextAlarmAt(),
 			}
-		}
-		this.#sql.exec(
-			"INSERT INTO webhook_deliveries (" +
-				"delivery_id, event_id, event_type, dedupe_key, payload_json, status, " +
-				"attempt_count, max_attempts, next_attempt_at, created_at, updated_at" +
-				") VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)",
-			input.delivery_id,
-			input.event_id,
-			input.event_type,
-			input.dedupe_key,
-			input.payload_json,
-			WEBHOOK_MAX_ATTEMPTS,
-			nowMillis,
-			nowMillis,
-			nowMillis,
-		)
-		this.prune(nowMillis)
-		const inserted = this.#sql
-			.exec(
-				`SELECT ${SELECT_COLUMNS} FROM webhook_deliveries WHERE delivery_id = ?`,
-				input.delivery_id,
-			)
-			.toArray()[0]
-		if (inserted === undefined) {
-			throw new Error(`Failed to read inserted delivery ${input.delivery_id}.`)
-		}
-		return {
-			record: toRecord(this.#webhookId, rowFromRaw(inserted)),
-			nextAlarmAt: this.nextAlarmAt(),
-		}
+		})
 	}
 
-	getDelivery(deliveryId: WebhookDeliveryId): WebhookDeliveryRecord | null {
+	getDelivery(deliveryId: WebhookDeliveryId, nowMillis?: number): WebhookDeliveryRecord | null {
 		this.#ensureSchema()
+		if (nowMillis !== undefined) {
+			this.prune(nowMillis)
+		}
 		const row = this.#sql
 			.exec(`SELECT ${SELECT_COLUMNS} FROM webhook_deliveries WHERE delivery_id = ?`, deliveryId)
 			.toArray()[0]
 		return row === undefined ? null : toRecord(this.#webhookId, rowFromRaw(row))
 	}
 
-	listDeliveries(query: ListWebhookDeliveriesQuery): ListWebhookDeliveriesPage {
+	listDeliveries(query: ListWebhookDeliveriesQuery, nowMillis?: number): ListWebhookDeliveriesPage {
 		this.#ensureSchema()
+		if (nowMillis !== undefined) {
+			this.prune(nowMillis)
+		}
 		const limit = Math.max(1, Math.min(100, query.limit ?? 50))
 		const cursor = query.after === undefined ? null : parseCursor(query.after)
 		const rawRows =
@@ -484,6 +534,7 @@ export class WebhookDeliveryEngine {
 		nowMillis: number,
 	): EnqueueWebhookResult | null {
 		this.#ensureSchema()
+		this.prune(nowMillis)
 		const originalRaw = this.#sql
 			.exec(`SELECT ${SELECT_COLUMNS} FROM webhook_deliveries WHERE delivery_id = ?`, deliveryId)
 			.toArray()[0]
@@ -505,24 +556,67 @@ export class WebhookDeliveryEngine {
 
 	purge(): void {
 		this.#ensureSchema()
-		this.#sql.exec("DELETE FROM webhook_deliveries")
+		this.#transaction(() => {
+			this.#sql.exec("DELETE FROM webhook_deliveries")
+			this.#sql.exec("DELETE FROM webhook_health_outcomes")
+		})
 	}
 
 	prune(nowMillis: number): void {
 		this.#ensureSchema()
 		const cutoff = nowMillis - WEBHOOK_RETENTION_MS
 		this.#sql.exec(
-			"DELETE FROM webhook_deliveries WHERE status != 'pending' AND created_at < ?",
+			"DELETE FROM webhook_deliveries WHERE status != 'pending' AND created_at <= ?",
 			cutoff,
 		)
 		this.#sql.exec(
-			"DELETE FROM webhook_deliveries WHERE delivery_id IN (" +
+			"DELETE FROM webhook_deliveries WHERE status != 'pending' AND delivery_id IN (" +
 				"SELECT delivery_id FROM webhook_deliveries " +
-				"ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END ASC, created_at DESC, delivery_id DESC " +
+				"WHERE status != 'pending' " +
+				"ORDER BY created_at DESC, delivery_id DESC " +
 				"LIMIT -1 OFFSET ?" +
 				")",
 			WEBHOOK_MAX_STORED_DELIVERIES,
 		)
+	}
+
+	pendingHealthOutcomesCount(): number {
+		this.#ensureSchema()
+		const row = this.#sql.exec("SELECT COUNT(*) AS count FROM webhook_health_outcomes").toArray()[0]
+		return row === undefined ? 0 : asNumber(row.count)
+	}
+
+	#recordPendingHealthOutcome(input: {
+		readonly outcome_id: string
+		readonly definition_revision: number
+		readonly outcome: WebhookOutcomeKind
+		readonly observed_at: number
+		readonly created_at: number
+	}): void {
+		this.#sql.exec(
+			"INSERT OR IGNORE INTO webhook_health_outcomes (" +
+				"outcome_id, definition_revision, outcome, observed_at, created_at" +
+				") VALUES (?, ?, ?, ?, ?)",
+			input.outcome_id,
+			input.definition_revision,
+			input.outcome,
+			input.observed_at,
+			input.created_at,
+		)
+	}
+
+	#listPendingHealthOutcomes(): ReadonlyArray<StoredHealthOutcome> {
+		return this.#sql
+			.exec(
+				"SELECT outcome_id, definition_revision, outcome, observed_at, created_at " +
+					"FROM webhook_health_outcomes ORDER BY created_at ASC, outcome_id ASC",
+			)
+			.toArray()
+			.map(healthOutcomeFromRaw)
+	}
+
+	#deletePendingHealthOutcome(outcomeId: string): void {
+		this.#sql.exec("DELETE FROM webhook_health_outcomes WHERE outcome_id = ?", outcomeId)
 	}
 
 	#skipAllPending(nowMillis: number, reason: string): void {
@@ -536,6 +630,59 @@ export class WebhookDeliveryEngine {
 		)
 	}
 
+	#flushHealthOutcomes(
+		deps: DrainWebhookDeliveriesDeps,
+		currentEndpoint: WebhookEndpointState,
+	): Effect.Effect<WebhookEndpointState> {
+		const self = this
+		return Effect.gen(function* () {
+			let endpoint = currentEndpoint
+			const pending = self.#listPendingHealthOutcomes()
+			for (const entry of pending) {
+				endpoint = yield* deps.recordOutcome({
+					outcome_id: entry.outcome_id,
+					definition_revision: entry.definition_revision,
+					outcome: entry.outcome,
+					observed_at: entry.observed_at,
+				})
+				self.#deletePendingHealthOutcome(entry.outcome_id)
+			}
+			return endpoint
+		})
+	}
+
+	#deriveSecretsForAttempt(
+		deps: DrainWebhookDeliveriesDeps,
+		masterKey: Mac.Key,
+		endpoint: WebhookEndpointState,
+		attemptAt: number,
+	): Effect.Effect<ReadonlyArray<string>> {
+		const self = this
+		return Effect.gen(function* () {
+			const secrets: Array<string> = [
+				yield* deriveWebhookSigningSecret(deps.mac, masterKey, {
+					webhookId: self.#webhookId,
+					secretRevision: endpoint.secret_revision,
+					secretSalt: endpoint.secret_salt,
+				}),
+			]
+			if (
+				endpoint.previous_secret_revision > 0 &&
+				endpoint.previous_secret_salt.length > 0 &&
+				endpoint.previous_secret_expires_at > attemptAt
+			) {
+				secrets.push(
+					yield* deriveWebhookSigningSecret(deps.mac, masterKey, {
+						webhookId: self.#webhookId,
+						secretRevision: endpoint.previous_secret_revision,
+						secretSalt: endpoint.previous_secret_salt,
+					}),
+				)
+			}
+			return secrets
+		})
+	}
+
 	drainDue(deps: DrainWebhookDeliveriesDeps): Effect.Effect<DrainWebhookDeliveriesResult> {
 		const self = this
 		return Effect.gen(function* () {
@@ -546,11 +693,18 @@ export class WebhookDeliveryEngine {
 				self.purge()
 				return { processed: 0, purged: true, nextAlarmAt: null }
 			}
+
+			endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+			if (endpoint.status === "" || endpoint.status === "deleted") {
+				self.purge()
+				return { processed: 0, purged: true, nextAlarmAt: null }
+			}
 			if (endpoint.status !== "active") {
 				self.#skipAllPending(nowMillis, `Webhook endpoint is ${endpoint.status}.`)
 				self.prune(nowMillis)
-				return { processed: 0, purged: false, nextAlarmAt: null }
+				return { processed: 0, purged: false, nextAlarmAt: self.nextAlarmAt() }
 			}
+
 			const batchSize = deps.batchSize ?? WEBHOOK_BATCH_PER_ALARM
 			const dueRows = self.#sql
 				.exec(
@@ -567,54 +721,74 @@ export class WebhookDeliveryEngine {
 				return { processed: 0, purged: false, nextAlarmAt: self.nextAlarmAt() }
 			}
 
-			const validatedUrl = parsePublicHttpsWebhookUrl(endpoint.url)
-			if (validatedUrl === null) {
-				for (const row of dueRows) {
-					self.#sql.exec(
-						"UPDATE webhook_deliveries " +
-							"SET status = 'failed', attempt_count = attempt_count + 1, next_attempt_at = NULL, " +
-							"last_attempt_at = ?, last_outcome = 'invalid_destination', last_error = ?, " +
-							"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-						nowMillis,
-						"Webhook destination URL is not a permitted public HTTPS address.",
-						nowMillis,
-						nowMillis,
-						row.delivery_id,
-					)
-				}
-				self.prune(nowMillis)
-				return { processed: dueRows.length, purged: false, nextAlarmAt: self.nextAlarmAt() }
-			}
-
-			const masterKey = yield* deps.masterKey
-			const secrets: Array<string> = [
-				yield* deriveWebhookSigningSecret(deps.mac, masterKey, {
-					webhookId: self.#webhookId,
-					secretRevision: endpoint.secret_revision,
-					secretSalt: endpoint.secret_salt,
-				}),
-			]
-			if (
-				endpoint.previous_secret_revision > 0 &&
-				endpoint.previous_secret_salt.length > 0 &&
-				endpoint.previous_secret_expires_at > nowMillis
-			) {
-				secrets.push(
-					yield* deriveWebhookSigningSecret(deps.mac, masterKey, {
-						webhookId: self.#webhookId,
-						secretRevision: endpoint.previous_secret_revision,
-						secretSalt: endpoint.previous_secret_salt,
-					}),
-				)
-			}
-
+			let cachedMasterKey: Mac.Key | undefined
 			let processed = 0
-			for (const row of dueRows) {
+			for (const [index, row] of dueRows.entries()) {
+				if (index > 0) {
+					endpoint = yield* deps.readEndpoint
+					if (endpoint.status === "" || endpoint.status === "deleted") {
+						self.purge()
+						return { processed, purged: true, nextAlarmAt: null }
+					}
+					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+					if (endpoint.status === "" || endpoint.status === "deleted") {
+						self.purge()
+						return { processed, purged: true, nextAlarmAt: null }
+					}
+				}
+
 				const attemptAt = yield* Clock.currentTimeMillis
 				if (endpoint.status !== "active") {
 					self.#skipAllPending(attemptAt, `Webhook endpoint is ${endpoint.status}.`)
 					break
 				}
+
+				const attemptRevision = endpoint.definition_revision
+				const nextAttemptCount = row.attempt_count + 1
+				const outcomeId = `${row.delivery_id}:${nextAttemptCount}`
+				const validatedUrl = parsePublicHttpsWebhookUrl(endpoint.url)
+				if (validatedUrl === null) {
+					processed += 1
+					self.#transaction(() => {
+						self.#sql.exec(
+							"UPDATE webhook_deliveries " +
+								"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
+								"last_attempt_at = ?, last_outcome = 'invalid_destination', last_error = ?, " +
+								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
+							nextAttemptCount,
+							attemptAt,
+							"Webhook destination URL is not a permitted public HTTPS address.",
+							attemptAt,
+							attemptAt,
+							row.delivery_id,
+						)
+						self.#recordPendingHealthOutcome({
+							outcome_id: outcomeId,
+							definition_revision: attemptRevision,
+							outcome: "failed",
+							observed_at: attemptAt,
+							created_at: attemptAt,
+						})
+					})
+					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+					if (endpoint.status === "" || endpoint.status === "deleted") {
+						self.purge()
+						return { processed, purged: true, nextAlarmAt: null }
+					}
+					if (endpoint.status !== "active") {
+						self.#skipAllPending(attemptAt, `Webhook endpoint is ${endpoint.status}.`)
+						break
+					}
+					continue
+				}
+
+				cachedMasterKey ??= yield* deps.masterKey
+				const secrets = yield* self.#deriveSecretsForAttempt(
+					deps,
+					cachedMasterKey,
+					endpoint,
+					attemptAt,
+				)
 				const timestampSeconds = Math.floor(attemptAt / 1000)
 				const signature = yield* signStandardWebhook(deps.mac, {
 					secrets,
@@ -635,53 +809,77 @@ export class WebhookDeliveryEngine {
 				})
 				processed += 1
 				const finishedAt = yield* Clock.currentTimeMillis
-				const nextAttemptCount = row.attempt_count + 1
 				const classified = classifyHttpResult(httpResult)
 
 				if (classified.healthOutcome === "delivered") {
-					self.#sql.exec(
-						"UPDATE webhook_deliveries " +
-							"SET status = 'succeeded', attempt_count = ?, next_attempt_at = NULL, " +
-							"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = NULL, " +
-							"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-						nextAttemptCount,
-						finishedAt,
-						classified.httpStatus,
-						classified.deliveryOutcome,
-						finishedAt,
-						finishedAt,
-						row.delivery_id,
-					)
-					if (endpoint.failure_window_started_at !== 0) {
-						endpoint = yield* deps.recordOutcome({
-							definition_revision: endpoint.definition_revision,
-							outcome: "delivered",
-							observed_at: finishedAt,
-						})
+					const shouldClearHealth = endpoint.failure_window_started_at !== 0
+					self.#transaction(() => {
+						self.#sql.exec(
+							"UPDATE webhook_deliveries " +
+								"SET status = 'succeeded', attempt_count = ?, next_attempt_at = NULL, " +
+								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = NULL, " +
+								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
+							nextAttemptCount,
+							finishedAt,
+							classified.httpStatus,
+							classified.deliveryOutcome,
+							finishedAt,
+							finishedAt,
+							row.delivery_id,
+						)
+						if (shouldClearHealth) {
+							self.#recordPendingHealthOutcome({
+								outcome_id: outcomeId,
+								definition_revision: attemptRevision,
+								outcome: "delivered",
+								observed_at: finishedAt,
+								created_at: finishedAt,
+							})
+						}
+					})
+					if (shouldClearHealth) {
+						endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+						if (endpoint.status === "" || endpoint.status === "deleted") {
+							self.purge()
+							return { processed, purged: true, nextAlarmAt: null }
+						}
+						if (endpoint.status !== "active") {
+							self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
+							break
+						}
 					}
 					continue
 				}
 
 				if (classified.healthOutcome === "redirect") {
-					self.#sql.exec(
-						"UPDATE webhook_deliveries " +
-							"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
-							"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
-							"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-						nextAttemptCount,
-						finishedAt,
-						classified.httpStatus,
-						classified.deliveryOutcome,
-						classified.errorMessage,
-						finishedAt,
-						finishedAt,
-						row.delivery_id,
-					)
-					endpoint = yield* deps.recordOutcome({
-						definition_revision: endpoint.definition_revision,
-						outcome: "redirect",
-						observed_at: finishedAt,
+					self.#transaction(() => {
+						self.#sql.exec(
+							"UPDATE webhook_deliveries " +
+								"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
+								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
+								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
+							nextAttemptCount,
+							finishedAt,
+							classified.httpStatus,
+							classified.deliveryOutcome,
+							classified.errorMessage,
+							finishedAt,
+							finishedAt,
+							row.delivery_id,
+						)
+						self.#recordPendingHealthOutcome({
+							outcome_id: outcomeId,
+							definition_revision: attemptRevision,
+							outcome: "redirect",
+							observed_at: finishedAt,
+							created_at: finishedAt,
+						})
 					})
+					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+					if (endpoint.status === "" || endpoint.status === "deleted") {
+						self.purge()
+						return { processed, purged: true, nextAlarmAt: null }
+					}
 					if (endpoint.status !== "active") {
 						self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
 						break
@@ -695,42 +893,51 @@ export class WebhookDeliveryEngine {
 						? retryDelayMsForAttempt(nextAttemptCount, jitter)
 						: null
 
-				if (delay !== null) {
-					self.#sql.exec(
-						"UPDATE webhook_deliveries " +
-							"SET status = 'pending', attempt_count = ?, next_attempt_at = ?, " +
-							"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
-							"updated_at = ? WHERE delivery_id = ?",
-						nextAttemptCount,
-						finishedAt + delay,
-						finishedAt,
-						classified.httpStatus,
-						classified.deliveryOutcome,
-						classified.errorMessage,
-						finishedAt,
-						row.delivery_id,
-					)
-				} else {
-					self.#sql.exec(
-						"UPDATE webhook_deliveries " +
-							"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
-							"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
-							"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-						nextAttemptCount,
-						finishedAt,
-						classified.httpStatus,
-						classified.deliveryOutcome,
-						classified.errorMessage,
-						finishedAt,
-						finishedAt,
-						row.delivery_id,
-					)
-				}
-				endpoint = yield* deps.recordOutcome({
-					definition_revision: endpoint.definition_revision,
-					outcome: "failed",
-					observed_at: finishedAt,
+				self.#transaction(() => {
+					if (delay !== null) {
+						self.#sql.exec(
+							"UPDATE webhook_deliveries " +
+								"SET status = 'pending', attempt_count = ?, next_attempt_at = ?, " +
+								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
+								"updated_at = ? WHERE delivery_id = ?",
+							nextAttemptCount,
+							finishedAt + delay,
+							finishedAt,
+							classified.httpStatus,
+							classified.deliveryOutcome,
+							classified.errorMessage,
+							finishedAt,
+							row.delivery_id,
+						)
+					} else {
+						self.#sql.exec(
+							"UPDATE webhook_deliveries " +
+								"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
+								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
+								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
+							nextAttemptCount,
+							finishedAt,
+							classified.httpStatus,
+							classified.deliveryOutcome,
+							classified.errorMessage,
+							finishedAt,
+							finishedAt,
+							row.delivery_id,
+						)
+					}
+					self.#recordPendingHealthOutcome({
+						outcome_id: outcomeId,
+						definition_revision: attemptRevision,
+						outcome: "failed",
+						observed_at: finishedAt,
+						created_at: finishedAt,
+					})
 				})
+				endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
+				if (endpoint.status === "" || endpoint.status === "deleted") {
+					self.purge()
+					return { processed, purged: true, nextAlarmAt: null }
+				}
 				if (endpoint.status !== "active") {
 					self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
 					break

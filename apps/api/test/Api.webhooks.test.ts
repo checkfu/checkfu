@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { makeApiHandler } from "../src/Http/Router.ts"
+import {
+	WebhookDeliveryStore,
+	WebhookDeliveryStoreError,
+} from "../src/Webhooks/WebhookDeliveryStore.ts"
 import { STANDARD_WEBHOOK_HEADERS, verifyStandardWebhook } from "../src/Webhooks/WebhookSigning.ts"
 import {
 	AUTH_HEADERS,
@@ -73,6 +78,8 @@ describe("Webhooks HTTP API", () => {
 						"https://169.254.169.254/latest/meta-data/",
 						"https://user:pass@hooks.example.com/events",
 						"https://hooks.example.com/events#frag",
+						// Canonicalizes past 2048 bytes after percent-encoding.
+						`https://hooks.example.com/${"é".repeat(400)}`,
 					]) {
 						const badRes = yield* sendRequest(apiFetch, {
 							method: "POST",
@@ -366,22 +373,7 @@ describe("Webhooks HTTP API", () => {
 					})
 					const filtered = (yield* Effect.promise(() => filteredRes.json())) as WebhookJson
 
-					// Wait briefly for WebhookListing projection so fan-out sees both webhooks.
-					for (let attempt = 0; attempt < 50; attempt++) {
-						const check = yield* sendRequest(apiFetch, {
-							method: "GET",
-							path: "/v1/webhooks",
-							headers: AUTH_HEADERS,
-						})
-						const body = (yield* Effect.promise(() => check.json())) as {
-							readonly data: ReadonlyArray<WebhookJson>
-						}
-						if (body.data.length === 2) {
-							break
-						}
-						yield* Effect.sleep("10 millis")
-					}
-
+					// Registration is immediately visible to fan-out upon 201 (no list polling needed).
 					const agentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -483,6 +475,119 @@ describe("Webhooks HTTP API", () => {
 						expect(valid).toBe(true)
 					}
 				}).pipe(Effect.scoped, Effect.provide(harness.layer)),
+			)
+		} finally {
+			await harness.closeAll()
+		}
+	})
+
+	it("applies partial updates atomically and makes deletion cleanup retryable after tombstoning", async () => {
+		const harness = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 5, 3),
+		)
+		let failPurge = true
+		let purgeCalls = 0
+		const FlakyPurgeDeliveries = Layer.effect(
+			WebhookDeliveryStore,
+			Effect.map(WebhookDeliveryStore, (store) => ({
+				...store,
+				purge: (webhookId) =>
+					Effect.suspend(() => {
+						purgeCalls += 1
+						if (failPurge) {
+							return Effect.fail(new WebhookDeliveryStoreError({ cause: "transient purge outage" }))
+						}
+						return store.purge(webhookId)
+					}),
+			})),
+		)
+		const testLayer = FlakyPurgeDeliveries.pipe(Layer.provideMerge(harness.layer))
+
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+
+					const createRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/webhooks",
+						headers: AUTH_HEADERS,
+						body: {
+							url: "https://hooks.example.com/initial",
+							description: "Initial desc",
+							event_types: ["agent.created"],
+						},
+					})
+					expect(createRes.status).toBe(201)
+					const created = (yield* Effect.promise(() => createRes.json())) as WebhookJson
+
+					// Concurrent partial updates (URL-only + description-only) preserve both changes.
+					const [urlRes, descRes] = yield* Effect.all(
+						[
+							sendRequest(apiFetch, {
+								method: "POST",
+								path: `/v1/webhooks/${created.id}`,
+								headers: AUTH_HEADERS,
+								body: { url: "https://hooks.example.com/updated" },
+							}),
+							sendRequest(apiFetch, {
+								method: "POST",
+								path: `/v1/webhooks/${created.id}`,
+								headers: AUTH_HEADERS,
+								body: { description: "Updated desc" },
+							}),
+						],
+						{ concurrency: 2 },
+					)
+					expect(urlRes.status).toBe(200)
+					expect(descRes.status).toBe(200)
+
+					const afterUpdatesRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/webhooks/${created.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(afterUpdatesRes.status).toBe(200)
+					const afterUpdates = (yield* Effect.promise(() => afterUpdatesRes.json())) as WebhookJson
+					expect(afterUpdates.url).toBe("https://hooks.example.com/updated")
+					expect(afterUpdates.description).toBe("Updated desc")
+					expect(afterUpdates.event_types).toEqual(["agent.created"])
+
+					// Create a completed delivery so payloads exist in storage before deletion.
+					const testRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/webhooks/${created.id}/test`,
+						headers: AUTH_HEADERS,
+					})
+					expect(testRes.status).toBe(201)
+
+					// First DELETE tombstones the endpoint, fails purge -> 503 (never silently claims success).
+					const deleteFailRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: `/v1/webhooks/${created.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(deleteFailRes.status).toBe(503)
+					expect(purgeCalls).toBe(1)
+
+					// Retrying DELETE on the tombstoned endpoint completes purge and returns 200.
+					failPurge = false
+					const deleteRetryRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: `/v1/webhooks/${created.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(deleteRetryRes.status).toBe(200)
+					expect(purgeCalls).toBe(2)
+
+					// Deleting a never-created webhook still returns 404.
+					const missingDeleteRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: "/v1/webhooks/whe_does_not_exist_000000",
+						headers: AUTH_HEADERS,
+					})
+					expect(missingDeleteRes.status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(testLayer)),
 			)
 		} finally {
 			await harness.closeAll()

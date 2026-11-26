@@ -25965,8 +25965,7 @@
 					"endpoint": "test"
 				},
 				"x-checkfu-mcp": {
-					"name": "webhooks_testWebhook",
-					"destructive": false
+					"name": "webhooks_testWebhook"
 				}
 			}
 		},
@@ -27540,8 +27539,7 @@
 					"endpoint": "redeliver"
 				},
 				"x-checkfu-mcp": {
-					"name": "webhooks_redeliver",
-					"destructive": false
+					"name": "webhooks_redeliver"
 				}
 			}
 		}

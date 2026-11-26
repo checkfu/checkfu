@@ -1817,6 +1817,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			readonly id: string
 			readonly event_type: string
 			readonly status: string
+			readonly last_outcome: string | null
 		}
 
 		const badUrl = await apiFetch("/v1/webhooks", {
@@ -1828,7 +1829,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		const created = await apiJson<WebhookBody>("/v1/webhooks", {
 			method: "POST",
 			body: {
-				url: "https://hooks.example.invalid/workerd-webhook",
+				url: "https://127.0.0.1.nip.io/workerd-webhook",
 				description: "Workerd webhook test",
 				event_types: ["agent.created"],
 			},
@@ -1839,20 +1840,12 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(created.body.signing_secret?.startsWith("whsec_")).toBe(true)
 		const webhookId = created.body.id
 
-		// Wait for WebhookListing projection in real D1.
-		const listDeadline = Date.now() + 15_000
-		let listedIds: ReadonlyArray<string> = []
-		while (!listedIds.includes(webhookId) && Date.now() < listDeadline) {
-			const page = await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
-				"/v1/webhooks?limit=100",
-			)
-			expect(page.status).toBe(200)
-			listedIds = page.body.data.map((item) => item.id)
-			if (!listedIds.includes(webhookId)) {
-				await sleep(150)
-			}
-		}
-		expect(listedIds).toContain(webhookId)
+		// Registration is immediately visible in D1 WebhookListing upon 201 (no polling required).
+		const page = await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+			"/v1/webhooks?limit=100",
+		)
+		expect(page.status).toBe(200)
+		expect(page.body.data.map((item) => item.id)).toContain(webhookId)
 
 		const rotated = await apiJson<WebhookBody>(`/v1/webhooks/${webhookId}/rotate-secret`, {
 			method: "POST",
@@ -1869,11 +1862,21 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(testDelivery.status).toBe(201)
 		expect(testDelivery.body.event_type).toBe("webhook.test")
 
-		const fetchedDelivery = await apiJson<DeliveryBody>(
+		// In local Alchemy workerd without CHECKFU_WEBHOOK_EGRESS_URL, direct delivery fails closed as invalid_destination.
+		const localEgressDeadline = Date.now() + 15_000
+		let fetchedDelivery = await apiJson<DeliveryBody>(
 			`/v1/webhooks/${webhookId}/deliveries/${testDelivery.body.id}`,
 		)
+		while (fetchedDelivery.body.status === "pending" && Date.now() < localEgressDeadline) {
+			await sleep(150)
+			fetchedDelivery = await apiJson<DeliveryBody>(
+				`/v1/webhooks/${webhookId}/deliveries/${testDelivery.body.id}`,
+			)
+		}
 		expect(fetchedDelivery.status).toBe(200)
 		expect(fetchedDelivery.body.id).toBe(testDelivery.body.id)
+		expect(fetchedDelivery.body.status).toBe("failed")
+		expect(fetchedDelivery.body.last_outcome).toBe("invalid_destination")
 
 		// Creating an agent triggers PublishWebhookEvents -> WebhookEventsLive -> WebhookDeliverer DO SQLite.
 		const triggeredAgent = await apiJson<{ readonly id: string }>("/v1/agents", {

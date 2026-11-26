@@ -239,6 +239,19 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 					after.consecutive_failures === before.consecutive_failures,
 				].every((ok) => ok),
 			].some((ok) => ok),
+		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) => {
+			if (command._tag !== "UpdateWebhookEndpoint") {
+				return true
+			}
+			return [
+				after.url === (command.url === null ? before.url : command.url),
+				after.description ===
+					(command.description === null ? before.description : command.description),
+				after.event_types ===
+					(command.event_types === null ? before.event_types : command.event_types),
+				after.status === (command.reactivate ? "active" : before.status),
+			].every((ok) => ok)
+		},
 	},
 	decide: {
 		CreateWebhookEndpoint: (state, cmd, ctx) => {
@@ -264,14 +277,14 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			if (state.status === "deleted") {
 				return new WebhookDeletedError({ webhook_id: ctx.id })
 			}
-			if (!cmd.url.startsWith("https://")) {
+			if (cmd.url !== null && !cmd.url.startsWith("https://")) {
 				return new WebhookInvalidUrl({ url: cmd.url })
 			}
 			return [
 				new WebhookEndpointUpdated({
-					url: cmd.url,
-					description: cmd.description,
-					event_types: cmd.event_types,
+					url: cmd.url === null ? state.url : cmd.url,
+					description: cmd.description === null ? state.description : cmd.description,
+					event_types: cmd.event_types === null ? state.event_types : cmd.event_types,
 					reactivated: cmd.reactivate,
 				}),
 			]

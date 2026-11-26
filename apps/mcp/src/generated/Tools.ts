@@ -2553,7 +2553,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		path: "/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
 		readOnly: false,
 		idempotent: false,
-		destructive: false,
+		destructive: true,
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -2662,7 +2662,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		path: "/v1/webhooks/{webhook_id}/test",
 		readOnly: false,
 		idempotent: false,
-		destructive: false,
+		destructive: true,
 		inputSchema: {
 			type: "object",
 			properties: {

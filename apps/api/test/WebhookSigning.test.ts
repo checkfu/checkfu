@@ -3,6 +3,7 @@ import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as TestClock from "effect/testing/TestClock"
 import {
 	WEBHOOK_SECRET_PREFIX,
 	deriveWebhookSigningSecret,
@@ -160,6 +161,29 @@ describe("WebhookSigning (Standard Webhooks HMAC-SHA256)", () => {
 						signatureHeader: dualHeader,
 						payload,
 						nowSeconds: timestampSeconds + 301,
+					}),
+				).toBe(false)
+
+				// By default (without nowSeconds), Clock enforces the 5-minute replay window.
+				yield* TestClock.setTime((timestampSeconds + 10) * 1000)
+				expect(
+					yield* verifyStandardWebhook(mac, {
+						secret: newSecret,
+						webhookId: "wdel_1",
+						timestampSeconds,
+						signatureHeader: dualHeader,
+						payload,
+					}),
+				).toBe(true)
+
+				yield* TestClock.setTime((timestampSeconds + 301) * 1000)
+				expect(
+					yield* verifyStandardWebhook(mac, {
+						secret: newSecret,
+						webhookId: "wdel_1",
+						timestampSeconds,
+						signatureHeader: dualHeader,
+						payload,
 					}),
 				).toBe(false)
 			}).pipe(Effect.provide(CryptoLive)),

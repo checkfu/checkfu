@@ -2203,7 +2203,7 @@ const Webhooks = HttpApiGroup.make("webhooks")
 				"x-forge-group-name": "webhooks",
 				"x-forge-method-name": "test",
 				"x-checkfu-endpoint": { group: "webhooks", endpoint: "test" },
-				"x-checkfu-mcp": { name: "webhooks_testWebhook", destructive: false },
+				"x-checkfu-mcp": { name: "webhooks_testWebhook" },
 			}),
 	)
 	.add(
@@ -2281,7 +2281,7 @@ const Webhooks = HttpApiGroup.make("webhooks")
 				"x-forge-group-name": "webhooks.deliveries",
 				"x-forge-method-name": "redeliver",
 				"x-checkfu-endpoint": { group: "webhooks", endpoint: "redeliver" },
-				"x-checkfu-mcp": { name: "webhooks_redeliver", destructive: false },
+				"x-checkfu-mcp": { name: "webhooks_redeliver" },
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage outbound webhooks")

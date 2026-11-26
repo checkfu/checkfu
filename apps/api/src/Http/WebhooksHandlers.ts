@@ -50,7 +50,7 @@ import {
 	reject,
 	sha256Json,
 } from "./HttpHelpers.ts"
-import { makeLister } from "./Listing.ts"
+import { WebhookListingQuery, hydrateListingPage } from "./Listing.ts"
 
 export const keyedWebhookId = (digest: Digest.Digest["Service"], idempotencyKey: string) =>
 	Effect.map(idempotentId(digest, "whe", ["create", "webhook", "id", idempotencyKey]), (id) =>
@@ -125,12 +125,12 @@ const deliveryResource = (record: WebhookDeliveryRecord) => ({
 export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handlers) =>
 	Effect.gen(function* () {
 		const webhooks = yield* WebhookEndpoint
+		const webhookListing = yield* WebhookListingQuery
 		const deliveries = yield* WebhookDeliveryStore
 		const mac = yield* Mac.Mac
 		const masterKeyService = yield* WebhookSigningMasterKey
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
-		const list = yield* makeLister
 
 		const requireLive = (id: WebhookId) =>
 			webhooks.get(id).pipe(
@@ -174,111 +174,111 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 								? WebhookId.make(yield* randomId(random, "whe"))
 								: yield* keyedWebhookId(digest, idempotencyKey)
 						const secretSalt = yield* newWebhookSecretSalt(random)
-
-						if (idempotencyKey !== undefined) {
-							const fingerprint = yield* sha256Json(digest, {
-								operation: "create",
-								url: canonicalUrl,
-								description,
-								event_types: eventTypes,
-							})
-							const createCmdId = yield* idempotentCommandId(digest, "create-webhook", [
-								"create",
-								"webhook",
-								webhookId,
-								idempotencyKey,
-								fingerprint,
-							])
-							const createResult = yield* Effect.result(
-								webhooks.send(
-									new CreateWebhookEndpoint({
-										webhook_id: webhookId,
-										url: canonicalUrl,
-										description,
-										event_types: encodedEventTypes,
-										secret_salt: secretSalt,
-									}),
-									{ commandId: createCmdId },
-								),
-							)
-							if (
-								createResult._tag === "Failure" &&
-								createResult.failure._tag !== "WebhookAlreadyExists"
-							) {
-								return yield* createResult.failure
-							}
-							const claim = yield* webhooks.send(
-								new ClaimWebhookIdempotencyKey({ webhook_id: webhookId, fingerprint }),
-								{
-									commandId: yield* idempotentCommandId(digest, "create-webhook-claim", [
+						const commandId =
+							idempotencyKey === undefined
+								? `create-webhook:${webhookId}`
+								: yield* idempotentCommandId(digest, "create-webhook", [
+										"create",
+										"webhook",
 										webhookId,
 										idempotencyKey,
-									]),
-								},
-							)
-							if (
-								!claim.events.some(
-									(event) =>
-										event._tag === "webhook.idempotency_key_claimed" &&
-										event.fingerprint === fingerprint,
-								)
-							) {
-								return yield* reject(409, IDEMPOTENCY_KEY_REUSED)
-							}
-							const state = yield* requireLive(webhookId)
-							if (state.secret_revision !== 1) {
-								return yield* reject(
-									409,
-									"This webhook's signing secret has already been rotated since the original create request.",
-								)
-							}
-							const signingSecret = yield* deriveCurrentSecret(webhookId, state)
-							return { ...webhookResource(webhookId, state), signing_secret: signingSecret }
-						}
+										yield* sha256Json(digest, {
+											operation: "create",
+											url: canonicalUrl,
+											description,
+											event_types: eventTypes,
+										}),
+									])
 
-						yield* webhooks.send(
-							new CreateWebhookEndpoint({
-								webhook_id: webhookId,
-								url: canonicalUrl,
-								description,
-								event_types: encodedEventTypes,
-								secret_salt: secretSalt,
-							}),
-						)
+						const receipt = yield* webhooks
+							.send(
+								new CreateWebhookEndpoint({
+									webhook_id: webhookId,
+									url: canonicalUrl,
+									description,
+									event_types: encodedEventTypes,
+									secret_salt: secretSalt,
+								}),
+								{ commandId },
+							)
+							.pipe(
+								Effect.catchTag("WebhookAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+							)
+
+						// Wait until WebhookListing commits this registration to ListingStore so
+						// subsequent lifecycle events are guaranteed to discover this endpoint.
+						yield* webhookListing
+							.waitFor(receipt)
+							.pipe(
+								Effect.catchTag("WebhookListingTimeout", () =>
+									reject(503, "Webhook registration is still propagating. Retry the request."),
+								),
+							)
+
 						const state = yield* requireLive(webhookId)
+						if (idempotencyKey !== undefined && state.secret_revision !== 1) {
+							return yield* reject(
+								409,
+								"This webhook's signing secret has already been rotated since the original create request.",
+							)
+						}
 						const signingSecret = yield* deriveCurrentSecret(webhookId, state)
 						return { ...webhookResource(webhookId, state), signing_secret: signingSecret }
 					}),
 				),
 			)
-			.handle("list", ({ query }) => handled(list("webhook", query, retrieve)))
+			.handle("list", ({ query }) =>
+				handled(
+					Effect.gen(function* () {
+						const page = yield* webhookListing
+							.page(query.order ?? "asc", {
+								take: query.limit ?? 50,
+								...(query.after === undefined ? {} : { after: query.after }),
+							})
+							.pipe(
+								Effect.catchTag("WebhookListingTimeout", () =>
+									reject(503, "Webhook listing is temporarily unavailable. Retry the request."),
+								),
+							)
+						return yield* hydrateListingPage(page, {}, retrieve)
+					}),
+				),
+			)
 			.handle("get", ({ params }) => handled(retrieve(params.webhook_id)))
 			.handle("update", ({ params, payload }) =>
 				handled(
 					Effect.gen(function* () {
-						const existing = yield* requireLive(params.webhook_id)
-						const nextUrlRaw = payload.url ?? existing.url
-						const canonicalUrl = parsePublicHttpsWebhookUrl(nextUrlRaw)
-						if (canonicalUrl === null) {
-							return yield* reject(
-								400,
-								"Webhook URL must be a public HTTPS URL without embedded credentials or fragments.",
-							)
+						let nextUrl: string | null = null
+						if (payload.url !== undefined) {
+							const canonicalUrl = parsePublicHttpsWebhookUrl(payload.url)
+							if (canonicalUrl === null) {
+								return yield* reject(
+									400,
+									"Webhook URL must be a public HTTPS URL without embedded credentials or fragments.",
+								)
+							}
+							nextUrl = canonicalUrl
 						}
-						const nextDescription = payload.description ?? existing.description
+						const nextDescription = payload.description ?? null
 						const nextEventTypes =
 							payload.event_types === undefined
-								? existing.event_types
+								? null
 								: encodeWebhookEventTypes(dedupeEventTypes(payload.event_types))
-						yield* webhooks.send(
-							new UpdateWebhookEndpoint({
-								webhook_id: params.webhook_id,
-								url: canonicalUrl,
-								description: nextDescription,
-								event_types: nextEventTypes,
-								reactivate: payload.reactivate === true,
-							}),
-						)
+						yield* webhooks
+							.send(
+								new UpdateWebhookEndpoint({
+									webhook_id: params.webhook_id,
+									url: nextUrl,
+									description: nextDescription,
+									event_types: nextEventTypes,
+									reactivate: payload.reactivate === true,
+								}),
+							)
+							.pipe(
+								Effect.catchTag("WebhookDeletedError", () =>
+									reject(404, `Webhook ${params.webhook_id} not found.`),
+								),
+							)
 						const updated = yield* requireLive(params.webhook_id)
 						return webhookResource(params.webhook_id, updated)
 					}),
@@ -414,16 +414,22 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 			.handle("delete", ({ params }) =>
 				handled(
 					Effect.gen(function* () {
-						yield* requireLive(params.webhook_id)
-						yield* webhooks.send(new DeleteWebhookEndpoint({ webhook_id: params.webhook_id }))
-						yield* deliveries.purge(params.webhook_id).pipe(
-							Effect.catchTag("WebhookDeliveryStoreError", (error) =>
-								Effect.logError("Best-effort webhook delivery purge failed", {
-									webhook_id: params.webhook_id,
-									cause: error.cause,
-								}),
-							),
-						)
+						const state = yield* webhooks.get(params.webhook_id)
+						if (state.status === "") {
+							return yield* reject(404, `Webhook ${params.webhook_id} not found.`)
+						}
+						if (state.status !== "deleted") {
+							yield* webhooks
+								.send(new DeleteWebhookEndpoint({ webhook_id: params.webhook_id }))
+								.pipe(
+									Effect.catchTag("WebhookNotFound", (refused) =>
+										Effect.flatMap(webhooks.get(params.webhook_id), (now) =>
+											now.status === "deleted" ? Effect.void : Effect.fail(refused),
+										),
+									),
+								)
+						}
+						yield* storedDelivery(deliveries.purge(params.webhook_id))
 						return { id: params.webhook_id, type: "webhook_deleted" as const }
 					}),
 				),

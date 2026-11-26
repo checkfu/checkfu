@@ -4,20 +4,24 @@ import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import type { ListingEntry, ListingFilter } from "@checkfu/domain/Listing/ListingStore"
 import { WebhookEndpoint } from "@checkfu/domain/Webhook/WebhookEndpoint.aggregate"
 import { WebhookEvents } from "@checkfu/domain/Webhook/WebhookEvents.external"
+import type { WebhookEventPublication } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { matchesWebhookSubscription } from "@checkfu/domain/Webhook/WebhookTypes"
 import { WebhookDeliveryId, WebhookEventId, WebhookId } from "@checkfu/sdk/Schemas"
 import { RuntimeContext } from "alchemy/RuntimeContext"
+import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { WebhookDeliveryStore, buildWebhookEventEnvelopeJson } from "./WebhookDeliveryStore.ts"
+import type { WebhookDeliveryStoreError } from "./WebhookDeliveryStore.ts"
 
-const FANOUT_CONCURRENCY = 10
-const LIST_PAGE_SIZE = 100
+export const WEBHOOK_FANOUT_CONCURRENCY = 10
+export const WEBHOOK_FANOUT_PAGE_SIZE = 15
+
 const utf8 = new TextEncoder()
 
-const deterministicDeliveryId = (
+export const deterministicDeliveryId = (
 	digest: Digest.Digest["Service"],
 	webhookId: WebhookId,
 	eventId: string,
@@ -26,106 +30,165 @@ const deterministicDeliveryId = (
 		WebhookDeliveryId.make(`wdel_${hash.slice(0, 24)}`),
 	)
 
-export const listWebhookIdsFromPage = (
-	readPage: (
-		filter: ListingFilter,
-		page: Query.PageRequest,
-	) => Effect.Effect<Query.Page<ListingEntry>>,
-): Effect.Effect<ReadonlyArray<WebhookId>> =>
-	Effect.gen(function* () {
-		const ids: Array<WebhookId> = []
-		let after: string | undefined
-		for (;;) {
-			const page = yield* readPage(
-				{ kind: "webhook", include_archived: false, agent_id: null, order: "asc" },
-				{ take: LIST_PAGE_SIZE, after },
-			)
-			for (const entry of page.entries) {
-				ids.push(WebhookId.make(entry.id))
-			}
-			if (page.cursor === null) {
-				break
-			}
-			after = page.cursor
-		}
-		return ids
-	})
+export interface WebhookFanoutContinuationService {
+	readonly continueFanout: (
+		event: WebhookEventPublication,
+		afterCursor: string,
+	) => Effect.Effect<void, WebhookDeliveryStoreError>
+}
 
-export const makeWebhookEventsLive = (
-	listRegisteredWebhookIds: Effect.Effect<ReadonlyArray<WebhookId>>,
+export class WebhookFanoutContinuation extends Context.Service<
+	WebhookFanoutContinuation,
+	WebhookFanoutContinuationService
+>()("@checkfu/api/WebhookFanoutContinuation") {}
+
+export type ReadWebhookListingPage = (
+	filter: ListingFilter,
+	page: Query.PageRequest,
+) => Effect.Effect<Query.Page<ListingEntry>>
+
+export interface FanoutWebhookPageDeps {
+	readonly webhooks: WebhookEndpoint["Service"]
+	readonly deliveries: WebhookDeliveryStore["Service"]
+	readonly digest: Digest.Digest["Service"]
+}
+
+export const WEBHOOK_FANOUT_LISTING_FILTER: ListingFilter = {
+	kind: "webhook",
+	include_archived: false,
+	agent_id: null,
+	order: "asc",
+}
+
+/**
+ * Enqueues a single page of registered webhooks for `event`. Fails on the first
+ * enqueue error so the caller (either `PublishWebhookEvents` policy retry or a
+ * durable `WebhookFanout` continuation pass) retries the page safely using
+ * deterministic delivery IDs.
+ */
+export const fanoutWebhookPage = (
+	event: WebhookEventPublication,
+	entries: ReadonlyArray<ListingEntry>,
+	deps: FanoutWebhookPageDeps,
+): Effect.Effect<void, WebhookDeliveryStoreError> => {
+	if (entries.length === 0) {
+		return Effect.void
+	}
+	const payloadJson = buildWebhookEventEnvelopeJson({
+		event_id: event.event_id,
+		event_type: event.event_type,
+		resource_type: event.resource_type,
+		resource_id: event.resource_id,
+		occurred_at: event.occurred_at,
+		data_json: event.data_json,
+	})
+	return Stream.fromIterable(entries).pipe(
+		Stream.mapEffect(
+			(entry) =>
+				Effect.gen(function* () {
+					const webhookId = WebhookId.make(entry.id)
+					const endpoint = yield* deps.webhooks.get(webhookId)
+					if (
+						endpoint.status !== "active" ||
+						!matchesWebhookSubscription(endpoint.event_types, event.event_type)
+					) {
+						return
+					}
+					const deliveryId = yield* deterministicDeliveryId(deps.digest, webhookId, event.event_id)
+					yield* deps.deliveries
+						.enqueue(webhookId, {
+							delivery_id: deliveryId,
+							event_id: WebhookEventId.make(event.event_id),
+							event_type: event.event_type,
+							dedupe_key: event.event_id,
+							payload_json: payloadJson,
+						})
+						.pipe(
+							Effect.tapError((error) =>
+								Effect.logError("Failed to enqueue webhook delivery", {
+									webhook_id: webhookId,
+									event_id: event.event_id,
+									cause: error.cause,
+								}),
+							),
+						)
+				}),
+			{ concurrency: WEBHOOK_FANOUT_CONCURRENCY },
+		),
+		Stream.runDrain,
+	)
+}
+
+export const makeInlineWebhookFanoutContinuation = (
+	readPage: ReadWebhookListingPage,
+	pageSize: number = WEBHOOK_FANOUT_PAGE_SIZE,
 ) =>
 	Layer.effect(
-		WebhookEvents,
+		WebhookFanoutContinuation,
 		Effect.gen(function* () {
 			const webhooks = yield* WebhookEndpoint
 			const deliveries = yield* WebhookDeliveryStore
 			const digest = yield* Digest.Digest
+			const deps: FanoutWebhookPageDeps = { webhooks, deliveries, digest }
 			return {
-				publish: (input) =>
+				continueFanout: (event, initialCursor) =>
 					Effect.gen(function* () {
-						const webhookIds = yield* listRegisteredWebhookIds
-						if (webhookIds.length === 0) {
-							return
+						let after: string | null = initialCursor
+						while (after !== null) {
+							const page: Query.Page<ListingEntry> = yield* readPage(
+								WEBHOOK_FANOUT_LISTING_FILTER,
+								{
+									take: pageSize,
+									after,
+								},
+							)
+							yield* fanoutWebhookPage(event, page.entries, deps)
+							after = page.cursor
 						}
-						const payloadJson = buildWebhookEventEnvelopeJson({
-							event_id: input.event_id,
-							event_type: input.event_type,
-							resource_type: input.resource_type,
-							resource_id: input.resource_id,
-							occurred_at: input.occurred_at,
-							data_json: input.data_json,
-						})
-						yield* Stream.fromIterable(webhookIds).pipe(
-							Stream.mapEffect(
-								(webhookId) =>
-									Effect.gen(function* () {
-										const endpoint = yield* webhooks.get(webhookId)
-										if (
-											endpoint.status !== "active" ||
-											!matchesWebhookSubscription(endpoint.event_types, input.event_type)
-										) {
-											return
-										}
-										const deliveryId = yield* deterministicDeliveryId(
-											digest,
-											webhookId,
-											input.event_id,
-										)
-										yield* deliveries
-											.enqueue(webhookId, {
-												delivery_id: deliveryId,
-												event_id: WebhookEventId.make(input.event_id),
-												event_type: input.event_type,
-												dedupe_key: input.event_id,
-												payload_json: payloadJson,
-											})
-											.pipe(
-												Effect.catchTag("WebhookDeliveryStoreError", (error) =>
-													Effect.logError("Failed to enqueue webhook delivery", {
-														webhook_id: webhookId,
-														event_id: input.event_id,
-														cause: error.cause,
-													}),
-												),
-											)
-									}),
-								{ concurrency: FANOUT_CONCURRENCY },
-							),
-							Stream.runDrain,
-						)
 					}),
 			}
 		}),
 	)
 
+export const makeWebhookEventsLive = (
+	readPage: ReadWebhookListingPage,
+	options?: { readonly pageSize?: number },
+) => {
+	const pageSize = options?.pageSize ?? WEBHOOK_FANOUT_PAGE_SIZE
+	return Layer.effect(
+		WebhookEvents,
+		Effect.gen(function* () {
+			const webhooks = yield* WebhookEndpoint
+			const deliveries = yield* WebhookDeliveryStore
+			const digest = yield* Digest.Digest
+			const continuation = yield* WebhookFanoutContinuation
+			const deps: FanoutWebhookPageDeps = { webhooks, deliveries, digest }
+			return {
+				publish: (event) =>
+					Effect.gen(function* () {
+						const firstPage = yield* readPage(WEBHOOK_FANOUT_LISTING_FILTER, {
+							take: pageSize,
+							after: undefined,
+						})
+						if (firstPage.entries.length === 0) {
+							return
+						}
+						yield* fanoutWebhookPage(event, firstPage.entries, deps)
+						if (firstPage.cursor !== null) {
+							yield* continuation.continueFanout(event, firstPage.cursor)
+						}
+					}).pipe(Effect.orDie),
+			}
+		}),
+	)
+}
+
 export const WebhookEventsLive = Layer.unwrap(
 	Effect.gen(function* () {
 		const listing = yield* ListingStore
 		const runtime = yield* Cloudflare.Worker
-		return makeWebhookEventsLive(
-			listWebhookIdsFromPage((filter, page) =>
-				listing.page(filter, page).pipe(Effect.provideService(RuntimeContext, runtime)),
-			),
+		return makeWebhookEventsLive((filter, page) =>
+			listing.page(filter, page).pipe(Effect.provideService(RuntimeContext, runtime)),
 		)
 	}),
 )

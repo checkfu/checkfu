@@ -51,7 +51,7 @@ import {
 	SUSTAINED_FAILURE_DISABLE_WINDOW_MS,
 	WEBHOOK_SECRET_ROTATION_GRACE_MS,
 } from "../src/Webhook/WebhookTypes.ts"
-import { parsePublicHttpsWebhookUrl } from "../src/Webhook/WebhookUrl.ts"
+import { isPublicIpAddress, parsePublicHttpsWebhookUrl } from "../src/Webhook/WebhookUrl.ts"
 import { Webhooks, WebhooksHandlersLive } from "../src/Webhooks.model.ts"
 
 const story = Story.make(Webhooks, {
@@ -98,9 +98,44 @@ describe("WebhookUrl SSRF validation", () => {
 			"https://[::ffff:7f00:1]/hook",
 			"https://[64:ff9b::127.0.0.1]/hook",
 			"https://[2001:db8::1]/hook",
+			"https://[2001:0db8::1]/hook",
 			"https://[2002:7f00:1::]/hook",
+			// Canonicalizes via UTF-8 percent-encoding past the 2048-byte limit.
+			`https://hooks.example.com/${"é".repeat(400)}`,
 		]) {
 			expect(parsePublicHttpsWebhookUrl(bad), bad).toBeNull()
+		}
+
+		expect(isPublicIpAddress("1.1.1.1")).toBe(true)
+		expect(isPublicIpAddress("93.184.216.34")).toBe(true)
+		expect(isPublicIpAddress("2606:4700:4700::1111")).toBe(true)
+		expect(isPublicIpAddress("::ffff:93.184.216.34")).toBe(true)
+		for (const badIp of [
+			"",
+			"not-an-ip",
+			"127.0.0.1",
+			"10.0.0.1",
+			"172.16.0.1",
+			"192.168.1.1",
+			"169.254.169.254",
+			"100.64.0.1",
+			"198.18.0.1",
+			"224.0.0.1",
+			"::1",
+			"::",
+			"fc00::1",
+			"fd12:3456::1",
+			"fe80::1",
+			"fe80::1%eth0",
+			"::ffff:127.0.0.1",
+			"::ffff:7f00:1",
+			"0:0:0:0:0:ffff:7f00:1",
+			"2001:db8::1",
+			"2001:0db8::1",
+			"2002::1",
+			"64:ff9b::127.0.0.1",
+		]) {
+			expect(isPublicIpAddress(badIp), badIp).toBe(false)
 		}
 	})
 })
@@ -329,7 +364,7 @@ describe("Webhooks model stories", () => {
 						webhook_id: endpoint.id,
 						url: "https://hooks.example.com/health-v2",
 						description: "Fixed URL",
-						event_types: "*",
+						event_types: null,
 						reactivate: true,
 					}),
 				),
@@ -344,9 +379,39 @@ describe("Webhooks model stories", () => {
 				),
 				Story.state(endpoint, {
 					status: "active",
+					url: "https://hooks.example.com/health-v2",
+					description: "Fixed URL",
+					event_types: "*",
 					definition_revision: 2,
 					failure_window_started_at: 0,
 					consecutive_failures: 0,
+				}),
+
+				// Partial description-only update preserves url and event_types atomically.
+				Story.when(
+					new UpdateWebhookEndpoint({
+						webhook_id: endpoint.id,
+						url: null,
+						description: "Renamed sink",
+						event_types: null,
+						reactivate: false,
+					}),
+				),
+				Story.then(
+					endpoint,
+					new WebhookEndpointUpdated({
+						url: "https://hooks.example.com/health-v2",
+						description: "Renamed sink",
+						event_types: "*",
+						reactivated: false,
+					}),
+				),
+				Story.state(endpoint, {
+					status: "active",
+					url: "https://hooks.example.com/health-v2",
+					description: "Renamed sink",
+					event_types: "*",
+					definition_revision: 3,
 				}),
 
 				// Stale outcome from revision 1 is ignored.
@@ -364,7 +429,7 @@ describe("Webhooks model stories", () => {
 				Story.when(
 					new RecordWebhookOutcome({
 						webhook_id: endpoint.id,
-						definition_revision: 2,
+						definition_revision: 3,
 						outcome: "failed",
 						observed_at: t0Ms + 10_000,
 					}),
@@ -379,7 +444,7 @@ describe("Webhooks model stories", () => {
 				Story.when(
 					new RecordWebhookOutcome({
 						webhook_id: endpoint.id,
-						definition_revision: 2,
+						definition_revision: 3,
 						outcome: "failed",
 						observed_at: t0Ms + 10_000 + SUSTAINED_FAILURE_DISABLE_WINDOW_MS,
 					}),
@@ -399,7 +464,7 @@ describe("Webhooks model stories", () => {
 				Story.then(endpoint, new WebhookEndpointResumed()),
 				Story.state(endpoint, {
 					status: "active",
-					definition_revision: 3,
+					definition_revision: 4,
 					failure_window_started_at: 0,
 					last_failure_at: 0,
 					consecutive_failures: 0,
@@ -413,7 +478,7 @@ describe("Webhooks model stories", () => {
 				Story.then(endpoint, new WebhookEndpointResumed()),
 				Story.state(endpoint, {
 					status: "active",
-					definition_revision: 4,
+					definition_revision: 5,
 					failure_window_started_at: 0,
 					last_failure_at: 0,
 					consecutive_failures: 0,

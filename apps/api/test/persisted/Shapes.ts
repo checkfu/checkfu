@@ -15,7 +15,10 @@ import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
 import { CANCELLED_OPS_TABLE } from "../../src/Pi/TurnFence.ts"
-import { WEBHOOK_DELIVERIES_TABLE } from "../../src/Webhooks/WebhookDeliveryEngine.ts"
+import {
+	WEBHOOK_DELIVERIES_TABLE,
+	WEBHOOK_HEALTH_OUTCOMES_TABLE,
+} from "../../src/Webhooks/WebhookDeliveryEngine.ts"
 
 export type PersistedSchema = Schema.Codec<unknown, unknown, never, never>
 
@@ -460,6 +463,11 @@ const WEBHOOK_TABLES: ReadonlyArray<PersistedShape> = [
 		id: "webhook-table:webhook_deliveries",
 		kind: "webhook-table",
 		schema: Schema.Literal(WEBHOOK_DELIVERIES_TABLE),
+	},
+	{
+		id: "webhook-table:webhook_health_outcomes",
+		kind: "webhook-table",
+		schema: Schema.Literal(WEBHOOK_HEALTH_OUTCOMES_TABLE),
 	},
 ]
 

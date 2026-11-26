@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { Random } from "alchemy/Random"
 import { RuntimeContext } from "alchemy/RuntimeContext"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Mac from "effect/crypto/Mac"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
@@ -150,11 +151,10 @@ export const verifyStandardWebhook = (
 		if (!Number.isInteger(input.timestampSeconds) || input.timestampSeconds < 0) {
 			return false
 		}
-		if (input.nowSeconds !== undefined) {
-			const tolerance = input.toleranceSeconds ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS
-			if (Math.abs(input.nowSeconds - input.timestampSeconds) > tolerance) {
-				return false
-			}
+		const nowSeconds = input.nowSeconds ?? Math.floor((yield* Clock.currentTimeMillis) / 1000)
+		const tolerance = input.toleranceSeconds ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS
+		if (Math.abs(nowSeconds - input.timestampSeconds) > tolerance) {
+			return false
 		}
 		const bytes = decodeSigningSecretBytes(input.secret)
 		if (bytes === null) {

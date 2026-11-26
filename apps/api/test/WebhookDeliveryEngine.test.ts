@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer"
 import * as TestClock from "effect/testing/TestClock"
 import {
 	WEBHOOK_MAX_ATTEMPTS,
+	WEBHOOK_MAX_PENDING_DELIVERIES,
 	WEBHOOK_MAX_STORED_DELIVERIES,
 	WEBHOOK_RETENTION_MS,
 	WEBHOOK_RETRY_DELAYS_MS,
@@ -38,6 +39,17 @@ const sqliteStorage = (db: DatabaseSync): WebhookSqlStorage => ({
 		stmt.run(...bindings)
 		return { toArray: () => [] }
 	},
+	transaction: (fn) => {
+		db.exec("BEGIN IMMEDIATE")
+		try {
+			const result = fn()
+			db.exec("COMMIT")
+			return result
+		} catch (error) {
+			db.exec("ROLLBACK")
+			throw error
+		}
+	},
 })
 
 const T0 = Date.parse("2026-01-01T00:00:00.000Z")
@@ -65,7 +77,7 @@ const CryptoLive = Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCr
 
 describe("WebhookDeliveryEngine (real SQLite)", () => {
 	it.effect(
-		"deduplicates enqueues, delivers signed payloads with zero health writes when healthy, and supports dual-secret rotation",
+		"deduplicates enqueues, delivers signed payloads with zero health writes when healthy, supports dual-secret rotation, and schedules idle 14d retention cleanup",
 		() =>
 			Effect.gen(function* () {
 				yield* TestClock.setTime(T0)
@@ -125,7 +137,11 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 					},
 				})
 
-				expect(drain).toEqual({ processed: 1, purged: false, nextAlarmAt: null })
+				expect(drain).toEqual({
+					processed: 1,
+					purged: false,
+					nextAlarmAt: T0 + WEBHOOK_RETENTION_MS,
+				})
 				expect(recordedOutcomes).toEqual([])
 				expect(sent).toHaveLength(1)
 
@@ -205,6 +221,253 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 						payload: postGrace.body,
 					}),
 				).toBe(false)
+
+				// When idle past 14d retention, reads immediately enforce expiry AND the retention alarm clears storage.
+				const afterAllExpired = T0 + 86_400_000 + 1000 + WEBHOOK_RETENTION_MS
+				yield* TestClock.setTime(afterAllExpired)
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_1"), afterAllExpired)).toBeNull()
+				expect(
+					engine.redeliver(
+						WebhookDeliveryId.make("wdel_2"),
+						WebhookDeliveryId.make("wdel_late"),
+						afterAllExpired,
+					),
+				).toBeNull()
+				expect(engine.listDeliveries({ limit: 50 }, afterAllExpired).data).toEqual([])
+				expect(engine.nextAlarmAt()).toBeNull()
+				db.close()
+			}).pipe(Effect.provide(CryptoLive)),
+	)
+
+	it.effect(
+		"enforces idle retention alarm when no reads arrive after the last completed delivery",
+		() =>
+			Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				const db = new DatabaseSync(":memory:")
+				const webhookId = WebhookId.make("whe_idle_ret")
+				const engine = new WebhookDeliveryEngine(webhookId, sqliteStorage(db))
+				const mac = yield* Mac.Mac
+				const masterKey = yield* makeWebhookMasterKey("idle-master")
+				const endpoint = activeEndpoint()
+
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_idle"),
+						event_id: WebhookEventId.make("evt_idle"),
+						event_type: "agent.created",
+						dedupe_key: "evt_idle",
+						payload_json: "{}",
+					},
+					T0,
+				)
+				const first = yield* engine.drainDue({
+					readEndpoint: Effect.succeed(endpoint),
+					recordOutcome: () => Effect.succeed(endpoint),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: { send: () => Effect.succeed({ kind: "response", status: 200 }) },
+				})
+				expect(first.nextAlarmAt).toBe(T0 + WEBHOOK_RETENTION_MS)
+
+				yield* TestClock.setTime(T0 + WEBHOOK_RETENTION_MS)
+				const cleanup = yield* engine.drainDue({
+					readEndpoint: Effect.succeed(endpoint),
+					recordOutcome: () => Effect.succeed(endpoint),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: { send: () => Effect.succeed({ kind: "response", status: 200 }) },
+				})
+				expect(cleanup).toEqual({ processed: 0, purged: false, nextAlarmAt: null })
+				expect(engine.listDeliveries({ limit: 50 }).data).toEqual([])
+				db.close()
+			}).pipe(Effect.provide(CryptoLive)),
+	)
+
+	it.effect(
+		"refreshes endpoint config and signing window before every row in a batch (pause, URL update, secret expiry, delete)",
+		() =>
+			Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				const db = new DatabaseSync(":memory:")
+				const webhookId = WebhookId.make("whe_refresh")
+				const engine = new WebhookDeliveryEngine(webhookId, sqliteStorage(db))
+				const mac = yield* Mac.Mac
+				const masterKey = yield* makeWebhookMasterKey("refresh-master")
+				const prevExpiry = T0 + 10_000
+				let endpoint = activeEndpoint({
+					url: "https://hooks.example.com/v1",
+					definition_revision: 1,
+					secret_revision: 2,
+					secret_salt: "22222222222222222222222222222222",
+					previous_secret_revision: 1,
+					previous_secret_salt: "11111111111111111111111111111111",
+					previous_secret_expires_at: prevExpiry,
+				})
+				const sent: Array<WebhookHttpRequest> = []
+				const recordedRevisions: Array<number> = []
+
+				for (const i of [1, 2, 3]) {
+					engine.enqueue(
+						{
+							delivery_id: WebhookDeliveryId.make(`wdel_r${i}`),
+							event_id: WebhookEventId.make(`evt_r${i}`),
+							event_type: "agent.created",
+							dedupe_key: `evt_r${i}`,
+							payload_json: `{"i":${i}}`,
+						},
+						T0 + i,
+					)
+				}
+				yield* TestClock.setTime(T0 + 5)
+
+				const drain = yield* engine.drainDue({
+					readEndpoint: Effect.sync(() => endpoint),
+					recordOutcome: (input) =>
+						Effect.sync(() => {
+							recordedRevisions.push(input.definition_revision)
+							return endpoint
+						}),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: (req) =>
+							Effect.gen(function* () {
+								sent.push(req)
+								if (sent.length === 1) {
+									// Operator updates URL + bumps revision, and clock passes previous_secret_expires_at while row 1 is in flight.
+									endpoint = {
+										...endpoint,
+										url: "https://hooks.example.com/v2",
+										definition_revision: 2,
+									}
+									yield* TestClock.setTime(prevExpiry + 1000)
+									return { kind: "response" as const, status: 200 }
+								}
+								// Operator pauses endpoint while row 2 is in flight -> row 3 must NOT be sent.
+								endpoint = { ...endpoint, status: "paused" }
+								return { kind: "response" as const, status: 500 }
+							}),
+					},
+				})
+
+				expect(drain.processed).toBe(2)
+				expect(sent).toHaveLength(2)
+				expect(sent[0]!.url).toBe("https://hooks.example.com/v1")
+				expect(sent[1]!.url).toBe("https://hooks.example.com/v2")
+
+				// Row 1 had dual signatures; row 2 signed ONLY with current secret after expiry passed mid-batch.
+				expect(sent[0]!.headers[STANDARD_WEBHOOK_HEADERS.signature]!.split(" ")).toHaveLength(2)
+				expect(sent[1]!.headers[STANDARD_WEBHOOK_HEADERS.signature]!.split(" ")).toHaveLength(1)
+
+				// Row 2 recorded its failure outcome against revision 2 (the revision actually used for row 2).
+				expect(recordedRevisions).toEqual([2])
+				// Row 3 was skipped once the pause was observed before sending row 3.
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_r3"))?.status).toBe("skipped")
+				db.close()
+			}).pipe(Effect.provide(CryptoLive)),
+	)
+
+	it.effect(
+		"persists health outcomes durably and retries them with deterministic outcome_id before sending subsequent rows",
+		() =>
+			Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				const db = new DatabaseSync(":memory:")
+				const webhookId = WebhookId.make("whe_outbox")
+				const engine = new WebhookDeliveryEngine(webhookId, sqliteStorage(db))
+				const mac = yield* Mac.Mac
+				const masterKey = yield* makeWebhookMasterKey("outbox-master")
+				let endpoint = activeEndpoint()
+				let failRecordOutcome = true
+				const seenOutcomeIds: Array<string> = []
+				const sentUrls: Array<string> = []
+
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_o1"),
+						event_id: WebhookEventId.make("evt_o1"),
+						event_type: "agent.created",
+						dedupe_key: "evt_o1",
+						payload_json: "{}",
+					},
+					T0,
+				)
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_o2"),
+						event_id: WebhookEventId.make("evt_o2"),
+						event_type: "agent.created",
+						dedupe_key: "evt_o2",
+						payload_json: "{}",
+					},
+					T0 + 1,
+				)
+				yield* TestClock.setTime(T0 + 5)
+
+				const runDrain = () =>
+					engine.drainDue({
+						readEndpoint: Effect.sync(() => endpoint),
+						recordOutcome: (input) =>
+							Effect.suspend(() => {
+								seenOutcomeIds.push(input.outcome_id)
+								if (failRecordOutcome) {
+									return Effect.die(new Error("transient aggregate RPC error"))
+								}
+								if (input.outcome === "redirect") {
+									endpoint = { ...endpoint, status: "disabled_redirect" }
+								}
+								return Effect.succeed(endpoint)
+							}),
+						mac,
+						masterKey: Effect.succeed(masterKey),
+						sender: {
+							send: (req) =>
+								Effect.sync(() => {
+									sentUrls.push(req.url)
+									return { kind: "response", status: 302 }
+								}),
+						},
+					})
+
+				// Attempt 1: row 1 returns 302, commits terminal row + outbox, then recordOutcome fails.
+				const failedExit = yield* Effect.exit(runDrain())
+				expect(failedExit._tag).toBe("Failure")
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_o1"))?.status).toBe("failed")
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_o1"))?.last_outcome).toBe(
+					"http_redirect",
+				)
+				expect(engine.pendingHealthOutcomesCount()).toBe(1)
+				expect(engine.nextAlarmAt()).toBeLessThanOrEqual(T0 + 5)
+				expect(sentUrls).toHaveLength(1)
+
+				// Attempt 2 (alarm retry): flushes persisted redirect outcome FIRST, disables endpoint, skips row 2 without sending it!
+				failRecordOutcome = false
+				const recovered = yield* runDrain()
+				expect(recovered.processed).toBe(0)
+				expect(engine.pendingHealthOutcomesCount()).toBe(0)
+				expect(endpoint.status).toBe("disabled_redirect")
+				expect(sentUrls).toHaveLength(1)
+				expect(seenOutcomeIds).toEqual(["wdel_o1:1", "wdel_o1:1"])
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_o2"))?.status).toBe("skipped")
+
+				// Even with zero remaining pending deliveries, an unacknowledged health outcome keeps nextAlarmAt immediate (not delayed 14d).
+				endpoint = activeEndpoint({ definition_revision: 2 })
+				failRecordOutcome = true
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_o3"),
+						event_id: WebhookEventId.make("evt_o3"),
+						event_type: "agent.created",
+						dedupe_key: "evt_o3",
+						payload_json: "{}",
+					},
+					T0 + 100,
+				)
+				yield* TestClock.setTime(T0 + 100)
+				expect((yield* Effect.exit(runDrain()))._tag).toBe("Failure")
+				expect(engine.pendingHealthOutcomesCount()).toBe(1)
+				expect(engine.nextAlarmAt()).toBe(T0 + 100)
 				db.close()
 			}).pipe(Effect.provide(CryptoLive)),
 	)
@@ -275,11 +538,11 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 						now += expectedDelay
 						yield* TestClock.setTime(now)
 					} else {
-						expect(res.nextAlarmAt).toBeNull()
+						expect(res.nextAlarmAt).toBe(T0 + WEBHOOK_RETENTION_MS)
 					}
 				}
 
-				const exhausted = engine.getDelivery(WebhookDeliveryId.make("wdel_fail"))
+				const exhausted = engine.getDelivery(WebhookDeliveryId.make("wdel_fail"), now)
 				expect(exhausted?.status).toBe("failed")
 				expect(exhausted?.attempt_count).toBe(WEBHOOK_MAX_ATTEMPTS)
 				expect(exhausted?.last_outcome).toBe("http_5xx")
@@ -295,19 +558,25 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				expect(redelivered?.record.id).toBe("wdel_retry_ok")
 				yield* TestClock.setTime(now + 1000)
 				const okDrain = yield* runDrain()
-				expect(okDrain).toEqual({ processed: 1, purged: false, nextAlarmAt: null })
+				expect(okDrain).toEqual({
+					processed: 1,
+					purged: false,
+					nextAlarmAt: T0 + WEBHOOK_RETENTION_MS,
+				})
 				expect(outcomes.at(-1)).toBe("delivered")
 				expect(endpoint.failure_window_started_at).toBe(0)
-				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_fail"))?.status).toBe("failed")
-				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_retry_ok"))?.status).toBe(
-					"succeeded",
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_fail"), now + 1000)?.status).toBe(
+					"failed",
 				)
+				expect(
+					engine.getDelivery(WebhookDeliveryId.make("wdel_retry_ok"), now + 1000)?.status,
+				).toBe("succeeded")
 				db.close()
 			}).pipe(Effect.provide(CryptoLive)),
 	)
 
 	it.effect(
-		"disables on redirect, skips queued rows, self-purges on delete, and enforces 500-row / 14d retention + pagination",
+		"never evicts pending rows during 500-row terminal history pruning, bounds pending queue with backpressure, and self-purges on delete",
 		() =>
 			Effect.gen(function* () {
 				yield* TestClock.setTime(T0)
@@ -318,78 +587,90 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				const masterKey = yield* makeWebhookMasterKey("ops-master")
 				let endpoint = activeEndpoint()
 
-				engine.enqueue(
-					{
-						delivery_id: WebhookDeliveryId.make("wdel_a"),
-						event_id: WebhookEventId.make("evt_a"),
-						event_type: "agent.created",
-						dedupe_key: "evt_a",
-						payload_json: "{}",
-					},
-					T0,
-				)
-				engine.enqueue(
-					{
-						delivery_id: WebhookDeliveryId.make("wdel_b"),
-						event_id: WebhookEventId.make("evt_b"),
-						event_type: "agent.created",
-						dedupe_key: "evt_b",
-						payload_json: "{}",
-					},
-					T0 + 1,
-				)
-
-				const redirDrain = yield* engine.drainDue({
-					readEndpoint: Effect.sync(() => endpoint),
-					recordOutcome: (input) =>
-						Effect.sync(() => {
-							if (input.outcome === "redirect") {
-								endpoint = { ...endpoint, status: "disabled_redirect" }
-							}
-							return endpoint
-						}),
-					mac,
-					masterKey: Effect.succeed(masterKey),
-					sender: { send: () => Effect.succeed({ kind: "response", status: 301 }) },
-				})
-				expect(redirDrain).toEqual({ processed: 1, purged: false, nextAlarmAt: null })
-				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_a"))?.status).toBe("failed")
-				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_b"))?.status).toBe("skipped")
-
-				// Retention: cap at 500 rows and keyset paginate cleanly.
-				endpoint = activeEndpoint({
-					failure_window_started_at: 0,
-					last_failure_at: 0,
-					consecutive_failures: 0,
-				})
+				// Enqueue 520 pending rows: NONE may be evicted by the 500-row terminal history cap.
 				for (let i = 0; i < WEBHOOK_MAX_STORED_DELIVERIES + 20; i++) {
-					const ts = T0 + 10_000 + i
+					const ts = T0 + i
 					engine.enqueue(
 						{
-							delivery_id: WebhookDeliveryId.make(`wdel_cap_${String(i).padStart(4, "0")}`),
-							event_id: WebhookEventId.make(`evt_cap_${i}`),
+							delivery_id: WebhookDeliveryId.make(`wdel_pend_${String(i).padStart(4, "0")}`),
+							event_id: WebhookEventId.make(`evt_pend_${i}`),
 							event_type: "agent.created",
-							dedupe_key: `evt_cap_${i}`,
+							dedupe_key: `evt_pend_${i}`,
 							payload_json: "{}",
 						},
 						ts,
 					)
 				}
-				const firstPage = engine.listDeliveries({ limit: 100 })
+				expect(engine.getDelivery(WebhookDeliveryId.make("wdel_pend_0000"))?.status).toBe("pending")
+
+				// Drain all 520 deliveries to terminal succeeded -> terminal history caps at 500 and keyset paginates cleanly.
+				yield* TestClock.setTime(T0 + 10_000)
+				for (;;) {
+					const res = yield* engine.drainDue({
+						readEndpoint: Effect.sync(() => endpoint),
+						recordOutcome: () => Effect.succeed(endpoint),
+						mac,
+						masterKey: Effect.succeed(masterKey),
+						sender: { send: () => Effect.succeed({ kind: "response", status: 200 }) },
+						batchSize: 100,
+					})
+					if (res.processed === 0) {
+						break
+					}
+				}
+				const firstPage = engine.listDeliveries({ limit: 100 }, T0 + 10_000)
 				expect(firstPage.data).toHaveLength(100)
 				expect(firstPage.has_more).toBe(true)
-				expect(firstPage.next_cursor).not.toBeNull()
-
 				let totalListed = firstPage.data.length
 				let cursor = firstPage.next_cursor
 				while (cursor !== null) {
-					const next = engine.listDeliveries({ after: cursor, limit: 100 })
+					const next = engine.listDeliveries({ after: cursor, limit: 100 }, T0 + 10_000)
 					totalListed += next.data.length
 					cursor = next.next_cursor
 				}
 				expect(totalListed).toBe(WEBHOOK_MAX_STORED_DELIVERIES)
 
-				// Sustained failure past 14d prunes old non-pending rows and deleted endpoint purges all rows.
+				// Pending queue rejects new work cleanly at WEBHOOK_MAX_PENDING_DELIVERIES rather than evicting accepted rows.
+				for (let i = 0; i < WEBHOOK_MAX_PENDING_DELIVERIES; i++) {
+					engine.enqueue(
+						{
+							delivery_id: WebhookDeliveryId.make(`wdel_q_${String(i).padStart(4, "0")}`),
+							event_id: WebhookEventId.make(`evt_q_${i}`),
+							event_type: "agent.created",
+							dedupe_key: `evt_q_${i}`,
+							payload_json: "{}",
+						},
+						T0 + 20_000 + i,
+					)
+				}
+				// Replaying an existing dedupe key still succeeds when full.
+				expect(
+					engine.enqueue(
+						{
+							delivery_id: WebhookDeliveryId.make("wdel_q_dup"),
+							event_id: WebhookEventId.make("evt_q_0"),
+							event_type: "agent.created",
+							dedupe_key: "evt_q_0",
+							payload_json: "{}",
+						},
+						T0 + 30_000,
+					).record.id,
+				).toBe("wdel_q_0000")
+				// A brand-new event above the cap throws backpressure error.
+				expect(() =>
+					engine.enqueue(
+						{
+							delivery_id: WebhookDeliveryId.make("wdel_q_overflow"),
+							event_id: WebhookEventId.make("evt_q_overflow"),
+							event_type: "agent.created",
+							dedupe_key: "evt_q_overflow",
+							payload_json: "{}",
+						},
+						T0 + 30_001,
+					),
+				).toThrow(/pending delivery queue is full/)
+
+				// Deleted endpoint self-purges all deliveries and health outcomes.
 				yield* TestClock.setTime(T0 + WEBHOOK_RETENTION_MS + SUSTAINED_FAILURE_DISABLE_WINDOW_MS)
 				endpoint = { ...endpoint, status: "deleted", secret_salt: "" }
 				const purged = yield* engine.drainDue({

@@ -276,10 +276,10 @@ describe("Checkfu MCP server", () => {
 				webhooks_listDeliveries: "read-only, additive, repeatable",
 				webhooks_listWebhooks: "read-only, additive, repeatable",
 				webhooks_pauseWebhook: "writes, destructive, repeatable",
-				webhooks_redeliver: "writes, additive, not repeatable",
+				webhooks_redeliver: "writes, destructive, not repeatable",
 				webhooks_resumeWebhook: "writes, destructive, repeatable",
 				webhooks_rotateWebhookSecret: "writes, destructive, not repeatable",
-				webhooks_testWebhook: "writes, additive, not repeatable",
+				webhooks_testWebhook: "writes, destructive, not repeatable",
 				webhooks_updateWebhook: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
