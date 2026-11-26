@@ -528,28 +528,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
-					const nested = payload.agent
-					const nestedAgentId = typeof nested === "string" ? nested : nested?.id
-					if (
-						nestedAgentId !== undefined &&
-						payload.agent_id !== undefined &&
-						nestedAgentId !== payload.agent_id
-					) {
-						return yield* reject(400, "Conflicting agent and agent_id values.")
-					}
-					const nestedVersion = typeof nested === "object" ? nested.version : undefined
-					if (
-						nestedVersion !== undefined &&
-						payload.agent_version !== undefined &&
-						nestedVersion !== payload.agent_version
-					) {
-						return yield* reject(400, "Conflicting agent.version and agent_version values.")
-					}
-					const rawAgentId = nestedAgentId ?? payload.agent_id
-					if (rawAgentId === undefined) {
-						return yield* reject(400, "Either agent or agent_id is required.")
-					}
-
+					const agent = payload.agent
+					const rawAgentId = typeof agent === "string" ? agent : agent.id
 					const decodedAgentId = Schema.decodeOption(AgentId)(rawAgentId)
 					if (Option.isNone(decodedAgentId)) {
 						return yield* reject(404, `Agent ${rawAgentId} not found.`)
@@ -559,9 +539,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return yield* reject(404, `Environment ${payload.environment_id} not found.`)
 					}
 					const agentId = decodedAgentId.value
-					const explicitVersion = nestedVersion ?? payload.agent_version
 					const environmentId = decodedEnvironmentId.value
-					const agentVersion = explicitVersion ?? null
+					const agentVersion = typeof agent === "string" ? null : (agent.version ?? null)
 					const title = payload.title ?? null
 					const messages = yield* Effect.forEach(
 						payload.initial_events ?? [],

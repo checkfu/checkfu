@@ -92,6 +92,7 @@ describe("normalizeApiUrl", () => {
 									seq,
 									type,
 									created_at: "2026-11-22T00:00:00.000Z",
+									processed_at: "2026-11-22T00:00:00.000Z",
 									content: [{ type: "text", text: `msg ${seq}` }],
 								}
 							: {
@@ -99,6 +100,7 @@ describe("normalizeApiUrl", () => {
 									seq,
 									type,
 									created_at: "2026-11-22T00:00:00.000Z",
+									processed_at: "2026-11-22T00:00:00.000Z",
 								}
 					return `id: ${seq}${eol}event: ${type}${eol}data: ${JSON.stringify(payload)}${eol}${eol}`
 				}

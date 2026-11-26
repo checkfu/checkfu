@@ -8842,274 +8842,125 @@
 					"content": {
 						"application/json": {
 							"schema": {
-								"anyOf": [
-									{
-										"type": "object",
-										"properties": {
-											"agent": {
-												"anyOf": [
-													{
+								"type": "object",
+								"properties": {
+									"agent": {
+										"anyOf": [
+											{
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["agent"]
+													},
+													"id": {
 														"type": "string",
 														"minLength": 1,
 														"maxLength": 256
 													},
-													{
-														"type": "object",
-														"properties": {
-															"type": {
-																"type": "string",
-																"enum": ["agent"]
-															},
-															"id": {
-																"type": "string",
-																"minLength": 1,
-																"maxLength": 256
-															},
-															"version": {
-																"type": "integer",
-																"minimum": 1,
-																"maximum": 9007199254740991
-															}
-														},
-														"required": ["id"],
-														"additionalProperties": false
+													"version": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
 													}
-												],
-												"description": "Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
-											},
-											"agent_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Agent ID (alternative to agent)"
-											},
-											"initial_events": {
-												"type": "array",
-												"items": {
-													"type": "object",
-													"properties": {
-														"type": {
-															"type": "string",
-															"enum": ["user.message"]
-														},
-														"content": {
-															"type": "array",
-															"items": {
-																"type": "object",
-																"properties": {
-																	"type": {
-																		"type": "string",
-																		"enum": ["text"]
-																	},
-																	"text": {
-																		"type": "string"
-																	}
-																},
-																"required": ["type", "text"],
-																"additionalProperties": false
-															},
-															"minItems": 1
-														}
-													},
-													"required": ["type", "content"],
-													"additionalProperties": false
 												},
-												"maxItems": 50,
-												"description": "User messages to send in order when the session is created."
-											},
-											"agent_version": {
-												"type": "integer",
-												"minimum": 1,
-												"maximum": 9007199254740991,
-												"description": "Optional pinned agent version"
-											},
-											"environment_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Environment ID for the session"
-											},
-											"title": {
-												"anyOf": [
-													{
-														"type": "string",
-														"maxLength": 1024
-													},
-													{
-														"type": "null"
-													}
-												],
-												"description": "Optional session title"
-											},
-											"vault_ids": {
-												"type": "array",
-												"items": {
-													"type": "string",
-													"minLength": 1
-												},
-												"maxItems": 20,
-												"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
-											},
-											"mcp_server_credentials": {
-												"type": "array",
-												"items": {
-													"type": "object",
-													"properties": {
-														"mcp_server_name": {
-															"type": "string",
-															"minLength": 1,
-															"maxLength": 32,
-															"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
-														},
-														"credential_id": {
-															"type": "string",
-															"minLength": 1
-														}
-													},
-													"required": ["mcp_server_name", "credential_id"],
-													"additionalProperties": false
-												},
-												"maxItems": 20,
-												"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
+												"required": ["type", "id"],
+												"additionalProperties": false
 											}
-										},
-										"required": ["agent", "environment_id"],
-										"additionalProperties": false
+										],
+										"description": "Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
-									{
-										"type": "object",
-										"properties": {
-											"agent": {
-												"anyOf": [
-													{
-														"type": "string",
-														"minLength": 1,
-														"maxLength": 256
-													},
-													{
+									"initial_events": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["user.message"]
+												},
+												"content": {
+													"type": "array",
+													"items": {
 														"type": "object",
 														"properties": {
 															"type": {
 																"type": "string",
-																"enum": ["agent"]
+																"enum": ["text"]
 															},
-															"id": {
-																"type": "string",
-																"minLength": 1,
-																"maxLength": 256
-															},
-															"version": {
-																"type": "integer",
-																"minimum": 1,
-																"maximum": 9007199254740991
+															"text": {
+																"type": "string"
 															}
 														},
-														"required": ["id"],
+														"required": ["type", "text"],
 														"additionalProperties": false
-													}
-												],
-												"description": "Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
-											},
-											"agent_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Agent ID (alternative to agent)"
-											},
-											"initial_events": {
-												"type": "array",
-												"items": {
-													"type": "object",
-													"properties": {
-														"type": {
-															"type": "string",
-															"enum": ["user.message"]
-														},
-														"content": {
-															"type": "array",
-															"items": {
-																"type": "object",
-																"properties": {
-																	"type": {
-																		"type": "string",
-																		"enum": ["text"]
-																	},
-																	"text": {
-																		"type": "string"
-																	}
-																},
-																"required": ["type", "text"],
-																"additionalProperties": false
-															},
-															"minItems": 1
-														}
 													},
-													"required": ["type", "content"],
-													"additionalProperties": false
+													"minItems": 1
+												}
+											},
+											"required": ["type", "content"],
+											"additionalProperties": false
+										},
+										"maxItems": 50,
+										"description": "User messages to send in order when the session is created."
+									},
+									"environment_id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 256,
+										"description": "Environment ID for the session"
+									},
+									"title": {
+										"anyOf": [
+											{
+												"type": "string",
+												"maxLength": 1024
+											},
+											{
+												"type": "null"
+											}
+										],
+										"description": "Optional session title"
+									},
+									"vault_ids": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"minLength": 1
+										},
+										"maxItems": 20,
+										"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
+									},
+									"mcp_server_credentials": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"mcp_server_name": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 32,
+													"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
 												},
-												"maxItems": 50,
-												"description": "User messages to send in order when the session is created."
-											},
-											"agent_version": {
-												"type": "integer",
-												"minimum": 1,
-												"maximum": 9007199254740991,
-												"description": "Optional pinned agent version"
-											},
-											"environment_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Environment ID for the session"
-											},
-											"title": {
-												"anyOf": [
-													{
-														"type": "string",
-														"maxLength": 1024
-													},
-													{
-														"type": "null"
-													}
-												],
-												"description": "Optional session title"
-											},
-											"vault_ids": {
-												"type": "array",
-												"items": {
+												"credential_id": {
 													"type": "string",
 													"minLength": 1
-												},
-												"maxItems": 20,
-												"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
+												}
 											},
-											"mcp_server_credentials": {
-												"type": "array",
-												"items": {
-													"type": "object",
-													"properties": {
-														"mcp_server_name": {
-															"type": "string",
-															"minLength": 1,
-															"maxLength": 32,
-															"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
-														},
-														"credential_id": {
-															"type": "string",
-															"minLength": 1
-														}
-													},
-													"required": ["mcp_server_name", "credential_id"],
-													"additionalProperties": false
-												},
-												"maxItems": 20,
-												"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
-											}
+											"required": ["mcp_server_name", "credential_id"],
+											"additionalProperties": false
 										},
-										"required": ["agent_id", "environment_id"],
-										"additionalProperties": false
+										"maxItems": 20,
+										"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
 									}
-								]
+								},
+								"required": ["agent", "environment_id"],
+								"additionalProperties": false
 							}
 						}
 					},
@@ -14143,7 +13994,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": ["id"],
+												"required": ["type", "id"],
 												"additionalProperties": false
 											}
 										],
@@ -16170,7 +16021,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": ["id"],
+												"required": ["type", "id"],
 												"additionalProperties": false
 											}
 										],
@@ -31596,7 +31447,7 @@
 								"maxItems": 1000
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "Privileged context appended to the session's system instructions."
 					},
@@ -31647,7 +31498,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "A user message in the session conversation, with text content blocks."
 					},
@@ -31680,7 +31531,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "An interrupt that stops the agent's current turn."
 					},
@@ -31726,7 +31577,15 @@
 								"maxLength": 4096
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "result"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"result"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -31783,7 +31642,15 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "custom_tool_use_id", "content"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"custom_tool_use_id",
+							"content"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -31820,7 +31687,7 @@
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "The agent is processing a turn."
 					},
@@ -31857,7 +31724,14 @@
 								"minLength": 1
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "model_request_start_id"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"model_request_start_id"
+						],
 						"additionalProperties": false,
 						"description": "A model request started."
 					},
@@ -31908,7 +31782,16 @@
 								"enum": [true]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"name",
+							"input"
+						],
 						"additionalProperties": false,
 						"description": "The agent called a tool. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -31974,7 +31857,16 @@
 								"enum": ["unavailable", "invalid_arguments", "blocked"]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"content",
+							"is_error"
+						],
 						"additionalProperties": false,
 						"description": "The result of a tool call, including why the call was rejected when applicable. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -32040,6 +31932,7 @@
 							"seq",
 							"type",
 							"created_at",
+							"processed_at",
 							"tool_use_id",
 							"mcp_server_name",
 							"name",
@@ -32110,7 +32003,16 @@
 								"enum": ["unavailable", "invalid_arguments", "blocked"]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"content",
+							"is_error"
+						],
 						"additionalProperties": false,
 						"description": "Records what an MCP call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -32156,7 +32058,16 @@
 								"type": "object"
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"name",
+							"input"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -32188,7 +32099,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "The agent is thinking."
 					},
@@ -32243,7 +32154,7 @@
 								"enum": [true]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "The agent's response, with text content blocks."
 					},
@@ -32312,6 +32223,7 @@
 							"seq",
 							"type",
 							"created_at",
+							"processed_at",
 							"model_request_start_id",
 							"model_usage",
 							"is_error"
@@ -32399,7 +32311,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "stop_reason"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "stop_reason"],
 						"additionalProperties": false,
 						"description": "The agent stopped processing a turn. See stop_reason for why it stopped."
 					},
@@ -32456,7 +32368,7 @@
 								"additionalProperties": false
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "error"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "error"],
 						"additionalProperties": false,
 						"description": "An error occurred while processing a turn. Includes the error and its retry status."
 					},
@@ -32496,7 +32408,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false
 					},
 					{
@@ -32528,7 +32440,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false
 					}
 				]
@@ -32617,7 +32529,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["type", "id", "turn", "queued", "content"],
+						"required": ["type", "id", "processed_at", "turn", "queued", "content"],
 						"additionalProperties": false
 					},
 					{
@@ -32641,7 +32553,7 @@
 								]
 							}
 						},
-						"required": ["type", "id"],
+						"required": ["type", "id", "processed_at"],
 						"additionalProperties": false
 					},
 					{
@@ -32678,7 +32590,7 @@
 								"maxLength": 4096
 							}
 						},
-						"required": ["type", "id", "tool_use_id", "result"],
+						"required": ["type", "id", "processed_at", "tool_use_id", "result"],
 						"additionalProperties": false
 					},
 					{
@@ -32728,7 +32640,7 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["type", "id", "custom_tool_use_id"],
+						"required": ["type", "id", "processed_at", "custom_tool_use_id"],
 						"additionalProperties": false
 					}
 				]

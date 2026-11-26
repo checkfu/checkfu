@@ -20,7 +20,7 @@ const extractAgentId = (payload: unknown): string | undefined => {
 	if (isPlainRecord(agent) && typeof agent["id"] === "string") {
 		return agent["id"]
 	}
-	return typeof payload["agent_id"] === "string" ? payload["agent_id"] : undefined
+	return undefined
 }
 
 export const diagnoseSessionCreateNotFound = (

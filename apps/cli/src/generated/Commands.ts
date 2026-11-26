@@ -1912,14 +1912,6 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
-			propName: "agentId",
-			flagName: "agent-id",
-			wireName: "agent_id",
-			location: "body",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "initialEvents",
 			flagName: "initial-event",
 			wireName: "initial_events",
@@ -1928,14 +1920,6 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 			min: 0,
 			max: 50,
-		},
-		{
-			propName: "agentVersion",
-			flagName: "agent-version",
-			wireName: "agent_version",
-			location: "body",
-			kind: "int",
-			required: false,
 		},
 		{
 			propName: "environmentId",
@@ -1990,20 +1974,10 @@ const sessionsCreateCommand = CommandMake(
 			),
 			FlagOptional,
 		),
-		agentId: FlagString("agent-id").pipe(
-			FlagWithMetavar("ID"),
-			FlagWithDescription("Agent ID (alternative to agent)"),
-			FlagOptional,
-		),
 		initialEvents: FlagString("initial-event").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription("Initial user message as JSON, YAML, or @file (repeatable, up to 50)"),
 			FlagBetween(0, 50),
-		),
-		agentVersion: FlagInt("agent-version").pipe(
-			FlagWithMetavar("INT"),
-			FlagWithDescription("Optional pinned agent version"),
-			FlagOptional,
 		),
 		environmentId: FlagString("environment-id").pipe(
 			FlagWithMetavar("ID"),

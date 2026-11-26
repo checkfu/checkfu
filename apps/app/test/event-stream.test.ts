@@ -36,6 +36,7 @@ const message = (seq: number): JsonSessionEvent => ({
 	seq,
 	type: "agent.message",
 	created_at: "2026-11-24T00:00:00.000Z",
+	processed_at: "2026-11-24T00:00:00.000Z",
 	content: [{ type: "text", text: `message ${seq}` }],
 })
 
@@ -118,6 +119,7 @@ describe("following a session's events", () => {
 			seq: 9,
 			type: "session.archived",
 			created_at: "2026-11-24T00:00:00.000Z",
+			processed_at: "2026-11-24T00:00:00.000Z",
 		})
 		await vi.advanceTimersByTimeAsync(60_000)
 		expect(stream.received).toEqual([8, 9])
@@ -133,6 +135,7 @@ describe("following a session's events", () => {
 			seq: 9,
 			type: "session.archived",
 			created_at: "2026-11-24T00:00:00.000Z",
+			processed_at: "2026-11-24T00:00:00.000Z",
 		})
 		expect(stream.latest().closed).toBe(true)
 		await vi.advanceTimersByTimeAsync(60_000)
