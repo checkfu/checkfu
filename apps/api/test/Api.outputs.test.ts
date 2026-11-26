@@ -44,6 +44,7 @@ interface ArtifactBody {
 	readonly files: ReadonlyArray<FileBody>
 	readonly created_at: string
 	readonly updated_at: string
+	readonly publication: { readonly url: string } | null
 }
 
 interface SessionBody {
@@ -92,6 +93,7 @@ const withSessions = async (
 			| "outputListReads"
 			| "outputWalks"
 			| "setBeforeOutputsRead"
+			| "failingOutputReads"
 			| "requests"
 		> & {
 			readonly onTurn: (edit: Edit) => void
@@ -242,7 +244,7 @@ describe("A session's outputs", () => {
 						fileOf("report.md", report, "text/markdown"),
 					]
 					expect(artifact).toEqual({
-						id: expect.stringMatching(/^art_[0-9a-f]{64}$/),
+						id: expect.stringMatching(/^art_[0-9a-f]{32}$/),
 						type: "artifact",
 						name: `Session ${session.id} outputs`,
 						version: 1,
@@ -275,6 +277,19 @@ describe("A session's outputs", () => {
 							.map((key) => key.slice(`artifacts/${SCOPE}/${id}/`.length))
 					expect(stored(artifact.id)).toHaveLength(3)
 					expect(stored(artifact.id)).toEqual(stored(uploaded.id))
+
+					const publishing = yield* request(
+						apiFetch,
+						"POST",
+						`/v1/artifacts/${artifact.id}/publication`,
+						{},
+					)
+					expect(publishing.status).toBe(200)
+					const { publication } = yield* json<ArtifactBody>(publishing)
+					expect(publication).toMatchObject({ url: expect.any(String) })
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						publication,
+					})
 				}),
 		))
 
@@ -600,6 +615,34 @@ describe("A session's outputs", () => {
 					yield* sendAndSettle(apiFetch, session.id, ["Again."], 3)
 					expect(yield* json(yield* outputs(session.id))).toEqual(published)
 					expect(blobs()).toHaveLength(2)
+				}),
+		))
+
+	it("keeps the last complete version when a listed file cannot be read", () =>
+		withSessions(
+			(apiFetch, { workspaceFiles, failingOutputReads, onTurn, createSession, outputs }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					const files = workspaceFiles(session.id)
+					onTurn(() => {
+						files.set(`${OUTPUTS}/a.txt`, "one")
+						files.set(`${OUTPUTS}/b.txt`, "two")
+					})
+					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					const published = yield* json<ArtifactBody>(yield* outputs(session.id))
+
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "changed"))
+					failingOutputReads.add(`${OUTPUTS}/b.txt`)
+					yield* sendAndSettle(apiFetch, session.id, ["Change it."], 2)
+					expect(yield* json(yield* outputs(session.id))).toEqual(published)
+
+					failingOutputReads.clear()
+					onTurn(() => undefined)
+					yield* sendAndSettle(apiFetch, session.id, ["Again."], 3)
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 2,
+						files: [fileOf("a.txt", "changed", "text/plain"), fileOf("b.txt", "two", "text/plain")],
+					})
 				}),
 		))
 

@@ -108,6 +108,17 @@ const fileUnderAnother = (paths: ReadonlySet<string>): string | undefined => {
 	return undefined
 }
 
+const overBudget = (path: string, size: number, totalBytes: number) =>
+	size > MAX_ARTIFACT_FILE_BYTES
+		? new InvalidArtifactFiles({
+				message: `File "${path}" is ${size} bytes; the limit is ${MAX_ARTIFACT_FILE_BYTES}.`,
+			})
+		: totalBytes > MAX_ARTIFACT_TOTAL_BYTES
+			? new InvalidArtifactFiles({
+					message: `Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
+				})
+			: undefined
+
 export const sealArtifactFiles = (
 	digest: Digest.Digest["Service"],
 	files: ReadonlyArray<ArtifactFileEntry>,
@@ -133,16 +144,10 @@ export const sealArtifactFiles = (
 				})
 			}
 			seen.add(file.path)
-			if (file.size > MAX_ARTIFACT_FILE_BYTES) {
-				return yield* new InvalidArtifactFiles({
-					message: `File "${file.path}" is ${file.size} bytes; the limit is ${MAX_ARTIFACT_FILE_BYTES}.`,
-				})
-			}
 			totalBytes += file.size
-			if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-				return yield* new InvalidArtifactFiles({
-					message: `Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
-				})
+			const over = overBudget(file.path, file.size, totalBytes)
+			if (over !== undefined) {
+				return yield* over
 			}
 			entries.push({
 				path: file.path,
@@ -178,6 +183,7 @@ export const buildArtifactVersion = (
 	Effect.gen(function* () {
 		const entries: Array<ArtifactFileEntry> = []
 		const blobs = new Map<string, ArtifactBlob>()
+		let totalBytes = 0
 		for (const file of files) {
 			if ("sha256" in file) {
 				const size = kept.get(file.sha256)
@@ -189,6 +195,11 @@ export const buildArtifactVersion = (
 								: `File "${file.path}" keeps sha256 ${file.sha256}, which the version being replaced does not hold; send its content.`,
 					})
 				}
+				totalBytes += size
+				const over = overBudget(file.path, size, totalBytes)
+				if (over !== undefined) {
+					return yield* over
+				}
 				entries.push({
 					path: file.path,
 					sha256: file.sha256,
@@ -198,6 +209,11 @@ export const buildArtifactVersion = (
 				continue
 			}
 			const bytes = yield* decodeContent(file)
+			totalBytes += bytes.byteLength
+			const over = overBudget(file.path, bytes.byteLength, totalBytes)
+			if (over !== undefined) {
+				return yield* over
+			}
 			const sha256 = yield* digest.digestHex(Digest.sha256, bytes)
 			entries.push({
 				path: file.path,

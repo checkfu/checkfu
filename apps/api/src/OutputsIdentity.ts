@@ -14,7 +14,7 @@ export const outputsArtifactId = (
 			Digest.sha256,
 			utf8Encoder.encode(JSON.stringify(["session", "outputs", sessionId])),
 		),
-		(hash) => ArtifactId.make(`art_${hash}`),
+		(hash) => ArtifactId.make(`art_${hash.slice(0, 32)}`),
 	)
 
 export const outputsArtifactName = (sessionId: string, title: string | null): string =>

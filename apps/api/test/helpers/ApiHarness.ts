@@ -268,11 +268,14 @@ export const makePiDurableTestLayer = (
 	}
 	const encoder = new TextEncoder()
 	const outputWalks: Array<{ readonly limit: number; readonly found: number }> = []
+	const failingOutputReads = new Set<string>()
 	const sessionOutputs = (sessionId: string, onRead?: (file: string) => void) => {
 		const files = workspaceFiles(sessionId)
 		const bytesOf = (file: string) => {
 			const content = files.get(file)
-			return content === undefined ? null : encoder.encode(content)
+			return content === undefined
+				? Promise.reject(Object.assign(new Error(`no such file: ${file}`), { code: "ENOENT" }))
+				: Promise.resolve(encoder.encode(content))
 		}
 		return makeSessionOutputs({
 			list: (directory, limit) => {
@@ -298,10 +301,12 @@ export const makePiDurableTestLayer = (
 				outputWalks.push({ limit, found: entries.length })
 				return Promise.resolve(entries)
 			},
-			size: (file) => Promise.resolve(bytesOf(file)?.byteLength ?? 0),
+			size: (file) => bytesOf(file).then((bytes) => bytes.byteLength),
 			read: (file) => {
 				onRead?.(file)
-				return Promise.resolve(bytesOf(file))
+				return failingOutputReads.has(file)
+					? Promise.reject(Object.assign(new Error(`cannot read ${file}`), { code: "EIO" }))
+					: bytesOf(file)
 			},
 		})
 	}
@@ -345,14 +350,18 @@ export const makePiDurableTestLayer = (
 					discardedWorkspaces.push(sessionId)
 				}),
 			listOutputs: (sessionId) =>
-				Effect.promise(() =>
-					sessionOutputs(sessionId, (file) => outputListReads.push(file)).list(),
-				),
+				Effect.tryPromise({
+					try: () => sessionOutputs(sessionId, (file) => outputListReads.push(file)).list(),
+					catch: (cause) => new HarnessCallFailed({ cause }),
+				}),
 			readOutputs: (sessionId, paths) =>
-				Effect.promise(() => {
-					outputReads.push({ sessionId, paths })
-					beforeOutputsRead?.(sessionId)
-					return sessionOutputs(sessionId).read(paths)
+				Effect.tryPromise({
+					try: () => {
+						outputReads.push({ sessionId, paths })
+						beforeOutputsRead?.(sessionId)
+						return sessionOutputs(sessionId).read(paths)
+					},
+					catch: (cause) => new HarnessCallFailed({ cause }),
 				}),
 		},
 	)
@@ -417,6 +426,7 @@ export const makePiDurableTestLayer = (
 		outputReads,
 		outputListReads,
 		outputWalks,
+		failingOutputReads,
 		setBeforeOutputsRead: (run: (sessionId: string) => void) => {
 			beforeOutputsRead = run
 		},

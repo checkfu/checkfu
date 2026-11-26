@@ -33,7 +33,7 @@ export interface OutputFiles {
 		limit: number,
 	) => Promise<ReadonlyArray<{ readonly path: string; readonly type: string }>>
 	readonly size: (file: string) => Promise<number>
-	readonly read: (file: string) => Promise<Uint8Array<ArrayBuffer> | null>
+	readonly read: (file: string) => Promise<Uint8Array<ArrayBuffer>>
 }
 
 const isArtifactPath = Schema.is(ArtifactPath)
@@ -75,9 +75,7 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 		const listed: Array<OutputFile> = []
 		for (const path of paths) {
 			const bytes = await files.read(`${SESSION_OUTPUTS_PATH}/${path}`)
-			if (bytes !== null) {
-				listed.push({ path, sha256: await sha256Hex(bytes), size: bytes.byteLength })
-			}
+			listed.push({ path, sha256: await sha256Hex(bytes), size: bytes.byteLength })
 		}
 		return { ok: true, files: listed }
 	},
@@ -85,10 +83,7 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 	read: async (paths: ReadonlyArray<string>): Promise<ReadonlyArray<OutputBytes>> => {
 		const read: Array<OutputBytes> = []
 		for (const path of paths) {
-			const bytes = await files.read(`${SESSION_OUTPUTS_PATH}/${path}`)
-			if (bytes !== null) {
-				read.push({ path, bytes })
-			}
+			read.push({ path, bytes: await files.read(`${SESSION_OUTPUTS_PATH}/${path}`) })
 		}
 		return read
 	},

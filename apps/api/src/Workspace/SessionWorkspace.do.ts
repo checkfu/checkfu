@@ -62,15 +62,16 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 			const outputs = async () => {
 				const { fs } = await workspace()
 				return makeSessionOutputs({
-					list: (directory, limit) => fs.find(directory, undefined, { limit }).catch(() => []),
+					list: (directory, limit) =>
+						fs.find(directory, undefined, { limit }).catch((error: unknown) => {
+							if (isMissing(error)) {
+								return []
+							}
+							throw error
+						}),
 					size: async (file) => (await fs.stat(file)).size,
-					read: async (file) => {
-						try {
-							return new Uint8Array(await new Response(await fs.readFile(file)).arrayBuffer())
-						} catch {
-							return null
-						}
-					},
+					read: async (file) =>
+						new Uint8Array(await new Response(await fs.readFile(file)).arrayBuffer()),
 				})
 			}
 
