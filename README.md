@@ -210,9 +210,23 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 - **SDK ([`packages/sdk`](packages/sdk/README.md)):** Effect (`CheckfuClient`) and Promise (`new Checkfu()`) clients with retries, idempotency, SSE, and pagination (`GET /openapi.json` for other languages).
 - **CLI (`checkfu`):** `bun checkfu --help` or standalone `bun run checkfu:build` with `--format` and GJSON `--transform`.
 - **Dashboard:** Sign in with `CHECKFU_API_KEY` to manage resources and stream live session transcripts.
-- **MCP** exposes Checkfu API operations as tools. Connect your MCP client to `https://<mcp-worker>.workers.dev/mcp` over HTTP and set the `Authorization` header to `Bearer $CHECKFU_API_KEY`.
+- **MCP** exposes Checkfu API operations as tools over the `2026-07-28` protocol. Connect a client that supports that revision to `https://<mcp-worker>.workers.dev/mcp` over HTTP and set the `Authorization` header to `Bearer $CHECKFU_API_KEY`. With the TypeScript SDK, enable protocol discovery; its default uses the older initialize handshake:
+
+  ```ts
+  import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
+
+  const client = new Client(
+    { name: "my-app", version: "1.0.0" },
+    { versionNegotiation: { mode: "auto" } },
+  )
+  await client.connect(new StreamableHTTPClientTransport(new URL(mcpUrl), {
+    requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
+  }))
+  ```
 
 ## Development
+
+See [user contracts and refactor verification](docs/verification.md) for the maintained acceptance journeys, domain guarantees and release checks.
 
 - `bun run generate`: Regenerate `openapi.json`, CLI, SDK, and MCP from `CheckfuApi`
 - `bun run check`: Check generated files, `oxfmt`, `oxlint`, directives, and `effect-tsgo`

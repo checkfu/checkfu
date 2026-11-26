@@ -25,6 +25,7 @@ import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import { startFakeMcpServer } from "./FakeMcpServer.ts"
 import { startScriptedMcpServer } from "./ScriptedMcpServer.ts"
+import { authoredProjectJourney } from "./UserJourneys.ts"
 import { toolUseOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
 
@@ -658,6 +659,234 @@ describe("PiSession real Durable Object under workerd", () => {
 			bytes: Buffer.from(file.body.content, file.body.encoding),
 		}
 	}
+
+	it("takes a YAML project through the compiled CLI and an independent MCP client without losing history or competing edits", async () => {
+		const deadline = Date.now() + 15_000
+		let mcpUrl: string | undefined
+		while (mcpUrl === undefined && Date.now() < deadline) {
+			mcpUrl = stripAnsi(workerLogs.join("")).match(/\[McpWorker\] ready at (http:\/\/[^\s]+)/)?.[1]
+			if (mcpUrl === undefined) {
+				await sleep(100)
+			}
+		}
+		if (mcpUrl === undefined) {
+			throw new Error("The MCP Worker did not become ready")
+		}
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "write",
+						arguments: {
+							path: "/mnt/session/outputs/report.csv",
+							content: "region,total\nEMEA,4217\n",
+						},
+					}
+				: { kind: "reply", text: "The report is ready." },
+		)
+		try {
+			await authoredProjectJourney({
+				repoRoot: REPO_ROOT,
+				baseUrl,
+				mcpUrl: `${mcpUrl}/mcp`,
+				apiKey: TEST_API_KEY,
+			})
+		} finally {
+			fakeOpenAI.setHandler((req) => ({
+				kind: "reply",
+				text: `Echo: ${req.lastUserText}`,
+				inputTokens: 17,
+				outputTokens: 9,
+			}))
+		}
+	}, 120_000)
+
+	it.each(["rate limit", "provider unavailable", "truncated stream"] as const)(
+		"preserves a queued follow-up after a %s and recovers without duplicate replies",
+		async (failure) => {
+			const session = await createSession()
+			const first = `Fail this request: ${failure}`
+			const followUp = `Recover this session: ${failure}`
+			let release!: () => void
+			const ready = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			fakeOpenAI.setHandler(async (request) => {
+				if (request.lastUserText !== first) {
+					return { kind: "reply", text: `Recovered: ${request.lastUserText}` }
+				}
+				await ready
+				return failure === "truncated stream"
+					? { kind: "hold", release: Promise.resolve(null) }
+					: { kind: "http_error", status: failure === "rate limit" ? 429 : 503, message: failure }
+			})
+			try {
+				expect(
+					(
+						await apiJson(`/v1/sessions/${session.id}/events`, {
+							method: "POST",
+							body: { events: [userMessage(first)] },
+						})
+					).status,
+				).toBe(200)
+				await fakeOpenAI.waitForRequest((request) => request.lastUserText === first)
+				expect(
+					(
+						await apiJson(`/v1/sessions/${session.id}/events`, {
+							method: "POST",
+							body: { events: [userMessage(followUp)] },
+						})
+					).status,
+				).toBe(200)
+				release()
+				await waitForSession(
+					session.id,
+					(state) => state.status === "idle" && state.turn === 2,
+					60_000,
+				)
+				const events = await listAllEvents(session.id)
+				expect(
+					events
+						.filter((event) => event.type === "user.message")
+						.map((event) => event.content?.[0]?.text),
+				).toEqual([first, followUp])
+				expect(events.filter((event) => event.type === "session.error")).toHaveLength(1)
+				expect(
+					events
+						.filter((event) => event.type === "agent.message")
+						.map((event) => event.content?.[0]?.text),
+				).toEqual([`Recovered: ${followUp}`])
+				expect(new Set(events.map((event) => event.id)).size).toBe(events.length)
+			} finally {
+				release()
+				await apiJson(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+			}
+		},
+		90_000,
+	)
+
+	const answer = (sessionId: string, callId: string, text: string) =>
+		apiJson(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: {
+				events: [
+					{
+						type: "user.custom_tool_result",
+						custom_tool_use_id: callId,
+						content: [{ type: "text", text }],
+					},
+				],
+			},
+		})
+
+	it("isolates pending custom tools across parallel sessions, including archived and repeated answers", async () => {
+		const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+			name: "Parallel receipts",
+			model: "gpt-4o-mini",
+			tools: [
+				{
+					type: "custom",
+					name: "receipt",
+					description: "Return a receipt",
+					input_schema: {
+						type: "object",
+						properties: { owner: { type: "string" } },
+						required: ["owner"],
+					},
+				},
+			],
+		})
+		fakeOpenAI.setHandler((request) =>
+			request.toolOutputs.length === 0
+				? { kind: "tool_call", name: "receipt", arguments: { owner: request.lastUserText } }
+				: { kind: "reply", text: `${request.lastUserText}: ${request.toolOutputs.join(" | ")}` },
+		)
+		const sessions = await Promise.all(
+			["OWNER_A", "OWNER_B", "OWNER_C"].map(async (owner) => {
+				const session = await createResource<SessionResource>("/v1/sessions", {
+					agent: agent.id,
+					environment_id: environmentId,
+				})
+				expect(
+					(
+						await apiJson(`/v1/sessions/${session.id}/events`, {
+							method: "POST",
+							body: { events: [userMessage(owner)] },
+						})
+					).status,
+				).toBe(200)
+				return { ...session, owner }
+			}),
+		)
+
+		try {
+			const waiting = await Promise.all(
+				sessions.map(async (session) => {
+					await expect
+						.poll(
+							async () =>
+								(await listAllEvents(session.id)).some(
+									(event) =>
+										event.type === "session.status_idle" &&
+										event.stop_reason?.type === "requires_action",
+								),
+							{ timeout: 20_000 },
+						)
+						.toBe(true)
+					const call = (await listAllEvents(session.id)).find(
+						(event) => event.type === "agent.custom_tool_use",
+					)
+					if (call?.tool_use_id === undefined) {
+						throw new Error("No pending receipt")
+					}
+					expect(call.input).toEqual({ owner: session.owner })
+					return { ...session, callId: call.tool_use_id, eventId: call.id }
+				}),
+			)
+			const [first, archived, last] = waiting
+			if (first === undefined || archived === undefined || last === undefined) {
+				throw new Error("Missing parallel session")
+			}
+			expect((await answer(first.id, archived.callId, "FOREIGN_RESULT")).status).toBe(409)
+			expect((await answer(first.id, archived.eventId, "FOREIGN_EVENT_RESULT")).status).toBe(409)
+			const outcomes = await Promise.all([
+				answer(first.id, first.callId, "RECEIPT_A"),
+				apiJson(`/v1/sessions/${archived.id}/archive`, { method: "POST" }),
+				answer(last.id, last.callId, "RECEIPT_C"),
+			])
+			expect(outcomes.map((outcome) => outcome.status)).toEqual([200, 200, 200])
+			for (const session of [first, last]) {
+				await expect
+					.poll(
+						async () =>
+							(await listAllEvents(session.id)).filter((event) => event.type === "agent.message")
+								.length,
+						{ timeout: 20_000 },
+					)
+					.toBe(1)
+				const events = await listAllEvents(session.id)
+				expect(events.filter((event) => event.type === "agent.custom_tool_use")).toHaveLength(1)
+				expect(events.filter((event) => event.type === "user.custom_tool_result")).toHaveLength(1)
+				const text =
+					events.find((event) => event.type === "agent.message")?.content?.[0]?.text ?? ""
+				expect(text).toContain(session.owner)
+				expect(text).toContain(session.id === first.id ? "RECEIPT_A" : "RECEIPT_C")
+				expect(text).not.toContain(session.id === first.id ? "RECEIPT_C" : "RECEIPT_A")
+				expect(JSON.stringify(events)).not.toContain("FOREIGN")
+			}
+			expect((await answer(first.id, first.callId, "DUPLICATE_RESULT")).status).toBe(409)
+			expect((await answer(archived.id, archived.callId, "LATE_RESULT")).status).toBe(409)
+			expect(
+				(await listAllEvents(archived.id)).filter((event) => event.type === "agent.message"),
+			).toHaveLength(0)
+		} finally {
+			await Promise.all(
+				sessions.map((session) =>
+					apiJson(`/v1/sessions/${session.id}/archive`, { method: "POST" }),
+				),
+			)
+		}
+	}, 60_000)
 
 	it("serializes a conditional archive with a competing automation repoint", async () => {
 		const target = await createResource<{ readonly id: string }>("/v1/environments", {

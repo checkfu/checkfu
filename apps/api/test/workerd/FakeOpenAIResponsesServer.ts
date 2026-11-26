@@ -26,6 +26,11 @@ export interface RecordedOpenAIRequest {
 
 export type FakeOpenAIAction =
 	| {
+			readonly kind: "http_error"
+			readonly status: number
+			readonly message: string
+	  }
+	| {
 			readonly kind: "reply"
 			readonly text: string
 			readonly inputTokens?: number
@@ -344,6 +349,18 @@ export const startFakeOpenAIResponsesServer = async (
 
 			const action = await handler(record)
 			if (res.destroyed || aborted) {
+				return
+			}
+			if (action.kind === "http_error") {
+				res.writeHead(action.status, { "content-type": "application/json", "retry-after": "0" })
+				res.end(
+					JSON.stringify({
+						error: {
+							message: action.message,
+							type: action.status === 429 ? "rate_limit_error" : "server_error",
+						},
+					}),
+				)
 				return
 			}
 

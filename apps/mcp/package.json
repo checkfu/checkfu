@@ -21,6 +21,7 @@
 		"@checkfu/api": "workspace:*",
 		"@checkfu/domain": "workspace:*",
 		"@effect/vitest": "catalog:",
+		"@modelcontextprotocol/client": "catalog:",
 		"alchemy": "catalog:",
 		"vitest": "catalog:"
 	}

@@ -10,6 +10,10 @@ import {
 } from "@checkfu/api/Connection/CredentialCustody"
 import { vaultListingQueriesFrom } from "@checkfu/api/Http/Listing"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
+import { CustomToolFaults } from "@checkfu/api/Http/ToolSchemas"
+import { customToolFaults } from "@checkfu/api/Pi/PiToolSchema"
+import { SkillReader } from "@checkfu/api/Skills/SkillReader"
+import { readSkill } from "@checkfu/api/Skills/ReadSkill"
 import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
@@ -79,6 +83,10 @@ export const makeTestServer = Effect.gen(function* () {
 		Layer.provide(Domain.InMemory),
 	)
 	const ApiLayer = Layer.mergeAll(
+		Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
+		Layer.succeed(CustomToolFaults, (tools, taken) =>
+			Effect.succeed(customToolFaults(tools, taken)),
+		),
 		webhooksTest.layer.pipe(Layer.provide(Domain.InMemory)),
 		VaultsLive,
 		vaultListingQueriesFrom(VaultsLive),
@@ -127,6 +135,8 @@ export const makeTestServer = Effect.gen(function* () {
 
 	const mcp = makeMcpWebHandler()
 	yield* Effect.addFinalizer(() => Effect.promise(() => mcp.dispose()))
+	const fetchWeb: typeof globalThis.fetch = (input, init) =>
+		mcp.handler(toWebRequest(input, init), Context.make(ApiBinding, { fetch: apiFetch }))
 
 	const fetch = (request: Request, api: ApiBinding["Service"] = { fetch: apiFetch }) =>
 		Effect.promise(() => mcp.handler(request, Context.make(ApiBinding, api)))
@@ -155,5 +165,5 @@ export const makeTestServer = Effect.gen(function* () {
 			),
 		)
 
-	return { fetch, connect, apiRequests, apiFetch }
+	return { fetch, fetchWeb, connect, apiRequests, apiFetch }
 })
