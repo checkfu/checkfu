@@ -390,9 +390,11 @@ describe("Cloudflare Forge pipeline", () => {
 		const listEventsParams = (spec.paths["/v1/sessions/{session_id}/events"]?.["get"]?.[
 			"parameters"
 		] ?? []) as ReadonlyArray<{ name: string; schema?: { description?: string } }>
-		const afterParam = listEventsParams.find((p) => p.name === "after")
-		expect(afterParam?.schema?.description).toContain("selected order")
-		expect(afterParam?.schema?.description).toContain("desc")
+		expect(listEventsParams.map((param) => param.name)).not.toContain("after")
+		const pageParam = listEventsParams.find((param) => param.name === "page")
+		expect(pageParam?.schema?.description).toContain("next_page")
+		const orderParam = listEventsParams.find((param) => param.name === "order")
+		expect(orderParam?.schema?.description).toContain("desc")
 
 		const cliCommands = generateCliFiles(forge).find((f) => f.path === "Commands.ts")?.content ?? ""
 		expect(cliCommands).toContain('FlagWithDescription("System prompt text (supports @file)")')

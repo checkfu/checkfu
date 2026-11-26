@@ -103,7 +103,7 @@ export function AutomationsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.page !== undefined} />
+			<Pager next={page.next_page} paged={search.page !== undefined} />
 		</>
 	)
 }
@@ -452,11 +452,7 @@ function AutomationDetails({
 					>
 						{shortId(automation.agent.id)}
 					</Link>{" "}
-					<span className="text-muted-foreground">
-						{automation.agent.version === null
-							? "latest version"
-							: `pinned to v${automation.agent.version}`}
-					</span>
+					<span className="text-muted-foreground">pinned to v{automation.agent.version}</span>
 				</Description>
 				<Description label="Environment">
 					<Link

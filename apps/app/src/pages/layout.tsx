@@ -12,6 +12,7 @@ import {
 	CalendarClockIcon,
 	DatabaseIcon,
 	FileStackIcon,
+	KeyRoundIcon,
 	LogOutIcon,
 	MessagesSquareIcon,
 } from "lucide-react"
@@ -67,6 +68,11 @@ export function Layout(): React.JSX.Element {
 					<NavItem>
 						<Link to="/memory-stores">
 							<DatabaseIcon /> Memory
+						</Link>
+					</NavItem>
+					<NavItem>
+						<Link to="/vaults">
+							<KeyRoundIcon /> Vaults
 						</Link>
 					</NavItem>
 				</>

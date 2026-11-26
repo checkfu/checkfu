@@ -28,6 +28,9 @@ import { Route as AppMemoryStoresNewRouteImport } from './routes/_app/memory-sto
 import { Route as AppSessionsIndexRouteImport } from './routes/_app/sessions/index'
 import { Route as AppSessionsSessionIdRouteImport } from './routes/_app/sessions/$sessionId'
 import { Route as AppSessionsNewRouteImport } from './routes/_app/sessions/new'
+import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
+import { Route as AppVaultsVaultIdRouteImport } from './routes/_app/vaults/$vaultId'
+import { Route as AppVaultsNewRouteImport } from './routes/_app/vaults/new'
 import { Route as AppMemoryStoresMemoryStoreIdIndexRouteImport } from './routes/_app/memory-stores/$memoryStoreId/index'
 import { Route as AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport } from './routes/_app/memory-stores/$memoryStoreId/memories/$memoryId'
 
@@ -127,6 +130,21 @@ const AppSessionsNewRoute = AppSessionsNewRouteImport.update({
   path: '/sessions/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppVaultsIndexRoute = AppVaultsIndexRouteImport.update({
+  id: '/vaults/',
+  path: '/vaults/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppVaultsVaultIdRoute = AppVaultsVaultIdRouteImport.update({
+  id: '/vaults/$vaultId',
+  path: '/vaults/$vaultId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppVaultsNewRoute = AppVaultsNewRouteImport.update({
+  id: '/vaults/new',
+  path: '/vaults/new',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMemoryStoresMemoryStoreIdIndexRoute =
   AppMemoryStoresMemoryStoreIdIndexRouteImport.update({
     id: '/memory-stores/$memoryStoreId/',
@@ -153,12 +171,15 @@ export interface FileRoutesByFullPath {
   '/memory-stores/new': typeof AppMemoryStoresNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
+  '/vaults/$vaultId': typeof AppVaultsVaultIdRoute
+  '/vaults/new': typeof AppVaultsNewRoute
   '/agents/': typeof AppAgentsIndexRoute
   '/artifacts/': typeof AppArtifactsIndexRoute
   '/automations/': typeof AppAutomationsIndexRoute
   '/environments/': typeof AppEnvironmentsIndexRoute
   '/memory-stores/': typeof AppMemoryStoresIndexRoute
   '/sessions/': typeof AppSessionsIndexRoute
+  '/vaults/': typeof AppVaultsIndexRoute
   '/memory-stores/$memoryStoreId/': typeof AppMemoryStoresMemoryStoreIdIndexRoute
   '/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
@@ -175,12 +196,15 @@ export interface FileRoutesByTo {
   '/memory-stores/new': typeof AppMemoryStoresNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
+  '/vaults/$vaultId': typeof AppVaultsVaultIdRoute
+  '/vaults/new': typeof AppVaultsNewRoute
   '/agents': typeof AppAgentsIndexRoute
   '/artifacts': typeof AppArtifactsIndexRoute
   '/automations': typeof AppAutomationsIndexRoute
   '/environments': typeof AppEnvironmentsIndexRoute
   '/memory-stores': typeof AppMemoryStoresIndexRoute
   '/sessions': typeof AppSessionsIndexRoute
+  '/vaults': typeof AppVaultsIndexRoute
   '/memory-stores/$memoryStoreId': typeof AppMemoryStoresMemoryStoreIdIndexRoute
   '/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
@@ -199,12 +223,15 @@ export interface FileRoutesById {
   '/_app/memory-stores/new': typeof AppMemoryStoresNewRoute
   '/_app/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/_app/sessions/new': typeof AppSessionsNewRoute
+  '/_app/vaults/$vaultId': typeof AppVaultsVaultIdRoute
+  '/_app/vaults/new': typeof AppVaultsNewRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
   '/_app/artifacts/': typeof AppArtifactsIndexRoute
   '/_app/automations/': typeof AppAutomationsIndexRoute
   '/_app/environments/': typeof AppEnvironmentsIndexRoute
   '/_app/memory-stores/': typeof AppMemoryStoresIndexRoute
   '/_app/sessions/': typeof AppSessionsIndexRoute
+  '/_app/vaults/': typeof AppVaultsIndexRoute
   '/_app/memory-stores/$memoryStoreId/': typeof AppMemoryStoresMemoryStoreIdIndexRoute
   '/_app/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
@@ -223,12 +250,15 @@ export interface FileRouteTypes {
     | '/memory-stores/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
+    | '/vaults/$vaultId'
+    | '/vaults/new'
     | '/agents/'
     | '/artifacts/'
     | '/automations/'
     | '/environments/'
     | '/memory-stores/'
     | '/sessions/'
+    | '/vaults/'
     | '/memory-stores/$memoryStoreId/'
     | '/memory-stores/$memoryStoreId/memories/$memoryId'
   fileRoutesByTo: FileRoutesByTo
@@ -245,12 +275,15 @@ export interface FileRouteTypes {
     | '/memory-stores/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
+    | '/vaults/$vaultId'
+    | '/vaults/new'
     | '/agents'
     | '/artifacts'
     | '/automations'
     | '/environments'
     | '/memory-stores'
     | '/sessions'
+    | '/vaults'
     | '/memory-stores/$memoryStoreId'
     | '/memory-stores/$memoryStoreId/memories/$memoryId'
   id:
@@ -268,12 +301,15 @@ export interface FileRouteTypes {
     | '/_app/memory-stores/new'
     | '/_app/sessions/$sessionId'
     | '/_app/sessions/new'
+    | '/_app/vaults/$vaultId'
+    | '/_app/vaults/new'
     | '/_app/agents/'
     | '/_app/artifacts/'
     | '/_app/automations/'
     | '/_app/environments/'
     | '/_app/memory-stores/'
     | '/_app/sessions/'
+    | '/_app/vaults/'
     | '/_app/memory-stores/$memoryStoreId/'
     | '/_app/memory-stores/$memoryStoreId/memories/$memoryId'
   fileRoutesById: FileRoutesById
@@ -418,6 +454,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSessionsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/vaults/': {
+      id: '/_app/vaults/'
+      path: '/vaults'
+      fullPath: '/vaults/'
+      preLoaderRoute: typeof AppVaultsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/vaults/$vaultId': {
+      id: '/_app/vaults/$vaultId'
+      path: '/vaults/$vaultId'
+      fullPath: '/vaults/$vaultId'
+      preLoaderRoute: typeof AppVaultsVaultIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/vaults/new': {
+      id: '/_app/vaults/new'
+      path: '/vaults/new'
+      fullPath: '/vaults/new'
+      preLoaderRoute: typeof AppVaultsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/memory-stores/$memoryStoreId/': {
       id: '/_app/memory-stores/$memoryStoreId/'
       path: '/memory-stores/$memoryStoreId'
@@ -447,12 +504,15 @@ interface AppRouteChildren {
   AppMemoryStoresNewRoute: typeof AppMemoryStoresNewRoute
   AppSessionsSessionIdRoute: typeof AppSessionsSessionIdRoute
   AppSessionsNewRoute: typeof AppSessionsNewRoute
+  AppVaultsVaultIdRoute: typeof AppVaultsVaultIdRoute
+  AppVaultsNewRoute: typeof AppVaultsNewRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
   AppArtifactsIndexRoute: typeof AppArtifactsIndexRoute
   AppAutomationsIndexRoute: typeof AppAutomationsIndexRoute
   AppEnvironmentsIndexRoute: typeof AppEnvironmentsIndexRoute
   AppMemoryStoresIndexRoute: typeof AppMemoryStoresIndexRoute
   AppSessionsIndexRoute: typeof AppSessionsIndexRoute
+  AppVaultsIndexRoute: typeof AppVaultsIndexRoute
   AppMemoryStoresMemoryStoreIdIndexRoute: typeof AppMemoryStoresMemoryStoreIdIndexRoute
   AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute: typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
@@ -469,12 +529,15 @@ const AppRouteChildren: AppRouteChildren = {
   AppMemoryStoresNewRoute: AppMemoryStoresNewRoute,
   AppSessionsSessionIdRoute: AppSessionsSessionIdRoute,
   AppSessionsNewRoute: AppSessionsNewRoute,
+  AppVaultsVaultIdRoute: AppVaultsVaultIdRoute,
+  AppVaultsNewRoute: AppVaultsNewRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
   AppArtifactsIndexRoute: AppArtifactsIndexRoute,
   AppAutomationsIndexRoute: AppAutomationsIndexRoute,
   AppEnvironmentsIndexRoute: AppEnvironmentsIndexRoute,
   AppMemoryStoresIndexRoute: AppMemoryStoresIndexRoute,
   AppSessionsIndexRoute: AppSessionsIndexRoute,
+  AppVaultsIndexRoute: AppVaultsIndexRoute,
   AppMemoryStoresMemoryStoreIdIndexRoute:
     AppMemoryStoresMemoryStoreIdIndexRoute,
   AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute:

@@ -1,3 +1,4 @@
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import * as Verify from "@alchemy.run/domain/Verify"
 import {
 	decodeAgentTools,
@@ -29,6 +30,7 @@ describe("Sessions Z3 formal verification", () => {
 						decodeAgentTools,
 						addToolUseId,
 						removeToolUseId,
+						decodeSystemMessage,
 					],
 					lock: "./Sessions.verify.lock.json",
 					require: { proved: PROVED },
@@ -37,7 +39,13 @@ describe("Sessions Z3 formal verification", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
-				expect(report.explored.aside).toEqual([])
+				expect(report.explored.aside).toEqual([
+					{
+						kind: "view",
+						name: "SessionTurnCompletion",
+						reason: "no rule reads it and no policy reacts to it",
+					},
+				])
 				expect(report.explored.truncated).toBe(false)
 				expect(report.explored.complete).toBe(2)
 				expect(report.explored.repeated).toContain(

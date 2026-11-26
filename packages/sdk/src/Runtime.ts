@@ -36,7 +36,7 @@ import {
 } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { streamApiSse, streamSessionEvents } from "./Sse.ts"
-import type { StreamSseOptions } from "./Sse.ts"
+import type { StreamSessionEventsOptions } from "./Sse.ts"
 import {
 	CurrentRequestTransportMeta,
 	computeRetryDelayMs,
@@ -81,6 +81,13 @@ type JsonPayloadOf<P> =
 			? P["Type"]
 			: never
 
+type JsonPayloadEncodedOf<P> =
+	P extends ReadonlyMap<string, { readonly schemas: ReadonlyArray<Schema.Top> }>
+		? never
+		: P extends Schema.Top
+			? P["Encoded"]
+			: never
+
 export type PathParam<
 	G extends ApiGroupName,
 	E extends ApiEndpointName<G>,
@@ -98,6 +105,11 @@ export type EndpointQuery<G extends ApiGroupName, E extends ApiEndpointName<G>> 
 export type EndpointBody<G extends ApiGroupName, E extends ApiEndpointName<G>> = JsonPayloadOf<
 	EndpointProp<ApiEndpoint<G, E>, "~Payload">
 >
+
+export type EndpointJsonBody<
+	G extends ApiGroupName,
+	E extends ApiEndpointName<G>,
+> = JsonPayloadEncodedOf<EndpointProp<ApiEndpoint<G, E>, "~Payload">>
 
 export type EndpointJsonSuccess<
 	G extends ApiGroupName,
@@ -128,12 +140,14 @@ export interface OperationShape<
 	Body = never,
 	Result = unknown,
 	JsonResult = IsoDateTimes<Result>,
+	JsonBody = Body,
 > {
 	readonly path: Path
 	readonly query: Query
 	readonly body: Body
 	readonly result: Result
 	readonly jsonResult: JsonResult
+	readonly jsonBody: JsonBody
 }
 
 export type PathOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
@@ -142,6 +156,9 @@ export type QueryOf<O extends OperationShape<unknown, unknown, unknown, unknown,
 	O["query"]
 export type BodyOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
 	O["body"]
+export type JsonBodyOf<
+	O extends OperationShape<unknown, unknown, unknown, unknown, unknown, unknown>,
+> = O["jsonBody"]
 export type ResultOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
 	O["result"]
 export type JsonResultOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
@@ -153,19 +170,10 @@ export type ItemOf<R> = R extends { readonly data: ReadonlyArray<infer T> }
 		? T
 		: never
 
-export interface CursorPageEnvelope<Item, Cursor extends string | number = number> {
+export interface PageEnvelope<Item> {
 	readonly data: ReadonlyArray<Item>
-	readonly has_more: boolean
-	readonly next_cursor: Cursor | null
+	readonly next_page: string | null
 }
-
-export type PageEnvelope<Item, Cursor extends string | number> =
-	| CursorPageEnvelope<Item, Cursor>
-	| { readonly data: ReadonlyArray<Item>; readonly next_page: Cursor | null }
-
-export const nextPageOf = <Item, Cursor extends string | number>(
-	page: PageEnvelope<Item, Cursor>,
-): Cursor | null => ("next_page" in page ? page.next_page : page.has_more ? page.next_cursor : null)
 
 export interface RequestOptions {
 	readonly headers?: HeaderMap | undefined
@@ -193,7 +201,7 @@ export interface WithResponse<A> {
 	readonly requestId: string | undefined
 }
 
-export interface SessionEventsStreamOptions extends StreamSseOptions {
+export interface SessionEventsStreamOptions extends StreamSessionEventsOptions {
 	readonly headers?: HeaderMap | undefined
 }
 
@@ -493,54 +501,31 @@ export function unwrapResponse<A>(
 	return options?.withResponse === true ? effect : Effect.map(effect, (res) => res.data)
 }
 
-export const executePaginatedPagesEffect = <
-	Item,
-	Cursor extends string | number = number,
-	Page extends PageEnvelope<Item, Cursor> = PageEnvelope<Item, Cursor>,
->(
-	fetchPage: (after: Cursor | undefined) => Effect.Effect<Page, CheckfuSdkError>,
-	initialAfter: Cursor | undefined,
-	order: "asc" | "desc",
+export const executePaginatedPagesEffect = <Page extends PageEnvelope<unknown>>(
+	fetchPage: (page: string | undefined) => Effect.Effect<Page, CheckfuSdkError>,
+	initialPage: string | undefined,
 ): Stream.Stream<Page, CheckfuSdkError> =>
 	Stream.suspend(() => {
-		interface PageCursor {
-			readonly after: Cursor | undefined
-			readonly done: boolean
-		}
-		const seenCursors = new Set<Cursor>()
-		if (initialAfter !== undefined) {
-			seenCursors.add(initialAfter)
-		}
-		const initialCursor: PageCursor = { after: initialAfter, done: false }
-		return Stream.unfold(
-			initialCursor,
-			(
-				cursor: PageCursor,
-			): Effect.Effect<readonly [Page, PageCursor] | undefined, CheckfuSdkError> => {
-				if (cursor.done) {
+		const seen = new Set<string>(initialPage === undefined ? [] : [initialPage])
+		return Stream.unfold<string | null | undefined, Page, CheckfuSdkError, never>(
+			initialPage,
+			(token) => {
+				if (token === null) {
 					return Effect.undefined
 				}
-				return fetchPage(cursor.after).pipe(
-					Effect.flatMap((page): Effect.Effect<readonly [Page, PageCursor], CheckfuSdkError> => {
-						const nextAfter = nextPageOf(page)
-						if (nextAfter === null) {
-							const next: PageCursor = { after: undefined, done: true }
-							return Effect.succeed([page, next] as const)
-						}
-						const repeated = seenCursors.has(nextAfter)
-						const regressed =
-							typeof cursor.after === "number" &&
-							typeof nextAfter === "number" &&
-							(order === "asc" ? nextAfter <= cursor.after : nextAfter >= cursor.after)
-						if (repeated || regressed) {
+				return fetchPage(token).pipe(
+					Effect.flatMap((page) => {
+						const next = page.next_page
+						if (next !== null && seen.has(next)) {
 							return Effect.fail(
 								new PaginationCursorCycleError({
-									message: `Pagination cursor did not advance (${String(cursor.after)} -> ${String(nextAfter)}).`,
+									message: `Pagination cursor did not advance (${token} -> ${next}).`,
 								}),
 							)
 						}
-						seenCursors.add(nextAfter)
-						const next: PageCursor = { after: nextAfter, done: false }
+						if (next !== null) {
+							seen.add(next)
+						}
 						return Effect.succeed([page, next] as const)
 					}),
 				)
@@ -548,16 +533,11 @@ export const executePaginatedPagesEffect = <
 		)
 	})
 
-export const executePaginatedStreamEffect = <
-	Item,
-	Cursor extends string | number = number,
-	Page extends PageEnvelope<Item, Cursor> = PageEnvelope<Item, Cursor>,
->(
-	fetchPage: (after: Cursor | undefined) => Effect.Effect<Page, CheckfuSdkError>,
-	initialAfter: Cursor | undefined,
-	order: "asc" | "desc",
+export const executePaginatedStreamEffect = <Item>(
+	fetchPage: (page: string | undefined) => Effect.Effect<PageEnvelope<Item>, CheckfuSdkError>,
+	initialPage: string | undefined,
 ): Stream.Stream<Item, CheckfuSdkError> =>
-	executePaginatedPagesEffect(fetchPage, initialAfter, order).pipe(
+	executePaginatedPagesEffect(fetchPage, initialPage).pipe(
 		Stream.flatMap((page) => Stream.fromIterable(page.data)),
 	)
 
@@ -627,6 +607,13 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 	)
 }
 
+const custodySettled = (custody: unknown): boolean =>
+	typeof custody === "string"
+		? custody === "erased"
+		: typeof custody !== "object" ||
+			custody === null ||
+			Object.values(custody).every((count) => typeof count !== "number" || count === 0)
+
 const isResourceReadyForMutation = <T>(
 	resource: T,
 	readiness: PendingReadiness | undefined,
@@ -650,9 +637,7 @@ const isResourceReadyForMutation = <T>(
 			"archived_at" in resource &&
 			resource.archived_at !== null &&
 			resource.archived_at !== undefined &&
-			(!("custody" in resource) ||
-				typeof resource.custody !== "string" ||
-				resource.custody === "erased")
+			(!("custody" in resource) || custodySettled(resource.custody))
 		)
 	}
 	return (

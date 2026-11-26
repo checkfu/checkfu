@@ -1,13 +1,13 @@
 import { infiniteQueryOptions, queryOptions, skipToken } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
-import type { JsonSessionEvent } from "@checkfu/sdk/client"
+import type { JsonSessionEvent, JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
 import { ApiError, checkfu } from "./api.ts"
 import type { EventPage } from "./api.ts"
 
-export const agentsPage = (after?: string) =>
+export const agentsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["agents", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.agents.list(after, signal),
+		queryKey: ["agents", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.agents.list(token, signal),
 	})
 
 export const agentQuery = (id: string) =>
@@ -20,13 +20,13 @@ export const agentChoices = infiniteQueryOptions({
 	queryKey: ["agents", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.agents.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
 })
 
-export const environmentsPage = (after?: string) =>
+export const environmentsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["environments", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.environments.list(after, signal),
+		queryKey: ["environments", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.environments.list(token, signal),
 	})
 
 export const environmentQuery = (id: string) =>
@@ -39,13 +39,13 @@ export const environmentChoices = infiniteQueryOptions({
 	queryKey: ["environments", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.environments.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
 })
 
-export const automationsPage = (after?: string) =>
+export const automationsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["automations", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.automations.list(after, signal),
+		queryKey: ["automations", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.automations.list(token, signal),
 	})
 
 export const automationQuery = (id: string) =>
@@ -58,8 +58,8 @@ export const automationRunsQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["automations", "runs", id],
 		queryFn: ({ pageParam, signal }) => checkfu.automations.runs(id, pageParam, signal),
-		initialPageParam: undefined as number | undefined,
-		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) => page.next_page ?? undefined,
 	})
 
 export const memoryStoresPage = (token?: string) =>
@@ -85,7 +85,7 @@ export const artifactChoices = infiniteQueryOptions({
 	queryKey: ["artifacts", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.artifacts.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
 })
 
 export const memoriesQuery = (storeId: string) =>
@@ -100,10 +100,72 @@ export const memoryQuery = (storeId: string, id: string) =>
 		queryFn: ({ signal }) => checkfu.memoryStores.memory(storeId, id, signal),
 	})
 
-export const sessionsPage = (after?: string) =>
+export const vaultsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["sessions", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.sessions.list(after, signal),
+		queryKey: ["vaults", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.vaults.list(token, signal, true),
+	})
+
+export const ERASING_POLL_MS = 2000
+
+export const vaultErasing = (vault: JsonVault): boolean =>
+	vault.custody.erasing > 0 ||
+	(vault.archived_at !== null && vault.custody.held + vault.custody.storing > 0)
+
+const credentialErasing = (credential: JsonVaultCredential, vaultEnded: boolean): boolean =>
+	credential.custody === "erasing" ||
+	(vaultEnded && (credential.custody === "held" || credential.custody === "storing"))
+
+export const vaultQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["vaults", "one", id],
+		queryFn: ({ signal }) => checkfu.vaults.retrieve(id, signal),
+		refetchInterval: (query) =>
+			query.state.data !== undefined && vaultErasing(query.state.data) ? ERASING_POLL_MS : false,
+	})
+
+export const credentialsQuery = (vaultId: string, archived = false) =>
+	queryOptions({
+		queryKey: ["vaults", "credentials", vaultId, archived ? "all" : "active"],
+		queryFn: ({ signal }) => checkfu.vaults.credentials.list(vaultId, archived, undefined, signal),
+		refetchInterval: (query) =>
+			query.state.data?.data.some((credential) => credential.custody === "erasing") === true
+				? ERASING_POLL_MS
+				: false,
+	})
+
+export const credentialQuery = (vaultId: string, id: string) =>
+	queryOptions({
+		queryKey: ["vaults", "credentials", vaultId, "one", id],
+		queryFn: ({ signal }) => checkfu.vaults.credentials.retrieve(vaultId, id, signal),
+	})
+
+export const credentialPages = (vaultId: string, vaultEnded = false) =>
+	infiniteQueryOptions({
+		queryKey: ["vaults", "credentials", vaultId, "pages"],
+		queryFn: ({ pageParam, signal }) =>
+			checkfu.vaults.credentials.list(vaultId, true, pageParam, signal),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) => page.next_page ?? undefined,
+		refetchInterval: (query) =>
+			query.state.data?.pages.some((page) =>
+				page.data.some((credential) => credentialErasing(credential, vaultEnded)),
+			) === true
+				? ERASING_POLL_MS
+				: false,
+	})
+
+export const vaultChoices = infiniteQueryOptions({
+	queryKey: ["vaults", "choices"],
+	queryFn: ({ pageParam, signal }) => checkfu.vaults.list(pageParam, signal),
+	initialPageParam: undefined as string | undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
+})
+
+export const sessionsPage = (token?: string) =>
+	queryOptions({
+		queryKey: ["sessions", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.sessions.list(token, signal),
 	})
 
 export const sessionQuery = (id: string) =>
@@ -112,10 +174,10 @@ export const sessionQuery = (id: string) =>
 		queryFn: ({ signal }) => checkfu.sessions.retrieve(id, signal),
 	})
 
-export const artifactsPage = (after?: string) =>
+export const artifactsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["artifacts", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.artifacts.list(after, signal),
+		queryKey: ["artifacts", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.artifacts.list(token, signal),
 	})
 
 export const artifactQuery = (id: string) =>
@@ -142,8 +204,8 @@ export const transcriptQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["transcripts", id],
 		queryFn: ({ pageParam, signal }) => checkfu.sessions.events(id, pageParam, signal),
-		initialPageParam: undefined as number | undefined,
-		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) => page.next_page ?? undefined,
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 
@@ -166,8 +228,30 @@ export const eventsOf = (transcript: Transcript): ReadonlyArray<JsonSessionEvent
 export const isFinal = (events: ReadonlyArray<JsonSessionEvent>): boolean =>
 	events.some((event) => event.type === "session.archived")
 
-export const present = <T>(query: { readonly data: T; readonly error: unknown }): T => {
+export type Lookup<T> =
+	| { readonly state: "pending" }
+	| { readonly state: "active"; readonly found: T }
+	| { readonly state: "gone" }
+	| { readonly state: "failed" }
+
+export const lookup = <T>(
+	query: { readonly data: T | undefined; readonly error: unknown },
+	active: (found: T) => boolean = () => true,
+): Lookup<T> => {
 	if (query.error instanceof ApiError && query.error.status === 404) {
+		return { state: "gone" }
+	}
+	if (query.error !== null && query.error !== undefined) {
+		return { state: "failed" }
+	}
+	if (query.data !== undefined) {
+		return active(query.data) ? { state: "active", found: query.data } : { state: "gone" }
+	}
+	return { state: "pending" }
+}
+
+export const present = <T>(query: { readonly data: T; readonly error: unknown }): T => {
+	if (lookup(query).state === "gone") {
 		throw query.error
 	}
 	return query.data

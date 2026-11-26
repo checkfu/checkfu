@@ -35,15 +35,15 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 				current_revision: current.revision,
 			})
 		}
-		if (!cmd.changed) {
+		const agentVersion = cmd.agent_version ?? agent.state.version
+		const agentChanged = cmd.agent_id_changed || agentVersion !== cmd.previous_agent_version
+		if (!cmd.changed && !agentChanged) {
 			return []
 		}
 		if (!isUsableSchedule(cmd.schedule.expression, cmd.schedule.timezone)) {
 			return new AutomationScheduleUnusable(cmd.schedule)
 		}
-		const agentRefused = cmd.agent_changed
-			? agentRefusal(agent, cmd.agent_version ?? agent.state.version)
-			: undefined
+		const agentRefused = agentChanged ? agentRefusal(agent, agentVersion) : undefined
 		if (agentRefused !== undefined) {
 			return agentRefused
 		}
@@ -58,7 +58,7 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 					name: cmd.name,
 					description: cmd.description,
 					agent_id: agent.id,
-					agent_version: cmd.agent_version,
+					agent_version: agentVersion,
 					environment_id: environment.id,
 					text: cmd.text,
 					schedule: cmd.schedule,
