@@ -366,8 +366,10 @@ export const makePiDurableTestLayer = (
 					}
 					requests.push(request)
 					conversations.push(conversation)
-					const sessionId = conversation.split("#")[0] ?? conversation
-					enteredTurns.set(sessionId, Math.max(enteredTurns.get(sessionId) ?? 0, request.turn))
+					enteredTurns.set(
+						conversation,
+						Math.max(enteredTurns.get(conversation) ?? 0, request.turn),
+					)
 					return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
 				}),
 			abortTurn: (conversation, operationId) =>

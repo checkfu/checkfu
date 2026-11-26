@@ -18,6 +18,6 @@ export const outputsArtifactId = (
 	)
 
 export const outputsArtifactName = (sessionId: string, title: string | null): string =>
-	title === null || title.trim().length === 0
-		? `Session ${sessionId} outputs`
-		: Array.from(title).slice(0, MAX_ARTIFACT_NAME_LENGTH).join("")
+	Array.from(title === null || title.trim().length === 0 ? `Session ${sessionId} outputs` : title)
+		.slice(0, MAX_ARTIFACT_NAME_LENGTH)
+		.join("")
