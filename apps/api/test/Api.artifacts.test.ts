@@ -8,6 +8,7 @@ import * as Fiber from "effect/Fiber"
 import {
 	buildArtifactVersion,
 	MAX_ARTIFACT_BODY_BYTES,
+	MAX_ARTIFACT_FILE_BYTES,
 	MAX_INLINE_FILE_BYTES,
 	MAX_ARTIFACT_FILES,
 	MAX_INLINE_TOTAL_BYTES,
@@ -1884,10 +1885,16 @@ describe("Artifact bytes", () => {
 				})
 				const key = `artifacts/${DEFAULT_STORAGE_SCOPE}/${artifact.id}/blobs/${sha256}`
 				expect((yield* putBytes(`${blobs}/${sha256}`, data)).status).toBe(200)
-				expect(store.objects.has(key)).toBe(true)
+				expect(store.putCount(key)).toBe(1)
 				const short = yield* putBytes(`${blobs}/${sha256}`, data.slice(1))
 				expect(short.status).toBe(400)
 				expect((yield* json<ErrorBody>(short)).error.message).toContain("do not match")
+				const swapped = yield* putBytes(
+					`${blobs}/${sha256}`,
+					data.map((byte) => 255 - byte),
+				)
+				expect(swapped.status).toBe(400)
+				expect(store.putCount(key)).toBe(1)
 
 				const version = yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
 					version: 0,
@@ -1927,6 +1934,19 @@ describe("Artifact bytes", () => {
 					"content-length": "ten",
 				})
 				expect(refused.status).toBe(400)
+				const oversized = yield* putBytes(
+					`/v1/artifacts/${artifact.id}/blobs/${hexOf(data)}`,
+					data,
+					{
+						"content-length": String(MAX_ARTIFACT_FILE_BYTES + 1),
+					},
+				)
+				expect(oversized.status).toBe(413)
+				expect((yield* json<ErrorBody>(oversized)).error.message).toContain("at most")
+				const anyType = yield* putBytes(`/v1/artifacts/${artifact.id}/blobs/${hexOf(data)}`, data, {
+					"content-type": "image/png",
+				})
+				expect(anyType.status).toBe(200)
 			}),
 		))
 

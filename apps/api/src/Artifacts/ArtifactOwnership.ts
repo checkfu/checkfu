@@ -44,6 +44,11 @@ export interface ArtifactBucketWriter<R> {
 		size: number,
 		sha256: string,
 	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError, R>
+	readonly verifyStream: (
+		body: ReadableStream<Uint8Array>,
+		size: number,
+		sha256: string,
+	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError, R>
 }
 
 export const ArtifactMarks = Schema.Struct({
@@ -124,12 +129,10 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 				if ((yield* ports.marks).purged) {
 					return yield* new ArtifactPurged({ artifact_id: artifactId })
 				}
-				return yield* bucket.putStream(
-					artifactBlobKey(scope, artifactId, sha256),
-					body,
-					size,
-					sha256,
-				)
+				const key = artifactBlobKey(scope, artifactId, sha256)
+				return yield* (yield* bucket.has(key))
+					? bucket.verifyStream(body, size, sha256)
+					: bucket.putStream(key, body, size, sha256)
 			}),
 		)
 

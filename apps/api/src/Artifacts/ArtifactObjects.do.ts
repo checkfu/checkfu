@@ -27,6 +27,17 @@ const MARKS_KEY = "marks"
 
 const storeError = (cause: unknown) => new ArtifactStoreError({ cause })
 
+declare global {
+	interface Crypto {
+		readonly DigestStream: new (
+			algorithm: string,
+		) => WritableStream<ArrayBufferView> & { readonly digest: Promise<ArrayBuffer> }
+	}
+}
+
+const hexOf = (buffer: ArrayBuffer) =>
+	Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("")
+
 const overWire = <A, R>(effect: Effect.Effect<A, ArtifactStoreError, R>) =>
 	Effect.mapError(effect, (error) => storeError(String(error.cause)))
 
@@ -69,6 +80,27 @@ const makeWriter = (
 						: Effect.fail(storeError(error)),
 				),
 			),
+	verifyStream: (body, size, sha256) =>
+		Effect.tryPromise({
+			try: async () => {
+				const digest = new crypto.DigestStream("SHA-256")
+				let received = 0
+				await body
+					.pipeThrough(
+						new TransformStream<Uint8Array, Uint8Array>({
+							transform: (chunk, controller) => {
+								received += chunk.byteLength
+								controller.enqueue(chunk)
+							},
+						}),
+					)
+					.pipeTo(digest)
+				return received === size && hexOf(await digest.digest) === sha256
+					? ("stored" as const)
+					: ("mismatch" as const)
+			},
+			catch: storeError,
+		}),
 })
 
 interface ArtifactObjectsShape {

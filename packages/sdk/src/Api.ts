@@ -1892,14 +1892,16 @@ const Artifacts = HttpApiGroup.make("artifacts")
 				...artifactParams,
 				sha256: Sha256Hex.annotate({ description: "sha256 of the bytes, as lowercase hex" }),
 			},
-			payload: HttpApiSchema.StreamUint8Array({ maxBytes: MAX_ARTIFACT_FILE_BYTES }),
+			payload: Schema.Uint8Array.pipe(
+				HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" }),
+			),
 			success: ArtifactBlobResource,
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Upload file bytes to an artifact")
 			.annotate(
 				OpenApi.Description,
-				`Store raw bytes in an artifact under their sha256, with a Content-Length header, so a version can name them by sha256 without sending them inline. The bytes must match the sha256 and be at most ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB. Uploading bytes the artifact already holds succeeds without storing them again.`,
+				`Store raw bytes in an artifact under their sha256, so a version can name them by sha256 without sending them inline. The request needs a Content-Length header, and the bytes must match the sha256 and be at most ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB. Uploading bytes the artifact already holds checks them and stores nothing new.`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-skip": true,

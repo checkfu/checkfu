@@ -20753,7 +20753,7 @@
 						}
 					}
 				},
-				"description": "Store raw bytes in an artifact under their sha256, with a Content-Length header, so a version can name them by sha256 without sending them inline. The bytes must match the sha256 and be at most 100 MiB. Uploading bytes the artifact already holds succeeds without storing them again.",
+				"description": "Store raw bytes in an artifact under their sha256, so a version can name them by sha256 without sending them inline. The request needs a Content-Length header, and the bytes must match the sha256 and be at most 100 MiB. Uploading bytes the artifact already holds checks them and stores nothing new.",
 				"summary": "Upload file bytes to an artifact",
 				"requestBody": {
 					"content": {
@@ -20761,9 +20761,6 @@
 							"schema": {
 								"type": "string",
 								"format": "binary"
-							},
-							"x-effect-stream": {
-								"encoding": "uint8array"
 							}
 						}
 					},

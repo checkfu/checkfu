@@ -22,7 +22,6 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
-import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -44,11 +43,13 @@ import {
 	publicationAddress,
 } from "../Content/ArtifactLink.ts"
 import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
-import { CheckfuApi } from "./Api.ts"
+import { CheckfuApi, apiError } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	createCommandId,
+	currentRequestId,
+	errorResponse,
 	handled,
 	idempotentCommandId,
 	idempotentId,
@@ -577,31 +578,41 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					})
 				}).pipe(handled),
 			)
-			.handle("uploadBlob", ({ params, payload }) =>
+			.handleRaw("uploadBlob", ({ params, request }) =>
 				Effect.gen(function* () {
 					const id = params.artifact_id
 					const { sha256 } = params
 					yield* requireActive(id)
-					const request = yield* HttpServerRequest.HttpServerRequest
 					const size = Number(request.headers["content-length"] ?? Number.NaN)
 					if (!Number.isSafeInteger(size) || size < 0) {
 						return yield* reject(400, "Send the upload with a Content-Length header.")
 					}
 					if (size > MAX_ARTIFACT_FILE_BYTES) {
-						return yield* reject(413, `An upload may be at most ${MAX_ARTIFACT_FILE_BYTES} bytes.`)
+						return yield* errorResponse(
+							apiError(
+								413,
+								`An upload may be at most ${MAX_ARTIFACT_FILE_BYTES} bytes.`,
+								yield* currentRequestId,
+							),
+						)
 					}
 					const outcome = yield* stored(
 						store.putBlob(
 							id,
 							sha256,
-							payload.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
+							request.stream.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
 							size,
 						),
 					).pipe(Effect.catchTag("ArtifactPurged", () => reject(404, `Artifact ${id} not found.`)))
 					if (outcome === "mismatch") {
 						return yield* reject(400, `The uploaded bytes do not match sha256 ${sha256}.`)
 					}
-					return { type: "artifact_blob" as const, artifact_id: id, sha256, size }
+					return HttpServerResponse.jsonUnsafe({
+						type: "artifact_blob",
+						artifact_id: id,
+						sha256,
+						size,
+					})
 				}).pipe(handled),
 			)
 			.handle("getFile", ({ params, query }) =>

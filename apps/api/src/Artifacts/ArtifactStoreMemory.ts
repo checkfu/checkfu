@@ -42,6 +42,20 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 	)
 
 	const bucket: ArtifactBucketWriter<never> = {
+		verifyStream: (body, size, sha256) =>
+			Effect.gen(function* () {
+				const bytes = new Uint8Array(
+					yield* Effect.tryPromise({
+						try: () => new Response(body).arrayBuffer(),
+						catch: (cause) => new ArtifactStoreError({ cause }),
+					}),
+				)
+				const digest = yield* Digest.Digest
+				return bytes.byteLength === size &&
+					(yield* digest.digestHex(Digest.sha256, bytes)) === sha256
+					? ("stored" as const)
+					: ("mismatch" as const)
+			}).pipe(Effect.provide(Digest.layerWebCrypto)),
 		putStream: (key, body, size, sha256) =>
 			Effect.gen(function* () {
 				const bytes = new Uint8Array(

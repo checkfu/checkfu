@@ -608,6 +608,15 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect((await upload("0".repeat(64))).status).toBe(400)
 		const stored = await upload(sha256)
 		expect(stored.status).toBe(200)
+		expect((await upload(sha256)).status).toBe(200)
+		expect(
+			(
+				await upload(
+					sha256,
+					data.map((byte) => 255 - byte),
+				)
+			).status,
+		).toBe(400)
 		const empty = new Uint8Array(0)
 		const emptySha256 = createHash("sha256").update(empty).digest("hex")
 		expect((await upload(emptySha256, empty)).status).toBe(200)

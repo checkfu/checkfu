@@ -20,6 +20,7 @@ const makeOwner = () => {
 	let beforeList: Effect.Effect<void> = Effect.void
 	let duringUpload: Effect.Effect<void> = Effect.void
 	const bucket: ArtifactBucketWriter<never> = {
+		verifyStream: () => Effect.succeed("stored" as const),
 		putStream: (key) =>
 			Effect.andThen(
 				Effect.suspend(() => duringUpload),

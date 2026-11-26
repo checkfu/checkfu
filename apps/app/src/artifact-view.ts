@@ -1,3 +1,4 @@
+import { MAX_INLINE_FILE_BYTES } from "@checkfu/sdk/Limits"
 const IMAGE_TYPES = new Set([
 	"image/avif",
 	"image/bmp",
@@ -91,3 +92,9 @@ export const artifactSearch = (search: {
 		: {}),
 	...(typeof search.path === "string" && search.path !== "" ? { path: search.path } : {}),
 })
+
+export const previewable = (file: { readonly size: number }): boolean =>
+	file.size <= MAX_INLINE_FILE_BYTES
+
+export const downloadUrl = (artifactId: string, version: number, path: string): string =>
+	`/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/content?file=${encodeURIComponent(path)}`
