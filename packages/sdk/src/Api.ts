@@ -582,7 +582,7 @@ const MAX_SESSION_VAULTS = 20
 const AgentReference = Schema.Union([
 	ResourceId,
 	Schema.Struct({
-		type: Schema.optionalKey(Schema.Literal("agent")),
+		type: Schema.Literal("agent"),
 		id: ResourceId,
 		version: Schema.optionalKey(PositiveInt),
 	}),
@@ -598,14 +598,12 @@ const AutomationAgentReference = AgentReference.annotate({
 		'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 })
 
-const CreateSessionCommonFields = {
+export const CreateSessionBody = Schema.Struct({
+	agent: SessionAgentReference,
 	initial_events: Schema.optionalKey(
 		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
 			.check(Schema.isMaxLength(MAX_SESSION_INITIAL_EVENTS))
 			.annotate({ description: "User messages to send in order when the session is created." }),
-	),
-	agent_version: Schema.optionalKey(
-		PositiveInt.annotate({ description: "Optional pinned agent version" }),
 	),
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
@@ -630,22 +628,7 @@ const CreateSessionCommonFields = {
 					"Explicit credentials for named servers. An explicit binding wins over vault matching.",
 			}),
 	),
-}
-
-export const CreateSessionBody = Schema.Union([
-	Schema.Struct({
-		agent: SessionAgentReference,
-		agent_id: Schema.optionalKey(
-			ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
-		),
-		...CreateSessionCommonFields,
-	}),
-	Schema.Struct({
-		agent: Schema.optionalKey(SessionAgentReference),
-		agent_id: ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
-		...CreateSessionCommonFields,
-	}),
-])
+})
 export type CreateSessionBody = typeof CreateSessionBody.Type
 
 const AutomationInitialEvent = Schema.Struct({
@@ -1099,7 +1082,7 @@ export const isPendingResource = <T extends { readonly type: string }>(
 export const UserMessageEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.message"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	turn: PositiveInt,
 	queued: Schema.Boolean,
 	content: TextBlocks,
@@ -1109,14 +1092,14 @@ export type UserMessageEventReceipt = typeof UserMessageEventReceipt.Type
 export const UserInterruptEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.interrupt"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
 export const UserToolConfirmationEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.tool_confirmation"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	tool_use_id: ToolUseEventId,
 	result: ToolConfirmationResult,
 	deny_message: Schema.optionalKey(DenyMessage),
@@ -1126,7 +1109,7 @@ export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventR
 export const UserCustomToolResultEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.custom_tool_result"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	custom_tool_use_id: ToolUseEventId,
 	content: Schema.optionalKey(TextBlocks),
 	is_error: Schema.optionalKey(Schema.Boolean),
@@ -1155,7 +1138,7 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		seq: PositiveInt,
 		type: Schema.Literal(type),
 		created_at: Schema.DateTimeUtc,
-		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+		processed_at: Schema.NullOr(Schema.DateTimeUtc),
 		...fields,
 	})
 
