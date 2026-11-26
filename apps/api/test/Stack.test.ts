@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "@effect/vitest"
+import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
 import { State } from "alchemy/State"
@@ -374,5 +375,77 @@ describe("Alchemy stack and worker entry", () => {
 			)
 			expect(requests).toBe(0)
 		}),
+	)
+
+	it.live(
+		"keeps every planned Worker within Cloudflare's 100-export script limit",
+		() =>
+			Effect.gen(function* () {
+				const scratch = yield* Effect.acquireRelease(
+					Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-exports-"))),
+					(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+				)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+					() => Effect.sync(() => vi.unstubAllEnvs()),
+				)
+				const counts = yield* Alchemist.plan({
+					stack: checkfuStack(Effect.void),
+					stage: "staging",
+					operation: "deploy",
+					dev: true,
+				}).pipe(
+					Effect.map(({ native }) => {
+						const byWorker: Record<string, number> = {}
+						for (const [id, entry] of Object.entries(native.resources)) {
+							if (!Cloudflare.Workers.isWorker(entry.resource)) {
+								continue
+							}
+							const exports = new Set<string>(["default"])
+							for (const binding of entry.bindings) {
+								const data = binding.data
+								const items =
+									typeof data === "object" &&
+									data !== null &&
+									"bindings" in data &&
+									Array.isArray(data.bindings)
+										? data.bindings
+										: []
+								for (const item of items) {
+									if (typeof item !== "object" || item === null || !("type" in item)) {
+										continue
+									}
+									if (
+										(item.type === "durable_object_namespace" || item.type === "workflow") &&
+										"className" in item &&
+										typeof item.className === "string" &&
+										(!("scriptName" in item) || item.scriptName === undefined)
+									) {
+										exports.add(item.className)
+									}
+								}
+							}
+							byWorker[id] = exports.size
+						}
+						return byWorker
+					}),
+					Effect.scoped,
+					Effect.provide(Alchemist.layer()),
+					Effect.provideService(Alchemy.AlchemyContext, {
+						dotAlchemy: join(scratch, "staging"),
+						dev: true,
+						adopt: false,
+					}),
+				)
+				expect(Object.keys(counts)).toContain("ApiWorker")
+				expect(Object.keys(counts)).toContain("PiHarnessWorker")
+				for (const [worker, count] of Object.entries(counts)) {
+					expect(
+						count,
+						`${worker} exports ${count} classes (Cloudflare limit is 100)`,
+					).toBeLessThanOrEqual(100)
+				}
+			}),
+		60_000,
 	)
 })
