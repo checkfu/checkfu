@@ -2012,9 +2012,9 @@ const memoryStoresListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -2051,10 +2051,8 @@ const memoryStoresListCommandSpec: GeneratedOperationDescriptor = {
 const memoryStoresListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(

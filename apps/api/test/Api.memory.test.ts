@@ -122,6 +122,19 @@ describe("Memory stores", () => {
 					["Bare", true],
 				])
 
+				const firstPage = yield* json<{ data: ReadonlyArray<StoreBody>; next_page: string | null }>(
+					yield* request(apiFetch, "GET", "/v1/memory_stores?limit=1"),
+				)
+				expect(firstPage).toEqual({ data: [renamed], next_page: expect.any(String) })
+				const nextPage = yield* json(
+					yield* request(
+						apiFetch,
+						"GET",
+						`/v1/memory_stores?limit=1&page=${encodeURIComponent(firstPage.next_page ?? "")}`,
+					),
+				)
+				expect(nextPage).toEqual({ data: [bare], next_page: null })
+
 				const archived = yield* json<StoreBody>(yield* request(apiFetch, "POST", `${path}/archive`))
 				expect(archived.archived_at).not.toBeNull()
 				expect(yield* listed()).toEqual([

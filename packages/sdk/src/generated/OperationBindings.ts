@@ -698,7 +698,7 @@ export const SDK_OPERATION_BINDINGS = [
 		httpMethod: "GET",
 		path: "/v1/memory_stores",
 		pathParams: [],
-		queryParams: ["after", "limit", "order", "include_archived"],
+		queryParams: ["page", "limit", "order", "include_archived"],
 		requiredQueryParams: [],
 		kind: "paginated",
 		retrySafety: "idempotent",

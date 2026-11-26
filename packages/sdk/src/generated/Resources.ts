@@ -2445,7 +2445,7 @@ export class EffectMemoryStoresResource {
 			executeWithRetries(this.#runtime, "checkfu.memoryStores.list", "idempotent", options, () =>
 				this.#runtime.raw.memory_stores.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 						...(params?.["include_archived"] === undefined
@@ -2469,11 +2469,11 @@ export class EffectMemoryStoresResource {
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(cursor === undefined ? {} : { page: cursor }),
 					},
 					options,
 				),
-			params?.["after"],
+			params?.["page"],
 			params?.order ?? "asc",
 		)
 	}
@@ -2488,11 +2488,11 @@ export class EffectMemoryStoresResource {
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(cursor === undefined ? {} : { page: cursor }),
 					},
 					options,
 				),
-			params?.["after"],
+			params?.["page"],
 			params?.order ?? "asc",
 		)
 	}
@@ -4439,14 +4439,14 @@ export class MemoryStoresResource {
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
+			params?.["page"],
 			params?.order ?? "asc",
 			options,
 			(effectRuntime, cursor, effectOpts) =>
 				new EffectMemoryStoresResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(cursor === undefined ? {} : { page: cursor }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),

@@ -1397,7 +1397,12 @@ export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
 export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot, ResourceListCursor)
-export const ListMemoryStoresResponse = listResponse(MemoryStoreSnapshot, ResourceListCursor)
+export const ListMemoryStoresResponse = Schema.Struct({
+	data: Schema.Array(MemoryStoreSnapshot),
+	next_page: Schema.NullOr(Schema.String).annotate({
+		description: "Token for the next page, or null when there are no more results.",
+	}),
+})
 export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
 export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
@@ -2861,7 +2866,16 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 	)
 	.add(
 		HttpApiEndpoint.get("list", "/v1/memory_stores", {
-			query: resourceListQuery,
+			query: {
+				page: Schema.optionalKey(
+					ResourceListCursor.annotate({
+						description: "Opaque page token from the previous response's next_page.",
+					}),
+				),
+				limit: resourceListQuery.limit,
+				order: resourceListQuery.order,
+				include_archived: resourceListQuery.include_archived,
+			},
 			success: ListMemoryStoresResponse,
 			error: HandlerErrors,
 		})

@@ -2437,11 +2437,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",

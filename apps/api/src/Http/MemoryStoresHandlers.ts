@@ -193,8 +193,13 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 					)
 				}).pipe(handled),
 			)
-			.handle("list", ({ query }) =>
-				list("memory_store", query, (id) => existingStore(MemoryStoreId.make(id))).pipe(handled),
+			.handle("list", ({ query: { page, ...query } }) =>
+				list("memory_store", { ...query, ...(page === undefined ? {} : { after: page }) }, (id) =>
+					existingStore(MemoryStoreId.make(id)),
+				).pipe(
+					Effect.map(({ data, next_cursor }) => ({ data, next_page: next_cursor })),
+					handled,
+				),
 			)
 			.handle("get", ({ params }) => existingStore(params.memory_store_id).pipe(handled))
 			.handle("update", ({ params, payload }) =>

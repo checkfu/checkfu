@@ -33842,12 +33842,12 @@
 				"operationId": "memory_stores.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -33950,23 +33950,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
