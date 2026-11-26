@@ -60,7 +60,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			agent_id: ResourceId,
 			agent_version: PositiveInt,
 			environment_id: ResourceId,
-			resources: SessionResources.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+			resources: SessionResources,
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
 			last_reply_turn: Schema.optionalKey(NonNegativeInt),

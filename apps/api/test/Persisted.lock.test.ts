@@ -600,6 +600,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					agent_id: "agent_1",
 					agent_version: 1,
 					environment_id: "env_1",
+					resources: [],
 					turn: 2,
 					harness_generation: 0,
 					input: ["hi"],

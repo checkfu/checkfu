@@ -12,10 +12,7 @@ export class SessionCreated extends Domain.Event("session.created", {
 	environment_id: ResourceId,
 	title: Schema.NullOr(Schema.String),
 	mcp_server_credentials: Schema.optionalKey(McpServerCredentialsText),
-	resources: SessionResources.pipe(
-		Schema.withDecodingDefaultKey(Effect.succeed([])),
-		Schema.withConstructorDefault(Effect.succeed([])),
-	),
+	resources: SessionResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 export class SessionAlreadyExists extends Domain.Rejection(

@@ -1,5 +1,4 @@
 import * as Domain from "@alchemy.run/domain"
-import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { TurnAbandoned } from "./AbandonTurn.command.ts"
@@ -15,7 +14,7 @@ export const TurnInputState = Schema.Struct({
 	agent_id: ResourceId,
 	agent_version: PositiveInt,
 	environment_id: ResourceId,
-	resources: SessionResources.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+	resources: SessionResources,
 	turn: NonNegativeInt,
 	input: Schema.Array(MessageText),
 	unsent: Schema.Array(MessageText),

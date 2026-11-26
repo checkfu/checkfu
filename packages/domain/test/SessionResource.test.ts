@@ -1,7 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
-import { SessionCreated } from "../src/Session/CreateSession.command.ts"
-import { RunTurn } from "../src/Session/RunTurn.saga.ts"
 import {
 	MAX_SESSION_REPOSITORIES,
 	MountPath,
@@ -132,28 +130,5 @@ describe("session resources", () => {
 			)
 		expect(valid(many(MAX_SESSION_REPOSITORIES))).toBe(true)
 		expect(valid(many(MAX_SESSION_REPOSITORIES + 1))).toBe(false)
-	})
-
-	it("reads a session and a queued turn written before resources existed as having none", () => {
-		const event = Schema.decodeSync(Schema.toCodecJson(SessionCreated))({
-			_tag: "session.created",
-			agent_id: "agent_1",
-			agent_version: 1,
-			environment_id: "env_1",
-			title: null,
-		})
-		expect(event.resources).toEqual([])
-
-		const turn = Schema.decodeSync(Schema.toCodecJson(RunTurn.workflow.payloadSchema))({
-			key: "sess_1:turn:1",
-			session_id: "sess_1",
-			agent_id: "agent_1",
-			agent_version: 1,
-			environment_id: "env_1",
-			turn: 1,
-			generation: 0,
-			input: ["Hello"],
-		})
-		expect(turn.resources).toEqual([])
 	})
 })
