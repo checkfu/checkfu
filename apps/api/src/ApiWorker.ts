@@ -11,6 +11,7 @@ import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
+import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
@@ -43,6 +44,14 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
+			listOutputs: (sessionId, turn) =>
+				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId, turn))).pipe(
+					Effect.withSpan("PiHarness.listOutputs"),
+				),
+			readOutputs: (sessionId, turn, paths) =>
+				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, paths))).pipe(
+					Effect.withSpan("PiHarness.readOutputs"),
+				),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),
@@ -59,6 +68,7 @@ const ArtifactStoreLive = ArtifactStoreR2.pipe(
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(PiDurableHarnessLive),
+		Layer.provide(SessionOutputsLive),
 		Layer.provide(ArtifactBytesLive),
 		Layer.provide(D1ListingStore),
 		Layer.provide(Cloudflare.D1.QueryDatabaseBinding),
@@ -76,8 +86,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
-	Digest.layerWebCrypto,
-).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
+).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,

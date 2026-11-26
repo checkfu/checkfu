@@ -366,6 +366,26 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
+	it.effect(
+		"locks the name of every policy an aggregate feeds, so a renamed policy is caught",
+		() =>
+			Effect.gen(function* () {
+				expect(persistedShapes.map((shape) => shape.id)).toEqual(
+					expect.arrayContaining([
+						"policy-delivery:Checkfu.PublishSessionOutputs/Session",
+						"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact",
+					]),
+				)
+				const renamed = "policy-delivery:Checkfu.DiscardWorkspace/Session"
+				expect(persistedShapes.map((shape) => shape.id)).not.toContain(renamed)
+				expect(yield* lockProblems(lockWith({ [renamed]: [] }))).toEqual([
+					expect.stringContaining(
+						`${renamed} shipped in baseline "test-baseline" and nothing reads it now.`,
+					),
+				])
+			}),
+	)
+
 	it.effect("locks the arguments and the result of every harness Worker call", () =>
 		Effect.gen(function* () {
 			expect(
@@ -374,7 +394,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.map((shape) => shape.id)
 					.toSorted(),
 			).toEqual(
-				["abortTurn", "discardWorkspace", "recoverTurn", "runTurn"].flatMap((method) => [
+				[
+					"abortTurn",
+					"discardWorkspace",
+					"listOutputs",
+					"readOutputs",
+					"recoverTurn",
+					"runTurn",
+				].flatMap((method) => [
 					`harness-call:PiHarness.${method}/args`,
 					`harness-call:PiHarness.${method}/result`,
 				]),

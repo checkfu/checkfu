@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
@@ -46,6 +47,7 @@ export const makeTestServer = Effect.gen(function* () {
 		Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(HarnessLive),
 			),

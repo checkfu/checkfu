@@ -194,6 +194,12 @@ describe("Cloudflare Forge pipeline", () => {
 				httpMethod: "GET",
 				path: "/v1/sessions/{session_id}/events/stream",
 			},
+			{
+				group: "sessions:outputs",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/sessions/{session_id}/outputs",
+			},
 		])
 
 		for (const item of resolved) {
@@ -531,7 +537,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(38)
+		expect(inspectedMethods.length).toBe(39)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

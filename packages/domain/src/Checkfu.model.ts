@@ -36,7 +36,10 @@ import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
 import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
-import { DiscardWorkspace, DiscardWorkspaceLive } from "./Session/DiscardWorkspace.policy.ts"
+import {
+	PublishSessionOutputs,
+	PublishSessionOutputsLive,
+} from "./Session/PublishSessionOutputs.policy.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
@@ -72,7 +75,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ArmAutomation,
 		StartAutomationRun,
 		FreeAutomationSlot,
-		DiscardWorkspace,
+		PublishSessionOutputs,
 		ExpireArtifactReservations,
 		ReleaseArtifactBytes,
 	],
@@ -400,7 +403,7 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	StartTurnLive,
 	EnsureTurnStartedLive,
 	EnsureTurnStoppedLive,
-	DiscardWorkspaceLive,
+	PublishSessionOutputsLive,
 	RunTurnLive,
 	ArmAutomationLive,
 	StartAutomationRunLive,

@@ -181,6 +181,8 @@ describe("PiProviderRuntime", () => {
 								recoverTurn: () => Effect.succeed(null),
 								runTurn: () => Effect.die(new Error("plan only")),
 								abortTurn: () => Effect.succeed(false),
+								listOutputs: () => Effect.succeed({ ok: true, files: [] }),
+								readOutputs: () => Effect.succeed([]),
 								discardWorkspace: () => Effect.void,
 							})
 						}).pipe(Effect.provide(providerLayer)),

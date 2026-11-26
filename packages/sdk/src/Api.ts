@@ -1439,6 +1439,27 @@ const Sessions = HttpApiGroup.make("sessions")
 				},
 			}),
 	)
+	.add(
+		HttpApiEndpoint.get("getOutputs", "/v1/sessions/:session_id/outputs", {
+			params: sessionParams,
+			success: ArtifactResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a session's outputs")
+			.annotate(
+				OpenApi.Description,
+				"Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.outputs",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "getOutputs" },
+				"x-checkfu-mcp": { name: "sessions_getOutputs" },
+				"x-checkfu-cli": {
+					groupDescription: "Retrieve what a session published from its outputs directory",
+				},
+			}),
+	)
 	.annotate(OpenApi.Description, "Manage sessions")
 	.middleware(Authentication)
 

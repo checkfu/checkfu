@@ -1,5 +1,6 @@
 import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
@@ -141,6 +142,7 @@ describe("Automation alarms", () => {
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
 						Layer.provide(ArtifactBytesKept),
+						Layer.provide(SessionOutputsUnpublished),
 						Layer.provide([harness, ListingStore.memory]),
 					),
 				).pipe(Layer.provide(platform.layer)),

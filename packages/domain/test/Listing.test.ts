@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -37,6 +38,7 @@ const HarnessStubLayer = Harness.toLayer(
 const CheckfuInMemory = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(ArtifactBytesKept),
+		Layer.provide(SessionOutputsUnpublished),
 		Layer.provide([HarnessStubLayer, ListingStore.memory]),
 	),
 ).pipe(Layer.provide(Domain.InMemory))

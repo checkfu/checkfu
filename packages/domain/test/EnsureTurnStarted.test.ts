@@ -2,6 +2,8 @@ import * as InMemory from "@alchemy.run/domain/InMemory"
 import { ExpireArtifactReservationsLive } from "../src/Artifact/ExpireArtifactReservations.policy.ts"
 import { ReleaseArtifactBytesLive } from "../src/Artifact/ReleaseArtifactBytes.policy.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
+import { PublishSessionOutputsLive } from "../src/Session/PublishSessionOutputs.policy.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -20,7 +22,6 @@ import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { ListResourcesLive } from "../src/Listing/ListResources.query.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
 import { SessionStatusTerminated } from "../src/Session/ArchiveSession.command.ts"
-import { DiscardWorkspaceLive } from "../src/Session/DiscardWorkspace.policy.ts"
 import { EnsureTurnStarted, ensureTurnStarted } from "../src/Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStoppedLive } from "../src/Session/EnsureTurnStopped.policy.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, Harness } from "../src/Session/Harness.external.ts"
@@ -135,7 +136,7 @@ const handlersOf =
 				),
 			),
 			EnsureTurnStoppedLive,
-			DiscardWorkspaceLive,
+			PublishSessionOutputsLive,
 			RunTurnLive,
 			ArmAutomationLive,
 			StartAutomationRunLive,
@@ -193,7 +194,12 @@ const run = <A, E, R>(
 		Effect.provide(
 			Checkfu.layer(
 				handlers(platform).pipe(
-					Layer.provide([harness(platform), ListingStore.memory, ArtifactBytesKept]),
+					Layer.provide([
+						harness(platform),
+						ListingStore.memory,
+						ArtifactBytesKept,
+						SessionOutputsUnpublished,
+					]),
 				),
 			).pipe(Layer.provide(platform.layer)),
 		),

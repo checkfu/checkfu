@@ -1,5 +1,7 @@
 import {
 	ArtifactFile,
+	ArtifactPath,
+	MAX_ARTIFACT_FILES,
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_TOTAL_BYTES,
 } from "@checkfu/sdk/Schemas"
@@ -49,20 +51,28 @@ export interface ArtifactBlob {
 	readonly bytes: Uint8Array
 }
 
-export interface BuiltArtifactVersion {
+export interface SealedArtifactFiles {
 	readonly manifest: ArtifactManifest
 	readonly manifest_json: string
 	readonly manifest_hash: string
-	readonly blobs: ReadonlyArray<ArtifactBlob>
 	readonly file_count: number
 	readonly total_bytes: number
 }
 
+export interface BuiltArtifactVersion extends SealedArtifactFiles {
+	readonly blobs: ReadonlyArray<ArtifactBlob>
+}
+
+export interface ArtifactFileEntry {
+	readonly path: string
+	readonly sha256: string
+	readonly size: number
+	readonly content_type?: string | undefined
+}
+
 const utf8Encoder = new TextEncoder()
 
-const contentTypeOf = (file: ArtifactVersionFileInput): string =>
-	file.content_type ??
-	Option.getOrElse(Mime.getType(`./${file.path}`), () => DEFAULT_ARTIFACT_CONTENT_TYPE)
+const isArtifactPath = Schema.is(ArtifactPath)
 
 const decodeContent = (
 	file: ArtifactFileInput,
@@ -98,23 +108,83 @@ const fileUnderAnother = (paths: ReadonlySet<string>): string | undefined => {
 	return undefined
 }
 
-export const buildArtifactVersion = (
+const overBudget = (path: string, size: number, totalBytes: number) =>
+	size > MAX_ARTIFACT_FILE_BYTES
+		? new InvalidArtifactFiles({
+				message: `File "${path}" is ${size} bytes; the limit is ${MAX_ARTIFACT_FILE_BYTES}.`,
+			})
+		: totalBytes > MAX_ARTIFACT_TOTAL_BYTES
+			? new InvalidArtifactFiles({
+					message: `Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
+				})
+			: undefined
+
+export const sealArtifactFiles = (
 	digest: Digest.Digest["Service"],
-	files: ReadonlyArray<ArtifactVersionFileInput>,
-	kept: ReadonlyMap<string, number> = new Map(),
-): Effect.Effect<BuiltArtifactVersion, InvalidArtifactFiles> =>
+	files: ReadonlyArray<ArtifactFileEntry>,
+): Effect.Effect<SealedArtifactFiles, InvalidArtifactFiles> =>
 	Effect.gen(function* () {
+		if (files.length > MAX_ARTIFACT_FILES) {
+			return yield* new InvalidArtifactFiles({
+				message: `${files.length} files; the limit is ${MAX_ARTIFACT_FILES}.`,
+			})
+		}
 		const seen = new Set<string>()
 		const entries: Array<ArtifactFile> = []
-		const blobs = new Map<string, ArtifactBlob>()
 		let totalBytes = 0
 		for (const file of files) {
+			if (!isArtifactPath(file.path)) {
+				return yield* new InvalidArtifactFiles({
+					message: `File path ${JSON.stringify(file.path)} is not allowed.`,
+				})
+			}
 			if (seen.has(file.path)) {
 				return yield* new InvalidArtifactFiles({
 					message: `File path "${file.path}" appears more than once.`,
 				})
 			}
 			seen.add(file.path)
+			totalBytes += file.size
+			const over = overBudget(file.path, file.size, totalBytes)
+			if (over !== undefined) {
+				return yield* over
+			}
+			entries.push({
+				path: file.path,
+				sha256: file.sha256,
+				size: file.size,
+				content_type:
+					file.content_type ??
+					Option.getOrElse(Mime.getType(`./${file.path}`), () => DEFAULT_ARTIFACT_CONTENT_TYPE),
+			})
+		}
+		const conflict = fileUnderAnother(seen)
+		if (conflict !== undefined) {
+			return yield* new InvalidArtifactFiles({ message: conflict })
+		}
+		entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+		const manifest: ArtifactManifest = { files: entries }
+		const manifest_json = JSON.stringify(manifest)
+		const manifest_hash = yield* digest.digestHex(Digest.sha256, utf8Encoder.encode(manifest_json))
+		return {
+			manifest,
+			manifest_json,
+			manifest_hash,
+			file_count: entries.length,
+			total_bytes: totalBytes,
+		}
+	})
+
+export const buildArtifactVersion = (
+	digest: Digest.Digest["Service"],
+	files: ReadonlyArray<ArtifactVersionFileInput>,
+	kept: ReadonlyMap<string, number> = new Map(),
+): Effect.Effect<BuiltArtifactVersion, InvalidArtifactFiles> =>
+	Effect.gen(function* () {
+		const entries: Array<ArtifactFileEntry> = []
+		const blobs = new Map<string, ArtifactBlob>()
+		let totalBytes = 0
+		for (const file of files) {
 			if ("sha256" in file) {
 				const size = kept.get(file.sha256)
 				if (size === undefined) {
@@ -126,59 +196,34 @@ export const buildArtifactVersion = (
 					})
 				}
 				totalBytes += size
-				if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-					return yield* new InvalidArtifactFiles({
-						message: `Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
-					})
+				const over = overBudget(file.path, size, totalBytes)
+				if (over !== undefined) {
+					return yield* over
 				}
 				entries.push({
 					path: file.path,
 					sha256: file.sha256,
 					size,
-					content_type: contentTypeOf(file),
+					content_type: file.content_type,
 				})
 				continue
 			}
 			const bytes = yield* decodeContent(file)
-			if (bytes.byteLength > MAX_ARTIFACT_FILE_BYTES) {
-				return yield* new InvalidArtifactFiles({
-					message: `File "${file.path}" is ${bytes.byteLength} bytes; the limit is ${MAX_ARTIFACT_FILE_BYTES}.`,
-				})
-			}
 			totalBytes += bytes.byteLength
-			if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-				return yield* new InvalidArtifactFiles({
-					message: `Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
-				})
+			const over = overBudget(file.path, bytes.byteLength, totalBytes)
+			if (over !== undefined) {
+				return yield* over
 			}
 			const sha256 = yield* digest.digestHex(Digest.sha256, bytes)
-			const content_type = contentTypeOf(file)
-			entries.push({ path: file.path, sha256, size: bytes.byteLength, content_type })
+			entries.push({
+				path: file.path,
+				sha256,
+				size: bytes.byteLength,
+				content_type: file.content_type,
+			})
 			if (!blobs.has(sha256)) {
 				blobs.set(sha256, { sha256, bytes })
 			}
 		}
-		const conflict = fileUnderAnother(seen)
-		if (conflict !== undefined) {
-			return yield* new InvalidArtifactFiles({ message: conflict })
-		}
-		entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-		const manifest: ArtifactManifest = {
-			files: entries.map((entry) => ({
-				path: entry.path,
-				sha256: entry.sha256,
-				size: entry.size,
-				content_type: entry.content_type,
-			})),
-		}
-		const manifest_json = JSON.stringify(manifest)
-		const manifest_hash = yield* digest.digestHex(Digest.sha256, utf8Encoder.encode(manifest_json))
-		return {
-			manifest,
-			manifest_json,
-			manifest_hash,
-			blobs: [...blobs.values()],
-			file_count: entries.length,
-			total_bytes: totalBytes,
-		}
+		return { ...(yield* sealArtifactFiles(digest, entries)), blobs: [...blobs.values()] }
 	})

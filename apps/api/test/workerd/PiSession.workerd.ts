@@ -108,6 +108,8 @@ const artifactBucketName = (stage: string): string => {
 	return name
 }
 
+const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex")
+
 const sleep = (ms: number): Promise<void> =>
 	new Promise((resolve) => {
 		setTimeout(resolve, ms)
@@ -561,6 +563,29 @@ describe("PiSession real Durable Object under workerd", () => {
 		await fakeOpenAI?.close()
 	}, 30_000)
 
+	const bytesOf = async (artifactId: string, version: number, path: string) => {
+		const file = await apiJson<{
+			readonly encoding: "utf8" | "base64"
+			readonly content: string
+		}>(`/v1/artifacts/${artifactId}/versions/${version}/file?file=${encodeURIComponent(path)}`)
+		expect(file.status).toBe(200)
+		return {
+			encoding: file.body.encoding,
+			bytes: Buffer.from(file.body.content, file.body.encoding),
+		}
+	}
+
+	const replyAfterTurn = async (sessionId: string, text: string, number: number) => {
+		const sent = await apiJson(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(sessionId, (s) => s.status === "idle" && s.turn === number, 60_000)
+		const replies = (await listAllEvents(sessionId)).filter((e) => e.type === "agent.message")
+		return replies.at(-1)?.content?.[0]?.text ?? ""
+	}
+
 	it("serves the OpenAPI document as a static asset, without running the Worker", async () => {
 		const res = await fetch(`${baseUrl}/openapi.json`)
 		expect(res.status).toBe(200)
@@ -1005,6 +1030,130 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
 	}, 60_000)
+
+	it("publishes what the model leaves in the outputs directory as the session's artifact, byte for byte", async () => {
+		const outputs = "/mnt/session/outputs"
+		const report = "# Q3\n\nSales rose 12%.\n"
+		const totals = "region,total\nEMEA,4217\n"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Write the report.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${outputs}/report.md`, content: report },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${outputs}/data/totals.csv`, content: totals },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/notes.md", content: "private" },
+					},
+				],
+				"Add a summary.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${outputs}/summary.md`, content: "Up 12%.\n" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+		const session = await createSession()
+		interface PublishedFile {
+			readonly path: string
+			readonly sha256: string
+			readonly size: number
+			readonly content_type: string
+		}
+		const published = () =>
+			apiJson<{
+				readonly id: string
+				readonly name: string
+				readonly version: number
+				readonly files: ReadonlyArray<PublishedFile>
+			}>(`/v1/sessions/${session.id}/outputs`)
+		const publishedAt = async (version: number) => {
+			const deadline = Date.now() + 30_000
+			for (;;) {
+				const current = await published()
+				if ((current.status === 200 && current.body.version >= version) || Date.now() > deadline) {
+					return current
+				}
+				await new Promise((resolve) => {
+					setTimeout(resolve, 100)
+				})
+			}
+		}
+		expect((await published()).status).toBe(404)
+		await replyAfterTurn(session.id, "Write the report.", 1)
+		const first = await publishedAt(1)
+		expect(first.status).toBe(200)
+		expect(first.body).toMatchObject({
+			name: `Session ${session.id} outputs`,
+			version: 1,
+			files: [
+				{
+					path: "data/totals.csv",
+					sha256: sha256(Buffer.from(totals)),
+					size: Buffer.byteLength(totals),
+					content_type: "text/csv",
+				},
+				{
+					path: "report.md",
+					sha256: sha256(Buffer.from(report)),
+					size: Buffer.byteLength(report),
+					content_type: "text/markdown",
+				},
+			],
+		})
+		const artifactId = first.body.id
+		expect((await bytesOf(artifactId, 1, "report.md")).bytes.toString()).toBe(report)
+
+		await replyAfterTurn(session.id, "Anything else?", 2)
+		expect((await published()).body.version).toBe(1)
+
+		await replyAfterTurn(session.id, "Add a summary.", 3)
+		const second = await publishedAt(2)
+		expect(second.body.version).toBe(2)
+		expect(second.body.files.map((file) => file.path)).toEqual([
+			"data/totals.csv",
+			"report.md",
+			"summary.md",
+		])
+		for (const file of second.body.files) {
+			const { bytes } = await bytesOf(artifactId, 2, file.path)
+			expect([file.path, bytes.byteLength, sha256(bytes)]).toEqual([
+				file.path,
+				file.size,
+				file.sha256,
+			])
+		}
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain(
+			"Files you leave in /mnt/session/outputs are published as this session's artifact each time your turn ends",
+		)
+		expect(systemText).toContain("at most 64 files, 1 MiB each and 4 MiB in total")
+		expect(systemText).toContain(
+			"An empty directory publishes nothing either, so the last version stays.",
+		)
+	}, 180_000)
 
 	it("runs a script that calls the workspace tools", async () => {
 		const script = [

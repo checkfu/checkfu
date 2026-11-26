@@ -42,7 +42,7 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"Aggregate state is permanent. Keep the old shape as a migration step (see `versionedSnapshot`) instead of changing the schema in place.",
 	view: "View rows are rebuilt from events. Bump the view's `version` when its state changes.",
 	"policy-delivery":
-		"Queued policy deliveries carry the source view state captured before deploy. Keep the source view state readable by the new schema while deliveries can still be in flight, even when the view's version is bumped.",
+		"Queued policy deliveries are routed by the policy's name and carry the source's event or view state captured before deploy. Keep the policy's name and source while deliveries can still be in flight, and keep a source view's state readable by the new schema even when the view's version is bumped.",
 	"scheduled-command":
 		"An armed deadline holds its encoded command until delivery. Keep its tag and input readable while deadlines can still fire.",
 	"command-reply":
@@ -97,12 +97,14 @@ interface ViewClass {
 interface PolicySource {
 	readonly kind?: string
 	readonly viewName?: string
+	readonly aggregateName?: string
 	readonly definition?: { readonly state?: PersistedSchema }
 }
 interface PolicyClass {
 	readonly policyName: string
 	readonly definition: {
 		readonly from: PolicySource | ReadonlyArray<PolicySource>
+		readonly on: ReadonlyArray<PersistedSchema>
 	}
 }
 interface SagaClass {
@@ -162,11 +164,7 @@ const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
 	}
 	for (const policy of model.definitions?.policies ?? []) {
 		const from = policy.definition.from
-		const sources: ReadonlyArray<{
-			readonly kind?: string
-			readonly viewName?: string
-			readonly definition?: { readonly state?: PersistedSchema }
-		}> = Array.isArray(from) ? from : [from]
+		const sources: ReadonlyArray<PolicySource> = Array.isArray(from) ? from : [from]
 		for (const source of sources) {
 			if (
 				source.kind === "View" &&
@@ -177,6 +175,12 @@ const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
 					id: policyDeliveryShapeId(model.modelName, policy.policyName, source.viewName),
 					kind: "policy-delivery",
 					schema: source.definition.state,
+				})
+			} else if (source.kind === "Aggregate" && source.aggregateName !== undefined) {
+				shapes.push({
+					id: policyDeliveryShapeId(model.modelName, policy.policyName, source.aggregateName),
+					kind: "policy-delivery",
+					schema: Schema.Union(policy.definition.on),
 				})
 			}
 		}

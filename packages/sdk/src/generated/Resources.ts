@@ -281,6 +281,12 @@ export interface CheckfuOperations {
 		never,
 		EndpointSseEvent<"sessions", "streamEvents">
 	>
+	readonly "sessions.outputs.retrieve": OperationShape<
+		EndpointParams<"sessions", "getOutputs">,
+		EndpointQuery<"sessions", "getOutputs">,
+		EndpointBody<"sessions", "getOutputs">,
+		EndpointSuccess<"sessions", "getOutputs">
+	>
 }
 
 export type CheckfuOperationId = keyof CheckfuOperations
@@ -1879,13 +1885,60 @@ export class EffectSessionsEventsResource {
 	}
 }
 
+export class EffectSessionsOutputsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version */
+	retrieve(
+		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "getOutputs">>, CheckfuSdkError>
+	retrieve(
+		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"sessions", "getOutputs">, CheckfuSdkError>
+	retrieve(
+		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"sessions", "getOutputs">
+		| WithResponse<EndpointSuccess<"sessions", "getOutputs">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("sessions", "getOutputs", { session_id: sessionId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.sessions.outputs.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.sessions.getOutputs({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+}
+
 export class EffectSessionsResource {
 	readonly #runtime: EffectSdkRuntime
 	readonly events: EffectSessionsEventsResource
+	readonly outputs: EffectSessionsOutputsResource
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.#runtime = runtime
 		this.events = new EffectSessionsEventsResource(runtime)
+		this.outputs = new EffectSessionsOutputsResource(runtime)
 	}
 
 	/** Archive a session */
@@ -2671,13 +2724,36 @@ export class SessionsEventsResource {
 	}
 }
 
+export class SessionsOutputsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version */
+	retrieve(
+		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"sessions", "getOutputs">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectSessionsOutputsResource(effectRuntime).retrieve(sessionId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
 export class SessionsResource {
 	readonly #runtime: PromiseSdkRuntime
 	readonly events: SessionsEventsResource
+	readonly outputs: SessionsOutputsResource
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.#runtime = runtime
 		this.events = new SessionsEventsResource(runtime)
+		this.outputs = new SessionsOutputsResource(runtime)
 	}
 
 	/** Archive a session */
