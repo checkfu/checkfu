@@ -103,7 +103,7 @@ export function Transcript({
 		return entry === null ? [] : [<li key={event.seq}>{entry}</li>]
 	})
 	return (
-		<ol className="space-y-5">
+		<ol className="space-y-5 wrap-anywhere">
 			{rows.length === 0 ? (
 				<li className="text-sm text-muted-foreground">No messages yet.</li>
 			) : (
