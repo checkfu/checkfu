@@ -13424,16 +13424,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -14296,16 +14289,9 @@
 																"type": "string"
 															},
 															"version": {
-																"anyOf": [
-																	{
-																		"type": "integer",
-																		"minimum": 1,
-																		"maximum": 9007199254740991
-																	},
-																	{
-																		"type": "null"
-																	}
-																]
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
 															}
 														},
 														"required": ["id", "version"],
@@ -14887,16 +14873,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -15451,16 +15430,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -16271,16 +16243,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -16862,16 +16827,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -17453,16 +17411,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -18449,34 +18400,20 @@
 														]
 													},
 													"agent": {
-														"anyOf": [
-															{
-																"type": "object",
-																"properties": {
-																	"id": {
-																		"type": "string"
-																	},
-																	"version": {
-																		"anyOf": [
-																			{
-																				"type": "integer",
-																				"minimum": 1,
-																				"maximum": 9007199254740991
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	}
-																},
-																"required": ["id", "version"],
-																"additionalProperties": false
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string"
 															},
-															{
-																"type": "null"
+															"version": {
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
 															}
-														],
-														"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null for automations created without a pinned version). Null for runs recorded before runs named their agent."
+														},
+														"required": ["id", "version"],
+														"additionalProperties": false,
+														"description": "The agent and version pinned for this run."
 													},
 													"session_id": {
 														"anyOf": [
@@ -18994,34 +18931,20 @@
 											]
 										},
 										"agent": {
-											"anyOf": [
-												{
-													"type": "object",
-													"properties": {
-														"id": {
-															"type": "string"
-														},
-														"version": {
-															"anyOf": [
-																{
-																	"type": "integer",
-																	"minimum": 1,
-																	"maximum": 9007199254740991
-																},
-																{
-																	"type": "null"
-																}
-															]
-														}
-													},
-													"required": ["id", "version"],
-													"additionalProperties": false
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
 												},
-												{
-													"type": "null"
+												"version": {
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
-											],
-											"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null for automations created without a pinned version). Null for runs recorded before runs named their agent."
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false,
+											"description": "The agent and version pinned for this run."
 										},
 										"session_id": {
 											"anyOf": [
