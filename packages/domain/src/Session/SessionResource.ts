@@ -1,4 +1,11 @@
 export {
+	artifactsOf,
+	artifactMountPath,
+	MAX_SESSION_RESOURCES,
+	MAX_SESSION_ARTIFACTS,
+	ArtifactMountPath,
+	ArtifactMount,
+	ARTIFACT_MOUNT_ROOT,
 	GitHubRepositoryResource,
 	MAX_BRANCH_NAME_LENGTH,
 	MAX_MEMORY_INSTRUCTIONS_LENGTH,

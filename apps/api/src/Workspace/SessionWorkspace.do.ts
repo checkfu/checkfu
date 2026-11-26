@@ -18,8 +18,11 @@ import {
 	withRepositoryCredentials,
 } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
+import { ARTIFACT_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
+import { makeArtifactMount } from "./ArtifactMount.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
 import { makeSandboxMount } from "./SandboxMount.ts"
+import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
 import type { PendingReceipts } from "./SessionMemory.ts"
 import { makeSessionOutputs } from "./SessionOutputs.ts"
@@ -169,19 +172,26 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						put: (pending) => storage.kv.put(MEMORY_RECEIPTS, pending),
 					},
 				)
-				const mounts = () => ({
+				const artifacts: SessionArtifacts = {
+					mounts: () => call(api.artifactMounts(sessionId)),
+					files: (mountPath) => call(api.artifactFiles(sessionId, mountPath)),
+					read: (mountPath, path, offset, length) =>
+						call(api.artifactRead(sessionId, mountPath, path, offset, length)),
+				}
+				const mounts = (walkLimit: number) => ({
 					[MEMORY_ROOT]: makeMemoryMount(memory),
+					[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
 				})
 				const allowedHosts = (): ReadonlyArray<string> | null => {
 					const allowed = storage.kv.get<ReadonlyArray<string> | null>(ALLOWED_HOSTS)
 					return allowed === undefined ? [] : allowed
 				}
 				const open = async () => {
-					const [{ Workspace }, { createPiTools }] = await Promise.all([
+					const [{ Workspace, PASSTHROUGH_WALK_LIMIT }, { createPiTools }] = await Promise.all([
 						import("@cloudflare/computer"),
 						import("@cloudflare/computer/tools/pi-ai"),
 					])
-					const { fs } = new Workspace({ storage, mounts: mounts() })
+					const { fs } = new Workspace({ storage, mounts: mounts(PASSTHROUGH_WALK_LIMIT) })
 					let overMachine: Files | undefined
 					return {
 						fs,
@@ -191,7 +201,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								const over = new Workspace({
 									storage,
 									mounts: {
-										...mounts(),
+										...mounts(PASSTHROUGH_WALK_LIMIT),
 										[WORKING_DIRECTORY]: makeSandboxMount(WORKING_DIRECTORY, machine.inMachine),
 									},
 								})

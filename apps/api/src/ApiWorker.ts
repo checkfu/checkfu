@@ -36,6 +36,7 @@ import { CustomToolFaults } from "./Http/ToolSchemas.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { SessionArtifactAccess } from "./SessionArtifactAccess.ts"
 import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
@@ -224,6 +225,7 @@ export default ApiWorker.make(
 			Effect.provideService(RuntimeContext, yield* Cloudflare.Worker),
 		)
 		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
+		const artifacts = yield* SessionArtifactAccess.pipe(Effect.provide(services))
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
@@ -236,6 +238,11 @@ export default ApiWorker.make(
 				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, exclusive)),
 			memoryRemove: (sessionId, name, path, expected) =>
 				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected)),
+			artifactMounts: (sessionId) => Effect.orDie(artifacts.artifactMounts(sessionId)),
+			artifactFiles: (sessionId, mountPath) =>
+				Effect.orDie(artifacts.artifactFiles(sessionId, mountPath)),
+			artifactRead: (sessionId, mountPath, path, offset, length) =>
+				Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
 		})
 	}),
 )

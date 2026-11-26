@@ -25,8 +25,12 @@ import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
 import * as Cause from "effect/Cause"
-import { memoryStoresOf, repositoriesOf } from "@checkfu/domain/Session/SessionResource"
-import type { MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
+import {
+	artifactsOf,
+	memoryStoresOf,
+	repositoriesOf,
+} from "@checkfu/domain/Session/SessionResource"
+import type { ArtifactMount, MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -226,6 +230,7 @@ export const describeMounts = (
 	system: string | null,
 	repositories: ReadonlyArray<RepositoryMount>,
 	stores: ReadonlyArray<MemoryStoreResource> = [],
+	artifacts: ReadonlyArray<ArtifactMount> = [],
 ): string | null => {
 	const sections = [
 		...(system === null || system.length === 0 ? [] : [system]),
@@ -248,8 +253,21 @@ export const describeMounts = (
 						...stores.map(describeStore),
 					].join("\n"),
 				]),
+		...(artifacts.length === 0
+			? []
+			: [
+					[
+						"Files mounted in your workspace, read-only:",
+						...artifacts.map(
+							(artifact) =>
+								`- ${artifact.mount_path}: ${artifact.name} (version ${artifact.version})`,
+						),
+					].join("\n"),
+				]),
 	]
-	return repositories.length === 0 && stores.length === 0 ? system : sections.join("\n\n")
+	return repositories.length + stores.length + artifacts.length === 0
+		? system
+		: sections.join("\n\n")
 }
 
 export const allowedHostsOf = (config: EnvironmentConfig | null): ReadonlyArray<string> | null =>
@@ -443,6 +461,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					const token = { turn: args.turn }
 					const repositories = repositoriesOf(args.resources)
 					const stores = memoryStoresOf(args.resources)
+					const artifacts = artifactsOf(args.resources)
 					const prepared = yield* withRetry(
 						executor.prepareWorkspace(
 							args.session_id,
@@ -470,7 +489,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							terminal: false,
 						})
 					}
-					const system = describeMounts(version.system, repositories, stores)
+					const system = describeMounts(version.system, repositories, stores, artifacts)
 
 					const mcp =
 						version.mcp_servers.length === 0 ||
