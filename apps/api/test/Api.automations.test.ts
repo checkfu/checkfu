@@ -824,7 +824,7 @@ describe("Automations API", () => {
 				const noon = { type: "cron", expression: "0 13 * * *", timezone: "UTC" }
 				const changed = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
 					description: null,
-					agent: { id: agentId, version: 1 },
+					agent: { type: "agent", id: agentId, version: 1 },
 					initial_events: message("Write the noon report."),
 					schedule: noon,
 				})
@@ -1018,7 +1018,7 @@ describe("Automations API", () => {
 						400,
 					],
 					[`/v1/automations/${id}`, { agent: "agent_missing" }, 404],
-					[`/v1/automations/${id}`, { agent: { id: agentId, version: 9 } }, 404],
+					[`/v1/automations/${id}`, { agent: { type: "agent", id: agentId, version: 9 } }, 404],
 					[`/v1/automations/${id}`, { environment_id: "env_missing" }, 404],
 					[`/v1/automations/${id}`, { initial_events: [] }, 400],
 					[`/v1/automations/${id}`, { name: "" }, 400],
@@ -1112,9 +1112,13 @@ describe("Automations API", () => {
 					["field the schema does not declare", { budget: { max: 1 } }, 400],
 					["unknown agent", { agent: "agent_missing" }, 404],
 					["agent reference that is not an id", { agent: "team/agent" }, 404],
-					["pinned agent reference that is not an id", { agent: { id: "..", version: 1 } }, 404],
+					[
+						"pinned agent reference that is not an id",
+						{ agent: { type: "agent", id: "..", version: 1 } },
+						404,
+					],
 					["environment reference that is not an id", { environment_id: "team/env" }, 404],
-					["unknown agent version", { agent: { id: agentId, version: 9 } }, 404],
+					["unknown agent version", { agent: { type: "agent", id: agentId, version: 9 } }, 404],
 					["unknown environment", { environment_id: "env_missing" }, 404],
 				] as const
 				const everyMinute = yield* call<ErrorBody>(apiFetch, "POST", "/v1/automations", {
