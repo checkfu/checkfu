@@ -2,10 +2,12 @@
 
 Effect-native TypeScript SDK for the Checkfu API, with a thin Promise / `AsyncIterable` client built on top of the same core.
 
+Create an agent and an environment, then create a session that references both. Use `client.sessions.events` to send a `user.message` event, list the session's event history, or follow its live event stream.
+
 - **Single-source contract:** shares `CheckfuApi` (`effect/http-api/HttpApi`) and Effect `Schema` definitions directly with the Checkfu API server.
 - **Forge-generated resources:** resource classes (`EffectResources` / `PromiseResources`), `CheckfuOperations` (`Op<Id>` / `BodyOf` / `QueryOf` / `ResultOf`), and `SDK_OPERATION_BINDINGS` are generated directly from `openapi.json` via `@cloudflare/forge` in lockstep with the CLI.
 - **Core clients:** use `effect` and standard Web APIs (`fetch`, `ReadableStream`, `AbortController`, WebCrypto).
-- **Full API coverage:** `agents`, `environments`, `sessions`, `sessions.events.{send, list, listPages, listStream, stream}`, plus `waitForPending` for `202 Pending` mutations.
+- Resources include `agents`, `environments`, `sessions`, `automations`, and `artifacts`. Use `waitForPending` when a mutation returns a `202` response and you need the completed resource.
 
 Use a model ID configured for your deployment in the examples below.
 
@@ -121,6 +123,8 @@ const { data, status, request_id, requestId } = await client.agents
 	.retrieve(agent.id)
 	.withResponse()
 ```
+
+Pass `agent: agent.id` when creating a session to pin the latest agent version. To pin a specific version, pass `agent: { type: "agent", id: agent.id, version: agent.version }`.
 
 ## Operation type helpers
 

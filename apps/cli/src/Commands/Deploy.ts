@@ -819,7 +819,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				"",
 				`  ${COMMAND} agents create --name Assistant --model ${provider.model === undefined ? `${provider.id ?? "<provider>"}/<model-id>` : formatShellArg(provider.model)}`,
 				`  ${COMMAND} environments create --name default`,
-				`  ${COMMAND} sessions create --agent-id <agent-id> --environment-id <environment-id>`,
+				`  ${COMMAND} sessions create --agent <agent-id> --environment-id <environment-id>`,
 				`  ${COMMAND} sessions connect <session-id>`,
 				"",
 				...(elsewhere

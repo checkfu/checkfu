@@ -28,9 +28,11 @@ Signs in to Cloudflare, prompts for a provider key, deploys the stack, and write
 ```sh
 bun checkfu agents create --name Assistant --model your-model-id
 bun checkfu environments create --name default
-bun checkfu sessions create --agent-id <agent-id> --environment-id <environment-id>
+bun checkfu sessions create --agent <agent-id> --environment-id <environment-id>
 bun checkfu sessions connect <session-id>
 ```
+
+Send a message in `sessions connect` to start work and follow the session's events live.
 
 Use a model ID configured for your deployment.
 
@@ -135,10 +137,10 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 
 ## Stack
 
-- **Pi (`@earendil-works/pi-ai`, `pi-durable`, `pi-codemode`, `@checkfu/pi-providers`):** Built-in and custom model providers, configured through the deployment and `CHECKFU_PROVIDERS`. `pi-durable` runs each session in a `PiSession` Durable Object with SQLite history, context compaction, journaled `codemode` calls, and $0-compute turn parking on approvals or custom tools.
+- **Pi (`@earendil-works/pi-ai`, `pi-durable`, `pi-codemode`, `@checkfu/pi-providers`)** runs each session in a `PiSession` Durable Object with SQLite history, context compaction, and journaled `codemode` calls. Use [`@checkfu/pi-providers`](packages/pi-providers/README.md) to configure model providers.
 - **Alchemy (`alchemy`, `@alchemy.run/cloudflare`, `@alchemy.run/domain`):** `alchemy.run.ts` declares Workers, Durable Objects, D1, R2, and domains in TypeScript with no `wrangler.toml`. `@alchemy.run/domain` runs event-sourced aggregates, cross-object decisions, sagas, and views on Durable Objects and proves invariants with **Z3**.
 - **Effect & Forge (`effect`, `@cloudflare/forge`):** `CheckfuApi` defines routes, events, and errors once with Effect `HttpApi` and `Schema`; `tools/forge` generates `openapi.json`, `@checkfu/sdk`, the CLI, and the MCP server.
-- **Cloudflare (`@cloudflare/computer`, Durable Objects, D1, R2):** `@cloudflare/computer` backs each session's `/workspace` filesystem and on-demand shell machine. Durable Objects isolate sessions, workspaces, and per-secret vaults; D1 serves lists; R2 stores artifacts.
+- **Cloudflare (`@cloudflare/computer`, Durable Objects, D1, R2)** provides a filesystem and on-demand shell for each session. Durable Objects isolate sessions and their workspaces. D1 serves lists, and R2 stores artifacts.
 
 ```text
   Clients (SDK / CLI / curl)      MCP Clients       Browser (Admin)       Browser (Viewers)
@@ -157,8 +159,6 @@ for await (const event of await client.sessions.events.stream(session.id)) {
   │ Lists │ │    │              │   (no public address)   │                      │ (read) │
   └───────┘ └────┘              │  • PiSession DO         │                      └────────┘
                                 │  • SessionWorkspace DO  │
-                                │  • Vault / Secret DOs   │
-                                │  • ApiCatalog DO        │
                                 └────────────┬────────────┘
                                              │
                                              ▼
@@ -171,7 +171,7 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 
 ### Layout
 
-- [`apps/api`](apps/api): HTTP/SSE API, domain host, Pi harness, workspaces, vaults, OpenAPI, content Worker
+- [`apps/api`](apps/api) contains the HTTP/SSE API, domain host, Pi harness, workspaces, OpenAPI, and content Worker.
 - [`apps/app`](apps/app): TanStack Router/Query web dashboard Worker
 - [`apps/cli`](apps/cli): `checkfu` CLI (`deploy`, `login`, `destroy`, `sessions connect`, resource commands)
 - [`apps/mcp`](apps/mcp): Generated HTTP MCP Worker
@@ -187,28 +187,22 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 
 | Resource | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| **Agent** | `/v1/agents` | Model, system prompt, MCP/OpenAPI servers, custom tools, approval rules; versioned on edit. |
-| **Environment** | `/v1/environments` | Network policy (`unrestricted`, or `limited` host/MCP/package allowlists). |
-| **Session** | `/v1/sessions` | Conversation, `/workspace` filesystem, and shell bound to an agent, environment, mounts, and credentials. |
-| **Memory store** | `/v1/memory_stores` | Cross-session UTF-8 files with SHA-256 preconditions, mounted at `/mnt/memory/<name>`. |
-| **Artifact** | `/v1/artifacts` | Versioned R2 file sets; a new version can keep files of the one it replaces by sha256. Mountable, linkable via signed URLs, or publishable as sandboxed sites. |
-| **Vault** | `/v1/vaults` | Per-secret Durable Object credentials (`static_bearer`, auto-refreshed `mcp_oauth`, `api_key`). |
-| **Automation** | `/v1/automations` | Cron (with IANA timezone) or manual session triggers with run history. |
+| **Agent** | `/v1/agents` | A reusable configuration with a model and an optional system prompt. Changes create a new version. |
+| **Environment** | `/v1/environments` | Configuration for the cloud sandbox where sessions run, including networking settings. |
+| **Session** | `/v1/sessions` | An instance of an agent in an environment. It keeps its conversation history and workspace across turns. |
+| **Events** | `/v1/sessions/{session_id}/events` | Messages, tool calls and results, and status updates. Send events to the session, list its history, or follow its live SSE stream. |
+| **Automation** | `/v1/automations` | Runs an agent in a new session on a cron schedule or on demand. Each run sends the configured initial events and records whether session creation succeeded. |
+| **Artifact** | `/v1/artifacts` | A versioned set of files. Share a version with a signed link or publish it as a sandboxed site. |
 
 ```text
   Session (PiSession DO)
    ├── Filesystem (SessionWorkspace DO)
-   │    ├── /workspace/<repo>        ◄── Cloned GitHub repos + scoped git fetch/pull/push
-   │    ├── /mnt/memory/<store>      ◄── Live read/write or read-only MemoryStore passthrough
-   │    ├── /mnt/artifacts/<name>    ◄── Version-pinned read-only R2 Artifact passthrough
-   │    ├── /mnt/skills/<name>       ◄── Validated SKILL.md + resources (read-only)
-   │    └── /mnt/session/outputs     ──► Published as an Artifact version after each reply
+   │    ├── /workspace              ◄── Persistent files and on-demand shell
+   │    └── /mnt/session/outputs    ──► Saved as an artifact after a completed turn
    │
    └── Tool Execution
-        ├── File, git & bash tools   ──► SessionWorkspace DO + on-demand shell machine
-        ├── codemode (JS scripts)    ──► CodemodeSandboxWorker (QuickJS, no network/timers, journaled)
-        ├── MCP & OpenAPI tools      ──► PiHarnessWorker (attaches vault credentials; enforces approvals)
-        └── Custom tools             ──► Pauses session (requires_action, $0 compute) until app posts result
+        ├── File and shell tools    ──► SessionWorkspace DO + on-demand shell machine
+        └── codemode (JS scripts)    ──► CodemodeSandboxWorker (QuickJS)
 ```
 
 ## Interfaces
@@ -216,7 +210,7 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 - **SDK ([`packages/sdk`](packages/sdk/README.md)):** Effect (`CheckfuClient`) and Promise (`new Checkfu()`) clients with retries, idempotency, SSE, and pagination (`GET /openapi.json` for other languages).
 - **CLI (`checkfu`):** `bun checkfu --help` or standalone `bun run checkfu:build` with `--format` and GJSON `--transform`.
 - **Dashboard:** Sign in with `CHECKFU_API_KEY` to manage resources and stream live session transcripts.
-- **MCP:** Connect your MCP client over HTTP at `https://<mcp-worker>.workers.dev/mcp` with the header `Authorization: Bearer $CHECKFU_API_KEY`. Secret-writing routes are omitted.
+- **MCP** exposes Checkfu API operations as tools. Connect your MCP client to `https://<mcp-worker>.workers.dev/mcp` over HTTP and set the `Authorization` header to `Bearer $CHECKFU_API_KEY`.
 
 ## Development
 

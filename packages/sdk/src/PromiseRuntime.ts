@@ -22,7 +22,7 @@ import {
 import type { CheckfuConfigError, CheckfuSdkError } from "./Errors.ts"
 import { attachPendingReadiness, getPendingReadiness } from "./Runtime.ts"
 import type {
-	CursorPageEnvelope,
+	PageEnvelope,
 	EffectSdkRuntime,
 	IsoDateTimes,
 	RequestOptions,
@@ -253,19 +253,26 @@ export class CursorPage<
 	readonly data: ReadonlyArray<Item>
 	readonly has_more: boolean
 	readonly next_cursor: Cursor | null
+	declare readonly next_page?: Cursor | null
 	readonly #fetchNext: (after: Cursor) => Promise<CursorPage<Item, Cursor>>
 	readonly #requestedAfter: Cursor | undefined
 	readonly #order: "asc" | "desc"
 
 	constructor(
-		body: CursorPageEnvelope<Item, Cursor>,
+		body: PageEnvelope<Item, Cursor>,
 		fetchNext: (after: Cursor) => Promise<CursorPage<Item, Cursor>>,
 		requestedAfter: Cursor | undefined,
 		order: "asc" | "desc",
 	) {
 		this.data = body.data
-		this.has_more = body.has_more
-		this.next_cursor = body.next_cursor
+		if ("next_page" in body) {
+			this.next_cursor = body.next_page
+			this.has_more = body.next_page !== null
+			Object.defineProperty(this, "next_page", { value: body.next_page, enumerable: true })
+		} else {
+			this.next_cursor = body.next_cursor
+			this.has_more = body.has_more
+		}
 		this.#fetchNext = fetchNext
 		this.#requestedAfter = requestedAfter
 		this.#order = order
@@ -558,7 +565,7 @@ export const executePaginatedPromise = <Item, Cursor extends string | number = n
 		effectRuntime: EffectSdkRuntime,
 		after: Cursor | undefined,
 		effectOpts: RequestOptions | undefined,
-	) => Effect.Effect<WithResponse<CursorPageEnvelope<Item, Cursor>>, CheckfuSdkError>,
+	) => Effect.Effect<WithResponse<PageEnvelope<Item, Cursor>>, CheckfuSdkError>,
 ): PagePromise<CursorPage<IsoDateTimes<Item>, Cursor>, IsoDateTimes<Item>> => {
 	const signal = requestOptions?.signal
 	const effectOpts = toEffectRequestOptions(requestOptions)
@@ -567,8 +574,8 @@ export const executePaginatedPromise = <Item, Cursor extends string | number = n
 		after: Cursor | undefined,
 	): Promise<{
 		readonly page: CursorPage<IsoDateTimes<Item>, Cursor>
-		readonly body: CursorPageEnvelope<IsoDateTimes<Item>, Cursor>
-		readonly raw: WithResponse<CursorPageEnvelope<Item, Cursor>>
+		readonly body: PageEnvelope<IsoDateTimes<Item>, Cursor>
+		readonly raw: WithResponse<PageEnvelope<Item, Cursor>>
 	}> => {
 		if (isSignalAborted(signal)) {
 			throw new APIUserAbortError({ message: "Request was aborted." })
@@ -578,11 +585,7 @@ export const executePaginatedPromise = <Item, Cursor extends string | number = n
 			signal,
 		)
 		const raw = unwrapPromiseExit(exit, isSignalAborted(signal))
-		const body: CursorPageEnvelope<IsoDateTimes<Item>, Cursor> = {
-			data: raw.data.data.map(toIsoJson),
-			has_more: raw.data.has_more,
-			next_cursor: raw.data.next_cursor,
-		}
+		const body = { ...raw.data, data: raw.data.data.map(toIsoJson) }
 		const page = new CursorPage<IsoDateTimes<Item>, Cursor>(
 			body,
 			async (nextAfter) => (await fetchPageRaw(nextAfter)).page,

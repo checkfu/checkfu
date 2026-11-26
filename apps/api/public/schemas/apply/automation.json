@@ -32,6 +32,10 @@
 						{
 							"type": "object",
 							"properties": {
+								"type": {
+									"type": "string",
+									"enum": ["agent"]
+								},
 								"id": {
 									"type": "string",
 									"minLength": 1,
@@ -43,11 +47,11 @@
 									"maximum": 9007199254740991
 								}
 							},
-							"required": ["id"],
+							"required": ["type", "id"],
 							"additionalProperties": false
 						}
 					],
-					"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+					"description": "Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type \"agent\", id, and version to pin a specific version."
 				},
 				{
 					"type": "object",
@@ -107,7 +111,7 @@
 			},
 			"minItems": 1,
 			"maxItems": 1,
-			"description": "The one user message each run's session starts with"
+			"description": "Initial events sent when each run creates a session. Supply one text user.message event."
 		},
 		"schedule": {
 			"type": "object",
