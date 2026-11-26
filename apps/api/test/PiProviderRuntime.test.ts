@@ -16,6 +16,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import {
 	AbortGrace,
+	CredentialCheckTimeout,
 	abortPiDurableTurn,
 	recoverPiDurableTurn,
 	runPiDurableTurn,
@@ -443,6 +444,75 @@ describe("PiProviderRuntime", () => {
 					expect(stalledSignal?.aborted).toBe(true)
 					expect(turn1Outcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
 					expect(recovered1Outcome).toBeNull()
+				} finally {
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
+	it.live(
+		"bounds a stalled credential check with CredentialCheckTimeout so recovery returns null and a retry can proceed",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) =>
+							makeAssistantReply(model, null, "reply after credential timeout retry", 6, 3),
+						),
+					),
+				)
+				let checkCall = 0
+				let stalledSignal: AbortSignal | undefined
+				let markStalledEntered!: () => void
+				const stalledEntered = new Promise<void>((resolve) => {
+					markStalledEntered = resolve
+				})
+
+				const backend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: (_provider, signal) => {
+						checkCall += 1
+						if (checkCall === 1) {
+							stalledSignal = signal
+							markStalledEntered()
+							return new Promise(() => {
+								// intentionally unsettled
+							})
+						}
+						return { ok: true }
+					},
+				}
+
+				try {
+					const request = makeTurnRequest(1, "openai")
+					const stalledTurn = yield* Effect.forkChild(
+						runPiDurableTurn(backend, request).pipe(
+							Effect.provideService(CredentialCheckTimeout, "50 millis"),
+						),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => stalledEntered)
+
+					const recovered = yield* recoverPiDurableTurn(backend, "turn:1")
+					expect(recovered).toBeNull()
+					expect(stalledSignal?.aborted).toBe(true)
+
+					const stalledOutcome = yield* Fiber.join(stalledTurn)
+					expect(stalledOutcome).toEqual({
+						ok: false,
+						error: {
+							_tag: "TurnFailed",
+							error_type: "credential_check_timeout",
+							message: 'Timed out checking credentials for provider "openai".',
+							terminal: false,
+						},
+					})
+
+					const retryOutcome = yield* runPiDurableTurn(backend, request)
+					expect(retryOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply after credential timeout retry" },
+					})
 				} finally {
 					yield* Effect.promise(() => rawBackend.close())
 				}

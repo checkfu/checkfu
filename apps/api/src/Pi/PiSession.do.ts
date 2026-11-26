@@ -47,10 +47,6 @@ class PiSessionHost {
 
 const ADMITTED_TURN = "workspace-turn"
 
-const isPendingCheck = (
-	check: ProviderCredentialCheck | Promise<ProviderCredentialCheck>,
-): check is Promise<ProviderCredentialCheck> => "then" in check
-
 export const makePiHarnessBackend = (
 	harness: PiHarness,
 	fence: SqliteTurnFence,
@@ -71,26 +67,23 @@ export const makePiHarnessBackend = (
 		lock.withPermit(Effect.uninterruptible(effect))
 	const runtimeConfig = toProviderRuntimeConfig(apiKeys, undefined, options)
 	const customProviders = options?.customProviders
+	const catalogCheck = (provider: string): ProviderCredentialCheck =>
+		checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
 	const checkCredentials = (
 		provider: string,
 		signal?: AbortSignal,
 	): ProviderCredentialCheck | Promise<ProviderCredentialCheck> =>
 		options?.checkCredentials !== undefined
 			? options.checkCredentials(provider, signal)
-			: checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
+			: catalogCheck(provider)
 
 	return {
 		withLock,
 		checkCredentials,
-		hasApiKey: (provider) => {
-			const check = checkCredentials(provider)
-			return isPendingCheck(check) ? check.then((resolved) => resolved.ok) : check.ok
-		},
+		hasApiKey: (provider) => catalogCheck(provider).ok,
 		missingCredentialsMessage: (provider) => {
-			const format = (check: ProviderCredentialCheck) =>
-				check.ok ? `Missing credentials for provider "${provider}".` : check.message
-			const check = checkCredentials(provider)
-			return isPendingCheck(check) ? check.then(format) : format(check)
+			const check = catalogCheck(provider)
+			return check.ok ? `Missing credentials for provider "${provider}".` : check.message
 		},
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),

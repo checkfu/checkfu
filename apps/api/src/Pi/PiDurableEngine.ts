@@ -32,8 +32,8 @@ import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
-	readonly hasApiKey: (provider: string) => boolean | Promise<boolean>
-	readonly missingCredentialsMessage?: (provider: string) => string | Promise<string>
+	readonly hasApiKey: (provider: string) => boolean
+	readonly missingCredentialsMessage?: (provider: string) => string
 	readonly checkCredentials?: (
 		provider: string,
 		signal?: AbortSignal,
@@ -254,6 +254,13 @@ export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortG
 	defaultValue: () => "10 seconds",
 })
 
+export const CredentialCheckTimeout = Context.Reference<Duration.Input>(
+	"@checkfu/api/CredentialCheckTimeout",
+	{
+		defaultValue: () => "10 seconds",
+	},
+)
+
 interface PendingCredentialCheck {
 	readonly operationId: string
 	readonly turn: number
@@ -340,6 +347,7 @@ const admissionsOf = (backend: PiDurableBackend) => {
 type AdmitPiTurnResult =
 	| boolean
 	| { readonly _tag: "missing_key"; readonly message: string | undefined }
+	| { readonly _tag: "credential_timeout"; readonly message: string }
 
 type AdmitLockOutcome =
 	| AdmitPiTurnResult
@@ -384,10 +392,12 @@ const admitPiTurnUnderWay = (
 	}
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
+		const credentialTimeout = yield* CredentialCheckTimeout
+		const checkCredentials = backend.checkCredentials
 		let finalizedPrevious: string | undefined
-		let credentialsVerified = false
+		let credentialsVerified = checkCredentials === undefined
 		while (true) {
-			if (!credentialsVerified) {
+			if (!credentialsVerified && checkCredentials !== undefined) {
 				const credentialOutcome = yield* Effect.acquireUseRelease(
 					Effect.sync(() => {
 						const entry: PendingCredentialCheck = {
@@ -432,20 +442,13 @@ const admitPiTurnUnderWay = (
 							return yield* Effect.raceFirst(
 								Deferred.await(entry.wake).pipe(Effect.as("woken" as const)),
 								Effect.promise(async (signal): Promise<AdmitPiTurnResult> => {
-									if (backend.checkCredentials !== undefined) {
-										const check = await backend.checkCredentials(request.provider, signal)
-										return check.ok ? true : { _tag: "missing_key", message: check.message }
-									}
-									if (await backend.hasApiKey(request.provider)) {
-										return true
-									}
-									return {
-										_tag: "missing_key",
-										message:
-											backend.missingCredentialsMessage === undefined
-												? undefined
-												: await backend.missingCredentialsMessage(request.provider),
-									}
+									const check = await checkCredentials(request.provider, signal)
+									return check.ok ? true : { _tag: "missing_key", message: check.message }
+								}),
+							).pipe(
+								Effect.timeoutOrElse({
+									duration: credentialTimeout,
+									orElse: () => Effect.succeed("timed_out" as const),
 								}),
 							)
 						}),
@@ -464,11 +467,15 @@ const admitPiTurnUnderWay = (
 				if (credentialOutcome === "cancelled") {
 					return false
 				}
-				if (credentialOutcome === "woken" || typeof credentialOutcome === "object") {
+				if (
+					credentialOutcome === "woken" ||
+					credentialOutcome === "timed_out" ||
+					typeof credentialOutcome === "object"
+				) {
 					const raced = yield* backend.withLock(
 						Effect.gen(function* () {
 							const status = yield* Effect.promise(
-								async (): Promise<"submitted" | "cancelled" | "missing"> => {
+								async (): Promise<"submitted" | "cancelled" | "unresolved"> => {
 									const pi = await backend.pi()
 									if ((await submissionOf(pi, operationId)) !== undefined) {
 										return "submitted"
@@ -480,7 +487,7 @@ const admitPiTurnUnderWay = (
 									) {
 										return "cancelled"
 									}
-									return "missing"
+									return "unresolved"
 								},
 							)
 							if (status === "submitted") {
@@ -494,6 +501,12 @@ const admitPiTurnUnderWay = (
 					}
 					if (raced === "cancelled") {
 						return false
+					}
+					if (credentialOutcome === "timed_out") {
+						return {
+							_tag: "credential_timeout",
+							message: `Timed out checking credentials for provider "${request.provider}".`,
+						}
 					}
 					return credentialOutcome === "woken" ? false : credentialOutcome
 				}
@@ -513,6 +526,12 @@ const admitPiTurnUnderWay = (
 							(await isStaleTurn(pi, operationId, request.turn))
 						) {
 							return false
+						}
+						if (checkCredentials === undefined && !backend.hasApiKey(request.provider)) {
+							return {
+								_tag: "missing_key",
+								message: backend.missingCredentialsMessage?.(request.provider),
+							}
 						}
 						await backend.ensureRoot(agent)
 						if (backend.isCancelled(operationId)) {
@@ -567,7 +586,7 @@ const admitPiTurnUnderWay = (
 			if (typeof admitted === "boolean") {
 				return admitted
 			}
-			if (admitted._tag === "missing_key") {
+			if (admitted._tag !== "waiting") {
 				return admitted
 			}
 			yield* abortPiDurableTurn(backend, admitted.waitingFor)
@@ -666,6 +685,17 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
 	if (typeof admitted === "object") {
+		if (admitted._tag === "credential_timeout") {
+			return {
+				ok: false,
+				error: {
+					_tag: "TurnFailed",
+					error_type: "credential_check_timeout",
+					message: admitted.message,
+					terminal: false,
+				},
+			}
+		}
 		const fallbackCheck = checkCatalogProviderCredentials(request.provider, { env: {} })
 		const message =
 			admitted.message ??
