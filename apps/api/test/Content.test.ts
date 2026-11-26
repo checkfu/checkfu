@@ -171,13 +171,9 @@ const withContent = <A>(
 						authorize,
 					})
 					return {
-						send: (url, headers) =>
+						send: (url, headers = {}) =>
 							Effect.map(
-								guarded({
-									method: "GET",
-									url,
-									...(headers === undefined ? {} : { headers }),
-								}),
+								guarded(contentRequestOf(HttpServerRequest.fromWeb(new Request(url, { headers })))),
 								HttpServerResponse.toWeb,
 							),
 						manifestReads: () => reads,
@@ -821,7 +817,7 @@ describe("Artifact viewing links", () => {
 				expect(deniedPub.status).toBe(403)
 				expect(manifestReads()).toBe(0)
 
-				const allowedLink = yield* send(link.url, { authorization: "Bearer allow" })
+				const allowedLink = yield* send(link.url, { Authorization: "Bearer allow" })
 				expect(allowedLink.status).toBe(200)
 				expect(yield* text(allowedLink)).toBe("secret-page")
 

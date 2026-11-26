@@ -130,6 +130,7 @@ export const contentRequestOf = (request: HttpServerRequest.HttpServerRequest): 
 	method: request.method,
 	url: request.originalUrl,
 	ifNoneMatch: request.headers["if-none-match"],
+	headers: request.headers,
 })
 
 export const serveContent = (options: {
