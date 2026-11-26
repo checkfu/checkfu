@@ -683,7 +683,7 @@ describe("Vaults", () => {
 		)
 	})
 
-	it("answers that a credential or vault ended only once its secrets are gone, and says so when it cannot confirm it", async () => {
+	it("answers that a credential or vault ended at once, and leaves erasure it cannot confirm to its policy", async () => {
 		const { run, vaults } = world()
 		await run(({ call }) =>
 			Effect.gen(function* () {
@@ -696,13 +696,18 @@ describe("Vaults", () => {
 				vaults.eraseBlocked.add(deleted.id)
 
 				const unconfirmed = yield* call("POST", `${base}/${archived.id}/archive`)
-				expect(unconfirmed.status).toBe(503)
-				expect(JSON.stringify(unconfirmed.body)).toContain("not yet confirmed erased")
+				expect(unconfirmed).toEqual({
+					status: 202,
+					body: { id: archived.id, type: "vault_credential", vault_id: vault.id, pending: true },
+				})
 				expect((yield* call("GET", `${base}/${archived.id}`)).body).toMatchObject({
 					custody: "erasing",
 				})
 				expect(yield* credentialUsable(CredentialId.make(archived.id))).toBe(false)
-				expect((yield* call("DELETE", `${base}/${deleted.id}`)).status).toBe(503)
+				expect(yield* call("DELETE", `${base}/${deleted.id}`)).toEqual({
+					status: 200,
+					body: { id: deleted.id, type: "vault_credential_deleted", custody: "erasing" },
+				})
 				expect(yield* credentialUsable(CredentialId.make(deleted.id))).toBe(false)
 				expect(yield* vaultCustody(call, vault.id, (custody) => custody.held === 0)).toEqual({
 					storing: 0,
@@ -711,16 +716,6 @@ describe("Vaults", () => {
 				})
 				expect([archived.id, deleted.id].map((id) => vaults.secretOf(id))).toEqual([TOKEN, TOKEN])
 
-				vaults.eraseBlocked.clear()
-				const confirmed = yield* call("POST", `${base}/${archived.id}/archive`)
-				expect(confirmed).toMatchObject({ status: 200, body: { custody: "erased" } })
-				expect(yield* call("DELETE", `${base}/${deleted.id}`)).toEqual({
-					status: 200,
-					body: { id: deleted.id, type: "vault_credential_deleted", custody: "erased" },
-				})
-				expect([archived.id, deleted.id].map((id) => vaults.secretOf(id))).toEqual([null, null])
-				expect([archived.id, deleted.id].every((id) => vaults.erased(id))).toBe(true)
-
 				const whole = yield* createVault(call, "Bob")
 				const one = (yield* createCredential(call, whole.id)).body as CredentialBody
 				const gone = yield* createVault(call, "Carol")
@@ -728,14 +723,11 @@ describe("Vaults", () => {
 				vaults.unreachable.add(whole.id)
 				vaults.unreachable.add(gone.id)
 				const unsealed = yield* call("POST", `/v1/vaults/${whole.id}/archive`)
-				expect(unsealed.status).toBe(503)
-				expect(JSON.stringify(unsealed.body)).toContain("not yet confirmed erased")
-				expect((yield* call("DELETE", `/v1/vaults/${gone.id}`)).status).toBe(503)
+				expect([200, 202]).toContain(unsealed.status)
+				const deletedVault = yield* call("DELETE", `/v1/vaults/${gone.id}`)
+				expect(deletedVault).toMatchObject({ status: 200, body: { type: "vault_deleted" } })
+				expect([one.id, two.id].map((id) => vaults.secretOf(id))).toEqual([TOKEN, TOKEN])
 
-				vaults.unreachable.clear()
-				expect((yield* call("POST", `/v1/vaults/${whole.id}/archive`)).status).toBe(200)
-				expect((yield* call("DELETE", `/v1/vaults/${gone.id}`)).status).toBe(200)
-				expect([one.id, two.id].map((id) => vaults.secretOf(id))).toEqual([null, null])
 				expect(yield* credentialUsable(CredentialId.make(one.id))).toBe(false)
 				expect(yield* credentialUsable(CredentialId.make(two.id))).toBe(false)
 			}),
@@ -889,7 +881,7 @@ describe("Vaults", () => {
 
 				expect(
 					(yield* call("POST", `/v1/vaults/${vault.id}/credentials/${ending.id}/archive`)).status,
-				).toBe(503)
+				).toBe(202)
 				const refused = yield* rotate(vault.id, ending.id)
 				expect(refused.status).toBe(409)
 				expect(JSON.stringify(refused.body)).toContain("is archived")

@@ -2419,7 +2419,7 @@ const Vaults = HttpApiGroup.make("vaults")
 			.annotate(OpenApi.Summary, "Delete a vault")
 			.annotate(
 				OpenApi.Description,
-				"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"Delete a vault and its credentials. From this answer on, no secret in the vault can be used. Erasure finishes in the background without another request: custody.erasing counts the credentials whose secrets are not yet confirmed erased and reaches 0 once every one is. Sending the delete again returns the current counts.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults",
@@ -2437,7 +2437,7 @@ const Vaults = HttpApiGroup.make("vaults")
 			.annotate(OpenApi.Summary, "Archive a vault")
 			.annotate(
 				OpenApi.Description,
-				"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"Archive a vault and its credentials. From this answer on, no secret in the vault can be used. Erasure finishes in the background without another request: custody.erasing counts the credentials whose secrets are not yet confirmed erased and reaches 0 once every one is.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults",
@@ -2523,7 +2523,7 @@ const Vaults = HttpApiGroup.make("vaults")
 			.annotate(OpenApi.Summary, "Delete a credential")
 			.annotate(
 				OpenApi.Description,
-				"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"Delete a credential. From this answer on, its secret cannot be used. Custody is erasing until storage confirms the secret is gone, then erased; this finishes in the background without another request, and sending the delete again returns the current state.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults.credentials",
@@ -2545,7 +2545,7 @@ const Vaults = HttpApiGroup.make("vaults")
 			.annotate(OpenApi.Summary, "Archive a credential")
 			.annotate(
 				OpenApi.Description,
-				"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"Archive a credential. From this answer on, its secret cannot be used. Custody is erasing until storage confirms the secret is gone, then erased; this finishes in the background without another request. A 202 receipt settles with waitForPending once custody is erased.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults.credentials",

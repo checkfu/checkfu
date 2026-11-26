@@ -2207,7 +2207,7 @@ export class EffectVaultsCredentialsResource {
 		this.#runtime = runtime
 	}
 
-	/** Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a credential. From this answer on, its secret cannot be used. Custody is erasing until storage confirms the secret is gone, then erased; this finishes in the background without another request. A 202 receipt settles with waitForPending once custody is erased. */
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
@@ -2300,7 +2300,7 @@ export class EffectVaultsCredentialsResource {
 		)
 	}
 
-	/** Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a credential. From this answer on, its secret cannot be used. Custody is erasing until storage confirms the secret is gone, then erased; this finishes in the background without another request, and sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
@@ -2536,7 +2536,7 @@ export class EffectVaultsResource {
 		this.credentials = new EffectVaultsCredentialsResource(runtime)
 	}
 
-	/** Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a vault and its credentials. From this answer on, no secret in the vault can be used. Erasure finishes in the background without another request: custody.erasing counts the credentials whose secrets are not yet confirmed erased and reaches 0 once every one is. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
 		options: WithResponseRequestOptions,
@@ -2608,7 +2608,7 @@ export class EffectVaultsResource {
 		)
 	}
 
-	/** Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a vault and its credentials. From this answer on, no secret in the vault can be used. Erasure finishes in the background without another request: custody.erasing counts the credentials whose secrets are not yet confirmed erased and reaches 0 once every one is. Sending the delete again returns the current counts. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
 		options: WithResponseRequestOptions,
@@ -3481,7 +3481,7 @@ export class VaultsCredentialsResource {
 		this.#runtime = runtime
 	}
 
-	/** Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a credential. From this answer on, its secret cannot be used. Custody is erasing until storage confirms the secret is gone, then erased; this finishes in the background without another request. A 202 receipt settles with waitForPending once custody is erased. */
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
@@ -3509,7 +3509,7 @@ export class VaultsCredentialsResource {
 		)
 	}
 
-	/** Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a credential. From this answer on, its secret cannot be used. Custody is erasing until storage confirms the secret is gone, then erased; this finishes in the background without another request, and sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
@@ -3588,7 +3588,7 @@ export class VaultsResource {
 		this.credentials = new VaultsCredentialsResource(runtime)
 	}
 
-	/** Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a vault and its credentials. From this answer on, no secret in the vault can be used. Erasure finishes in the background without another request: custody.erasing counts the credentials whose secrets are not yet confirmed erased and reaches 0 once every one is. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
 		options?: PromiseRequestOptions,
@@ -3611,7 +3611,7 @@ export class VaultsResource {
 		)
 	}
 
-	/** Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a vault and its credentials. From this answer on, no secret in the vault can be used. Erasure finishes in the background without another request: custody.erasing counts the credentials whose secrets are not yet confirmed erased and reaches 0 once every one is. Sending the delete again returns the current counts. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
 		options?: PromiseRequestOptions,
