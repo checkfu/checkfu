@@ -1170,4 +1170,40 @@ describe("A session's outputs", () => {
 					expect(outputReads.map((read) => read.paths)).toEqual([["a.txt", "b.txt"], ["c.txt"]])
 				}),
 		))
+
+	it("follows the outputs directory: the next turn that replies, or a replay of one, puts the directory back over a version added by hand", () =>
+		withSessions(
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, publishOutputs, onTurn, createSession, outputs },
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					const byHand = (id: string, version: number) =>
+						request(apiFetch, "POST", `/v1/artifacts/${id}/versions`, {
+							version,
+							files: [{ path: "theirs.txt", content: "theirs" }],
+						})
+					onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "one"))
+					yield* replyAndPublish(session.id, ["Write it."], 1)
+					const { id } = yield* json<ArtifactBody>(yield* outputs(session.id))
+					const ours = [fileOf("a.txt", "one", "text/plain")]
+
+					onTurn(() => undefined)
+					yield* replyAndPublish(session.id, ["Thanks."], 2)
+					yield* byHand(id, 1)
+					yield* publishOutputs({ session_id: SessionId.make(session.id), turn: 2 })
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 3,
+						files: ours,
+					})
+
+					yield* byHand(id, 3)
+					yield* replyAndPublish(session.id, ["Anything else?"], 3)
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 5,
+						files: ours,
+					})
+				}),
+		))
 })

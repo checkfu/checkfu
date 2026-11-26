@@ -98,6 +98,10 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 	},
 
 	read: async (paths: ReadonlyArray<string>): Promise<ReadonlyArray<OutputBytes>> => {
+		const outside = paths.find((path) => !isArtifactPath(path))
+		if (outside !== undefined) {
+			throw new Error(`${JSON.stringify(outside)} is not a path in the outputs directory.`)
+		}
 		const read: Array<OutputBytes> = []
 		for (const path of paths) {
 			read.push({ path, bytes: await files.read(`${SESSION_OUTPUTS_PATH}/${path}`) })
