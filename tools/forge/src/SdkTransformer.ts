@@ -121,6 +121,7 @@ const generateResourcesFile = (
 	const EffectSdkRuntime = runtimeMod.ident("EffectSdkRuntime").ty()
 	const EndpointBody = runtimeMod.ident("EndpointBody").ty()
 	const EndpointJsonSuccess = runtimeMod.ident("EndpointJsonSuccess").ty()
+	const EndpointJsonBody = runtimeMod.ident("EndpointJsonBody").ty()
 	const EndpointParams = runtimeMod.ident("EndpointParams").ty()
 	const PathParam = runtimeMod.ident("PathParam").ty()
 	const EndpointQuery = runtimeMod.ident("EndpointQuery").ty()
@@ -192,7 +193,9 @@ const generateResourcesFile = (
 						out(EndpointQuery, "<", g, ", ", e, ">,")
 					}
 					out(EndpointBody, "<", g, ", ", e, ">,")
-					out(EndpointSuccess, "<", g, ", ", e, ">")
+					out(EndpointSuccess, "<", g, ", ", e, ">,")
+					out(EndpointJsonSuccess, "<", g, ", ", e, ">,")
+					out(EndpointJsonBody, "<", g, ", ", e, ">")
 				}
 			})
 			out(">")
