@@ -2723,6 +2723,13 @@ const Vaults = HttpApiGroup.make("vaults")
 	.annotate(OpenApi.Description, "Manage vaults and the credentials they hold")
 	.middleware(Authentication)
 
+const webhookListQuery = {
+	...artifactListQuery,
+	id: Schema.optionalKey(WebhookId).annotate({
+		description: "Filter to a single webhook endpoint ID to check listing readiness in O(1).",
+	}),
+}
+
 const Webhooks = HttpApiGroup.make("webhooks")
 	.add(
 		HttpApiEndpoint.post("create", "/v1/webhooks", {
@@ -2754,7 +2761,7 @@ const Webhooks = HttpApiGroup.make("webhooks")
 	)
 	.add(
 		HttpApiEndpoint.get("list", "/v1/webhooks", {
-			query: artifactListQuery,
+			query: webhookListQuery,
 			success: ListWebhooksResponse,
 			error: HandlerErrors,
 		})
@@ -2850,7 +2857,7 @@ const Webhooks = HttpApiGroup.make("webhooks")
 			.annotate(OpenApi.Summary, "Rotate a webhook signing secret")
 			.annotate(
 				OpenApi.Description,
-				"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours.",
+				"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "webhooks",

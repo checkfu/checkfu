@@ -21,7 +21,7 @@ import type {
 	VaultCredential,
 	WebhookCreated,
 } from "./Api.ts"
-import { CheckfuConfigError, NotFoundError } from "./Errors.ts"
+import { CheckfuConfigError, ConflictError, NotFoundError } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { EffectResources } from "./generated/Resources.ts"
 import type { Op } from "./generated/Resources.ts"
@@ -145,25 +145,23 @@ const retrievePending = (
 			return client.vaults.credentials.retrieve(pending.vault_id, pending.id, options)
 		case "webhook":
 			return Effect.gen(function* () {
-				let after: string | undefined
-				for (;;) {
-					const page = yield* client.webhooks.list(
-						{ order: "desc", limit: 100, ...(after === undefined ? {} : { after }) },
-						options,
-					)
-					const found = page.data.find((item) => item.id === pending.id)
-					if (found !== undefined) {
-						return { ...found, signing_secret: pending.signing_secret }
-					}
-					if (!page.has_more || page.next_cursor === null) {
-						return yield* new NotFoundError({
-							status: 404,
-							errorType: "not_found_error",
-							message: `Webhook "${pending.id}" is not yet listed.`,
-						})
-					}
-					after = page.next_cursor
+				const page = yield* client.webhooks.list({ id: pending.id, limit: 1 }, options)
+				const found = page.data.find((item) => item.id === pending.id)
+				if (found === undefined) {
+					return yield* new NotFoundError({
+						status: 404,
+						errorType: "not_found_error",
+						message: `Webhook "${pending.id}" is not yet listed.`,
+					})
 				}
+				if (found.secret_revision !== 1) {
+					return yield* new ConflictError({
+						status: 409,
+						errorType: "conflict_error",
+						message: `Webhook "${pending.id}" has already rotated its signing secret (revision ${found.secret_revision}); the pending creation receipt's signing_secret is no longer current.`,
+					})
+				}
+				return { ...found, signing_secret: pending.signing_secret }
 			})
 		default: {
 			const unknown: { readonly type: unknown } = pending

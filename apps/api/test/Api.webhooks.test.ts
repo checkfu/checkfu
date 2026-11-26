@@ -620,15 +620,18 @@ describe("Webhooks HTTP API", () => {
 			},
 		)
 
-		let forceListingTimeout = true
+		let listingMode: "timeout" | "defect" | "normal" = "timeout"
 		const FlakyListing = Layer.effect(
 			WebhookListingQuery,
 			Effect.map(WebhookListingQuery, (inner) => ({
 				page: (order, options) => inner.page(order, options),
+				lookup: (id) => inner.lookup(id),
 				waitFor: (receipt) =>
-					forceListingTimeout
+					listingMode === "timeout"
 						? Effect.fail(new WebhookListingTimeout({ receipt }))
-						: inner.waitFor(receipt),
+						: listingMode === "defect"
+							? Effect.die(new Error("D1 listing host unavailable"))
+							: inner.waitFor(receipt),
 			})),
 		)
 		const testLayer = FlakyListing.pipe(Layer.provideMerge(harness.layer))
@@ -662,7 +665,40 @@ describe("Webhooks HTTP API", () => {
 					expect(pendingBody.pending).toBe(true)
 					expect(pendingBody.signing_secret.startsWith("whsec_")).toBe(true)
 
-					// 2) Concurrent unkeyed rotations return each caller's OWN distinct revision & secret.
+					// 1b) Post-commit listing defect (e.g., D1 failure) ALSO returns 202 PendingWebhook
+					//     with committed id + signing_secret instead of a 500 without receipt!
+					listingMode = "defect"
+					const defectRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/webhooks",
+						headers: AUTH_HEADERS,
+						body: {
+							url: "https://hooks.example.com/defect-sink",
+							description: "Defect listener",
+							event_types: ["agent.created"],
+						},
+					})
+					expect(defectRes.status).toBe(202)
+					const defectBody = (yield* Effect.promise(() => defectRes.json())) as {
+						readonly id: string
+						readonly type: string
+						readonly pending: boolean
+						readonly signing_secret: string
+					}
+					expect(defectBody.id.startsWith("whe_")).toBe(true)
+					expect(defectBody.pending).toBe(true)
+					expect(defectBody.signing_secret.startsWith("whsec_")).toBe(true)
+					// Remove the extra defect webhook so only pendingBody listens to the vault events below.
+					expect(
+						(yield* sendRequest(apiFetch, {
+							method: "DELETE",
+							path: `/v1/webhooks/${defectBody.id}`,
+							headers: AUTH_HEADERS,
+						})).status,
+					).toBe(200)
+
+					// 2) Concurrent unkeyed rotations: one succeeds (rev 2) and the overlapping rotation
+					//    is rejected with 409 Conflict so rev 1's advertised 24h grace period is preserved!
 					const [rotA, rotB] = yield* Effect.all(
 						[
 							sendRequest(apiFetch, {
@@ -678,35 +714,30 @@ describe("Webhooks HTTP API", () => {
 						],
 						{ concurrency: 2 },
 					)
-					expect(rotA.status).toBe(200)
-					expect(rotB.status).toBe(200)
-					const bodyA = (yield* Effect.promise(() => rotA.json())) as WebhookJson
-					const bodyB = (yield* Effect.promise(() => rotB.json())) as WebhookJson
-					expect([bodyA.secret_revision, bodyB.secret_revision].toSorted((a, b) => a - b)).toEqual([
-						2, 3,
-					])
-					expect(bodyA.signing_secret).not.toBe(bodyB.signing_secret)
-					const activeSecret =
-						bodyA.secret_revision === 3
-							? (bodyA.signing_secret ?? "")
-							: (bodyB.signing_secret ?? "")
+					expect([rotA.status, rotB.status].toSorted((a, b) => a - b)).toEqual([200, 409])
+					const winningRes = rotA.status === 200 ? rotA : rotB
+					const winningBody = (yield* Effect.promise(() => winningRes.json())) as WebhookJson
+					expect(winningBody.secret_revision).toBe(2)
+					expect(winningBody.signing_secret?.startsWith("whsec_")).toBe(true)
+					expect(winningBody.signing_secret).not.toBe(pendingBody.signing_secret)
+					const activeSecret = winningBody.signing_secret ?? ""
 
-					// 3) Wait for the committed pending webhook to become visible in the listing
-					//    projection, then exercise Vault & Credential lifecycle -> vault.created,
+					// 3) Check ID-specific listing readiness via GET /v1/webhooks?id=... in O(1),
+					//    then exercise Vault & Credential lifecycle -> vault.created,
 					//    vault_credential.created, vault.archived + vault_credential.archived,
 					//    vault.deleted + vault_credential.deleted!
-					forceListingTimeout = false
+					listingMode = "normal"
 					let listedPending = false
 					for (let attempt = 0; attempt < 100; attempt++) {
 						const listRes = yield* sendRequest(apiFetch, {
 							method: "GET",
-							path: "/v1/webhooks?limit=20",
+							path: `/v1/webhooks?id=${pendingBody.id}&limit=1`,
 							headers: AUTH_HEADERS,
 						})
 						const listed = (yield* Effect.promise(() => listRes.json())) as {
 							readonly data: ReadonlyArray<WebhookJson>
 						}
-						if (listed.data.some((hook) => hook.id === pendingBody.id)) {
+						if (listed.data.length === 1 && listed.data[0]?.id === pendingBody.id) {
 							listedPending = true
 							break
 						}

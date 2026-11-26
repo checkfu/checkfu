@@ -28,7 +28,12 @@ import { WebhookDeletedError } from "./WebhookDeleted.rejection.ts"
 import { WebhookId } from "./Webhook.id.ts"
 import { WebhookInvalidUrl } from "./WebhookInvalidUrl.rejection.ts"
 import { WebhookNotFound } from "./WebhookNotFound.rejection.ts"
-import { NonNegativeInt, SUSTAINED_FAILURE_DISABLE_WINDOW_MS } from "./WebhookTypes.ts"
+import { WebhookSecretRotationInProgress } from "./WebhookSecretRotationInProgress.rejection.ts"
+import {
+	NonNegativeInt,
+	SUSTAINED_FAILURE_DISABLE_WINDOW_MS,
+	WEBHOOK_SECRET_ROTATION_GRACE_MS,
+} from "./WebhookTypes.ts"
 
 export const WebhookEndpointState = Schema.Struct({
 	status: Schema.String,
@@ -252,6 +257,38 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 				after.status === (command.reactivate ? "active" : before.status),
 			].every((ok) => ok)
 		},
+		PredatingSuccessLeavesFailureWindowUntouched: ({ before, after, command }) => {
+			if (command._tag !== "RecordWebhookOutcome") {
+				return true
+			}
+			return [
+				before.status !== "active",
+				command.definition_revision !== before.definition_revision,
+				command.outcome !== "delivered",
+				before.failure_window_started_at === 0,
+				command.observed_at >= before.failure_window_started_at,
+				[
+					after.failure_window_started_at === before.failure_window_started_at,
+					after.last_failure_at === before.last_failure_at,
+					after.consecutive_failures === before.consecutive_failures,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
+		ActiveGracePeriodNotOverwritten: ({ before, after, command }) => {
+			if (command._tag !== "RotateWebhookSecret") {
+				return true
+			}
+			return [
+				before.previous_secret_revision === 0,
+				command.rotated_at >= before.previous_secret_expires_at,
+				[
+					after.secret_revision === before.secret_revision,
+					after.previous_secret_revision === before.previous_secret_revision,
+					after.previous_secret_salt === before.previous_secret_salt,
+					after.previous_secret_expires_at === before.previous_secret_expires_at,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
 	},
 	decide: {
 		CreateWebhookEndpoint: (state, cmd, ctx) => {
@@ -320,13 +357,22 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			if (state.status === "deleted") {
 				return new WebhookDeletedError({ webhook_id: ctx.id })
 			}
+			if (
+				state.previous_secret_revision !== 0 &&
+				state.previous_secret_expires_at > cmd.rotated_at
+			) {
+				return new WebhookSecretRotationInProgress({
+					webhook_id: ctx.id,
+					previous_secret_expires_at: state.previous_secret_expires_at,
+				})
+			}
 			return [
 				new WebhookSecretRotated({
 					secret_revision: state.secret_revision + 1,
 					secret_salt: cmd.next_secret_salt,
 					previous_secret_revision: state.secret_revision,
 					previous_secret_salt: state.secret_salt,
-					previous_secret_expires_at: cmd.grace_until,
+					previous_secret_expires_at: cmd.rotated_at + WEBHOOK_SECRET_ROTATION_GRACE_MS,
 				}),
 			]
 		},
@@ -368,7 +414,10 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 				]
 			}
 			if (cmd.outcome === "delivered") {
-				if (state.failure_window_started_at === 0) {
+				if (
+					state.failure_window_started_at === 0 ||
+					cmd.observed_at < state.failure_window_started_at
+				) {
 					return []
 				}
 				if (cmd.observed_at < state.last_failure_at) {
@@ -509,7 +558,7 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 						failure_window_started_at: e.window_started_at,
 						last_failure_at:
 							e.last_failure_at >= e.window_started_at ? e.last_failure_at : e.window_started_at,
-						consecutive_failures: 0,
+						consecutive_failures: 1,
 						updated_at: DateTime.toEpochMillis(envelope.at),
 					}
 				: state,

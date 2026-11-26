@@ -47,6 +47,7 @@ import { WebhookDeletedError } from "../src/Webhook/WebhookDeleted.rejection.ts"
 import { WebhookEndpoint } from "../src/Webhook/WebhookEndpoint.aggregate.ts"
 import { WebhookInvalidUrl } from "../src/Webhook/WebhookInvalidUrl.rejection.ts"
 import { WebhookNotFound } from "../src/Webhook/WebhookNotFound.rejection.ts"
+import { WebhookSecretRotationInProgress } from "../src/Webhook/WebhookSecretRotationInProgress.rejection.ts"
 import {
 	SUSTAINED_FAILURE_DISABLE_WINDOW_MS,
 	WEBHOOK_SECRET_ROTATION_GRACE_MS,
@@ -146,7 +147,7 @@ describe("Webhooks model stories", () => {
 		() => {
 			const endpoint = WebhookEndpoint.ref(WebhookId.make("whe_rotate_1"))
 			const grace1 = t0Ms + WEBHOOK_SECRET_ROTATION_GRACE_MS
-			const grace2 = t0Ms + 3_600_000 + WEBHOOK_SECRET_ROTATION_GRACE_MS
+			const grace2 = grace1 + WEBHOOK_SECRET_ROTATION_GRACE_MS
 			return story(
 				Story.clock(t0),
 				Story.when(
@@ -192,7 +193,7 @@ describe("Webhooks model stories", () => {
 					new RotateWebhookSecret({
 						webhook_id: endpoint.id,
 						next_secret_salt: SALT_2,
-						grace_until: grace1,
+						rotated_at: t0Ms,
 					}),
 				),
 				Story.then(
@@ -214,13 +215,37 @@ describe("Webhooks model stories", () => {
 					previous_secret_expires_at: grace1,
 				}),
 
-				// Rotate again an hour later; stale expiry for revision 2 is ignored, while revision 3's alarm fires.
+				// Overlapping rotation 1 hour later is refused so revision 1's advertised 24h grace period stays intact.
 				Story.clock(DateTime.makeUnsafe(t0Ms + 3_600_000)),
 				Story.when(
 					new RotateWebhookSecret({
 						webhook_id: endpoint.id,
 						next_secret_salt: SALT_3,
-						grace_until: grace2,
+						rotated_at: t0Ms + 3_600_000,
+					}),
+				),
+				Story.rejected(
+					new WebhookSecretRotationInProgress({
+						webhook_id: endpoint.id,
+						previous_secret_expires_at: grace1,
+					}),
+				),
+				Story.state(endpoint, {
+					secret_revision: 2,
+					secret_salt: SALT_2,
+					previous_secret_revision: 1,
+					previous_secret_salt: SALT_1,
+					previous_secret_expires_at: grace1,
+				}),
+
+				// Once grace1 elapses, the expiry alarm clears rev 1, and a second rotation succeeds.
+				Story.clock(DateTime.makeUnsafe(grace1)),
+				Story.then(endpoint, new WebhookPreviousSecretExpired({ expired_revision: 1 })),
+				Story.when(
+					new RotateWebhookSecret({
+						webhook_id: endpoint.id,
+						next_secret_salt: SALT_3,
+						rotated_at: grace1,
 					}),
 				),
 				Story.then(
@@ -233,6 +258,7 @@ describe("Webhooks model stories", () => {
 						previous_secret_expires_at: grace2,
 					}),
 				),
+				// Stale expiry for revision 2 is ignored while revision 3's alarm fires at grace2.
 				Story.when(
 					new ExpirePreviousWebhookSecret({
 						webhook_id: endpoint.id,
@@ -299,7 +325,9 @@ describe("Webhooks model stories", () => {
 				),
 				Story.then(endpoint),
 
-				// Failure opens failure window; earlier success re-anchors window; newer success clears it.
+				// Failures at T1=5000 and T2=9000 open failure window [5000, 9000].
+				// A delayed success before T1 (2000) is ignored; a success between T1 and T2 (7000)
+				// reanchors the window to [9000, 9000]; a newer success (10000) clears it.
 				Story.when(
 					new RecordWebhookOutcome({
 						webhook_id: endpoint.id,
@@ -319,15 +347,15 @@ describe("Webhooks model stories", () => {
 					new RecordWebhookOutcome({
 						webhook_id: endpoint.id,
 						definition_revision: 1,
-						outcome: "delivered",
-						observed_at: t0Ms + 2000,
+						outcome: "failed",
+						observed_at: t0Ms + 9000,
 					}),
 				),
 				Story.then(
 					endpoint,
-					new WebhookHealthReanchored({
+					new WebhookHealthDegraded({
 						window_started_at: t0Ms + 5000,
-						last_failure_at: t0Ms + 5000,
+						last_failure_at: t0Ms + 9000,
 					}),
 				),
 				Story.when(
@@ -335,7 +363,41 @@ describe("Webhooks model stories", () => {
 						webhook_id: endpoint.id,
 						definition_revision: 1,
 						outcome: "delivered",
-						observed_at: t0Ms + 6000,
+						observed_at: t0Ms + 2000,
+					}),
+				),
+				Story.then(endpoint),
+				Story.state(endpoint, {
+					failure_window_started_at: t0Ms + 5000,
+					last_failure_at: t0Ms + 9000,
+					consecutive_failures: 2,
+				}),
+				Story.when(
+					new RecordWebhookOutcome({
+						webhook_id: endpoint.id,
+						definition_revision: 1,
+						outcome: "delivered",
+						observed_at: t0Ms + 7000,
+					}),
+				),
+				Story.then(
+					endpoint,
+					new WebhookHealthReanchored({
+						window_started_at: t0Ms + 9000,
+						last_failure_at: t0Ms + 9000,
+					}),
+				),
+				Story.state(endpoint, {
+					failure_window_started_at: t0Ms + 9000,
+					last_failure_at: t0Ms + 9000,
+					consecutive_failures: 1,
+				}),
+				Story.when(
+					new RecordWebhookOutcome({
+						webhook_id: endpoint.id,
+						definition_revision: 1,
+						outcome: "delivered",
+						observed_at: t0Ms + 10_000,
 					}),
 				),
 				Story.then(endpoint, new WebhookHealthCleared()),
@@ -519,7 +581,7 @@ describe("Webhooks model stories", () => {
 				new RotateWebhookSecret({
 					webhook_id: id,
 					next_secret_salt: SALT_2,
-					grace_until: t0Ms + WEBHOOK_SECRET_ROTATION_GRACE_MS,
+					rotated_at: t0Ms,
 				}),
 			)
 			yield* platform.control.drain

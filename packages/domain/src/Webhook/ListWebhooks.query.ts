@@ -12,6 +12,7 @@ export class ListWebhooks extends Domain.Query(
 	{
 		input: {
 			order: ListingOrder,
+			id: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		},
 		success: ListingEntry,
 		paged: true,
@@ -27,10 +28,17 @@ export const ListWebhooksLive = ListWebhooks.toLayer(
 	Effect.gen(function* () {
 		const store = yield* ListingStore
 		const isCursor = Schema.is(ResourceListCursor)
-		return ({ order }, page) =>
-			page.after === undefined || isCursor(page.after)
+		return ({ order, id }, page) => {
+			if (id !== undefined && id !== null) {
+				return Effect.map(store.get("webhook", id), (entry) => ({
+					entries: entry === null ? [] : [entry],
+					cursor: null,
+				}))
+			}
+			return page.after === undefined || isCursor(page.after)
 				? store.page({ kind: "webhook", include_archived: false, agent_id: null, order }, page)
 				: Effect.fail(new InvalidListingCursor({ cursor: page.after }))
+		}
 	}),
 	{ take: { default: 50, max: LIST_PAGE_MAX } },
 )

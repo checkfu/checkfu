@@ -31229,6 +31229,17 @@
 							"description": "Sort order by creation: asc (oldest first, the default) or desc"
 						},
 						"required": false
+					},
+					{
+						"name": "id",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Filter to a single webhook endpoint ID to check listing readiness in O(1)."
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -34678,7 +34689,7 @@
 						}
 					}
 				},
-				"description": "Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours.",
+				"description": "Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict.",
 				"summary": "Rotate a webhook signing secret",
 				"x-forge-group-name": "webhooks",
 				"x-forge-method-name": "rotateSecret",

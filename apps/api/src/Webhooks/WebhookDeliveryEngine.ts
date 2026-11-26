@@ -103,6 +103,7 @@ export type WebhookHttpResult =
 	| { readonly kind: "invalid_destination"; readonly message: string }
 	| { readonly kind: "network_error"; readonly message: string }
 	| { readonly kind: "egress_error"; readonly message: string }
+	| { readonly kind: "egress_unconfigured"; readonly message: string }
 
 export interface WebhookHttpSender {
 	readonly send: (request: WebhookHttpRequest) => Effect.Effect<WebhookHttpResult>
@@ -312,6 +313,15 @@ const classifyHttpResult = (result: WebhookHttpResult): ClassifiedHttpResult => 
 		return {
 			deliveryOutcome: "invalid_destination",
 			healthOutcome: "failed",
+			httpStatus: null,
+			errorMessage: truncateError(result.message),
+			retryable: false,
+		}
+	}
+	if (result.kind === "egress_unconfigured") {
+		return {
+			deliveryOutcome: "network_error",
+			healthOutcome: null,
 			httpStatus: null,
 			errorMessage: truncateError(result.message),
 			retryable: false,

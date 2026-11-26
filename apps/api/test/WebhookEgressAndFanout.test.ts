@@ -45,6 +45,10 @@ import {
 	makeWebhookEventsLive,
 } from "../src/Webhooks/WebhookEventsLive.ts"
 import type { WebhookFanoutWork } from "../src/Webhooks/WebhookEventsLive.ts"
+import {
+	WEBHOOK_FANOUT_SHARD_COUNT,
+	webhookFanoutShardId,
+} from "../src/Webhooks/WebhookFanout.do.ts"
 import { WebhookListingQuery, WebhookListingQueryLive } from "../src/Http/Listing.ts"
 import { WebhookSigningMasterKeyTest } from "../src/Webhooks/WebhookSigning.ts"
 
@@ -304,7 +308,7 @@ describe("PublicWebhookEgress connection-time enforcement", () => {
 						body: "{}",
 						timeoutMs: 2000,
 					})
-					expect(blockedRes.kind).toBe("invalid_destination")
+					expect(blockedRes.kind).toBe("egress_unconfigured")
 
 					const viaEgress = makeConfiguredWebhookHttpSender(client, {
 						egressUrl: egress.url,
@@ -532,4 +536,19 @@ describe("WebhookEventsLive isolation, event-time bounds, and resumable batched 
 				}).pipe(Effect.provide(testLayer))
 			}),
 	)
+
+	it("routes fan-out continuations deterministically onto a bounded shard pool", () => {
+		const shards = new Set<string>()
+		for (let i = 0; i < 200; i++) {
+			const eventId = `evt_agent_agt_${i}_${i + 1}`
+			const shard = webhookFanoutShardId(eventId)
+			expect(shard).toBe(webhookFanoutShardId(eventId))
+			expect(shard).toMatch(/^shard_\d+$/u)
+			const index = Number(shard.slice("shard_".length))
+			expect(index).toBeGreaterThanOrEqual(0)
+			expect(index).toBeLessThan(WEBHOOK_FANOUT_SHARD_COUNT)
+			shards.add(shard)
+		}
+		expect(shards.size).toBe(WEBHOOK_FANOUT_SHARD_COUNT)
+	})
 })

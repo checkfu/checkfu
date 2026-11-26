@@ -183,7 +183,7 @@ export const makeConfiguredWebhookHttpSender = (
 		}
 		if (config.localRuntime) {
 			return Effect.succeed<WebhookHttpResult>({
-				kind: "invalid_destination",
+				kind: "egress_unconfigured",
 				message:
 					"Direct webhook delivery is disabled in local workerd because it allows private addresses; configure CHECKFU_WEBHOOK_EGRESS_URL.",
 			})

@@ -8,7 +8,6 @@ import { UpdateWebhookEndpoint } from "@checkfu/domain/Webhook/UpdateWebhookEndp
 import { WebhookEndpoint } from "@checkfu/domain/Webhook/WebhookEndpoint.aggregate"
 import type { WebhookEndpointState } from "@checkfu/domain/Webhook/WebhookEndpoint.aggregate"
 import {
-	WEBHOOK_SECRET_ROTATION_GRACE_MS,
 	decodeWebhookEventTypes,
 	encodeWebhookEventTypes,
 } from "@checkfu/domain/Webhook/WebhookTypes"
@@ -19,6 +18,7 @@ import {
 	WebhookEventId,
 	WebhookId,
 } from "@checkfu/sdk/Schemas"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Digest from "effect/crypto/Digest"
 import * as Mac from "effect/crypto/Mac"
@@ -215,12 +215,27 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 						const signingSecret = yield* deriveCurrentSecret(webhookId, state)
 
 						// Wait until WebhookListing commits this registration to ListingStore so
-						// 201 guarantees immediate fan-out visibility. On timeout, return 202
-						// PendingWebhook with the committed id and signing_secret so unkeyed
-						// callers never lose the webhook or create duplicates on retry.
+						// 201 guarantees immediate fan-out visibility. On timeout OR any post-commit
+						// listing read failure/defect, return 202 PendingWebhook with the committed
+						// id and signing_secret so unkeyed callers never lose the webhook or create
+						// duplicates on retry.
 						const listingReady = yield* webhookListing.waitFor(receipt).pipe(
 							Effect.as(true),
 							Effect.catchTag("WebhookListingTimeout", () => Effect.succeed(false)),
+							Effect.catchCause((cause) =>
+								Cause.hasInterruptsOnly(cause)
+									? Effect.interrupt
+									: Effect.andThen(
+											Effect.logError(
+												"Webhook listing wait failed after webhook creation committed",
+												{
+													webhook_id: webhookId,
+													cause: Cause.pretty(cause),
+												},
+											),
+											Effect.succeed(false),
+										),
+							),
 						)
 						if (!listingReady) {
 							return {
@@ -237,16 +252,18 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 			.handle("list", ({ query }) =>
 				handled(
 					Effect.gen(function* () {
-						const page = yield* webhookListing
-							.page(query.order ?? "asc", {
-								take: query.limit ?? 50,
-								...(query.after === undefined ? {} : { after: query.after }),
-							})
-							.pipe(
-								Effect.catchTag("WebhookListingTimeout", () =>
-									reject(503, "Webhook listing is temporarily unavailable. Retry the request."),
-								),
-							)
+						const page = yield* (
+							query.id !== undefined
+								? webhookListing.lookup(query.id)
+								: webhookListing.page(query.order ?? "asc", {
+										take: query.limit ?? 50,
+										...(query.after === undefined ? {} : { after: query.after }),
+									})
+						).pipe(
+							Effect.catchTag("WebhookListingTimeout", () =>
+								reject(503, "Webhook listing is temporarily unavailable. Retry the request."),
+							),
+						)
 						return yield* hydrateListingPage(page, {}, retrieve)
 					}),
 				),
@@ -317,7 +334,6 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 						yield* requireLive(params.webhook_id)
 						const nowMillis = yield* Clock.currentTimeMillis
 						const nextSalt = yield* newWebhookSecretSalt(random)
-						const graceUntil = nowMillis + WEBHOOK_SECRET_ROTATION_GRACE_MS
 						const idempotencyKey = headers["idempotency-key"]
 						if (idempotencyKey !== undefined) {
 							const fingerprint = yield* sha256Json(digest, {
@@ -346,14 +362,23 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 								params.webhook_id,
 								idempotencyKey,
 							])
-							const receipt = yield* webhooks.send(
-								new RotateWebhookSecret({
-									webhook_id: params.webhook_id,
-									next_secret_salt: nextSalt,
-									grace_until: graceUntil,
-								}),
-								{ commandId },
-							)
+							const receipt = yield* webhooks
+								.send(
+									new RotateWebhookSecret({
+										webhook_id: params.webhook_id,
+										next_secret_salt: nextSalt,
+										rotated_at: nowMillis,
+									}),
+									{ commandId },
+								)
+								.pipe(
+									Effect.catchTag("WebhookSecretRotationInProgress", (refused) =>
+										reject(
+											409,
+											`A previous signing secret is still active until ${DateTime.formatIso(DateTime.makeUnsafe(refused.previous_secret_expires_at))}; wait until its grace period expires before rotating again.`,
+										),
+									),
+								)
 							const rotatedEvent = receipt.events.find(
 								(event) => event._tag === "webhook.secret_rotated",
 							)
@@ -371,13 +396,22 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 							return { ...webhookResource(params.webhook_id, state), signing_secret: signingSecret }
 						}
 
-						const receipt = yield* webhooks.send(
-							new RotateWebhookSecret({
-								webhook_id: params.webhook_id,
-								next_secret_salt: nextSalt,
-								grace_until: graceUntil,
-							}),
-						)
+						const receipt = yield* webhooks
+							.send(
+								new RotateWebhookSecret({
+									webhook_id: params.webhook_id,
+									next_secret_salt: nextSalt,
+									rotated_at: nowMillis,
+								}),
+							)
+							.pipe(
+								Effect.catchTag("WebhookSecretRotationInProgress", (refused) =>
+									reject(
+										409,
+										`A previous signing secret is still active until ${DateTime.formatIso(DateTime.makeUnsafe(refused.previous_secret_expires_at))}; wait until its grace period expires before rotating again.`,
+									),
+								),
+							)
 						const rotatedEvent = receipt.events.find(
 							(event) => event._tag === "webhook.secret_rotated",
 						)

@@ -3058,6 +3058,14 @@ const webhooksListCommandSpec: GeneratedOperationDescriptor = {
 			kind: "literals",
 			required: false,
 		},
+		{
+			propName: "id",
+			flagName: "id",
+			wireName: "id",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
 	],
 }
 
@@ -3077,6 +3085,12 @@ const webhooksListCommand = CommandMake(
 		),
 		order: FlagLiterals("order", ["asc", "desc"]).pipe(
 			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		id: FlagString("id").pipe(
+			FlagWithDescription(
+				"Filter to a single webhook endpoint ID to check listing readiness in O(1).",
+			),
 			FlagOptional,
 		),
 	},
@@ -3216,7 +3230,7 @@ const webhooksRotateSecretCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(webhooksRotateSecretCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours.",
+		"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict.",
 	),
 )
 

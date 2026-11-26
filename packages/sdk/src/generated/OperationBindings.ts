@@ -1059,7 +1059,7 @@ export const SDK_OPERATION_BINDINGS = [
 		httpMethod: "GET",
 		path: "/v1/webhooks",
 		pathParams: [],
-		queryParams: ["after", "limit", "order"],
+		queryParams: ["after", "limit", "order", "id"],
 		requiredQueryParams: [],
 		kind: "paginated",
 		retrySafety: "idempotent",

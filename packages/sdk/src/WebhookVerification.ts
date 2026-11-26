@@ -96,14 +96,18 @@ export const verifyWebhookSignature = async (
 	) {
 		return false
 	}
-	if (!/^\d+$/u.test(timestampRaw.trim())) {
+	const timestampText = timestampRaw.trim()
+	if (!/^\d+$/u.test(timestampText)) {
 		return false
 	}
-	const timestampSeconds = Number(timestampRaw.trim())
+	const timestampSeconds = Number(timestampText)
 	const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1000)
 	const toleranceSeconds = options.toleranceSeconds ?? DEFAULT_WEBHOOK_TOLERANCE_SECONDS
 	if (
 		!Number.isFinite(timestampSeconds) ||
+		!Number.isFinite(nowSeconds) ||
+		!Number.isFinite(toleranceSeconds) ||
+		toleranceSeconds < 0 ||
 		Math.abs(nowSeconds - timestampSeconds) > toleranceSeconds
 	) {
 		return false
@@ -112,8 +116,11 @@ export const verifyWebhookSignature = async (
 	if (keyBytes === null) {
 		return false
 	}
-	const bodyText = typeof payload === "string" ? payload : new TextDecoder().decode(payload)
-	const signedBytes = utf8.encode(`${webhookId}.${timestampSeconds}.${bodyText}`)
+	const prefixBytes = utf8.encode(`${webhookId}.${timestampText}.`)
+	const bodyBytes = typeof payload === "string" ? utf8.encode(payload) : payload
+	const signedBytes = new Uint8Array(new ArrayBuffer(prefixBytes.byteLength + bodyBytes.byteLength))
+	signedBytes.set(prefixBytes, 0)
+	signedBytes.set(bodyBytes, prefixBytes.byteLength)
 	const cryptoKey = await crypto.subtle.importKey(
 		"raw",
 		keyBytes,
@@ -150,6 +157,9 @@ export const unwrapWebhookEvent = async (
 	if (!valid) {
 		throw new Error("Invalid webhook signature or expired timestamp.")
 	}
-	const text = typeof payload === "string" ? payload : new TextDecoder().decode(payload)
+	const text =
+		typeof payload === "string"
+			? payload
+			: new TextDecoder("utf-8", { fatal: true }).decode(payload)
 	return decodeEnvelope(JSON.parse(text))
 }

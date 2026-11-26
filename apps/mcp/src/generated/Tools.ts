@@ -3325,6 +3325,13 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							enum: ["asc", "desc"],
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
+						id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description:
+								"Filter to a single webhook endpoint ID to check listing readiness in O(1).",
+						},
 					},
 					required: [],
 					additionalProperties: false,
@@ -3438,7 +3445,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "webhooks_rotateWebhookSecret",
 		title: "Rotate a webhook signing secret",
 		description:
-			"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours.",
+			"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict.",
 		method: "POST",
 		path: "/v1/webhooks/{webhook_id}/rotate-secret",
 		readOnly: false,

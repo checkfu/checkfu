@@ -779,6 +779,43 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				expect(afterProxyOutage?.status).toBe("pending")
 				expect(afterProxyOutage?.attempt_count).toBe(1)
 
+				// 2b) Missing local egress configuration fails the delivery without degrading endpoint health.
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_unconfigured_1"),
+						event_id: WebhookEventId.make("evt_unconfigured_1"),
+						event_type: "agent.created",
+						dedupe_key: "evt_unconfigured_1",
+						payload_json: JSON.stringify({ custom: "payload" }),
+					},
+					T0,
+				)
+				yield* engine.drainDue({
+					readEndpoint: Effect.succeed(endpoint),
+					recordOutcome: (input) =>
+						Effect.sync(() => {
+							healthOutcomes.push(input.outcome)
+							return endpoint
+						}),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: () =>
+							Effect.succeed({
+								kind: "egress_unconfigured",
+								message: "Direct webhook delivery is disabled in local workerd.",
+							}),
+					},
+				})
+				expect(healthOutcomes).toEqual([])
+				expect(engine.pendingHealthOutcomesCount()).toBe(0)
+				const afterUnconfigured = engine.getDelivery(
+					WebhookDeliveryId.make("wdel_unconfigured_1"),
+					T0,
+				)
+				expect(afterUnconfigured?.status).toBe("failed")
+				expect(afterUnconfigured?.last_outcome).toBe("network_error")
+
 				// 3) Next attempt succeeds; then manual redelivery creates a new delivery_id
 				//    while keeping the exact same Standard Webhooks webhook-id & signature input.
 				yield* TestClock.setTime(afterProxyOutage!.next_attempt_at!)

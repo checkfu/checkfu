@@ -33,6 +33,25 @@ const overWire = <A, R>(effect: Effect.Effect<A, WebhookDeliveryStoreError, R>) 
 
 export const WEBHOOK_FANOUT_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000
 export const WEBHOOK_FANOUT_MAX_RETRY_AGE_MS = 14 * 24 * 60 * 60 * 1000
+export const WEBHOOK_FANOUT_SHARD_COUNT = 16
+
+/**
+ * Deterministically routes an event publication onto a bounded pool of
+ * `WebhookFanout` Durable Object shards (`shard_0`..`shard_15`). Bounding the
+ * shard count prevents unbounded per-event SQLite database accumulation while
+ * preserving per-event deduplication and parallel fan-out throughput.
+ */
+export const webhookFanoutShardId = (eventId: string): string => {
+	let hash = 2_166_136_261
+	for (let index = 0; index < eventId.length; index++) {
+		hash ^= eventId.charCodeAt(index)
+		hash = Math.imul(hash, 16_777_619)
+	}
+	hash ^= hash >>> 16
+	hash = Math.imul(hash, 2_246_822_507)
+	hash ^= hash >>> 13
+	return `shard_${(hash >>> 0) % WEBHOOK_FANOUT_SHARD_COUNT}`
+}
 
 interface FanoutPagePayload {
 	readonly event: WebhookEventPublication
@@ -64,26 +83,30 @@ const FANOUT_PAGE_CALLBACK = "fanoutPage"
 const RETRY_SUBSCRIBER_CALLBACK = "retrySubscriber"
 const CLEANUP_CALLBACK = "cleanup"
 
-const SCAN_JOB_ID = "scan"
-const CLEANUP_JOB_ID = "cleanup"
+const scanJobId = (eventId: string) => `scan:${eventId}`
+const retryJobId = (eventId: string, webhookId: WebhookId) => `retry:${eventId}:${webhookId}`
+const cleanupJobId = (eventId: string) => `cleanup:${eventId}`
 
-const SCAN_STARTED_KEY = "scan_started"
-const SCAN_DONE_KEY = "scan_done"
-const PENDING_RETRIES_KEY = "pending_retries"
+const scanStartedKey = (eventId: string) => `ev:${eventId}:started`
+const scanDoneKey = (eventId: string) => `ev:${eventId}:done`
+const pendingCountKey = (eventId: string) => `ev:${eventId}:pending_count`
+const retryMarkerKey = (eventId: string, webhookId: WebhookId) => `ev:${eventId}:retry:${webhookId}`
 
 interface FanoutCallbackSlot<P> {
 	current: Alchemy.Callback<P> | undefined
 }
 
 /**
- * Durable continuation object for large or partially saturated webhook fan-outs.
- * Keyed by `event.event_id`:
+ * Sharded durable continuation object for large or partially saturated webhook
+ * fan-outs. Each event is deterministically mapped to one of 16 reusable shards:
  * - `"fanoutPage"` drains one creation-ordered page at a time, bounded to
  *   endpoints registered at or before `event.occurred_at`.
- * - `"retrySubscriber"` retries each individual failed/saturated subscriber
- *   independently with exponential backoff so one receiver never blocks others.
- * - `"cleanup"` reclaims per-event deduplication state after `WEBHOOK_FANOUT_DEDUPE_TTL_MS`
- *   once both the page scan and all subscriber retries have settled.
+ * - `"retrySubscriber"` stores one small marker key per failed subscriber plus
+ *   a transactional pending count, retrying each subscriber independently with
+ *   exponential backoff so neither slow receivers nor large outages block later pages.
+ * - `"cleanup"` deletes the per-event scalar keys after `WEBHOOK_FANOUT_DEDUPE_TTL_MS`
+ *   once the scan and all subscriber retries have settled, and Alchemy deletes each
+ *   completed callback row upon acknowledgment.
  */
 export const WebhookFanoutLive = WebhookFanout.make(
 	Effect.map(
@@ -105,15 +128,15 @@ export const WebhookFanoutLive = WebhookFanout.make(
 				const scheduleCleanupIfSettled = (
 					eventId: string,
 					scanDone: boolean,
-					pendingRetries: ReadonlyArray<WebhookId>,
+					pendingCount: number,
 				) =>
 					Effect.gen(function* () {
 						const cleanup = cleanupRef.current
-						if (cleanup === undefined || !scanDone || pendingRetries.length > 0) {
+						if (cleanup === undefined || !scanDone || pendingCount > 0) {
 							return
 						}
 						const now = yield* Clock.currentTimeMillis
-						yield* cleanup.schedule(CLEANUP_JOB_ID, {
+						yield* cleanup.schedule(cleanupJobId(eventId), {
 							at: now + WEBHOOK_FANOUT_DEDUPE_TTL_MS,
 							payload: { eventId },
 						})
@@ -122,6 +145,7 @@ export const WebhookFanoutLive = WebhookFanout.make(
 				const onPage = yield* Alchemy.makeCallback(
 					FANOUT_PAGE_CALLBACK,
 					Effect.fn(function* (payload: FanoutPagePayload) {
+						const eventId = payload.event.event_id
 						const page = yield* listing.page(WEBHOOK_FANOUT_LISTING_FILTER, {
 							take: WEBHOOK_FANOUT_PAGE_SIZE,
 							after: payload.cursor,
@@ -136,26 +160,31 @@ export const WebhookFanoutLive = WebhookFanout.make(
 						yield* state.storage
 							.transaction(
 								Effect.gen(function* () {
-									const pending = new Set<WebhookId>(
-										(yield* state.storage.get<ReadonlyArray<WebhookId>>(PENDING_RETRIES_KEY)) ?? [],
-									)
+									const pKey = pendingCountKey(eventId)
+									let pendingCount = (yield* state.storage.get<number>(pKey)) ?? 0
+									let addedRetries = 0
 									const retryCb = retryRef.current
 									for (const webhookId of result.failedWebhookIds) {
-										if (!pending.has(webhookId)) {
-											pending.add(webhookId)
+										const rKey = retryMarkerKey(eventId, webhookId)
+										const alreadyPending = (yield* state.storage.get<boolean>(rKey)) === true
+										if (!alreadyPending) {
+											yield* state.storage.put(rKey, true)
+											addedRetries += 1
 											if (retryCb !== undefined) {
-												yield* retryCb.schedule(webhookId, {
+												yield* retryCb.schedule(retryJobId(eventId, webhookId), {
 													after: "2 seconds",
 													payload: { event: payload.event, webhookId },
 												})
 											}
 										}
 									}
-									const pendingList = [...pending]
-									yield* state.storage.put(PENDING_RETRIES_KEY, pendingList)
+									if (addedRetries > 0) {
+										pendingCount += addedRetries
+										yield* state.storage.put(pKey, pendingCount)
+									}
 
 									if (nextCursor !== null && pageRef.current !== undefined) {
-										yield* pageRef.current.schedule(SCAN_JOB_ID, {
+										yield* pageRef.current.schedule(scanJobId(eventId), {
 											after: "0 seconds",
 											payload: {
 												event: payload.event,
@@ -166,8 +195,8 @@ export const WebhookFanoutLive = WebhookFanout.make(
 										})
 										return
 									}
-									yield* state.storage.put(SCAN_DONE_KEY, true)
-									yield* scheduleCleanupIfSettled(payload.event.event_id, true, pendingList)
+									yield* state.storage.put(scanDoneKey(eventId), true)
+									yield* scheduleCleanupIfSettled(eventId, true, pendingCount)
 								}),
 							)
 							.pipe(Effect.orDie)
@@ -178,6 +207,7 @@ export const WebhookFanoutLive = WebhookFanout.make(
 				const onRetrySubscriber = yield* Alchemy.makeCallback(
 					RETRY_SUBSCRIBER_CALLBACK,
 					Effect.fn(function* (payload: RetrySubscriberPayload) {
+						const eventId = payload.event.event_id
 						const now = yield* Clock.currentTimeMillis
 						if (now - payload.event.occurred_at < WEBHOOK_FANOUT_MAX_RETRY_AGE_MS) {
 							const payloadJson = buildWebhookEventEnvelopeJson(payload.event)
@@ -191,7 +221,7 @@ export const WebhookFanoutLive = WebhookFanout.make(
 								"Dropping webhook fan-out subscriber retry past retention window",
 								{
 									webhook_id: payload.webhookId,
-									event_id: payload.event.event_id,
+									event_id: eventId,
 								},
 							)
 						}
@@ -199,12 +229,22 @@ export const WebhookFanoutLive = WebhookFanout.make(
 						yield* state.storage
 							.transaction(
 								Effect.gen(function* () {
-									const pending = (
-										(yield* state.storage.get<ReadonlyArray<WebhookId>>(PENDING_RETRIES_KEY)) ?? []
-									).filter((id) => id !== payload.webhookId)
-									yield* state.storage.put(PENDING_RETRIES_KEY, pending)
-									const scanDone = (yield* state.storage.get<boolean>(SCAN_DONE_KEY)) === true
-									yield* scheduleCleanupIfSettled(payload.event.event_id, scanDone, pending)
+									const rKey = retryMarkerKey(eventId, payload.webhookId)
+									const pKey = pendingCountKey(eventId)
+									const existed = (yield* state.storage.get<boolean>(rKey)) === true
+									let pendingCount = (yield* state.storage.get<number>(pKey)) ?? 0
+									if (existed) {
+										yield* state.storage.delete(rKey)
+										pendingCount = Math.max(0, pendingCount - 1)
+										if (pendingCount === 0) {
+											yield* state.storage.delete(pKey)
+										} else {
+											yield* state.storage.put(pKey, pendingCount)
+										}
+									}
+									const scanDone =
+										(yield* state.storage.get<boolean>(scanDoneKey(eventId))) === true
+									yield* scheduleCleanupIfSettled(eventId, scanDone, pendingCount)
 								}),
 							)
 							.pipe(Effect.orDie)
@@ -214,21 +254,20 @@ export const WebhookFanoutLive = WebhookFanout.make(
 
 				const onCleanup = yield* Alchemy.makeCallback(
 					CLEANUP_CALLBACK,
-					Effect.fn(function* (_payload: CleanupPayload) {
+					Effect.fn(function* (payload: CleanupPayload) {
+						const { eventId } = payload
 						yield* state.storage
 							.transaction(
 								Effect.gen(function* () {
-									const scanDone = (yield* state.storage.get<boolean>(SCAN_DONE_KEY)) === true
-									const pending =
-										(yield* state.storage.get<ReadonlyArray<WebhookId>>(PENDING_RETRIES_KEY)) ?? []
-									if (!scanDone || pending.length > 0) {
+									const sKey = scanStartedKey(eventId)
+									const dKey = scanDoneKey(eventId)
+									const pKey = pendingCountKey(eventId)
+									const scanDone = (yield* state.storage.get<boolean>(dKey)) === true
+									const pendingCount = (yield* state.storage.get<number>(pKey)) ?? 0
+									if (!scanDone || pendingCount > 0) {
 										return
 									}
-									yield* state.storage.delete([
-										SCAN_STARTED_KEY,
-										SCAN_DONE_KEY,
-										PENDING_RETRIES_KEY,
-									])
+									yield* state.storage.delete([sKey, dKey, pKey])
 								}),
 							)
 							.pipe(Effect.orDie)
@@ -242,51 +281,55 @@ export const WebhookFanoutLive = WebhookFanout.make(
 							state.storage
 								.transaction(
 									Effect.gen(function* () {
-										const scanStarted =
-											(yield* state.storage.get<boolean>(SCAN_STARTED_KEY)) === true
-										let scanDone = (yield* state.storage.get<boolean>(SCAN_DONE_KEY)) === true
-										const pending = new Set<WebhookId>(
-											(yield* state.storage.get<ReadonlyArray<WebhookId>>(PENDING_RETRIES_KEY)) ??
-												[],
-										)
+										const eventId = event.event_id
+										const sKey = scanStartedKey(eventId)
+										const dKey = scanDoneKey(eventId)
+										const pKey = pendingCountKey(eventId)
+										const scanStarted = (yield* state.storage.get<boolean>(sKey)) === true
+										let scanDone = (yield* state.storage.get<boolean>(dKey)) === true
+										let pendingCount = (yield* state.storage.get<number>(pKey)) ?? 0
+										let addedRetries = 0
 										let scheduledNewWork = false
 
 										for (const webhookId of work.retryWebhookIds) {
-											if (!pending.has(webhookId)) {
-												pending.add(webhookId)
+											const rKey = retryMarkerKey(eventId, webhookId)
+											const alreadyPending = (yield* state.storage.get<boolean>(rKey)) === true
+											if (!alreadyPending) {
+												yield* state.storage.put(rKey, true)
+												addedRetries += 1
 												scheduledNewWork = true
-												yield* onRetrySubscriber.schedule(webhookId, {
+												yield* onRetrySubscriber.schedule(retryJobId(eventId, webhookId), {
 													after: "2 seconds",
 													payload: { event, webhookId },
 												})
 											}
 										}
-										const pendingList = [...pending]
-										if (pendingList.length > 0) {
-											yield* state.storage.put(PENDING_RETRIES_KEY, pendingList)
+										if (addedRetries > 0) {
+											pendingCount += addedRetries
+											yield* state.storage.put(pKey, pendingCount)
 										}
 
 										if (!scanStarted) {
-											yield* state.storage.put(SCAN_STARTED_KEY, true)
+											yield* state.storage.put(sKey, true)
 											if (work.afterCursor !== null) {
 												scanDone = false
 												scheduledNewWork = true
-												yield* state.storage.put(SCAN_DONE_KEY, false)
-												yield* onPage.schedule(SCAN_JOB_ID, {
+												yield* state.storage.put(dKey, false)
+												yield* onPage.schedule(scanJobId(eventId), {
 													after: "0 seconds",
 													payload: { event, cursor: work.afterCursor, step: 1 },
 													progress: 1,
 												})
 											} else {
 												scanDone = true
-												yield* state.storage.put(SCAN_DONE_KEY, true)
+												yield* state.storage.put(dKey, true)
 											}
 										}
 
 										if (scheduledNewWork) {
-											yield* onCleanup.cancel(CLEANUP_JOB_ID)
+											yield* onCleanup.cancel(cleanupJobId(eventId))
 										} else {
-											yield* scheduleCleanupIfSettled(event.event_id, scanDone, pendingList)
+											yield* scheduleCleanupIfSettled(eventId, scanDone, pendingCount)
 										}
 									}),
 								)
@@ -311,7 +354,9 @@ export const WebhookFanoutContinuationDo = Layer.effect(
 		const runtime = yield* Cloudflare.Worker
 		return {
 			continueFanout: (event, work) =>
-				Effect.suspend(() => fanouts(event.event_id).enqueue(event, work)).pipe(
+				Effect.suspend(() =>
+					fanouts(webhookFanoutShardId(event.event_id)).enqueue(event, work),
+				).pipe(
 					Effect.catchCause((cause) =>
 						Cause.hasInterruptsOnly(cause)
 							? Effect.interrupt

@@ -55,6 +55,7 @@ export interface WebhookListingQueryService {
 		order: ListingOrder,
 		options?: Query.RunOptions,
 	) => Effect.Effect<Query.Page<ListingEntry>, WebhookListingTimeout>
+	readonly lookup: (id: string) => Effect.Effect<Query.Page<ListingEntry>, WebhookListingTimeout>
 	readonly waitFor: (receipt: Query.AtLeast) => Effect.Effect<void, WebhookListingTimeout>
 }
 
@@ -75,12 +76,12 @@ export const WebhookListingQueryLive = Layer.effect(
 		if (query === undefined) {
 			return yield* Effect.die(new Error("ListWebhooks is not hosted by the Webhooks model."))
 		}
-		const runPage = (
-			order: ListingOrder,
+		const runQuery = (
+			input: { readonly order: ListingOrder; readonly id?: string | null },
 			options: Query.RunOptions = {},
 		): Effect.Effect<Query.Page<ListingEntry>, WebhookListingTimeout> =>
 			Effect.gen(function* () {
-				const exit = yield* Effect.exit(Effect.orDie(query.run({ order }, options)))
+				const exit = yield* Effect.exit(Effect.orDie(query.run(input, options)))
 				if (Exit.isFailure(exit)) {
 					const error = Cause.squash(exit.cause)
 					if (isConsistencyTimeout(error) && options.atLeast !== undefined) {
@@ -94,8 +95,10 @@ export const WebhookListingQueryLive = Layer.effect(
 				return yield* decodePage(exit.value).pipe(Effect.orDie)
 			})
 		return {
-			page: runPage,
-			waitFor: (receipt) => Effect.asVoid(runPage("asc", { take: 1, atLeast: receipt })),
+			page: (order, options) => runQuery({ order }, options),
+			lookup: (id) => runQuery({ order: "asc", id }, { take: 1 }),
+			waitFor: (receipt) =>
+				Effect.asVoid(runQuery({ order: "asc" }, { take: 1, atLeast: receipt })),
 		}
 	}),
 )

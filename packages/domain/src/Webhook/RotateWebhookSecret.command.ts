@@ -2,6 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { WebhookDeletedError } from "./WebhookDeleted.rejection.ts"
 import { WebhookId } from "./Webhook.id.ts"
 import { WebhookNotFound } from "./WebhookNotFound.rejection.ts"
+import { WebhookSecretRotationInProgress } from "./WebhookSecretRotationInProgress.rejection.ts"
 import { PositiveInt, WebhookSecretSalt } from "./WebhookTypes.ts"
 
 export class WebhookSecretRotated extends Domain.Event("webhook.secret_rotated", {
@@ -16,8 +17,8 @@ export class RotateWebhookSecret extends Domain.Command("RotateWebhookSecret", {
 	input: {
 		webhook_id: WebhookId,
 		next_secret_salt: WebhookSecretSalt,
-		grace_until: PositiveInt,
+		rotated_at: PositiveInt,
 	},
 	events: [WebhookSecretRotated],
-	rejects: [WebhookNotFound, WebhookDeletedError],
+	rejects: [WebhookNotFound, WebhookDeletedError, WebhookSecretRotationInProgress],
 }) {}

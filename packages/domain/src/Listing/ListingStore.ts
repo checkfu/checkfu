@@ -115,10 +115,18 @@ export const makeListingStoreMemory = () => {
 				cursor: matching.length > take && last !== undefined ? listingCursor(last) : null,
 			}
 		})
+	const get = (kind: ListingKind, id: string): Effect.Effect<ListingEntry | null> =>
+		Effect.sync(() => {
+			const row = rows.get(`${kind}/${id}`)
+			return row !== undefined && row.status === LISTED
+				? { id: row.id, created_at: row.created_at }
+				: null
+		})
 	return {
 		record,
 		page,
-		layer: Layer.succeed(ListingStore, ListingStore.of({ record, page })),
+		get,
+		layer: Layer.succeed(ListingStore, ListingStore.of({ record, page, get })),
 	}
 }
 
@@ -133,6 +141,10 @@ export class ListingStore extends Context.Service<
 			filter: ListingFilter,
 			page: Query.PageRequest,
 		) => Effect.Effect<Query.Page<ListingEntry>, never, RuntimeContext>
+		readonly get: (
+			kind: ListingKind,
+			id: string,
+		) => Effect.Effect<ListingEntry | null, never, RuntimeContext>
 	}
 >()("Checkfu/ListingStore") {
 	static readonly memory = Layer.unwrap(Effect.sync(() => makeListingStoreMemory().layer))

@@ -3,11 +3,11 @@ import { unwrapWebhookEvent, verifyWebhookSignature } from "../src/WebhookVerifi
 
 const utf8 = new TextEncoder()
 
-const sign = async (
+const signBytes = async (
 	secret: string,
 	id: string,
 	timestamp: number,
-	body: string,
+	body: Uint8Array,
 ): Promise<string> => {
 	const raw = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret
 	const binary = atob(raw)
@@ -22,13 +22,20 @@ const sign = async (
 		false,
 		["sign"],
 	)
-	const mac = await crypto.subtle.sign("HMAC", key, utf8.encode(`${id}.${timestamp}.${body}`))
+	const prefix = utf8.encode(`${id}.${timestamp}.`)
+	const signed = new Uint8Array(new ArrayBuffer(prefix.byteLength + body.byteLength))
+	signed.set(prefix, 0)
+	signed.set(body, prefix.byteLength)
+	const mac = await crypto.subtle.sign("HMAC", key, signed)
 	let encoded = ""
 	for (const byte of new Uint8Array(mac)) {
 		encoded += String.fromCharCode(byte)
 	}
 	return `v1,${btoa(encoded)}`
 }
+
+const sign = (secret: string, id: string, timestamp: number, body: string): Promise<string> =>
+	signBytes(secret, id, timestamp, utf8.encode(body))
 
 const SECRET_A = `whsec_${btoa("checkfu-webhook-test-secret-alpha-01")}`
 const SECRET_B = `whsec_${btoa("checkfu-webhook-test-secret-beta-002")}`
@@ -134,5 +141,90 @@ describe("SDK WebhookVerification", () => {
 		await expect(
 			unwrapWebhookEvent(body, headers, { secret: SECRET_A, nowSeconds: now + 301 }),
 		).rejects.toThrow(/Invalid webhook signature/)
+
+		// Invalid replay-window options fail closed.
+		for (const badOptions of [
+			{ secret: SECRET_A, nowSeconds: Number.NaN },
+			{ secret: SECRET_A, nowSeconds: Number.POSITIVE_INFINITY },
+			{ secret: SECRET_A, nowSeconds: now, toleranceSeconds: Number.NaN },
+			{ secret: SECRET_A, nowSeconds: now, toleranceSeconds: Number.POSITIVE_INFINITY },
+			{ secret: SECRET_A, nowSeconds: now, toleranceSeconds: -1 },
+		]) {
+			expect(await verifyWebhookSignature(body, headers, badOptions)).toBe(false)
+		}
+	})
+
+	it("authenticates exact raw Uint8Array bytes without UTF-8 BOM stripping or replacement normalization", async () => {
+		const now = 1_770_000_000
+		const json = JSON.stringify({
+			type: "event",
+			id: "evt_raw_bytes_1",
+			created_at: "2026-02-02T00:00:00.000Z",
+			data: { type: "webhook.test", id: "whe_1" },
+		})
+		const jsonBytes = utf8.encode(json)
+		const withBom = new Uint8Array(3 + jsonBytes.byteLength)
+		withBom.set([0xef, 0xbb, 0xbf], 0)
+		withBom.set(jsonBytes, 3)
+
+		// Signature over stripped UTF-8 text must NOT verify against the BOM-prefixed bytes.
+		const sigWithoutBom = await signBytes(SECRET_A, "evt_raw_bytes_1", now, jsonBytes)
+		expect(
+			await verifyWebhookSignature(
+				withBom,
+				{
+					"webhook-id": "evt_raw_bytes_1",
+					"webhook-timestamp": String(now),
+					"webhook-signature": sigWithoutBom,
+				},
+				{ secret: SECRET_A, nowSeconds: now },
+			),
+		).toBe(false)
+
+		// Signature over exact BOM-prefixed bytes DOES verify.
+		const sigWithBom = await signBytes(SECRET_A, "evt_raw_bytes_1", now, withBom)
+		expect(
+			await verifyWebhookSignature(
+				withBom,
+				{
+					"webhook-id": "evt_raw_bytes_1",
+					"webhook-timestamp": String(now),
+					"webhook-signature": sigWithBom,
+				},
+				{ secret: SECRET_A, nowSeconds: now },
+			),
+		).toBe(true)
+
+		// Signature over invalid UTF-8 bytes authenticates the exact bytes (not U+FFFD replacement).
+		const invalidUtf8 = new Uint8Array([0x7b, 0xff, 0x7d])
+		const sigInvalidRaw = await signBytes(SECRET_A, "evt_raw_bytes_2", now, invalidUtf8)
+		const sigReplaced = await sign(
+			SECRET_A,
+			"evt_raw_bytes_2",
+			now,
+			new TextDecoder().decode(invalidUtf8),
+		)
+		expect(
+			await verifyWebhookSignature(
+				invalidUtf8,
+				{
+					"webhook-id": "evt_raw_bytes_2",
+					"webhook-timestamp": String(now),
+					"webhook-signature": sigInvalidRaw,
+				},
+				{ secret: SECRET_A, nowSeconds: now },
+			),
+		).toBe(true)
+		expect(
+			await verifyWebhookSignature(
+				invalidUtf8,
+				{
+					"webhook-id": "evt_raw_bytes_2",
+					"webhook-timestamp": String(now),
+					"webhook-signature": sigReplaced,
+				},
+				{ secret: SECRET_A, nowSeconds: now },
+			),
+		).toBe(false)
 	})
 })

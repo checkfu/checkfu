@@ -2047,7 +2047,8 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(testDelivery.status).toBe(201)
 		expect(testDelivery.body.event_type).toBe("webhook.test")
 
-		// In local Alchemy workerd without CHECKFU_WEBHOOK_EGRESS_URL, direct delivery fails closed as invalid_destination.
+		// In local Alchemy workerd without CHECKFU_WEBHOOK_EGRESS_URL, direct delivery fails
+		// closed as a sender configuration error without degrading endpoint health.
 		const localEgressDeadline = Date.now() + 15_000
 		let fetchedDelivery = await apiJson<DeliveryBody>(
 			`/v1/webhooks/${webhookId}/deliveries/${testDelivery.body.id}`,
@@ -2061,7 +2062,18 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(fetchedDelivery.status).toBe(200)
 		expect(fetchedDelivery.body.id).toBe(testDelivery.body.id)
 		expect(fetchedDelivery.body.status).toBe("failed")
-		expect(fetchedDelivery.body.last_outcome).toBe("invalid_destination")
+		expect(fetchedDelivery.body.last_outcome).toBe("network_error")
+
+		const afterLocalRefusal = await apiJson<
+			WebhookBody & {
+				readonly consecutive_failures: number
+				readonly last_failure_at: string | null
+			}
+		>(`/v1/webhooks/${webhookId}`)
+		expect(afterLocalRefusal.status).toBe(200)
+		expect(afterLocalRefusal.body.status).toBe("active")
+		expect(afterLocalRefusal.body.consecutive_failures).toBe(0)
+		expect(afterLocalRefusal.body.last_failure_at).toBeNull()
 
 		// Creating an agent triggers PublishWebhookEvents -> WebhookEventsLive -> WebhookDeliverer DO SQLite.
 		const triggeredAgent = await apiJson<{ readonly id: string }>("/v1/agents", {

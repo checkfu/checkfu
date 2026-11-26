@@ -229,4 +229,99 @@ describe("waitForPending", () => {
 		}
 		expect([typeof archived, typeof created]).toEqual(["function", "function"])
 	})
+
+	it("polls pending webhook registration by ID and refuses to pair signing_secret with a rotated revision", async () => {
+		const seenUrls: Array<string> = []
+		let attempt = 0
+		const webhookRow = (secretRevision: number) => ({
+			id: "whe_1",
+			type: "webhook",
+			status: "active",
+			url: "https://hooks.example.com/events",
+			description: "Primary",
+			event_types: ["*"],
+			definition_revision: 1,
+			secret_revision: secretRevision,
+			previous_secret_expires_at: null,
+			consecutive_failures: 0,
+			last_failure_at: null,
+			created_at: "2026-01-01T00:00:00.000Z",
+			updated_at: "2026-01-01T00:00:00.000Z",
+		})
+
+		const listingFetch: typeof globalThis.fetch = async (input, init) => {
+			const req = new Request(input, init)
+			const parsed = new URL(req.url)
+			seenUrls.push(`${parsed.pathname}${parsed.search}`)
+			attempt += 1
+			return new Response(
+				JSON.stringify({
+					data: attempt === 1 ? [] : [webhookRow(1)],
+					has_more: false,
+					next_cursor: null,
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			)
+		}
+
+		const resolved = await Effect.runPromise(
+			Effect.flatMap(CheckfuClient, (client) =>
+				client.waitForPending(webhookReceipt, {
+					until: () => true,
+					timeout: "2 seconds",
+					initialDelay: "1 millis",
+					requestOptions: { maxRetries: 0 },
+				}),
+			).pipe(
+				Effect.provide(
+					CheckfuClient.layerFetch({
+						apiKey: "ck_test_key",
+						baseUrl: "http://localhost:1337",
+						maxRetries: 0,
+						fetch: listingFetch,
+					}),
+				),
+			),
+		)
+		expect(seenUrls).toEqual(["/v1/webhooks?limit=1&id=whe_1", "/v1/webhooks?limit=1&id=whe_1"])
+		expect(resolved.id).toBe("whe_1")
+		expect(resolved.secret_revision).toBe(1)
+		expect(resolved.signing_secret).toBe("whsec_test_secret")
+
+		// If rotated to revision 2 before waitForPending resolves, fail immediately with ConflictError.
+		let rotatedCalls = 0
+		const rotatedFetch: typeof globalThis.fetch = async () => {
+			rotatedCalls += 1
+			return new Response(
+				JSON.stringify({
+					data: [webhookRow(2)],
+					has_more: false,
+					next_cursor: null,
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			)
+		}
+		const conflict = await Effect.runPromise(
+			Effect.flatMap(CheckfuClient, (client) =>
+				client.waitForPending(webhookReceipt, {
+					until: () => true,
+					timeout: "2 seconds",
+					initialDelay: "1 millis",
+					requestOptions: { maxRetries: 0 },
+				}),
+			).pipe(
+				Effect.flip,
+				Effect.provide(
+					CheckfuClient.layerFetch({
+						apiKey: "ck_test_key",
+						baseUrl: "http://localhost:1337",
+						maxRetries: 0,
+						fetch: rotatedFetch,
+					}),
+				),
+			),
+		)
+		expect(conflict._tag).toBe("ConflictError")
+		expect(rotatedCalls).toBe(1)
+	})
 })

@@ -3184,6 +3184,7 @@ export class EffectWebhooksResource {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["id"] === undefined ? {} : { id: params["id"] }),
 					},
 					responseMode: "decoded-and-response",
 				}),
@@ -3328,7 +3329,7 @@ export class EffectWebhooksResource {
 		)
 	}
 
-	/** Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours. */
+	/** Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict. */
 	rotateSecret(
 		webhookId: PathParam<"webhooks", "rotateSecret", "webhook_id">,
 		options: WithResponseRequestOptions,
@@ -4526,7 +4527,7 @@ export class WebhooksResource {
 		)
 	}
 
-	/** Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours. */
+	/** Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict. */
 	rotateSecret(
 		webhookId: PathParam<"webhooks", "rotateSecret", "webhook_id">,
 		options?: PromiseRequestOptions,
