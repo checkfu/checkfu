@@ -96,7 +96,9 @@ describe("waiting for an update to show", () => {
 		expect(
 			showsChanges({ ...pinned, agent: { id: "agent_2", version: null } }, { agent: "agent_2" }),
 		).toBe(false)
-		expect(showsChanges(pinned, { agent: { id: "agent_2", version: 2 } })).toBe(false)
+		expect(showsChanges(pinned, { agent: { type: "agent", id: "agent_2", version: 2 } })).toBe(
+			false,
+		)
 	})
 
 	it("accepts a read only once every submitted field is visible", () => {
