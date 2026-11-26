@@ -14,6 +14,12 @@ import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
+import {
+	codemodeSandboxes,
+	loadToolSurface,
+	scriptOutputEnv,
+	withScriptBounds,
+} from "./PiCodemode.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
@@ -131,12 +137,13 @@ const piSessionInit = Effect.gen(function* () {
 		? injectedRuntime.value
 		: yield* loadEnvPiProviderRuntime
 	const workspaces = yield* SessionWorkspace
+	const sandboxes = yield* codemodeSandboxes
 	const where = yield* Effect.orDie(placement)
-	return { state, providerRuntime, workspaces, where }
+	return { state, providerRuntime, workspaces, sandboxes, where }
 })
 
 export const PiSessionLive = PiSession.make(
-	Effect.map(piSessionInit, ({ state, providerRuntime, workspaces, where }) =>
+	Effect.map(piSessionInit, ({ state, providerRuntime, workspaces, sandboxes, where }) =>
 		Effect.gen(function* () {
 			const rawCtx = state.raw
 			const sessionId = rawCtx.id.name
@@ -147,28 +154,53 @@ export const PiSessionLive = PiSession.make(
 			const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
 
 			// Load workerd-only modules after Alchemy has evaluated the stack.
-			const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = yield* Effect.promise(
-				() => Promise.all([import("agents/lifecycle"), import("agents/harness/pi")]),
+			const [
+				{ Lifecycle: LifecycleClass },
+				{ PiHarness: PiHarnessClass },
+				{ RemoteCodemodeSandbox },
+				withToolSurface,
+			] = yield* Effect.promise(() =>
+				Promise.all([
+					import("agents/lifecycle"),
+					import("agents/harness/pi"),
+					import("@earendil-works/pi-codemode/portable"),
+					loadToolSurface(),
+				]),
 			)
 
 			const workspaceStub = placedStub(workspaces, where)
 			const workspace = () => workspaceStub(sessionId)
 			const workspaceTools = yield* Effect.promise(() => workspaceToolDeclarations())
 			const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
+			const writeScriptOutput = (path: string, content: string | Uint8Array) =>
+				runPromise(workspace().writeScriptOutput(path, content, { turn: admittedTurn() }))
+			const outputEnv = scriptOutputEnv(writeScriptOutput)
+			const sandboxStub = placedStub(sandboxes, where)
+			const sandbox = withScriptBounds(
+				new RemoteCodemodeSandbox({
+					remote: () => ({
+						execute: (request, exchange) =>
+							runPromise(sandboxStub(sessionId).execute(request, exchange)),
+					}),
+				}),
+			)
 
 			// PiHarness calls this factory again when it reopens after a storage error.
 			const harness = new PiHarnessClass({
 				harness: ({ storage, context, onWake }) => {
 					const models = sessionProviders.createModels()
 					const registry = createCheckfuRegistry()
-					registry.install(
+					const surface = withToolSurface(sandbox, [
 						workspaceExtension(workspaceTools, (call, signal) =>
 							runPromise(
 								workspace().runTool(call, { turn: admittedTurn() }),
 								signal === undefined ? undefined : { signal },
 							),
 						),
-					)
+					])
+					for (const extension of surface) {
+						registry.install(extension)
+					}
 					return Harness.open(
 						storage,
 						{
@@ -176,6 +208,7 @@ export const PiSessionLive = PiSession.make(
 							registry,
 							onWake,
 							settings: PI_HARNESS_SETTINGS,
+							env: () => outputEnv,
 						},
 						context,
 					)

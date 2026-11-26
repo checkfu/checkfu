@@ -264,7 +264,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				depth: 3,
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
-				walks: { count: 120, length: 8 },
+				walks: { count: 400, length: 12 },
 
 				allow: { skipped: ["EnsureTurnStarted"] },
 				opaque: [sessionIdOfNextRun, isUsableSchedule, upcomingOccurrences],
@@ -310,6 +310,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		).pipe(
 			Layer.updateService(Domain.Platform, (base) =>
 				Domain.Platform.of({
+					keys: base.keys,
 					model: (hosted) =>
 						Effect.map(base.model(hosted), (host) => ({
 							...host,

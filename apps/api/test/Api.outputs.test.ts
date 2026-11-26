@@ -5,6 +5,7 @@ import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { describe, expect, it } from "@effect/vitest"
 import type * as Duration from "effect/Duration"
+import type { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
@@ -119,7 +120,7 @@ const withSessions = async (
 				path: string,
 			) => Effect.Effect<string>
 		},
-	) => Effect.Effect<void>,
+	) => Effect.Effect<void, never, RuntimeContext>,
 	publishTimeout: Duration.Input = "30 seconds",
 ) => {
 	let edit: Edit = () => undefined

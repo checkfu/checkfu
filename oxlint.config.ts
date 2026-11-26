@@ -205,6 +205,7 @@ export default defineConfig({
 		{
 			files: [
 				"apps/api/src/D1Jurisdiction.ts",
+				"apps/api/src/WorkerHost.ts",
 				"apps/app/src/json-boundary.ts",
 				"apps/mcp/src/JsonSchemaCodec.ts",
 				"packages/sdk/src/Boundary.ts",
@@ -226,7 +227,7 @@ export default defineConfig({
 			},
 		},
 		{
-			files: ["packages/sdk/src/Api.ts"],
+			files: ["packages/sdk/src/Api.ts", "packages/domain/src/**/*.external.ts"],
 			rules: {
 				"effecttsgo/leaking-requirements": "off",
 			},
