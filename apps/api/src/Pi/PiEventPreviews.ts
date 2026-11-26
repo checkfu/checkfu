@@ -1,4 +1,5 @@
 import { modelEventId } from "@checkfu/domain/Session/Session.id"
+import { truncateText } from "@checkfu/domain/Session/TextBounds"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import type { SessionEventPreview, SessionPreviewType } from "@checkfu/sdk/Api"
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai"
@@ -33,7 +34,7 @@ const observe = (
 					publish({ event: { type: "event_start", event: { type, id } }, offset: 0 })
 				}
 				if (event.type === "text_delta" && textSize < MAX_MESSAGE_TEXT_LENGTH) {
-					const text = event.delta.slice(0, MAX_MESSAGE_TEXT_LENGTH - textSize)
+					const text = truncateText(event.delta, MAX_MESSAGE_TEXT_LENGTH - textSize)
 					if (text.length > 0) {
 						textSize += text.length
 						offset += 1
@@ -45,6 +46,9 @@ const observe = (
 							},
 							offset,
 						})
+					}
+					if (text.length < event.delta.length) {
+						textSize = MAX_MESSAGE_TEXT_LENGTH
 					}
 				}
 			}
