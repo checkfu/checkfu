@@ -197,10 +197,21 @@ const urlOf = (binding: Binding, input: RawInput): string => {
 	return search === "" ? path : `${path}?${search}`
 }
 
+const URL_OPTIONS: ReadonlyArray<string> = ["path", "query"]
+const REQUEST_OPTIONS: ReadonlyArray<string> = [...URL_OPTIONS, "body", "idempotencyKey", "signal"]
+
+const checkedOptions = (operationId: string, input: RawInput, allowed: ReadonlyArray<string>) => {
+	const unknown = Object.keys(input).filter((name) => !allowed.includes(name))
+	if (unknown.length > 0) {
+		throw new Error(`${operationId} takes no option ${unknown.join(", ")}.`)
+	}
+	return input
+}
+
 export const operationUrl = <Op extends OperationId>(
 	operationId: Op,
 	...[input]: UrlInputArgs<Op>
-): string => urlOf(bindingOf(operationId), input ?? {})
+): string => urlOf(bindingOf(operationId), checkedOptions(operationId, input ?? {}, URL_OPTIONS))
 
 export const createFetchClient = (options: FetchClientOptions = {}): FetchClient => {
 	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
@@ -217,7 +228,7 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 				`${operationId} streams events; open operationUrl("${operationId}") with an EventSource.`,
 			)
 		}
-		const fields: RawInput = input ?? {}
+		const fields = checkedOptions(operationId, input ?? {}, REQUEST_OPTIONS)
 		const headers = new Headers(defaults)
 		if (fields.idempotencyKey !== undefined) {
 			if (!binding.supportsIdempotencyKey) {
@@ -243,6 +254,7 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 		}
 		const response = await send(urlOf(binding, fields), {
 			method: binding.httpMethod,
+			mode: "same-origin",
 			headers,
 			...(fields.signal === undefined ? {} : { signal: fields.signal }),
 			...(fields.body === undefined ? {} : { body: JSON.stringify(fields.body) }),
@@ -257,7 +269,11 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 				stringOr(envelope.error?.type) ?? null,
 				stringOr(envelope.error?.message) ?? `Request failed with status ${response.status}.`,
 				{
-					requestId: stringOr(envelope.request_id),
+					requestId:
+						stringOr(envelope.request_id) ??
+						response.headers.get("request-id") ??
+						response.headers.get("x-request-id") ??
+						undefined,
 					accepted: listOr(envelope.accepted),
 					failedIndex: indexOr(envelope.failed_index),
 					unconfirmedIndex: indexOr(envelope.unconfirmed_index),

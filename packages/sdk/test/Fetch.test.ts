@@ -16,6 +16,7 @@ import { isClientEventId } from "../src/IdempotencyKey.ts"
 interface Sent {
 	readonly url: string
 	readonly method: string | undefined
+	readonly mode: RequestMode | undefined
 	readonly headers: Headers
 	readonly body: string | null
 }
@@ -26,6 +27,7 @@ const recording = (status: number, body: string) => {
 		sent.push({
 			url: String(url),
 			method: init?.method,
+			mode: init?.mode,
 			headers: new Headers(init?.headers),
 			body: typeof init?.body === "string" ? init.body : null,
 		})
@@ -44,6 +46,11 @@ type Requirement<T, K extends PropertyKey> = K extends keyof T
 
 interface NonScalarQueryInput {
 	readonly query: Readonly<Record<string, { readonly by: string }>>
+}
+
+interface SignalUrlInput {
+	readonly path: { readonly agent_id: string }
+	readonly signal: AbortSignal
 }
 
 interface LoosePathInput {
@@ -412,6 +419,42 @@ describe("the fetch client", () => {
 			request("artifacts.delete", { path: { artifact_id: { id: "art_1" } } }),
 		).rejects.toThrow("Invalid artifact_id: must be a string or a number.")
 		expect(sent).toEqual([])
+	})
+
+	it("asks fetch for same-origin delivery, so a base URL or redirect elsewhere fails instead", async () => {
+		const { sent, fetch } = recording(201, JSON.stringify({ id: "agent_1", type: "agent" }))
+		await createFetchClient({ fetch })("agents.create", {
+			body: { name: "Helper", model: "claude-opus-5-5" },
+			idempotencyKey: "create-helper",
+		})
+		expect(sent.map((call) => call.mode)).toEqual(["same-origin"])
+	})
+
+	it("refuses an option it does not know, so a misspelled idempotency key is never dropped silently", async () => {
+		const { sent, fetch } = recording(201, JSON.stringify({ id: "agent_1", type: "agent" }))
+		const misspelled = {
+			body: { name: "Helper", model: "claude-opus-5-5" },
+			idempotency_key: "create-helper",
+		}
+		await expect(createFetchClient({ fetch })("agents.create", misspelled)).rejects.toThrow(
+			"agents.create takes no option idempotency_key.",
+		)
+		const withSignal = { path: { agent_id: "a" }, signal: new AbortController().signal }
+		expect(() =>
+			(operationUrl as (operationId: string, input: SignalUrlInput) => string)(
+				"agents.retrieve",
+				withSignal,
+			),
+		).toThrow("agents.retrieve takes no option signal.")
+		expect(sent).toEqual([])
+	})
+
+	it("takes the request id from the response headers when the error body cannot be read", async () => {
+		const fetch: typeof globalThis.fetch = async () =>
+			new Response("<html>Bad gateway</html>", { status: 502, headers: { "request-id": "req_9" } })
+		await expect(
+			createFetchClient({ fetch })("agents.retrieve", { path: { agent_id: "agent_1" } }),
+		).rejects.toMatchObject({ status: 502, requestId: "req_9" })
 	})
 
 	it("keeps the status when an error reply's body cannot be read", async () => {
