@@ -1,6 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
+import { RESERVED_TOOL_NAMES } from "@checkfu/sdk/Api"
+import { allowedHostsOf } from "../src/Pi/PiDurableHarness.ts"
+import { createMachineEgress } from "../src/Workspace/MachineEgress.ts"
 import { makeTurnFence } from "../src/Workspace/WorkspaceFence.ts"
-import type { TurnToken } from "../src/Workspace/WorkspaceFence.ts"
+import type { FencedTurn, TurnToken } from "../src/Workspace/WorkspaceFence.ts"
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
 import {
 	MAX_INLINE_IMAGE_BYTES,
@@ -11,14 +14,19 @@ import {
 import type { WorkspaceTool } from "../src/Workspace/WorkspaceTools.ts"
 
 const store = () => {
-	let newest: TurnToken | undefined
+	let newest: FencedTurn | undefined
 	return {
 		get: () => newest,
-		put: (token: TurnToken) => {
-			newest = token
+		put: (fenced: FencedTurn) => {
+			newest = fenced
 		},
 	}
 }
+
+const untilAborted = (signal: AbortSignal): Promise<string> =>
+	new Promise((resolve) => {
+		signal.addEventListener("abort", () => resolve("stopped"), { once: true })
+	})
 
 const turn = (number: number): TurnToken => ({ turn: number })
 
@@ -75,6 +83,49 @@ describe("session workspace", () => {
 		expect(await third).toBe(true)
 	})
 
+	it("stops the calls of the turn a newer one replaces before it waits for them, and no others", async () => {
+		const fence = makeTurnFence(store())
+		await fence.enter(turn(1))
+		const order: Array<string> = []
+		const clone = fence.run(turn(1), async (signal) => {
+			order.push(await untilAborted(signal))
+		})
+		const again = fence.enter(turn(1))
+		expect(await fence.enter(turn(0))).toBe(false)
+		await Promise.resolve()
+		expect(order).toEqual([])
+		expect(await fence.enter(turn(2))).toBe(true)
+		await clone
+		expect(order).toEqual(["stopped"])
+		expect(await again).toBe(false)
+		expect(await fence.run(turn(2), async (signal) => signal.aborted)).toBe(false)
+	})
+
+	it("stops an interrupted turn's calls, and refuses its later calls even after a restart", async () => {
+		const kept = store()
+		const fence = makeTurnFence(kept)
+		await fence.enter(turn(1))
+		const running = fence.run(turn(1), untilAborted)
+		fence.interrupt(turn(0))
+		fence.interrupt(turn(1))
+		expect(await running).toBe("stopped")
+		expect(await fence.run(turn(1), () => Promise.resolve("written"))).toBeUndefined()
+		const restarted = makeTurnFence(kept)
+		expect(await restarted.run(turn(1), () => Promise.resolve("written"))).toBeUndefined()
+		expect(await restarted.enter(turn(1))).toBe(false)
+		expect(await restarted.enter(turn(2))).toBe(true)
+		expect(await restarted.run(turn(2), () => Promise.resolve("written"))).toBe("written")
+	})
+
+	it("refuses a turn interrupted before it entered", async () => {
+		const fence = makeTurnFence(store())
+		await fence.enter(turn(1))
+		fence.interrupt(turn(2))
+		expect(await fence.enter(turn(2))).toBe(false)
+		expect(await fence.enter(turn(1))).toBe(false)
+		expect(await fence.enter(turn(3))).toBe(true)
+	})
+
 	it("drains the calls already running, and not one that starts later", async () => {
 		const fence = makeTurnFence(store())
 		await fence.enter(turn(1))
@@ -98,7 +149,7 @@ describe("session workspace", () => {
 			description: name,
 			parameters: { type: "object", properties: {} },
 		})
-		const names = ["read", "ls", "find", "grep", "write", "edit", "delete", "git"]
+		const names = ["read", "ls", "find", "grep", "write", "edit", "delete", "bash"]
 		const { tools } = workspaceExtension(names.map(tool), () =>
 			Promise.resolve({ content: [], isError: false }),
 		)
@@ -110,7 +161,7 @@ describe("session workspace", () => {
 			write: "unsafe",
 			edit: "unsafe",
 			delete: "unsafe",
-			git: "unsafe",
+			bash: "unsafe",
 		})
 	})
 
@@ -124,7 +175,11 @@ describe("session workspace", () => {
 			"write",
 			"edit",
 			"delete",
+			"bash",
 		])
+		expect(
+			declared.map(({ name }) => name).filter((name) => !RESERVED_TOOL_NAMES.includes(name)),
+		).toEqual([])
 		expect(declared.every(({ description }) => description.length > 0)).toBe(true)
 		const grep = declared.find(({ name }) => name === "grep")
 		expect(Object.keys(grep?.parameters.properties ?? {})).toEqual([
@@ -137,7 +192,7 @@ describe("session workspace", () => {
 			"limit",
 			"offset",
 		])
-		expect(JSON.stringify(grep)).not.toContain("regular expression")
+		expect(JSON.stringify(grep?.parameters)).not.toContain("regular expression")
 		expect(grep?.description).toContain("matched as written")
 	})
 
@@ -231,5 +286,31 @@ describe("session workspace", () => {
 		expect(small.content.map(({ type }) => type)).toEqual(["text", "image"])
 		const large = await read("/workspace/large.png")
 		expect(large.content.map(({ type }) => type)).toEqual(["text"])
+	})
+
+	it("lets a machine reach the package registries only when its environment allows package managers", async () => {
+		const limited = (allow_package_managers: boolean) =>
+			allowedHostsOf({
+				type: "cloud",
+				networking: {
+					type: "limited",
+					allowed_hosts: ["example.com"],
+					allow_mcp_servers: false,
+					allow_package_managers,
+				},
+			})
+		const reach = async (allowed: ReadonlyArray<string> | null, url: string) =>
+			(
+				await createMachineEgress({
+					allowedHosts: () => allowed,
+					fetch: () => Promise.resolve(new Response("ok")),
+				})(new Request(url))
+			).status
+		expect(limited(false)).toEqual(["example.com"])
+		expect(await reach(limited(true), "https://registry.npmjs.org/effect")).toBe(200)
+		expect(await reach(limited(true), "https://example.com/")).toBe(200)
+		expect(await reach(limited(false), "https://registry.npmjs.org/effect")).toBe(403)
+		expect(await reach(limited(true), "https://example.org/")).toBe(403)
+		expect(allowedHostsOf({ type: "cloud", networking: { type: "unrestricted" } })).toBeNull()
 	})
 })

@@ -101,9 +101,10 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
+  # Builds the image of the sessions' machines and runs them under the runner's Docker.
   workerd:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
         with:

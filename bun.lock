@@ -45,6 +45,7 @@
         "agents": "catalog:",
         "alchemy": "catalog:",
         "effect": "catalog:",
+        "modern-tar": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -228,6 +229,7 @@
     "alchemy": "https://pkg.alchemy.run/alchemy/-/099477e46ca2063d281240b2b9f220fa2bfb094de47f1dddc26cc7b067248cab.tgz",
     "effect": "4.1.5",
     "fast-check": "4.9.0",
+    "modern-tar": "0.8.6",
     "typescript": "7.0.2",
     "vitest": "5.1.1",
     "yaml": "2.9.1",
