@@ -74,14 +74,7 @@ export const fanoutWebhookPage = (
 	if (entries.length === 0) {
 		return Effect.void
 	}
-	const payloadJson = buildWebhookEventEnvelopeJson({
-		event_id: event.event_id,
-		event_type: event.event_type,
-		resource_type: event.resource_type,
-		resource_id: event.resource_id,
-		occurred_at: event.occurred_at,
-		data_json: event.data_json,
-	})
+	const payloadJson = buildWebhookEventEnvelopeJson(event)
 	return Stream.fromIterable(entries).pipe(
 		Stream.mapEffect(
 			(entry) =>

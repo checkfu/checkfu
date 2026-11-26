@@ -18,6 +18,7 @@ import type {
 	ListWebhookDeliveriesQuery,
 	WebhookDeliveryRecord,
 } from "./WebhookDeliveryStore.ts"
+import { signingIdForDelivery } from "./WebhookDeliveryStore.ts"
 import {
 	STANDARD_WEBHOOK_HEADERS,
 	deriveWebhookSigningSecret,
@@ -790,9 +791,10 @@ export class WebhookDeliveryEngine {
 					attemptAt,
 				)
 				const timestampSeconds = Math.floor(attemptAt / 1000)
+				const webhookId = signingIdForDelivery(row)
 				const signature = yield* signStandardWebhook(deps.mac, {
 					secrets,
-					webhookId: row.delivery_id,
+					webhookId,
 					timestampSeconds,
 					payload: row.payload_json,
 				})
@@ -800,7 +802,7 @@ export class WebhookDeliveryEngine {
 					url: validatedUrl,
 					headers: {
 						"user-agent": WEBHOOK_USER_AGENT,
-						[STANDARD_WEBHOOK_HEADERS.id]: row.delivery_id,
+						[STANDARD_WEBHOOK_HEADERS.id]: webhookId,
 						[STANDARD_WEBHOOK_HEADERS.timestamp]: String(timestampSeconds),
 						[STANDARD_WEBHOOK_HEADERS.signature]: signature,
 					},

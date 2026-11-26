@@ -99,21 +99,19 @@ describe("PublishWebhookEvents policy", () => {
 				const byType = new Map(published.map((event) => [event.event_type, event]))
 				expect(byType.has("agent.created")).toBe(true)
 				expect(byType.has("environment.created")).toBe(true)
-				expect(byType.has("session.created")).toBe(true)
+				expect([...byType.keys()]).not.toContain("session.created")
 				expect(byType.has("artifact.created")).toBe(true)
 				expect(byType.has("artifact.published")).toBe(true)
 
 				const agentEvent = byType.get("agent.created")
 				expect(agentEvent?.event_id).toMatch(/^evt_agent_agent_pub_1_\d+$/)
-				expect(agentEvent?.data_json).not.toContain("TOP_SECRET_SYSTEM_PROMPT_SHOULD_NOT_BE_SENT")
+				expect(agentEvent?.resource_id).toBe(agentId)
+				expect(agentEvent?.data_json).toBeUndefined()
 
 				const artifactPub = byType.get("artifact.published")
 				expect(artifactPub?.event_id).toMatch(/^evt_artifact_art_pub_1_\d+$/)
-				expect(artifactPub?.data_json).not.toContain("pub_secret_token_never_leak")
-				expect(JSON.parse(artifactPub?.data_json ?? "{}")).toEqual({
-					artifact_id: artifactId,
-					pinned_version: 1,
-				})
+				expect(artifactPub?.resource_id).toBe(artifactId)
+				expect(artifactPub?.data_json).toBeUndefined()
 			}).pipe(Effect.scoped, Effect.provide(layer))
 		},
 	)

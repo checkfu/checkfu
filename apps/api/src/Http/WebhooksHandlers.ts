@@ -396,7 +396,6 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 							resource_type: "webhook",
 							resource_id: params.webhook_id,
 							occurred_at: nowMillis,
-							data_json: JSON.stringify({ webhook_id: params.webhook_id, test: true }),
 						})
 						const record = yield* storedDelivery(
 							deliveries.enqueue(params.webhook_id, {

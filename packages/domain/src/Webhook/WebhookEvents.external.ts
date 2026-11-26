@@ -9,6 +9,7 @@ export const WebhookResourceType = Schema.Literals([
 	"environment",
 	"session",
 	"automation",
+	"automation_run",
 	"artifact",
 	"webhook",
 ])
@@ -20,7 +21,7 @@ export interface WebhookEventPublication {
 	readonly resource_type: WebhookResourceType
 	readonly resource_id: string
 	readonly occurred_at: number
-	readonly data_json: string
+	readonly data_json?: string
 }
 
 export interface WebhookEventsService {

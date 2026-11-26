@@ -83,7 +83,7 @@ export interface WebhookEventEnvelopeInput {
 	readonly resource_type: string
 	readonly resource_id: string
 	readonly occurred_at: number
-	readonly data_json: string
+	readonly data_json?: string
 }
 
 const isValidJson = (raw: string): boolean => {
@@ -96,13 +96,29 @@ const isValidJson = (raw: string): boolean => {
 }
 
 export const buildWebhookEventEnvelopeJson = (input: WebhookEventEnvelopeInput): string => {
+	const created_at = DateTime.formatIso(DateTime.makeUnsafe(input.occurred_at))
+	if (input.data_json === undefined) {
+		return JSON.stringify({
+			type: "event",
+			id: input.event_id,
+			created_at,
+			data: { type: input.event_type, id: input.resource_id },
+		})
+	}
 	const head = JSON.stringify({
 		id: input.event_id,
 		type: input.event_type,
 		resource_type: input.resource_type,
 		resource_id: input.resource_id,
-		created_at: DateTime.formatIso(DateTime.makeUnsafe(input.occurred_at)),
+		created_at,
 	})
 	const dataJson = isValidJson(input.data_json) ? input.data_json : "{}"
 	return `${head.slice(0, -1)},"data":${dataJson}}`
 }
+
+export const signingIdForDelivery = (delivery: {
+	readonly event_id: string
+	readonly delivery_id: string
+	readonly payload_json: string
+}): string =>
+	delivery.payload_json.startsWith('{"type":"event",') ? delivery.event_id : delivery.delivery_id

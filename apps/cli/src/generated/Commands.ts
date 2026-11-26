@@ -2295,7 +2295,7 @@ const webhooksCreateCommand = CommandMake(
 	CommandWithExamples([
 		{
 			command:
-				'checkfu webhooks create --url "https://hooks.example.com/checkfu" --event-types \'["session.status_idle","automation.run_failed"]\'',
+				'checkfu webhooks create --url "https://hooks.example.com/checkfu" --event-types \'["session.status_idled","automation_run.failed"]\'',
 			description: "Create a webhook subscribed to session and automation events",
 		},
 	]),

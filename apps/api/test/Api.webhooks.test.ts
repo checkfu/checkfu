@@ -98,14 +98,14 @@ describe("Webhooks HTTP API", () => {
 						body: {
 							url: "https://hooks.example.com/checkfu?env=prod",
 							description: "Primary sink",
-							event_types: ["session.status_idle", "session.status_idle"],
+							event_types: ["session.status_idled", "session.status_idled"],
 						},
 					})
 					expect(createRes1.status).toBe(201)
 					const created1 = (yield* Effect.promise(() => createRes1.json())) as WebhookJson
 					expect(created1.id.startsWith("whe_")).toBe(true)
 					expect(created1.status).toBe("active")
-					expect(created1.event_types).toEqual(["session.status_idle"])
+					expect(created1.event_types).toEqual(["session.status_idled"])
 					expect(created1.signing_secret?.startsWith("whsec_")).toBe(true)
 					const originalSecret = created1.signing_secret ?? ""
 
@@ -117,7 +117,7 @@ describe("Webhooks HTTP API", () => {
 						body: {
 							url: "https://hooks.example.com/checkfu?env=prod",
 							description: "Primary sink",
-							event_types: ["session.status_idle"],
+							event_types: ["session.status_idled"],
 						},
 					})
 					expect(createReplay.status).toBe(201)
@@ -190,7 +190,13 @@ describe("Webhooks HTTP API", () => {
 					const sigHeader = sent?.headers[STANDARD_WEBHOOK_HEADERS.signature] ?? ""
 					const ts = Number(sent?.headers[STANDARD_WEBHOOK_HEADERS.timestamp] ?? "0")
 					const deliveryIdHeader = sent?.headers[STANDARD_WEBHOOK_HEADERS.id] ?? ""
-					expect(deliveryIdHeader).toBe(testDelivery.id)
+					expect(deliveryIdHeader).toBe(testDelivery.event_id)
+					expect(JSON.parse(sent?.body ?? "{}")).toEqual({
+						type: "event",
+						id: testDelivery.event_id,
+						created_at: expect.any(String),
+						data: { type: "webhook.test", id: created1.id },
+					})
 					expect(
 						yield* verifyStandardWebhook(mac, {
 							secret: originalSecret,
@@ -368,7 +374,7 @@ describe("Webhooks HTTP API", () => {
 						headers: AUTH_HEADERS,
 						body: {
 							url: "https://hooks.example.com/only-failures",
-							event_types: ["automation.run_failed"],
+							event_types: ["automation_run.failed"],
 						},
 					})
 					const filtered = (yield* Effect.promise(() => filteredRes.json())) as WebhookJson
@@ -420,7 +426,7 @@ describe("Webhooks HTTP API", () => {
 						readonly publication: { readonly address: string }
 					}
 
-					// Poll until the wildcard webhook receives artifact.published + session.status_idle.
+					// Poll until the wildcard webhook receives artifact.published + session.status_idled.
 					let deliveredEvents: Array<string> = []
 					for (let attempt = 0; attempt < 100; attempt++) {
 						const res = yield* sendRequest(apiFetch, {
@@ -433,7 +439,7 @@ describe("Webhooks HTTP API", () => {
 						}
 						deliveredEvents = list.data.map((d) => d.event_type)
 						if (
-							deliveredEvents.includes("session.status_idle") &&
+							deliveredEvents.includes("session.status_idled") &&
 							deliveredEvents.includes("artifact.published")
 						) {
 							break
@@ -443,13 +449,13 @@ describe("Webhooks HTTP API", () => {
 
 					expect(deliveredEvents).toContain("agent.created")
 					expect(deliveredEvents).toContain("environment.created")
-					expect(deliveredEvents).toContain("session.created")
-					expect(deliveredEvents).toContain("session.status_running")
-					expect(deliveredEvents).toContain("session.status_idle")
+					expect(deliveredEvents).not.toContain("session.created")
+					expect(deliveredEvents).toContain("session.status_run_started")
+					expect(deliveredEvents).toContain("session.status_idled")
 					expect(deliveredEvents).toContain("artifact.created")
 					expect(deliveredEvents).toContain("artifact.published")
 
-					// Filtered webhook subscribed only to automation.run_failed receives nothing.
+					// Filtered webhook subscribed only to automation_run.failed receives nothing.
 					const filteredDeliveriesRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/webhooks/${filtered.id}/deliveries`,
@@ -465,6 +471,16 @@ describe("Webhooks HTTP API", () => {
 					expect(pubToken.length).toBeGreaterThan(8)
 					for (const req of harness.webhookDeliveries.sentRequests) {
 						expect(req.body).not.toContain(pubToken)
+						const delivery = JSON.parse(req.body) as {
+							readonly id: string
+							readonly data: { readonly type: string; readonly id: string }
+						}
+						expect(delivery).toEqual({
+							type: "event",
+							id: req.headers[STANDARD_WEBHOOK_HEADERS.id],
+							created_at: expect.any(String),
+							data: { type: expect.any(String), id: expect.any(String) },
+						})
 						const valid = yield* verifyStandardWebhook(mac, {
 							secret: wildcard.signing_secret ?? "",
 							webhookId: req.headers[STANDARD_WEBHOOK_HEADERS.id] ?? "",
