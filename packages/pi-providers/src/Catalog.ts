@@ -1,5 +1,6 @@
 import { isValidModelId, resolveProviderModelPlan } from "./ModelResolution.ts"
 import { BUILTIN_PROVIDERS, allProviders, findProvider } from "./Providers.ts"
+import type { BuiltinProviderId } from "./Providers.ts"
 import { DEFAULT_MIN_CONTEXT_WINDOW, MAX_MODEL_ID_LENGTH } from "./Types.ts"
 import type { ProviderSpec, ResolvedModelSpecifier } from "./Types.ts"
 
@@ -88,6 +89,27 @@ export type {
 	WireFormat,
 } from "./Types.ts"
 
+const splitModelSpecifier = (specifier: string) => {
+	const slash = specifier.indexOf("/")
+	return slash > 0
+		? { providerId: specifier.slice(0, slash), modelId: specifier.slice(slash + 1) }
+		: { providerId: null, modelId: specifier }
+}
+
+export interface DefaultProviderModel {
+	readonly provider: BuiltinProviderId
+	readonly modelId: string
+	readonly specifier: string
+}
+
+export const DEFAULT_PROVIDER_MODELS: ReadonlyArray<DefaultProviderModel> = BUILTIN_PROVIDERS.map(
+	(provider) => ({
+		provider: provider.id,
+		modelId: splitModelSpecifier(provider.defaultModel).modelId,
+		specifier: provider.defaultModel,
+	}),
+)
+
 export interface ResolveModelSpecifierOptions {
 	readonly customProviders?: ReadonlyArray<ProviderSpec>
 	readonly minContextWindow?: number
@@ -101,10 +123,8 @@ export const resolveModelSpecifier = (
 		return null
 	}
 	const minContextWindow = options?.minContextWindow ?? DEFAULT_MIN_CONTEXT_WINDOW
-	const slashIndex = requestedModelId.indexOf("/")
-	if (slashIndex > 0) {
-		const providerId = requestedModelId.slice(0, slashIndex)
-		const modelId = requestedModelId.slice(slashIndex + 1)
+	const { providerId, modelId } = splitModelSpecifier(requestedModelId)
+	if (providerId !== null) {
 		const provider = findProvider(providerId, options?.customProviders)
 		if (provider === undefined) {
 			return null
@@ -112,16 +132,16 @@ export const resolveModelSpecifier = (
 		const plan = resolveProviderModelPlan(provider, modelId, minContextWindow)
 		return plan === undefined ? null : { provider: provider.id, modelId, cataloged: plan.cataloged }
 	}
-	if (!isValidModelId(requestedModelId)) {
+	if (!isValidModelId(modelId)) {
 		return null
 	}
 	for (const provider of allProviders(options?.customProviders)) {
 		if (!provider.resolveBareModelIds) {
 			continue
 		}
-		const plan = resolveProviderModelPlan(provider, requestedModelId, minContextWindow)
+		const plan = resolveProviderModelPlan(provider, modelId, minContextWindow)
 		if (plan !== undefined && plan.cataloged) {
-			return { provider: provider.id, modelId: requestedModelId, cataloged: true }
+			return { provider: provider.id, modelId, cataloged: true }
 		}
 	}
 	return null
