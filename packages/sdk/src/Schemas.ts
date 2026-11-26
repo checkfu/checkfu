@@ -265,6 +265,7 @@ export type TextBlock = typeof TextBlock.Type
 
 export const TextBlocks = Schema.Array(TextBlock).check(Schema.isMinLength(1))
 export type TextBlocks = typeof TextBlocks.Type
+export const SystemMessageContent = TextBlocks.check(Schema.isMaxLength(1000))
 
 export const StopReason = Schema.Struct({
 	type: Schema.Literals([
@@ -332,7 +333,7 @@ export const ToolRejection = Schema.Literals(["unavailable", "invalid_arguments"
 export type ToolRejection = typeof ToolRejection.Type
 
 export const SessionEventFields = {
-	"system.message": { content: TextBlocks },
+	"system.message": { content: SystemMessageContent },
 	"user.message": {
 		content: TextBlocks,
 	},

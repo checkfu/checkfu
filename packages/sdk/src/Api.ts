@@ -80,6 +80,7 @@ import {
 	SessionSnapshot,
 	SessionTitle,
 	Sha256Hex,
+	SystemMessageContent,
 	TextBlocks,
 	VaultCustody,
 	VaultDisplayName,
@@ -739,7 +740,7 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("system.message"),
-				content: TextBlocks.check(Schema.isMaxLength(1000)),
+				content: SystemMessageContent,
 			}),
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),

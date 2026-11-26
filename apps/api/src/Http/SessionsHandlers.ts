@@ -1,3 +1,4 @@
+import type { TextBlock } from "@checkfu/sdk/Schemas"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
@@ -151,7 +152,8 @@ const sessionEventCommandId = (
 
 type PreparedEvent =
 	| { readonly type: "user.interrupt" }
-	| { readonly type: "user.message" | "system.message"; readonly text: string }
+	| { readonly type: "user.message"; readonly text: string }
+	| { readonly type: "system.message"; readonly content: ReadonlyArray<TextBlock> }
 	| {
 			readonly type: "user.tool_confirmation"
 			readonly tool_use_id: string
@@ -175,8 +177,9 @@ const eventFields = (item: PreparedEvent) => {
 		case "user.interrupt":
 			return {}
 		case "user.message":
-		case "system.message":
 			return { text: item.text }
+		case "system.message":
+			return { content: item.content }
 		case "user.tool_confirmation":
 			return { tool_use_id: item.tool_use_id, result: item.result, deny_message: item.deny_message }
 		case "user.custom_tool_result":
@@ -262,6 +265,8 @@ export const serializeSessionEvent = (
 	const base = { id: eventId, seq, created_at: at, processed_at: processedAt }
 
 	switch (type) {
+		case "system.message":
+			return { ...base, type, content: event.content, processed_at: event.processed_at }
 		case "user.message":
 			return { ...base, type, content: event.content }
 		case "user.interrupt":
@@ -768,6 +773,15 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							})
 							continue
 						}
+						if (event.type === "system.message") {
+							prepared.push({
+								type: event.type,
+								eventId: event.id,
+								commandId,
+								content: event.content,
+							})
+							continue
+						}
 						const joined = event.content.map((block) => block.text).join("\n")
 						const text = yield* Schema.decodeEffect(MessageText)(joined).pipe(
 							Effect.catch(() =>
@@ -825,7 +839,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										claimed.pipe(
 											Effect.andThen(
 												sessions.send(
-													new SendSystemMessage({ session_id: id, text: item.text }),
+													new SendSystemMessage({ session_id: id, content: item.content }),
 													sendOptions,
 												),
 											),

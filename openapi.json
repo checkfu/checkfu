@@ -31812,7 +31812,8 @@
 									"required": ["type", "text"],
 									"additionalProperties": false
 								},
-								"minItems": 1
+								"minItems": 1,
+								"maxItems": 1000
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "content"],

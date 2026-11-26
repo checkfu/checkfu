@@ -32,6 +32,7 @@ export const PiTurnRequest = Schema.Struct({
 	provider: Schema.String.check(Schema.isMinLength(1)),
 	modelId: Schema.String,
 	system: Schema.NullOr(Schema.String),
+	systemContext: Schema.optionalKey(Schema.String),
 	text: Schema.String,
 	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
 	mcp: Schema.optionalKey(McpTurn),

@@ -110,6 +110,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"view:Vaults.CredentialView@v0",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
+						"pi-doc:checkfu.session-system-context",
 					]),
 				)
 			}),

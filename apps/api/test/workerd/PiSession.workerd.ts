@@ -769,6 +769,10 @@ describe("PiSession real Durable Object under workerd", () => {
 			body: {
 				events: [
 					{
+						type: "system.message",
+						content: [{ type: "text", text: "Report distances in meters." }],
+					},
+					{
 						type: "user.message",
 						content: [{ type: "text", text: "Hello custom provider" }],
 					},
@@ -780,6 +784,14 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		const req = fakeOpenAI.requests[startCount]
 		expect(req?.model).toBe("custom-model-v1")
+		const system = req?.messages.filter(
+			(message) => message.role === "system" || message.role === "developer",
+		)
+		expect(system?.[0]?.text).toContain("Respond concisely.")
+		expect(system?.map((message) => message.text).join("\n")).toContain(
+			"Report distances in meters.",
+		)
+		expect(req?.userTexts).toEqual(["Hello custom provider"])
 		expect(req?.authorization).toBe(`Bearer ${TEST_CUSTOM_API_KEY}`)
 		expect(req?.headers["x-tenant"]).toBe("acme-tenant-tag")
 		expect(req?.headers["x-custom-secret"]).toBe(TEST_CUSTOM_HEADER_SECRET)
