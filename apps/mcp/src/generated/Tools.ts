@@ -163,7 +163,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												},
 												additionalProperties: false,
 												description:
-													"Applies to every tool of the server without its own config. Without either, a tool the server marks read-only runs and every other tool asks.",
+													"Applies to tools without their own configuration. MCP tools require confirmation by default.",
 											},
 											configs: {
 												type: "array",
@@ -464,7 +464,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												},
 												additionalProperties: false,
 												description:
-													"Applies to every tool of the server without its own config. Without either, a tool the server marks read-only runs and every other tool asks.",
+													"Applies to tools without their own configuration. MCP tools require confirmation by default.",
 											},
 											configs: {
 												type: "array",

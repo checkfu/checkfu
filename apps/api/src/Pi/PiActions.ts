@@ -63,10 +63,7 @@ export const mcpPermission = (
 			? (toolset.configs?.find((config) => config.name === tool.name)?.permission_policy?.type ??
 				toolset.default_config?.permission_policy?.type)
 			: undefined
-	if (named !== undefined) {
-		return named === "always_allow" ? "allow" : "ask"
-	}
-	return tool.annotations?.readOnlyHint === true ? "allow" : "ask"
+	return named === "always_allow" ? "allow" : "ask"
 }
 
 const publishable = Schema.is(ResourceId)

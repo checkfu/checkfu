@@ -69,8 +69,8 @@ describe("the gate before a tool runs", () => {
 
 describe("an MCP tool's permission", () => {
 	const tool = { name: "search", annotations: { readOnlyHint: true } }
-	it("runs a read-only tool and asks for any other, unless the agent says otherwise", () => {
-		expect(mcpPermission([], "docs", tool)).toBe("allow")
+	it("asks for all tools by default, including tools marked as read-only", () => {
+		expect(mcpPermission([], "docs", tool)).toBe("ask")
 		expect(mcpPermission([], "docs", { name: "deploy" })).toBe("ask")
 		const toolset = {
 			type: "mcp_toolset" as const,
