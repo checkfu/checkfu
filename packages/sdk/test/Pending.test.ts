@@ -275,8 +275,7 @@ describe("waitForPending", () => {
 			return new Response(
 				JSON.stringify({
 					data: attempt === 1 ? [] : [webhookRow(1)],
-					has_more: false,
-					next_cursor: null,
+					next_page: null,
 				}),
 				{ status: 200, headers: { "content-type": "application/json" } },
 			)
@@ -313,8 +312,7 @@ describe("waitForPending", () => {
 			return new Response(
 				JSON.stringify({
 					data: [webhookRow(2)],
-					has_more: false,
-					next_cursor: null,
+					next_page: null,
 				}),
 				{ status: 200, headers: { "content-type": "application/json" } },
 			)

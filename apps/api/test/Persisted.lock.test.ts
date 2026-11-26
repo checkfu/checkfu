@@ -84,7 +84,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(13)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(14)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",

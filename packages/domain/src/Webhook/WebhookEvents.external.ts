@@ -26,7 +26,6 @@ export interface WebhookEventPublication {
 	readonly occurred_at: number
 	readonly vault_id?: string
 	readonly automation_id?: string
-	readonly data_json?: string
 }
 
 export interface WebhookEventsService {

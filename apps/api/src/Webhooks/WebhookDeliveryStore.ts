@@ -1,3 +1,4 @@
+import type { WebhookEventPublication } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import type {
 	WebhookDeliveryId,
 	WebhookDeliveryOutcome,
@@ -76,51 +77,18 @@ export class WebhookDeliveryStore extends Context.Service<
 	WebhookDeliveryStoreService
 >()("@checkfu/api/WebhookDeliveryStore") {}
 
-export interface WebhookEventEnvelopeInput {
-	readonly event_id: string
-	readonly event_type: string
-	readonly resource_type: string
-	readonly resource_id: string
-	readonly occurred_at: number
-	readonly vault_id?: string
-	readonly automation_id?: string
-	readonly data_json?: string
-}
-
-const isValidJson = (raw: string): boolean => {
-	try {
-		JSON.parse(raw)
-		return true
-	} catch {
-		return false
-	}
-}
-
-export const buildWebhookEventEnvelopeJson = (input: WebhookEventEnvelopeInput): string => {
-	const created_at = DateTime.formatIso(DateTime.makeUnsafe(input.occurred_at))
-	if (input.data_json === undefined) {
-		return JSON.stringify({
-			type: "event",
-			id: input.event_id,
-			created_at,
-			data: {
-				type: input.event_type,
-				id: input.resource_id,
-				...(input.vault_id === undefined ? {} : { vault_id: input.vault_id }),
-				...(input.automation_id === undefined ? {} : { automation_id: input.automation_id }),
-			},
-		})
-	}
-	const head = JSON.stringify({
-		id: input.event_id,
-		type: input.event_type,
-		resource_type: input.resource_type,
-		resource_id: input.resource_id,
-		created_at,
+export const buildWebhookEventEnvelopeJson = (event: WebhookEventPublication): string =>
+	JSON.stringify({
+		type: "event",
+		id: event.event_id,
+		created_at: DateTime.formatIso(DateTime.makeUnsafe(event.occurred_at)),
+		data: {
+			type: event.event_type,
+			id: event.resource_id,
+			...(event.vault_id === undefined ? {} : { vault_id: event.vault_id }),
+			...(event.automation_id === undefined ? {} : { automation_id: event.automation_id }),
+		},
 	})
-	const dataJson = isValidJson(input.data_json) ? input.data_json : "{}"
-	return `${head.slice(0, -1)},"data":${dataJson}}`
-}
 
 export const signingIdForDelivery = (delivery: { readonly event_id: string }): string =>
 	delivery.event_id

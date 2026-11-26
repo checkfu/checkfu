@@ -136,6 +136,8 @@ export function SessionsPage(): React.JSX.Element {
 const NO_VAULTS: ReadonlyArray<string> = []
 const NO_CREDENTIALS: ExplicitCredentials = {}
 
+type ResourceDraftRow = ResourceDraft & { readonly key: string }
+
 export function NewSessionPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const agentOptions = choicesOf(useSuspenseInfiniteQuery(agentChoices))
@@ -149,7 +151,7 @@ export function NewSessionPage(): React.JSX.Element {
 	const agentId = agent.id
 	const environmentId = environment.id
 	const [title, setTitle] = useState("")
-	const [resources, setResources] = useState<ReadonlyArray<ResourceDraft>>([])
+	const [resources, setResources] = useState<ReadonlyArray<ResourceDraftRow>>([])
 	const ready = agentId !== "" && environmentId !== "" && resources.every(namesResource)
 	const [picked, setPicked] = useState<{
 		readonly agentId: string
@@ -506,8 +508,8 @@ function ResourcesEditor({
 	drafts,
 	onChange,
 }: {
-	readonly drafts: ReadonlyArray<ResourceDraft>
-	readonly onChange: (drafts: ReadonlyArray<ResourceDraft>) => void
+	readonly drafts: ReadonlyArray<ResourceDraftRow>
+	readonly onChange: (drafts: ReadonlyArray<ResourceDraftRow>) => void
 }): React.JSX.Element {
 	const types: ReadonlyArray<ResourceType> = [
 		"github_repository",
@@ -525,7 +527,7 @@ function ResourcesEditor({
 				</p>
 			</div>
 			{drafts.map((draft, index) => (
-				<div key={index} className="space-y-3 rounded-lg border p-3">
+				<div key={draft.key} className="space-y-3 rounded-lg border p-3">
 					<div className="flex items-center justify-between">
 						<span className="text-sm font-medium">{RESOURCE_LABELS[draft.type]}</span>
 						<Button
@@ -537,7 +539,10 @@ function ResourcesEditor({
 							<XIcon />
 						</Button>
 					</div>
-					<ResourceFields draft={draft} onChange={(next) => onChange(drafts.with(index, next))} />
+					<ResourceFields
+						draft={draft}
+						onChange={(next) => onChange(drafts.with(index, { ...next, key: draft.key }))}
+					/>
 				</div>
 			))}
 			<div className="flex flex-wrap gap-2">
@@ -546,7 +551,7 @@ function ResourcesEditor({
 						key={type}
 						variant="outline"
 						size="sm"
-						onClick={() => onChange([...drafts, emptyDraft(type)])}
+						onClick={() => onChange([...drafts, { ...emptyDraft(type), key: crypto.randomUUID() }])}
 					>
 						<PlusIcon /> {RESOURCE_LABELS[type]}
 					</Button>

@@ -141,6 +141,9 @@ describe("PublishWebhookEvents policy", () => {
 					yield* Effect.yieldNow
 				}
 
+				const notifications = JSON.stringify(published)
+				expect(notifications).not.toContain("TOP_SECRET_SYSTEM_PROMPT_SHOULD_NOT_BE_SENT")
+				expect(notifications).not.toContain("pub_secret_token_never_leak")
 				const byType = new Map(published.map((event) => [event.event_type, event]))
 				expect(byType.has("agent.created")).toBe(true)
 				expect(byType.has("environment.created")).toBe(true)
@@ -173,12 +176,10 @@ describe("PublishWebhookEvents policy", () => {
 				const agentEvent = byType.get("agent.created")
 				expect(agentEvent?.event_id).toMatch(/^evt_agent_agent_pub_1_\d+$/)
 				expect(agentEvent?.resource_id).toBe(agentId)
-				expect(agentEvent?.data_json).toBeUndefined()
 
 				const artifactPub = byType.get("artifact.published")
 				expect(artifactPub?.event_id).toMatch(/^evt_artifact_art_pub_1_\d+$/)
 				expect(artifactPub?.resource_id).toBe(artifactId)
-				expect(artifactPub?.data_json).toBeUndefined()
 			}).pipe(Effect.scoped, Effect.provide(layer))
 		},
 	)
