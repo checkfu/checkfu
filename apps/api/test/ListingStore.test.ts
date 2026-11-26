@@ -118,6 +118,11 @@ describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 					ids(yield* listing.page(filter({ kind: "environment", include_archived: true }), first)),
 				).toEqual([])
 				expect(ids(yield* listing.page(filter({ kind: "agent" }), first))).toEqual(["s1"])
+				expect(yield* listing.get("session", "s1")).toEqual({ id: "s1", created_at: 1 })
+				expect(yield* listing.get("session", "s2")).toBeNull()
+				expect(yield* listing.get("environment", "e1")).toBeNull()
+				expect(yield* listing.get("agent", "s1")).toEqual({ id: "s1", created_at: 5 })
+				expect(yield* listing.get("agent", "missing")).toBeNull()
 			}),
 		),
 	)

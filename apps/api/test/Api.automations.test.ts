@@ -64,6 +64,7 @@ interface AutomationBody {
 }
 
 interface RunBody {
+	readonly id: string
 	readonly type: string
 	readonly automation_id: string
 	readonly run: number
@@ -425,6 +426,7 @@ describe("Automations API", () => {
 				expect(first.status).toBe(201)
 				expect(first.body).toEqual({
 					type: "automation_run",
+					id: `arun_${id}_1`,
 					automation_id: id,
 					run: 1,
 					status: "queued",
@@ -443,7 +445,11 @@ describe("Automations API", () => {
 				})
 				const one = yield* call<RunBody>(apiFetch, "GET", `/v1/automations/${id}/runs/1`)
 				expect([one.status, one.body]).toEqual([200, recorded])
+				const byId = yield* call<RunBody>(apiFetch, "GET", `/v1/automation_runs/${first.body.id}`)
+				expect([byId.status, byId.body]).toEqual([200, recorded])
 				for (const [path, status] of [
+					[`/v1/automation_runs/arun_${id}_02`, 404],
+					[`/v1/automation_runs/arun_${id}_2`, 404],
 					[`/v1/automations/${id}/runs/2`, 404],
 					[`/v1/automations/auto_missing/runs/1`, 404],
 					[`/v1/automations/${id}/runs/0`, 400],

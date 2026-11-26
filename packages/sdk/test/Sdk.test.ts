@@ -2668,6 +2668,7 @@ describe("@checkfu/sdk", () => {
 					if (req.method === "POST" && url.pathname === "/v1/automations/auto_run/run") {
 						return jsonResponse(
 							{
+								id: "arun_auto_run_4",
 								type: "automation_run",
 								automation_id: "auto_run",
 								run: 4,

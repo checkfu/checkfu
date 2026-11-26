@@ -11,6 +11,10 @@ import { CredentialView } from "./Vault/CredentialView.view.ts"
 import { DeleteCredentialDecision } from "./Vault/DeleteCredential.decision.ts"
 import { ListCredentials, ListCredentialsLive } from "./Vault/ListCredentials.query.ts"
 import { ListVaults, ListVaultsLive } from "./Vault/ListVaults.query.ts"
+import {
+	PublishVaultWebhookEvents,
+	PublishVaultWebhookEventsLive,
+} from "./Vault/PublishVaultWebhookEvents.policy.ts"
 import { RetireCredentialDecision } from "./Vault/RetireCredential.decision.ts"
 import { RotateCredentialDecision } from "./Vault/RotateCredential.decision.ts"
 import {
@@ -41,7 +45,7 @@ export class Vaults extends Domain.Model("Vaults", {
 	views: [VaultView, CredentialView],
 	projections: [VaultListing, CredentialListing],
 	queries: [ListVaults, ListCredentials],
-	policies: [RetireReleasedCredentials, SettleCredentialSecret],
+	policies: [RetireReleasedCredentials, SettleCredentialSecret, PublishVaultWebhookEvents],
 	invariants: {
 		VaultViewMatchesVault: (m) =>
 			[
@@ -208,6 +212,7 @@ export class Vaults extends Domain.Model("Vaults", {
 export const VaultsHandlersLive = Layer.mergeAll(
 	RetireReleasedCredentialsLive,
 	SettleCredentialSecretLive,
+	PublishVaultWebhookEventsLive,
 	VaultListingLive,
 	ListVaultsLive,
 	CredentialListingLive,

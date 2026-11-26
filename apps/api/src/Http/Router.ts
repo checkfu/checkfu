@@ -41,6 +41,7 @@ import {
 import { MemoryStoresLive } from "./MemoryStoresHandlers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
 import { VaultsLive } from "./VaultsHandlers.ts"
+import { WebhooksLive } from "./WebhooksHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
 export { ArtifactReadWaitTimeout } from "./ArtifactsHandlers.ts"
@@ -95,6 +96,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		AutomationsLive,
 		ArtifactsLive,
 		VaultsLive,
+		WebhooksLive,
 		MemoryStoresLive,
 	]),
 	Layer.provide([

@@ -12,6 +12,8 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
+import { makeWebhooksTestSupport } from "../src/Webhooks/WebhookTestLayer.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
@@ -195,6 +197,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
+				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),
 			),
 		).pipe(Layer.provide(executorLayer))
@@ -202,7 +205,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
-		const layer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
+		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
@@ -460,6 +463,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
+				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),
 			),
 		).pipe(Layer.provide(executorLayer))
@@ -467,7 +471,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
-		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
+		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
@@ -1062,7 +1066,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 								)
 					}),
 			})
-			const normalizedLayer = checkfuWithHarness(normalizedExecutor).pipe(
+			const normalizedLayer = Layer.mergeAll(
+				makeWebhooksTestSupport().layer,
+				checkfuWithHarness(normalizedExecutor).pipe(Layer.provide(WebhookEventsNoop)),
+			).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
@@ -1271,7 +1278,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 								)
 					}),
 			})
-			const unnormalizedLayer = checkfuWithHarness(unnormalizedExecutor).pipe(
+			const unnormalizedLayer = Layer.mergeAll(
+				makeWebhooksTestSupport().layer,
+				checkfuWithHarness(unnormalizedExecutor).pipe(Layer.provide(WebhookEventsNoop)),
+			).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
