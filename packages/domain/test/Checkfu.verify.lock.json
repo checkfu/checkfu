@@ -581,6 +581,10 @@
 			"AdmitSessionWithMessages.AdmissionKeepsTheInitialPlan": {
 				"kind": "transition",
 				"source": "({ command, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent.initial_messages !== undefined &&\n\t\t\t\t\tevent.initial_messages.count === command.initial_messages.count &&\n\t\t\t\t\tevent.initial_messages.messages === command.initial_messages.messages,\n\t\t\t)"
+			},
+			"Agent.ConfigurationIsStableWithinAVersion": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tafter.version !== before.version,\n\t\t\t\t[\n\t\t\t\t\tafter.current_version_id === before.current_version_id,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t\tafter.mcp_servers === before.mcp_servers,\n\t\t\t\t\tafter.tools === before.tools,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}
