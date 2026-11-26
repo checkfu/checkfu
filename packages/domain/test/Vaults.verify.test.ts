@@ -7,9 +7,10 @@ import * as Layer from "effect/Layer"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
 import { Vaults, VaultsApi, VaultsHandlersLive } from "../src/Vaults.model.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 
 const story = Story.make(Vaults, {
-	layer: VaultsHandlersLive.pipe(Layer.provide(ListingStore.memory)),
+	layer: VaultsHandlersLive.pipe(Layer.provide([ListingStore.memory, WebhookEventsNoop])),
 	stub: [CredentialSecrets],
 })
 
@@ -89,6 +90,7 @@ describe("Vaults Z3 formal verification", () => {
 					instances: 1,
 					depth: 3,
 					walks: { count: 50 },
+					allow: { skipped: ["PublishVaultWebhookEvents"] },
 					lock: "./Vaults.verify.lock.json",
 					require: { proved: PROVED },
 				})
@@ -96,6 +98,9 @@ describe("Vaults Z3 formal verification", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
+				expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual([
+					"PublishVaultWebhookEvents",
+				])
 				expect(report.explored.aside).toEqual([
 					{
 						kind: "projection",

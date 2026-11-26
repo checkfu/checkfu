@@ -31,6 +31,8 @@ import { UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
+import { PublishWebhookEventsLive } from "../src/Webhook/PublishWebhookEvents.policy.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 
 type Platform = ReturnType<typeof InMemory.make>
 
@@ -146,6 +148,7 @@ const handlersOf =
 			FreeAutomationSlotLive,
 			ExpireArtifactReservationsLive,
 			ReleaseArtifactBytesLive,
+			PublishWebhookEventsLive,
 			ListingLive,
 			ListResourcesLive,
 		)
@@ -204,6 +207,7 @@ const run = <A, E, R>(
 						ListingStore.memory,
 						ArtifactBytesKept,
 						SessionOutputsUnpublished,
+						WebhookEventsNoop,
 					]),
 				),
 			).pipe(Layer.provide(platform.layer)),

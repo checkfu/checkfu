@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "@effect/vitest"
+import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
 import { State } from "alchemy/State"
@@ -51,7 +52,7 @@ describe("Alchemy stack and worker entry", () => {
 				expect(ApiWorker).toBeDefined()
 				expect(API_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
 				expect(ARTIFACT_BUCKET_PROPS).toEqual({ forceDestroy: true })
-				expect("flags" in API_WORKER_PROPS.compatibility).toBe(false)
+				expect(API_WORKER_PROPS.compatibility.flags).toEqual(["global_fetch_strictly_public"])
 				expect(API_WORKER_PROPS.codeUpdateStrategy).toEqual({
 					mode: "deferred",
 					maxDelay: "12 minutes",
@@ -374,5 +375,69 @@ describe("Alchemy stack and worker entry", () => {
 			)
 			expect(requests).toBe(0)
 		}),
+	)
+
+	it.live(
+		"keeps planned Worker entrypoints and local classes within the export budget",
+		() =>
+			Effect.gen(function* () {
+				const scratch = yield* Effect.acquireRelease(
+					Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-exports-"))),
+					(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+				)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+					() => Effect.sync(() => vi.unstubAllEnvs()),
+				)
+				const counts = yield* Alchemist.plan({
+					stack: checkfuStack(Effect.void),
+					stage: "staging",
+					operation: "deploy",
+					dev: true,
+				}).pipe(
+					Effect.map(({ native }) => {
+						const byWorker: Record<string, number> = {}
+						for (const [id, entry] of Object.entries(native.resources)) {
+							if (entry.action !== "create" || !Cloudflare.Workers.isWorker(entry.resource)) {
+								continue
+							}
+							const exports = new Set(["default", ...Object.keys(entry.props.exports ?? {})])
+							// Workers with a raw entry module declare local classes through their bindings.
+							for (const { data } of entry.bindings) {
+								const bindings: ReadonlyArray<Cloudflare.Workers.WorkerBinding> =
+									data.bindings ?? []
+								for (const binding of bindings) {
+									if (
+										(binding.type === "durable_object_namespace" || binding.type === "workflow") &&
+										"className" in binding &&
+										typeof binding.className === "string" &&
+										(!("scriptName" in binding) ||
+											binding.scriptName === undefined ||
+											binding.scriptName === entry.props.name)
+									) {
+										exports.add(binding.className)
+									}
+								}
+							}
+							byWorker[id] = exports.size
+						}
+						return byWorker
+					}),
+					Effect.scoped,
+					Effect.provide(Alchemist.layer()),
+					Effect.provideService(Alchemy.AlchemyContext, {
+						dotAlchemy: join(scratch, "staging"),
+						dev: true,
+						adopt: false,
+					}),
+				)
+				expect(counts["ApiWorker"]).toBeGreaterThan(1)
+				expect(counts["PiHarnessWorker"]).toBeGreaterThan(1)
+				const exportBudget = 100
+				for (const [worker, count] of Object.entries(counts)) {
+					expect(count, `${worker} has ${count} planned exports`).toBeLessThanOrEqual(exportBudget)
+				}
+			}),
+		60_000,
 	)
 })

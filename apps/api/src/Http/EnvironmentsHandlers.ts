@@ -1,3 +1,9 @@
+import {
+	ArchiveEnvironmentIfCurrent,
+	ArchiveEnvironmentIfCurrentDecision,
+} from "@checkfu/domain/Automation/GuardedArchives"
+import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/Schemas"
 import { ArchiveEnvironment } from "@checkfu/domain/Environment/ArchiveEnvironment.command"
 import { CreateEnvironment } from "@checkfu/domain/Environment/CreateEnvironment.command"
 import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"
@@ -15,10 +21,10 @@ import * as Option from "effect/Option"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
-	DEFAULT_ENVIRONMENT_CONFIG,
 	IDEMPOTENCY_KEY_REUSED,
 	archiveAndRead,
 	bestEffortAfterCommit,
+	commitForStream,
 	createIdentity,
 	handled,
 	isPending,
@@ -39,6 +45,8 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
+		const automationViews = yield* AutomationView
+		const guardedArchive = yield* ArchiveEnvironmentIfCurrentDecision
 
 		const retrieve = (id: EnvironmentId) => {
 			const ref = Environment.ref(id)
@@ -55,6 +63,28 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 				),
 			})
 		}
+
+		const archiveCommit = Effect.fnUntraced(function* (id: EnvironmentId, version?: number) {
+			if (version === undefined) {
+				return yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
+			}
+			const { withArchiveInventory } = yield* Effect.promise(() => import("./ArchiveInventory.ts"))
+			const receipt = yield* withArchiveInventory(list, automationViews, (inventory) =>
+				guardedArchive.send(
+					new ArchiveEnvironmentIfCurrent({
+						environment_id: id,
+						expected_version: version,
+						inventory,
+					}),
+				),
+			)
+			return commitForStream(receipt.commits, `Environment/${id}`)
+		})
+
+		const archive = (id: EnvironmentId, version?: number) =>
+			archiveAndRead(id, "environment", "Environment", archiveCommit(id, version), (commit) =>
+				environmentViews.get(Environment.ref(id), commit === undefined ? {} : { atLeast: commit }),
+			).pipe(handled)
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -82,7 +112,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 						)
 						.pipe(
 							Effect.catchTag("EnvironmentAlreadyExists", () =>
-								reject(409, IDEMPOTENCY_KEY_REUSED),
+								reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" }),
 							),
 						)
 					const result = yield* environmentViews
@@ -184,15 +214,6 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					return { id, type: "environment_deleted" as const }
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) =>
-				archiveAndRead(
-					params.environment_id,
-					"environment",
-					"Environment",
-					environments.send(new ArchiveEnvironment({ environment_id: params.environment_id })),
-					(receipt) =>
-						environmentViews.get(Environment.ref(params.environment_id), { atLeast: receipt }),
-				).pipe(handled),
-			)
+			.handle("archive", ({ params, query }) => archive(params.environment_id, query.version))
 	}),
 )

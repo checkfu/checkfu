@@ -98,6 +98,12 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/artifacts/{artifact_id}/versions/{version}",
 			},
 			{
+				group: "automation-runs",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/automation_runs/{automation_run_id}",
+			},
+			{
 				group: "automations",
 				name: "archive",
 				httpMethod: "POST",
@@ -361,6 +367,68 @@ describe("Cloudflare Forge pipeline", () => {
 				name: "update",
 				httpMethod: "POST",
 				path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+			},
+			{ group: "webhooks", name: "create", httpMethod: "POST", path: "/v1/webhooks" },
+			{
+				group: "webhooks",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/webhooks/{webhook_id}",
+			},
+			{ group: "webhooks", name: "list", httpMethod: "GET", path: "/v1/webhooks" },
+			{
+				group: "webhooks",
+				name: "pause",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/pause",
+			},
+			{
+				group: "webhooks",
+				name: "resume",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/resume",
+			},
+			{
+				group: "webhooks",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/webhooks/{webhook_id}",
+			},
+			{
+				group: "webhooks",
+				name: "rotate-secret",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/rotate-secret",
+			},
+			{
+				group: "webhooks",
+				name: "test",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/test",
+			},
+			{
+				group: "webhooks",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}",
+			},
+			{
+				group: "webhooks:deliveries",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/webhooks/{webhook_id}/deliveries",
+			},
+			{
+				group: "webhooks:deliveries",
+				name: "redeliver",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
+			},
+			{
+				group: "webhooks:deliveries",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/webhooks/{webhook_id}/deliveries/{delivery_id}",
 			},
 		])
 
@@ -711,7 +779,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(66)
+		expect(inspectedMethods.length).toBe(79)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

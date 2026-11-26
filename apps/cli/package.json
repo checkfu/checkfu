@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",
+		"@checkfu/authoring": "workspace:*",
 		"@checkfu/pi-providers": "workspace:*",
 		"@checkfu/sdk": "workspace:*",
 		"@effect/platform-bun": "catalog:",

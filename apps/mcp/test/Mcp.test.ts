@@ -181,6 +181,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				"artifacts_listArtifacts",
 				"artifacts_publishArtifact",
 				"artifacts_unpublishArtifact",
+				"automationRuns_retrieve",
 				"automations_archiveAutomation",
 				"automations_createAutomation",
 				"automations_getAutomation",
@@ -227,6 +228,18 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				"vaults_listCredentials",
 				"vaults_listVaults",
 				"vaults_updateVault",
+				"webhooks_createWebhook",
+				"webhooks_deleteWebhook",
+				"webhooks_getDelivery",
+				"webhooks_getWebhook",
+				"webhooks_listDeliveries",
+				"webhooks_listWebhooks",
+				"webhooks_pauseWebhook",
+				"webhooks_redeliver",
+				"webhooks_resumeWebhook",
+				"webhooks_rotateWebhookSecret",
+				"webhooks_testWebhook",
+				"webhooks_updateWebhook",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
 				GENERATED_TOOLS.map((tool) => tool.inputSchema),
@@ -259,6 +272,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				artifacts_listArtifacts: "read-only, additive, repeatable",
 				artifacts_publishArtifact: "writes, destructive, not repeatable",
 				artifacts_unpublishArtifact: "writes, destructive, not repeatable",
+				automationRuns_retrieve: "read-only, additive, repeatable",
 				automations_archiveAutomation: "writes, destructive, repeatable",
 				automations_createAutomation: "writes, additive, repeatable",
 				automations_getAutomation: "read-only, additive, repeatable",
@@ -305,6 +319,18 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				vaults_listCredentials: "read-only, additive, repeatable",
 				vaults_listVaults: "read-only, additive, repeatable",
 				vaults_updateVault: "writes, destructive, not repeatable",
+				webhooks_createWebhook: "writes, additive, not repeatable",
+				webhooks_deleteWebhook: "writes, destructive, repeatable",
+				webhooks_getDelivery: "read-only, additive, repeatable",
+				webhooks_getWebhook: "read-only, additive, repeatable",
+				webhooks_listDeliveries: "read-only, additive, repeatable",
+				webhooks_listWebhooks: "read-only, additive, repeatable",
+				webhooks_pauseWebhook: "writes, destructive, repeatable",
+				webhooks_redeliver: "writes, destructive, not repeatable",
+				webhooks_resumeWebhook: "writes, destructive, repeatable",
+				webhooks_rotateWebhookSecret: "writes, destructive, not repeatable",
+				webhooks_testWebhook: "writes, destructive, not repeatable",
+				webhooks_updateWebhook: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
 	)
@@ -469,6 +495,8 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				const automation = { path: { automation_id: "auto_1" } }
 				const artifact = { path: { artifact_id: "art_1" } }
 				const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
+				const webhook = { path: { webhook_id: "whe_1" } }
+				const webhookDelivery = { path: { webhook_id: "whe_1", delivery_id: "wdel_1" } }
 				const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
 				const vault = { path: { vault_id: "vault_1" } }
 				const credential = { path: { vault_id: "vault_1", credential_id: "cred_1" } }
@@ -491,6 +519,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
 					artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
 					artifacts_unpublishArtifact: artifact,
+					automationRuns_retrieve: { path: { automation_run_id: "arun_auto_1_1" } },
 					automations_archiveAutomation: automation,
 					automations_createAutomation: {
 						body: {
@@ -575,6 +604,23 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					vaults_listCredentials: vault,
 					vaults_listVaults: { query: { limit: "5", include_archived: "true" } },
 					vaults_updateVault: { ...vault, body: { display_name: "Team" } },
+					webhooks_createWebhook: {
+						body: { url: "https://hooks.example.com/events", event_types: ["*"] },
+					},
+					webhooks_deleteWebhook: webhook,
+					webhooks_getDelivery: webhookDelivery,
+					webhooks_getWebhook: webhook,
+					webhooks_listDeliveries: { ...webhook, query: { limit: "5" } },
+					webhooks_listWebhooks: { query: { limit: "5", order: "desc" } },
+					webhooks_pauseWebhook: webhook,
+					webhooks_redeliver: webhookDelivery,
+					webhooks_resumeWebhook: webhook,
+					webhooks_rotateWebhookSecret: webhook,
+					webhooks_testWebhook: webhook,
+					webhooks_updateWebhook: {
+						...webhook,
+						body: { description: "Updated", reactivate: true },
+					},
 				} satisfies Record<string, Argument>
 				expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
 
@@ -655,6 +701,8 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
 			"vaults_createVault",
+			"webhooks_createWebhook",
+			"webhooks_rotateWebhookSecret",
 		])
 		for (const [name, schema] of keyed) {
 			const accepts = Schema.is(

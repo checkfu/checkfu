@@ -10,8 +10,10 @@ import {
 } from "@checkfu/api/Connection/CredentialCustody"
 import { vaultListingQueriesFrom } from "@checkfu/api/Http/Listing"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
+import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type {
 	HarnessReply,
@@ -116,6 +118,7 @@ export interface CliRunOptions {
 	readonly stdoutIsTerminal?: boolean
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
+	readonly fileSystem?: Layer.Layer<FileSystem.FileSystem>
 	readonly onChmod?: (filePath: string, mode: number) => void
 	readonly onRead?: (filePath: string) => void
 	readonly readyWithin?: Duration.Input
@@ -208,16 +211,19 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				}
 			}),
 		)
+		const listingStore = ListingStore.memory
+		const webhooksTest = makeWebhooksTestSupport(listingStore)
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
-				Layer.provide(ListingStore.memory),
+				Layer.provide(listingStore),
+				Layer.provide(WebhookEventsNoop),
 				Layer.provide(HarnessLive),
 			),
 		)
 		const VaultsLive = Vaults.layer(
-			VaultsHandlersLive.pipe(Layer.provide(ListingStore.memory)),
+			VaultsHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(WebhookEventsNoop)),
 		).pipe(
 			Layer.provideMerge(CredentialSecretsLive),
 			Layer.provide(
@@ -230,6 +236,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			),
 		)
 		const ServerLayer = Layer.mergeAll(
+			webhooksTest.layer,
 			VaultsLive,
 			vaultListingQueriesFrom(VaultsLive),
 			HarnessLive.pipe(Layer.provideMerge(CheckfuLive)),
@@ -434,7 +441,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 							}
 
 				const cliLayer = Layer.mergeAll(
-					fileSystemLayer,
+					options?.fileSystem ?? fileSystemLayer,
 					Path.layer,
 					Stdio.layerTest({
 						args: Effect.succeed(args),

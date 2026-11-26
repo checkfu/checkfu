@@ -280,6 +280,10 @@ const startAlchemyDev = async (
 	delete childEnv.CHECKFU_GITHUB_BASE_URL
 	delete childEnv.CHECKFU_MACHINE_IDLE
 	delete childEnv.CHECKFU_LOCAL_DEV
+	delete childEnv.CHECKFU_WEBHOOK_LOCAL_DEV
+	delete childEnv.CHECKFU_WEBHOOK_LOCAL_RUNTIME
+	delete childEnv.CHECKFU_WEBHOOK_EGRESS_URL
+	delete childEnv.CHECKFU_WEBHOOK_EGRESS_TOKEN
 	delete childEnv.ALCHEMY_STAGE
 	delete childEnv.ALCHEMY_PROFILE
 
@@ -654,6 +658,67 @@ describe("PiSession real Durable Object under workerd", () => {
 			bytes: Buffer.from(file.body.content, file.body.encoding),
 		}
 	}
+
+	it("serializes a conditional archive with a competing automation repoint", async () => {
+		const target = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Prune target",
+		})
+		const creation = await fetch(`${baseUrl}/v1/automations`, {
+			method: "POST",
+			headers: {
+				...AUTH_HEADERS,
+				"content-type": "application/json",
+				"idempotency-key": "guarded-archive-race",
+			},
+			body: JSON.stringify({
+				name: "Guarded archive race",
+				agent: agentId,
+				environment_id: environmentId,
+				initial_events: [
+					{ type: "user.message", content: [{ type: "text", text: "Write a report." }] },
+				],
+				schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+			}),
+		})
+		const raw = await creation.text()
+		expect([201, 202], raw).toContain(creation.status)
+		const { id } = parseResponseJson<{ readonly id: string }>(
+			"POST",
+			"/v1/automations",
+			creation.status,
+			raw,
+		)
+		const automationPath = `/v1/automations/${id}`
+		const environmentPath = `/v1/environments/${target.id}`
+		await pollResourceReady<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+			"/v1/automations",
+			(page) => page.data.some((row) => row.id === id),
+		)
+
+		const [archive, repoint] = await Promise.all([
+			apiJson(`${environmentPath}/archive?version=1`, { method: "POST" }),
+			apiJson(automationPath, { method: "POST", body: { environment_id: target.id } }),
+		])
+		const archived = archive.status === 200 || archive.status === 202
+		if (archived) {
+			expect(repoint.status, JSON.stringify(repoint.body)).toBe(409)
+		} else {
+			expect([409, 503], JSON.stringify(archive.body)).toContain(archive.status)
+			expect([200, 202], JSON.stringify(repoint.body)).toContain(repoint.status)
+		}
+		await pollResourceReady<{ readonly archived_at: string | null }>(
+			environmentPath,
+			(environment) => (environment.archived_at !== null) === archived,
+		)
+		const automation = await pollResourceReady<{
+			readonly environment_id: string
+			readonly revision: number
+		}>(automationPath, (row) => row.environment_id === (archived ? environmentId : target.id))
+		const cleanup = await apiJson(`${automationPath}/archive?revision=${automation.revision}`, {
+			method: "POST",
+		})
+		expect([200, 202], JSON.stringify(cleanup.body)).toContain(cleanup.status)
+	}, 30_000)
 
 	it("stores uploaded bytes in R2 only when they match their sha256, and serves them raw", async () => {
 		const opened = await apiJson<{ readonly id: string; readonly version: number }>(
@@ -2992,6 +3057,130 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(unpublished.body.publication).toBe(null)
 		expect((await fetch(url)).status).toBe(404)
 		expect((await apiFetch(`/v1/artifacts/${id}`)).status).toBe(200)
+	}, 30_000)
+
+	it("manages webhooks, rotates signing secrets, records deliveries in Durable Object SQLite, and fans out lifecycle events", async () => {
+		interface WebhookBody {
+			readonly id: string
+			readonly status: string
+			readonly secret_revision: number
+			readonly previous_secret_expires_at: string | null
+			readonly signing_secret?: string
+		}
+		interface DeliveryBody {
+			readonly id: string
+			readonly event_type: string
+			readonly status: string
+			readonly last_outcome: string | null
+		}
+
+		const badUrl = await apiFetch("/v1/webhooks", {
+			method: "POST",
+			body: { url: "http://127.0.0.1/hook", event_types: ["*"] },
+		})
+		expect(badUrl.status).toBe(400)
+
+		const created = await apiJson<WebhookBody>("/v1/webhooks", {
+			method: "POST",
+			body: {
+				url: "https://127.0.0.1.nip.io/workerd-webhook",
+				description: "Workerd webhook test",
+				event_types: ["agent.created"],
+			},
+		})
+		expect(created.status).toBe(201)
+		expect(created.body.status).toBe("active")
+		expect(created.body.secret_revision).toBe(1)
+		expect(created.body.signing_secret?.startsWith("whsec_")).toBe(true)
+		const webhookId = created.body.id
+
+		// Registration is immediately visible in D1 WebhookListing upon 201 (no polling required).
+		const page = await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+			"/v1/webhooks?limit=100",
+		)
+		expect(page.status).toBe(200)
+		expect(page.body.data.map((item) => item.id)).toContain(webhookId)
+
+		const rotated = await apiJson<WebhookBody>(`/v1/webhooks/${webhookId}/rotate-secret`, {
+			method: "POST",
+		})
+		expect(rotated.status).toBe(200)
+		expect(rotated.body.secret_revision).toBe(2)
+		expect(rotated.body.previous_secret_expires_at).not.toBeNull()
+		expect(rotated.body.signing_secret?.startsWith("whsec_")).toBe(true)
+		expect(rotated.body.signing_secret).not.toBe(created.body.signing_secret)
+
+		const testDelivery = await apiJson<DeliveryBody>(`/v1/webhooks/${webhookId}/test`, {
+			method: "POST",
+		})
+		expect(testDelivery.status).toBe(201)
+		expect(testDelivery.body.event_type).toBe("webhook.test")
+
+		// In local Alchemy workerd without CHECKFU_WEBHOOK_EGRESS_URL, direct delivery fails
+		// closed as a sender configuration error without degrading endpoint health.
+		const localEgressDeadline = Date.now() + 15_000
+		let fetchedDelivery = await apiJson<DeliveryBody>(
+			`/v1/webhooks/${webhookId}/deliveries/${testDelivery.body.id}`,
+		)
+		while (fetchedDelivery.body.status === "pending" && Date.now() < localEgressDeadline) {
+			await sleep(150)
+			fetchedDelivery = await apiJson<DeliveryBody>(
+				`/v1/webhooks/${webhookId}/deliveries/${testDelivery.body.id}`,
+			)
+		}
+		expect(fetchedDelivery.status).toBe(200)
+		expect(fetchedDelivery.body.id).toBe(testDelivery.body.id)
+		expect(fetchedDelivery.body.status).toBe("failed")
+		expect(fetchedDelivery.body.last_outcome).toBe("network_error")
+
+		const afterLocalRefusal = await apiJson<
+			WebhookBody & {
+				readonly consecutive_failures: number
+				readonly last_failure_at: string | null
+			}
+		>(`/v1/webhooks/${webhookId}`)
+		expect(afterLocalRefusal.status).toBe(200)
+		expect(afterLocalRefusal.body.status).toBe("active")
+		expect(afterLocalRefusal.body.consecutive_failures).toBe(0)
+		expect(afterLocalRefusal.body.last_failure_at).toBeNull()
+
+		// Creating an agent triggers PublishWebhookEvents -> WebhookEventsLive -> WebhookDeliverer DO SQLite.
+		const triggeredAgent = await apiJson<{ readonly id: string }>("/v1/agents", {
+			method: "POST",
+			body: { name: "Webhook Fanout Agent", model: "gpt-4o-mini" },
+		})
+		expect(triggeredAgent.status).toBe(201)
+
+		const deliveryDeadline = Date.now() + 15_000
+		let eventTypes: ReadonlyArray<string> = []
+		while (!eventTypes.includes("agent.created") && Date.now() < deliveryDeadline) {
+			const deliveriesPage = await apiJson<{ readonly data: ReadonlyArray<DeliveryBody> }>(
+				`/v1/webhooks/${webhookId}/deliveries?limit=50`,
+			)
+			expect(deliveriesPage.status).toBe(200)
+			eventTypes = deliveriesPage.body.data.map((item) => item.event_type)
+			if (!eventTypes.includes("agent.created")) {
+				await sleep(150)
+			}
+		}
+		expect(eventTypes).toContain("webhook.test")
+		expect(eventTypes).toContain("agent.created")
+
+		const paused = await apiJson<WebhookBody>(`/v1/webhooks/${webhookId}/pause`, {
+			method: "POST",
+		})
+		expect(paused.status).toBe(200)
+		expect(paused.body.status).toBe("paused")
+
+		const resumed = await apiJson<WebhookBody>(`/v1/webhooks/${webhookId}/resume`, {
+			method: "POST",
+		})
+		expect(resumed.status).toBe(200)
+		expect(resumed.body.status).toBe("active")
+
+		const deleted = await apiFetch(`/v1/webhooks/${webhookId}`, { method: "DELETE" })
+		expect(deleted.status).toBe(200)
+		expect((await apiFetch(`/v1/webhooks/${webhookId}`)).status).toBe(404)
 	}, 30_000)
 
 	it("calls MCP servers from scripts and, once found, directly, keeping the credential in its connection", async () => {

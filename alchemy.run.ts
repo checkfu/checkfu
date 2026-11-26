@@ -98,6 +98,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				observability: { enabled: true },
 				env: {
 					API: api,
+					CHECKFU_PUBLIC_API_URL: api.url.as<string>(),
 					...Option.match(dashboardKey, {
 						onNone: () => ({}),
 						onSome: (key) => ({ CHECKFU_API_KEY: key }),

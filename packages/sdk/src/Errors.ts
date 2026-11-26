@@ -10,6 +10,7 @@ const ApiErrorEnvelopeSchema = Schema.Struct({
 	error: Schema.Struct({
 		type: Schema.Literals(API_ERROR_TYPE_LITERALS),
 		message: Schema.String,
+		code: Schema.optionalKey(Schema.String),
 	}),
 	request_id: Schema.optional(Schema.String),
 	accepted: Schema.optional(Schema.Array(Schema.Unknown)),
