@@ -19,11 +19,14 @@ import {
 	SessionId,
 	sessionEventId,
 	submittedSessionEventId,
+	toolUseEventId,
+	toolUseIdFromEvent,
 } from "@checkfu/domain/Session/Session.id"
 import {
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_MESSAGE_TEXT_LENGTH,
 	MessageText,
+	ResourceId,
 	decodeToolUseIds,
 } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
@@ -151,6 +154,11 @@ type PreparedEvent =
 			readonly is_error: boolean
 	  }
 
+const readToolUseId = (sessionId: string, eventId: string) =>
+	Schema.decodeEffect(ResourceId)(toolUseIdFromEvent(sessionId, eventId)).pipe(
+		Effect.catch(() => reject(400, "Invalid tool use ID.")),
+	)
+
 const eventFields = (item: PreparedEvent) => {
 	switch (item.type) {
 		case "user.interrupt":
@@ -241,7 +249,9 @@ export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): S
 		case "agent.thinking":
 			return { ...base, type }
 		case "session.status_idle": {
-			const unanswered = decodeToolUseIds(event.event_ids ?? "[]")
+			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
+				toolUseEventId(id, call),
+			)
 			return event.stop_reason.type === "requires_action"
 				? {
 						...base,
@@ -258,7 +268,9 @@ export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): S
 					}
 		}
 		case "session.status_terminated": {
-			const unanswered = decodeToolUseIds(event.event_ids ?? "[]")
+			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
+				toolUseEventId(id, call),
+			)
 			return {
 				...base,
 				type,
@@ -269,6 +281,19 @@ export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): S
 			return { ...base, type }
 		default: {
 			const payload = { ...base, type, ...fields }
+			if ("tool_use_id" in payload) {
+				payload.tool_use_id = toolUseEventId(id, payload.tool_use_id)
+				if (
+					type === "agent.tool_use" ||
+					type === "agent.mcp_tool_use" ||
+					type === "agent.custom_tool_use"
+				) {
+					payload.id = payload.tool_use_id
+				}
+			}
+			if ("custom_tool_use_id" in payload) {
+				payload.custom_tool_use_id = toolUseEventId(id, payload.custom_tool_use_id)
+			}
 			if (isSessionEvent(payload)) {
 				return payload
 			}
@@ -670,7 +695,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								type: "user.tool_confirmation",
 								eventId: event.id,
 								commandId,
-								tool_use_id: event.tool_use_id,
+								tool_use_id: yield* readToolUseId(id, event.tool_use_id),
 								result: event.result,
 								deny_message: event.deny_message ?? "",
 							})
@@ -688,7 +713,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								type: "user.custom_tool_result",
 								eventId: event.id,
 								commandId,
-								custom_tool_use_id: event.custom_tool_use_id,
+								custom_tool_use_id: yield* readToolUseId(id, event.custom_tool_use_id),
 								text: resultText,
 								is_error: event.is_error === true,
 							})
@@ -765,8 +790,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 												type: "user.tool_confirmation" as const,
 												id: eventId,
 												processed_at: null,
-												tool_use_id: item.tool_use_id,
+												tool_use_id: toolUseEventId(id, item.tool_use_id),
 												result: item.result,
+												...(item.deny_message === "" ? {} : { deny_message: item.deny_message }),
 											}),
 										),
 									)
@@ -789,7 +815,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 													type: "user.custom_tool_result" as const,
 													id: eventId,
 													processed_at: null,
-													custom_tool_use_id: item.custom_tool_use_id,
+													custom_tool_use_id: toolUseEventId(id, item.custom_tool_use_id),
+													content: [{ type: "text" as const, text: item.text }],
+													...(item.is_error ? { is_error: true } : {}),
 												}),
 											),
 										)

@@ -21,7 +21,7 @@ import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
 import { encodeAgentTools, encodeMcpServers } from "@checkfu/domain/Mcp/McpServers"
 import { AbandonTurn } from "@checkfu/domain/Session/AbandonTurn.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
-import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionId, toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
 import { idempotentCommandId } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { conversationName } from "../src/Pi/PiDurableHarness.ts"
@@ -371,7 +371,7 @@ describe("tool calls that wait on an answer", () => {
 				})
 				expect(use.name?.length).toBeLessThanOrEqual(MAX_PUBLIC_TOOL_NAME_LENGTH)
 				expect(idles(paused).at(-1)).toMatchObject({
-					stop_reason: { type: "requires_action", event_ids: [use.tool_use_id] },
+					stop_reason: { type: "requires_action", event_ids: [use.id] },
 				})
 				expect(ran).toEqual([])
 				expect((yield* send(call, id, [confirm(use.tool_use_id, "allow")])).status).toBe(200)
@@ -396,13 +396,13 @@ describe("tool calls that wait on an answer", () => {
 					evaluated_permission: "ask",
 				})
 				expect(idles(paused).at(-1)).toMatchObject({
-					stop_reason: { type: "requires_action", event_ids: [use.tool_use_id] },
+					stop_reason: { type: "requires_action", event_ids: [use.id] },
 					turn: 1,
 				})
 				expect((yield* call("GET", `/v1/sessions/${id}`)).body.status).toBe("idle")
 				expect(ran).toEqual([])
 
-				const answered = yield* send(call, id, [confirm(use.tool_use_id, "allow")])
+				const answered = yield* send(call, id, [confirm(use.id, "allow")])
 				expect(answered.status).toBe(200)
 				expect(answered.body.data).toEqual([
 					{
@@ -554,7 +554,7 @@ describe("tool calls that wait on an answer", () => {
 				expect(idles(all).at(-1)).toMatchObject({
 					stop_reason: { type: "interrupted" },
 					turn: 1,
-					cancelled_event_ids: [use.tool_use_id],
+					cancelled_event_ids: [use.id],
 				})
 				const late = yield* send(call, id, [confirm(use.tool_use_id, "allow")])
 				expect(late.status).toBe(409)
@@ -583,7 +583,7 @@ describe("tool calls that wait on an answer", () => {
 					"not archived",
 				)
 				expect(find(all, "session.status_terminated")).toMatchObject({
-					cancelled_event_ids: [use.tool_use_id],
+					cancelled_event_ids: [use.id],
 				})
 				expect((yield* send(call, id, [confirm(use.tool_use_id, "allow")])).status).toBe(409)
 				expect(ran).toEqual([])
@@ -610,7 +610,7 @@ describe("tool calls that wait on an answer", () => {
 				expect(idles(all)[0]).toMatchObject({
 					stop_reason: { type: "interrupted" },
 					turn: 1,
-					cancelled_event_ids: [use.tool_use_id],
+					cancelled_event_ids: [use.id],
 				})
 				expect(all.findIndex((e) => e.type === "user.interrupt")).toBeLessThan(
 					all.findIndex((e) => e.type === "session.status_idle"),
@@ -739,8 +739,9 @@ describe("tool calls that wait on an answer", () => {
 					yield* until(call, second, waiting(1), "no second pause"),
 					"agent.mcp_tool_use",
 				)
-				expect(b.tool_use_id).toBe(a.tool_use_id)
-				yield* send(call, first, [confirm(a.tool_use_id, "deny")])
+				expect(b.id).not.toBe(a.id)
+				expect((yield* send(call, second, [confirm(a.id, "allow")])).status).toBe(409)
+				yield* send(call, first, [confirm(toolUseIdFromEvent(first, a.id), "deny")])
 				yield* until(call, first, ended, "first turn did not end")
 				expect(idles(yield* events(call, second)).at(-1)).toMatchObject({
 					stop_reason: { type: "requires_action", event_ids: [b.tool_use_id] },
@@ -803,7 +804,7 @@ describe("custom tools", () => {
 				const answered = yield* send(call, id, [
 					{
 						type: "user.custom_tool_result",
-						custom_tool_use_id: use.tool_use_id,
+						custom_tool_use_id: use.id,
 						content: [{ type: "text", text: "shipped" }],
 					},
 				])
@@ -814,6 +815,7 @@ describe("custom tools", () => {
 						type: "user.custom_tool_result",
 						processed_at: null,
 						custom_tool_use_id: use.tool_use_id,
+						content: [{ type: "text", text: "shipped" }],
 					},
 				])
 				const all = yield* until(call, id, ended, "turn did not end")

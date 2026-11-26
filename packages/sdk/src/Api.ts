@@ -63,6 +63,7 @@ import {
 	AgentTools,
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
+	MAX_IDENTIFIER_LENGTH,
 	CancelledEventIds,
 	RequiresActionStopReason,
 	StopReason,
@@ -715,6 +716,11 @@ export const ClientEventId = Schema.String.check(
 )
 export type ClientEventId = typeof ClientEventId.Type
 
+const ToolUseEventId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(2 * MAX_IDENTIFIER_LENGTH + "sevt__tool_".length),
+)
+
 export const SendSessionEventsBody = Schema.Struct({
 	events: Schema.Array(
 		Schema.Union([
@@ -732,7 +738,7 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.tool_confirmation"),
-				tool_use_id: ResourceId.annotate({
+				tool_use_id: ToolUseEventId.annotate({
 					description: "The agent.mcp_tool_use event that waits for this answer",
 				}),
 				result: ToolConfirmationResult,
@@ -743,7 +749,7 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.custom_tool_result"),
-				custom_tool_use_id: ResourceId.annotate({
+				custom_tool_use_id: ToolUseEventId.annotate({
 					description: "The agent.custom_tool_use event this result answers",
 				}),
 				content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }))
@@ -1110,8 +1116,9 @@ export const UserToolConfirmationEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.tool_confirmation"),
 	id: Schema.String,
 	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
-	tool_use_id: ResourceId,
+	tool_use_id: ToolUseEventId,
 	result: ToolConfirmationResult,
+	deny_message: Schema.optionalKey(DenyMessage),
 })
 export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventReceipt.Type
 
@@ -1119,7 +1126,9 @@ export const UserCustomToolResultEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.custom_tool_result"),
 	id: Schema.String,
 	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
-	custom_tool_use_id: ResourceId,
+	custom_tool_use_id: ToolUseEventId,
+	content: Schema.optionalKey(TextBlocks),
+	is_error: Schema.optionalKey(Schema.Boolean),
 })
 export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
 
@@ -1157,18 +1166,18 @@ export const UserInterruptSessionEvent = wireSessionEvent(
 	"user.interrupt",
 	SessionEventFields["user.interrupt"],
 ).annotate({ description: "An interrupt that stops the agent's current turn." })
-export const UserToolConfirmationSessionEvent = wireSessionEvent(
-	"user.tool_confirmation",
-	SessionEventFields["user.tool_confirmation"],
-)
-export const UserCustomToolResultSessionEvent = wireSessionEvent(
-	"user.custom_tool_result",
-	SessionEventFields["user.custom_tool_result"],
-)
-export const AgentCustomToolUseSessionEvent = wireSessionEvent(
-	"agent.custom_tool_use",
-	SessionEventFields["agent.custom_tool_use"],
-)
+export const UserToolConfirmationSessionEvent = wireSessionEvent("user.tool_confirmation", {
+	...SessionEventFields["user.tool_confirmation"],
+	tool_use_id: ToolUseEventId,
+})
+export const UserCustomToolResultSessionEvent = wireSessionEvent("user.custom_tool_result", {
+	...SessionEventFields["user.custom_tool_result"],
+	custom_tool_use_id: ToolUseEventId,
+})
+export const AgentCustomToolUseSessionEvent = wireSessionEvent("agent.custom_tool_use", {
+	...SessionEventFields["agent.custom_tool_use"],
+	tool_use_id: ToolUseEventId,
+})
 export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
 	...SessionEventFields["session.status_running"],
 	turn: Schema.optionalKey(PositiveInt),
@@ -1179,30 +1188,30 @@ export const SpanModelRequestStartEvent = wireSessionEvent(
 ).annotate({ description: "A model request started." })
 const TOOL_CALL_RECORD =
 	"A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
-export const AgentToolUseSessionEvent = wireSessionEvent(
-	"agent.tool_use",
-	SessionEventFields["agent.tool_use"],
-).annotate({ description: `The agent called a tool. ${TOOL_CALL_RECORD}` })
-export const AgentToolResultSessionEvent = wireSessionEvent(
-	"agent.tool_result",
-	SessionEventFields["agent.tool_result"],
-).annotate({
+export const AgentToolUseSessionEvent = wireSessionEvent("agent.tool_use", {
+	...SessionEventFields["agent.tool_use"],
+	tool_use_id: ToolUseEventId,
+}).annotate({ description: `The agent called a tool. ${TOOL_CALL_RECORD}` })
+export const AgentToolResultSessionEvent = wireSessionEvent("agent.tool_result", {
+	...SessionEventFields["agent.tool_result"],
+	tool_use_id: ToolUseEventId,
+}).annotate({
 	description: `The result of a tool call, including why the call was rejected when applicable. ${TOOL_CALL_RECORD}`,
 })
-export const AgentMcpToolUseSessionEvent = wireSessionEvent(
-	"agent.mcp_tool_use",
-	SessionEventFields["agent.mcp_tool_use"],
-).annotate({ description: `Records an MCP call the model made. ${TOOL_CALL_RECORD}` })
-export const AgentMcpToolResultSessionEvent = wireSessionEvent(
-	"agent.mcp_tool_result",
-	SessionEventFields["agent.mcp_tool_result"],
-).annotate({
+export const AgentMcpToolUseSessionEvent = wireSessionEvent("agent.mcp_tool_use", {
+	...SessionEventFields["agent.mcp_tool_use"],
+	tool_use_id: ToolUseEventId,
+}).annotate({ description: `Records an MCP call the model made. ${TOOL_CALL_RECORD}` })
+export const AgentMcpToolResultSessionEvent = wireSessionEvent("agent.mcp_tool_result", {
+	...SessionEventFields["agent.mcp_tool_result"],
+	tool_use_id: ToolUseEventId,
+}).annotate({
 	description: `Records what an MCP call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
 })
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
-).annotate({ description: "The agent's thinking text when the model returns it." })
+).annotate({ description: "The agent is thinking." })
 export const AgentMessageSessionEvent = wireSessionEvent(
 	"agent.message",
 	SessionEventFields["agent.message"],

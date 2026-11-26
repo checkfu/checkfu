@@ -2370,12 +2370,12 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					input: { path: "/workspace/notes.md", lines: [1, 20] },
 				}),
 				expectedJson: {
-					id: `sevt_${sessionId}_5`,
+					id: `sevt_${sessionId}_tool_call_1`,
 					seq: 5,
 					type: "agent.tool_use",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
-					tool_use_id: "call_1",
+					tool_use_id: `sevt_${sessionId}_tool_call_1`,
 					name: "read",
 					input: { path: "/workspace/notes.md", lines: [1, 20] },
 				},
@@ -2393,7 +2393,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					type: "agent.tool_result",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
-					tool_use_id: "call_1",
+					tool_use_id: `sevt_${sessionId}_tool_call_1`,
 					content: [{ type: "text", text: "# Notes" }],
 					is_error: false,
 					truncated: true,
@@ -2514,12 +2514,12 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					input: { query: "rate limits" },
 				}),
 				expectedJson: {
-					id: `sevt_${sessionId}_14`,
+					id: `sevt_${sessionId}_tool_tu_9`,
 					seq: 14,
 					type: "agent.mcp_tool_use",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
-					tool_use_id: "tu_9",
+					tool_use_id: `sevt_${sessionId}_tool_tu_9`,
 					mcp_server_name: "docs",
 					name: "search",
 					input: { query: "rate limits" },
@@ -2537,7 +2537,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					type: "agent.mcp_tool_result",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
-					tool_use_id: "tu_9",
+					tool_use_id: `sevt_${sessionId}_tool_tu_9`,
 					content: [{ type: "text", text: "60 per minute" }],
 					is_error: false,
 				},
@@ -2549,12 +2549,12 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					input: { order: 42 },
 				}),
 				expectedJson: {
-					id: `sevt_${sessionId}_16`,
+					id: `sevt_${sessionId}_tool_tu_20`,
 					seq: 16,
 					type: "agent.custom_tool_use",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
-					tool_use_id: "tu_20",
+					tool_use_id: `sevt_${sessionId}_tool_tu_20`,
 					name: "lookup_order",
 					input: { order: 42 },
 				},
@@ -2571,7 +2571,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					type: "session.status_idle",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
-					stop_reason: { type: "requires_action", event_ids: ["tu_20", "tu_21"] },
+					stop_reason: {
+						type: "requires_action",
+						event_ids: [`sevt_${sessionId}_tool_tu_20`, `sevt_${sessionId}_tool_tu_21`],
+					},
 					turn: 1,
 				},
 			},
@@ -2587,7 +2590,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					type: "user.tool_confirmation",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: null,
-					tool_use_id: "tu_21",
+					tool_use_id: `sevt_${sessionId}_tool_tu_21`,
 					result: "deny",
 					deny_message: "No",
 				},
@@ -2604,7 +2607,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					type: "user.custom_tool_result",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: null,
-					custom_tool_use_id: "tu_20",
+					custom_tool_use_id: `sevt_${sessionId}_tool_tu_20`,
 					content: [{ type: "text", text: "shipped" }],
 					is_error: true,
 				},
@@ -2746,8 +2749,14 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						event: generated as DomainSessionEvent,
 					})
 					const encoded = encodeEvent(mapped)
+					const expectedId =
+						mapped.type === "agent.tool_use" ||
+						mapped.type === "agent.mcp_tool_use" ||
+						mapped.type === "agent.custom_tool_use"
+							? mapped.tool_use_id
+							: `sevt_sess_generated_${seq}`
 					expect(encoded).toMatchObject({
-						id: `sevt_sess_generated_${seq}`,
+						id: expectedId,
 						seq,
 						type: eventSchema.tag,
 						created_at: "2026-01-01T00:00:00.000Z",

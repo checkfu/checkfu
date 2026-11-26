@@ -2700,7 +2700,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											tool_use_id: {
 												type: "string",
 												minLength: 1,
-												maxLength: 256,
+												maxLength: 523,
 												description: "The agent.mcp_tool_use event that waits for this answer",
 											},
 											result: {
@@ -2732,7 +2732,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											custom_tool_use_id: {
 												type: "string",
 												minLength: 1,
-												maxLength: 256,
+												maxLength: 523,
 												description: "The agent.custom_tool_use event this result answers",
 											},
 											content: {
