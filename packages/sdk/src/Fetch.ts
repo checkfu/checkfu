@@ -3,7 +3,7 @@ import { CLIENT_EVENT_ID_MESSAGE, isClientEventId } from "./IdempotencyKey.ts"
 import { SDK_OPERATION_BINDINGS } from "./generated/OperationBindings.ts"
 import type { CheckfuOperations } from "./generated/Resources.ts"
 import { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./PathSegment.ts"
-import type { BodyOf, JsonResultOf, PathOf, QueryOf } from "./Runtime.ts"
+import type { JsonBodyOf, JsonResultOf, PathOf, QueryOf } from "./Runtime.ts"
 
 type Binding = (typeof SDK_OPERATION_BINDINGS)[number]
 type BindingOf<Op extends OperationId> = Extract<Binding, { readonly operationId: Op }>
@@ -30,8 +30,8 @@ type QueryField<Op extends OperationId> = BindingOf<Op>["queryParams"] extends r
 type BodyField<Op extends OperationId> = BindingOf<Op>["hasBody"] extends false
 	? { readonly body?: never }
 	: BindingOf<Op>["bodyRequired"] extends true
-		? { readonly body: BodyOf<Shape<Op>> }
-		: { readonly body?: BodyOf<Shape<Op>> }
+		? { readonly body: JsonBodyOf<Shape<Op>> }
+		: { readonly body?: JsonBodyOf<Shape<Op>> }
 
 type KeyField<Op extends OperationId> = BindingOf<Op>["requiresIdempotencyKey"] extends true
 	? { readonly idempotencyKey: string }
@@ -115,7 +115,13 @@ export interface FetchClientOptions {
 	readonly headers?: HeadersInit
 }
 
-type QueryValue = string | number | boolean | null | undefined
+type QueryValue =
+	| string
+	| number
+	| boolean
+	| ReadonlyArray<string | number | boolean>
+	| null
+	| undefined
 
 interface RawInput {
 	readonly path?: Readonly<Record<string, string | number>>
@@ -178,10 +184,13 @@ const urlOf = (binding: Binding, input: RawInput): string => {
 			}
 			return []
 		}
-		if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-			throw new Error(`Invalid ${name}: must be a string, number or boolean.`)
-		}
-		return [[name, String(value)]]
+		const values: ReadonlyArray<unknown> = Array.isArray(value) ? value : [value]
+		return values.map((item) => {
+			if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean") {
+				throw new Error(`Invalid ${name}: must be a string, number or boolean.`)
+			}
+			return [name, String(item)] as const
+		})
 	})
 	const path = binding.pathParams.reduce<string>((url, name) => {
 		const value: unknown = input.path?.[name]
@@ -217,7 +226,8 @@ export const operationUrl = <Op extends OperationId>(
 ): string => urlOf(bindingOf(operationId), checkedOptions(operationId, input ?? {}, URL_OPTIONS))
 
 export const createFetchClient = (options: FetchClientOptions = {}): FetchClient => {
-	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
+	const send: typeof globalThis.fetch =
+		options.fetch ?? ((input, init) => globalThis.fetch(input, init))
 	const defaults = new Headers(options.headers)
 	if (defaults.has("idempotency-key")) {
 		throw new Error(

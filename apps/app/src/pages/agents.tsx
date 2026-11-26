@@ -24,10 +24,12 @@ import {
 	changesFromSource,
 	draftOf,
 	emptyDraft,
-	FIELD_LABELS,
+	hasProblems,
+	problemsOf,
 	rebase,
 } from "../agent-draft.ts"
 import type { AgentDraft } from "../agent-draft.ts"
+import { AgentToolsFields, AgentToolsSummary } from "./agent-tools.tsx"
 
 import { readAgentSource } from "../agent-source.ts"
 import type { AgentSourceCodec, AgentSourceReading } from "../agent-source.ts"
@@ -43,7 +45,7 @@ const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(agentsPage(search.after)).data
+	const page = useSuspenseQuery(agentsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -106,7 +108,7 @@ export function AgentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_page} paged={search.page !== undefined} />
 		</>
 	)
 }
@@ -134,7 +136,7 @@ function AgentForm<Saved>({
 }: {
 	readonly draft: AgentDraft
 	readonly onChange: (draft: AgentDraft) => void
-	readonly sourceBody?: (draft: AgentDraft) => AgentDraft
+	readonly sourceBody?: (draft: AgentDraft) => CreateAgentBody
 	readonly submitLabel: string
 	readonly notice?: (canRebase: boolean) => React.ReactNode
 	readonly onSubmit: (submission: AgentSubmission) => Promise<Saved>
@@ -146,7 +148,7 @@ function AgentForm<Saved>({
 	const [source, setSource] = useState<SourceEdit>()
 	const load = useAction(loadAgentSource, {
 		then: (codec) => {
-			const text = codec.agentDefinitionYaml(sourceBody?.(draft) ?? draft)
+			const text = codec.agentDefinitionYaml(sourceBody?.(draft) ?? bodyOf(draft))
 			setSource({ codec, text, reading: readAgentSource(codec, text), touched: false })
 		},
 	})
@@ -159,6 +161,8 @@ function AgentForm<Saved>({
 			onChange({ ...draft, [field]: value })
 		}
 	const invalidSource = source?.touched === true && source.reading.body === undefined
+	const problems = problemsOf(draft)
+	const invalidForm = !showYaml && hasProblems(problems)
 	const editNotice = notice?.(!invalidSource)
 	const changeSource = (text: string) => {
 		if (source === undefined) {
@@ -175,7 +179,7 @@ function AgentForm<Saved>({
 			className="max-w-2xl"
 			onSubmit={(event) => {
 				event.preventDefault()
-				if (editNotice !== undefined || invalidSource) {
+				if (editNotice !== undefined || invalidSource || invalidForm) {
 					return
 				}
 				if (!showYaml && source?.touched !== true) {
@@ -229,6 +233,14 @@ function AgentForm<Saved>({
 						<Field label="Description">
 							<Input value={draft.description ?? ""} onChange={set("description")} />
 						</Field>
+						<AgentToolsFields
+							draft={draft}
+							problems={problems}
+							onChange={(next) => {
+								setSource(undefined)
+								onChange(next)
+							}}
+						/>
 					</div>
 				)}
 				{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
@@ -240,6 +252,7 @@ function AgentForm<Saved>({
 							action.pending ||
 							editNotice !== undefined ||
 							invalidSource ||
+							invalidForm ||
 							(showYaml && source?.reading.body === undefined)
 						}
 					>
@@ -312,17 +325,23 @@ const editNotice = (
 	if (agent.version <= edit.base.version) {
 		return undefined
 	}
-	const { draft, overlapping } = rebase(edit.base, edit.draft, agent)
+	const { draft, overlapping, orphaned } = rebase(edit.base, edit.draft, agent)
 	return (
-		<Callout>
+		<Callout tone={orphaned.length === 0 ? "info" : "error"}>
 			<p>
 				This agent was saved as v{agent.version} while you were editing v{edit.base.version}.
 				{canRebase
 					? overlapping.length === 0
 						? " Your changes can be applied to the newer version."
-						: ` Applying your edits will replace the newer ${overlapping.map((field) => FIELD_LABELS[field]).join(", ")}.`
+						: ` Applying your edits will replace the newer ${overlapping.join(", ")}.`
 					: " Fix the YAML errors before applying your edits to the newer version."}
 			</p>
+			{orphaned.map((name) => (
+				<p key={name}>
+					You edited MCP server {name}, which v{agent.version} renamed or removed. Applying your
+					edits adds your version of {name} back to the draft.
+				</p>
+			))}
 			<Button
 				size="sm"
 				variant="outline"
@@ -412,6 +431,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 							{agent.system ?? "None"}
 						</pre>
 					</section>
+					<AgentToolsSummary agent={agent} />
 				</AgentConfigurationView>
 			) : (
 				<AgentForm

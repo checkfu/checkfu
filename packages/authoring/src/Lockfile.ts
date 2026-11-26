@@ -9,7 +9,6 @@ const resourceKey = Schema.String.check(
 	Schema.isPattern(/^\.\/(?!\.\.?(?:\/|$))(?!.*\/\.\.?(?:\/|$))[^\\]+$/u),
 )
 const resourceId = Schema.String.check(Schema.isPattern(/^(?:agent|env|auto)_[A-Za-z0-9_-]+$/u))
-const version = Schema.optionalKey(PositiveInt)
 
 const LockEntry = Schema.Struct({
 	kind: Schema.Literals(resourceKinds),
@@ -28,7 +27,11 @@ const PendingCreate = Schema.Union([
 		kind: Schema.Literal("automation"),
 		...pendingIdentity,
 		dependencies: Schema.Struct({
-			agent: Schema.Struct({ id: ResourceId, version, path: Schema.optionalKey(resourceKey) }),
+			agent: Schema.Struct({
+				id: ResourceId,
+				version: PositiveInt,
+				path: Schema.optionalKey(resourceKey),
+			}),
 			environment_id: Schema.Struct({ id: ResourceId, path: Schema.optionalKey(resourceKey) }),
 		}),
 	}),

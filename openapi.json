@@ -1274,12 +1274,12 @@
 				"operationId": "agents.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -1536,23 +1536,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -6105,12 +6101,12 @@
 				"operationId": "environments.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -6279,23 +6275,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -10203,7 +10195,7 @@
 						}
 					}
 				},
-				"description": "Create an agent instance in an environment. Send a user.message event to start work.",
+				"description": "Create an agent instance in an environment. Include initial user messages to start work immediately.",
 				"summary": "Create a session",
 				"requestBody": {
 					"content": {
@@ -10273,8 +10265,8 @@
 											"required": ["type", "content"],
 											"additionalProperties": false
 										},
-										"maxItems": 1,
-										"description": "A text user message to send when the session is created."
+										"maxItems": 50,
+										"description": "User messages to send in order when the session is created."
 									},
 									"environment_id": {
 										"type": "string",
@@ -10348,7 +10340,7 @@
 					"repeatArrayField": {
 						"field": "initial_events",
 						"flag": "initial-event",
-						"description": "Initial user message as JSON, YAML, or @file"
+						"description": "Initial user message as JSON, YAML, or @file (repeatable, up to 50)"
 					},
 					"examples": [
 						{
@@ -10363,12 +10355,12 @@
 				"operationId": "sessions.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -10729,23 +10721,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -13061,6 +13049,42 @@
 														},
 														"type": {
 															"type": "string",
+															"enum": ["system.message"]
+														},
+														"content": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["text"]
+																	},
+																	"text": {
+																		"type": "string"
+																	}
+																},
+																"required": ["type", "text"],
+																"additionalProperties": false
+															},
+															"minItems": 1,
+															"maxItems": 1000
+														}
+													},
+													"required": ["type", "content"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+															"minLength": 1,
+															"maxLength": 128
+														},
+														"type": {
+															"type": "string",
 															"enum": ["user.tool_confirmation"]
 														},
 														"tool_use_id": {
@@ -13185,12 +13209,12 @@
 						"required": true
 					},
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+							"description": "Opaque pagination cursor from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -13201,6 +13225,39 @@
 							"type": "string",
 							"pattern": "^(?:[1-9]\\d?|100)$",
 							"description": "Maximum number of events to return (1-100)"
+						},
+						"required": false
+					},
+					{
+						"name": "types",
+						"in": "query",
+						"schema": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"enum": [
+									"system.message",
+									"user.message",
+									"user.interrupt",
+									"user.tool_confirmation",
+									"user.custom_tool_result",
+									"session.status_running",
+									"span.model_request_start",
+									"agent.tool_use",
+									"agent.tool_result",
+									"agent.mcp_tool_use",
+									"agent.mcp_tool_result",
+									"agent.custom_tool_use",
+									"agent.thinking",
+									"agent.message",
+									"span.model_request_end",
+									"session.status_idle",
+									"session.error",
+									"session.status_terminated",
+									"session.archived"
+								]
+							},
+							"description": "Return events with one of these types."
 						},
 						"required": false
 					},
@@ -13237,21 +13294,19 @@
 												"$ref": "#/components/schemas/SessionEvent"
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "number"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -13594,7 +13649,7 @@
 						}
 					}
 				},
-				"description": "List persisted events for a session. Use the returned cursor to continue through its history.",
+				"description": "List persisted events for a session. Use next_page to continue through its history.",
 				"summary": "List session events",
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "list",
@@ -13606,11 +13661,11 @@
 					"name": "sessions_listEvents"
 				},
 				"x-checkfu-cli": {
+					"repeatArrayField": {
+						"field": "types",
+						"flag": "type"
+					},
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,
@@ -13635,6 +13690,20 @@
 							"description": "Session ID"
 						},
 						"required": true
+					},
+					{
+						"name": "event_deltas[]",
+						"in": "query",
+						"schema": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"enum": ["agent.message", "agent.thinking"]
+							},
+							"maxItems": 100,
+							"description": "Event types to preview on this connection."
+						},
+						"required": false
 					},
 					{
 						"name": "after",
@@ -13676,7 +13745,18 @@
 											"type": "string"
 										},
 										"data": {
-											"$ref": "#/components/schemas/SessionEventEncoded"
+											"type": "string",
+											"contentMediaType": "application/json",
+											"contentSchema": {
+												"anyOf": [
+													{
+														"$ref": "#/components/schemas/SessionEvent"
+													},
+													{
+														"$ref": "#/components/schemas/SessionEventPreview"
+													}
+												]
+											}
 										}
 									},
 									"required": ["event", "data"],
@@ -14755,16 +14835,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -15354,7 +15427,7 @@
 												"additionalProperties": false
 											}
 										],
-										"description": "Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type \"agent\", id, and version to pin a specific version."
+										"description": "Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
 									"environment_id": {
 										"type": "string",
@@ -15458,12 +15531,12 @@
 				"operationId": "automations.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -15633,16 +15706,9 @@
 																"type": "string"
 															},
 															"version": {
-																"anyOf": [
-																	{
-																		"type": "integer",
-																		"minimum": 1,
-																		"maximum": 9007199254740991
-																	},
-																	{
-																		"type": "null"
-																	}
-																]
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
 															}
 														},
 														"required": ["id", "version"],
@@ -15717,23 +15783,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -16234,16 +16296,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -16804,16 +16859,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -17409,7 +17457,7 @@
 												"additionalProperties": false
 											}
 										],
-										"description": "Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type \"agent\", id, and version to pin a specific version."
+										"description": "Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
 									"environment_id": {
 										"type": "string",
@@ -17636,16 +17684,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -18233,16 +18274,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -18830,16 +18864,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -19428,16 +19455,9 @@
 													"type": "string"
 												},
 												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
-														},
-														{
-															"type": "null"
-														}
-													]
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
 											},
 											"required": ["id", "version"],
@@ -20431,12 +20451,12 @@
 						"required": true
 					},
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+							"description": "Opaque pagination cursor from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -20530,34 +20550,20 @@
 														]
 													},
 													"agent": {
-														"anyOf": [
-															{
-																"type": "object",
-																"properties": {
-																	"id": {
-																		"type": "string"
-																	},
-																	"version": {
-																		"anyOf": [
-																			{
-																				"type": "integer",
-																				"minimum": 1,
-																				"maximum": 9007199254740991
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	}
-																},
-																"required": ["id", "version"],
-																"additionalProperties": false
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string"
 															},
-															{
-																"type": "null"
+															"version": {
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
 															}
-														],
-														"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent."
+														},
+														"required": ["id", "version"],
+														"additionalProperties": false,
+														"description": "The agent and version pinned for this run."
 													},
 													"session_id": {
 														"anyOf": [
@@ -20607,21 +20613,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "number"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -20977,10 +20981,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,
@@ -21081,34 +21081,20 @@
 											]
 										},
 										"agent": {
-											"anyOf": [
-												{
-													"type": "object",
-													"properties": {
-														"id": {
-															"type": "string"
-														},
-														"version": {
-															"anyOf": [
-																{
-																	"type": "integer",
-																	"minimum": 1,
-																	"maximum": 9007199254740991
-																},
-																{
-																	"type": "null"
-																}
-															]
-														}
-													},
-													"required": ["id", "version"],
-													"additionalProperties": false
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
 												},
-												{
-													"type": "null"
+												"version": {
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
 												}
-											],
-											"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent."
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false,
+											"description": "The agent and version pinned for this run."
 										},
 										"session_id": {
 											"anyOf": [
@@ -22207,12 +22193,12 @@
 				"operationId": "artifacts.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -22344,23 +22330,19 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -28349,12 +28331,12 @@
 				"operationId": "vaults.list",
 				"parameters": [
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -28411,23 +28393,19 @@
 												"$ref": "#/components/schemas/Vault"
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -29744,6 +29722,11 @@
 											"type": "string",
 											"enum": ["vault_deleted"]
 										},
+										"secrets": {
+											"type": "string",
+											"enum": ["erased"],
+											"description": "erased once the vault's storage confirmed every secret gone; erasing while that finishes in the background"
+										},
 										"custody": {
 											"type": "object",
 											"properties": {
@@ -29770,7 +29753,58 @@
 											"additionalProperties": false
 										}
 									},
-									"required": ["id", "type", "custody"],
+									"required": ["id", "type", "secrets", "custody"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["vault_deleted"]
+										},
+										"secrets": {
+											"type": "string",
+											"enum": ["erasing"],
+											"description": "erased once the vault's storage confirmed every secret gone; erasing while that finishes in the background"
+										},
+										"custody": {
+											"type": "object",
+											"properties": {
+												"storing": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991,
+													"description": "Active credentials whose secrets are not yet confirmed stored"
+												},
+												"held": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991,
+													"description": "Active credentials whose secrets are held"
+												},
+												"erasing": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991,
+													"description": "Archived or deleted credentials whose secrets are not yet confirmed erased"
+												}
+											},
+											"required": ["storing", "held", "erasing"],
+											"additionalProperties": false
+										}
+									},
+									"required": ["id", "type", "secrets", "custody"],
 									"additionalProperties": false
 								}
 							}
@@ -30113,7 +30147,7 @@
 						}
 					}
 				},
-				"description": "Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"description": "Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 				"summary": "Delete a vault",
 				"x-forge-group-name": "vaults",
 				"x-forge-method-name": "delete",
@@ -30523,7 +30557,7 @@
 						}
 					}
 				},
-				"description": "Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"description": "Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
 				"summary": "Archive a vault",
 				"x-forge-group-name": "vaults",
 				"x-forge-method-name": "archive",
@@ -31126,12 +31160,12 @@
 						"required": true
 					},
 					{
-						"name": "after",
+						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -31188,23 +31222,19 @@
 												"$ref": "#/components/schemas/VaultCredential"
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
+										"next_page": {
 											"anyOf": [
 												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+													"type": "string"
 												},
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -32577,8 +32607,32 @@
 										},
 										"custody": {
 											"type": "string",
-											"enum": ["storing", "held", "erasing", "erased"],
-											"description": "Where the secret stands: storing until its storage confirms the secret, held while the credential is active, erasing once it is archived or deleted, erased once its storage confirmed the secret is gone"
+											"enum": ["erased"]
+										}
+									},
+									"required": ["id", "type", "custody"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["vault_credential_deleted"]
+										},
+										"custody": {
+											"type": "string",
+											"enum": ["erasing"]
 										}
 									},
 									"required": ["id", "type", "custody"],
@@ -32924,7 +32978,7 @@
 						}
 					}
 				},
-				"description": "Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"description": "Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
 				"summary": "Delete a credential",
 				"x-forge-group-name": "vaults.credentials",
 				"x-forge-method-name": "delete",
@@ -33348,7 +33402,7 @@
 						}
 					}
 				},
-				"description": "Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"description": "Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
 				"summary": "Archive a credential",
 				"x-forge-group-name": "vaults.credentials",
 				"x-forge-method-name": "archive",
@@ -33513,15 +33567,133 @@
 				],
 				"additionalProperties": false
 			},
-			"SessionEventEncoded": {
-				"type": "string",
-				"contentMediaType": "application/json",
-				"contentSchema": {
-					"$ref": "#/components/schemas/SessionEvent"
-				}
+			"SessionEventPreview": {
+				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"type": {
+								"type": "string",
+								"enum": ["event_start"]
+							},
+							"event": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"type": "string"
+									},
+									"type": {
+										"type": "string",
+										"enum": ["agent.message", "agent.thinking"]
+									}
+								},
+								"required": ["id", "type"],
+								"additionalProperties": false
+							}
+						},
+						"required": ["type", "event"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"type": {
+								"type": "string",
+								"enum": ["event_delta"]
+							},
+							"event_id": {
+								"type": "string"
+							},
+							"delta": {
+								"type": "object",
+								"properties": {
+									"type": {
+										"type": "string",
+										"enum": ["content_delta"]
+									},
+									"index": {
+										"type": "integer",
+										"minimum": 0,
+										"maximum": 9007199254740991
+									},
+									"content": {
+										"type": "object",
+										"properties": {
+											"type": {
+												"type": "string",
+												"enum": ["text"]
+											},
+											"text": {
+												"type": "string"
+											}
+										},
+										"required": ["type", "text"],
+										"additionalProperties": false
+									}
+								},
+								"required": ["type", "index", "content"],
+								"additionalProperties": false
+							}
+						},
+						"required": ["type", "event_id", "delta"],
+						"additionalProperties": false
+					}
+				]
 			},
 			"SessionEvent": {
 				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["system.message"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1,
+								"maxItems": 1000
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
+						"additionalProperties": false,
+						"description": "Privileged context appended to the session's system instructions."
+					},
 					{
 						"type": "object",
 						"properties": {
@@ -33569,7 +33741,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "A user message in the session conversation, with text content blocks."
 					},
@@ -33602,7 +33774,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "An interrupt that stops the agent's current turn."
 					},
@@ -33648,7 +33820,15 @@
 								"maxLength": 4096
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "result"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"result"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -33705,7 +33885,15 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "custom_tool_use_id", "content"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"custom_tool_use_id",
+							"content"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -33742,7 +33930,7 @@
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "turn"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "turn"],
 						"additionalProperties": false,
 						"description": "The agent is processing a turn."
 					},
@@ -33779,7 +33967,14 @@
 								"minLength": 1
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "model_request_start_id"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"model_request_start_id"
+						],
 						"additionalProperties": false,
 						"description": "A model request started."
 					},
@@ -33830,7 +34025,16 @@
 								"enum": [true]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"name",
+							"input"
+						],
 						"additionalProperties": false,
 						"description": "The agent called a tool. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -33896,7 +34100,16 @@
 								"enum": ["unavailable", "invalid_arguments", "blocked"]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"content",
+							"is_error"
+						],
 						"additionalProperties": false,
 						"description": "The result of a tool call, including why the call was rejected when applicable. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -33962,6 +34175,7 @@
 							"seq",
 							"type",
 							"created_at",
+							"processed_at",
 							"tool_use_id",
 							"mcp_server_name",
 							"name",
@@ -34032,7 +34246,16 @@
 								"enum": ["unavailable", "invalid_arguments", "blocked"]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"content",
+							"is_error"
+						],
 						"additionalProperties": false,
 						"description": "Records what an MCP call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -34078,7 +34301,16 @@
 								"type": "object"
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"name",
+							"input"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -34110,7 +34342,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "The agent is thinking."
 					},
@@ -34165,7 +34397,7 @@
 								"enum": [true]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "The agent's response, with text content blocks."
 					},
@@ -34234,6 +34466,7 @@
 							"seq",
 							"type",
 							"created_at",
+							"processed_at",
 							"model_request_start_id",
 							"model_usage",
 							"is_error"
@@ -34321,7 +34554,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "stop_reason", "turn"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "stop_reason", "turn"],
 						"additionalProperties": false,
 						"description": "The agent stopped processing a turn. See stop_reason for why it stopped."
 					},
@@ -34378,7 +34611,7 @@
 								"additionalProperties": false
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "error"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "error"],
 						"additionalProperties": false,
 						"description": "An error occurred while processing a turn. Includes the error and its retry status."
 					},
@@ -34418,7 +34651,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false
 					},
 					{
@@ -34450,13 +34683,48 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false
 					}
 				]
 			},
 			"SendSessionEventReceipt": {
 				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"type": {
+								"type": "string",
+								"enum": ["system.message"]
+							},
+							"id": {
+								"type": "string"
+							},
+							"processed_at": {
+								"type": "string"
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1
+							}
+						},
+						"required": ["type", "id", "processed_at", "content"],
+						"additionalProperties": false
+					},
 					{
 						"type": "object",
 						"properties": {
@@ -34504,7 +34772,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["type", "id", "turn", "queued", "content"],
+						"required": ["type", "id", "processed_at", "turn", "queued", "content"],
 						"additionalProperties": false
 					},
 					{
@@ -34528,7 +34796,7 @@
 								]
 							}
 						},
-						"required": ["type", "id"],
+						"required": ["type", "id", "processed_at"],
 						"additionalProperties": false
 					},
 					{
@@ -34565,7 +34833,7 @@
 								"maxLength": 4096
 							}
 						},
-						"required": ["type", "id", "tool_use_id", "result"],
+						"required": ["type", "id", "processed_at", "tool_use_id", "result"],
 						"additionalProperties": false
 					},
 					{
@@ -34615,7 +34883,7 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["type", "id", "custom_tool_use_id"],
+						"required": ["type", "id", "processed_at", "custom_tool_use_id"],
 						"additionalProperties": false
 					}
 				]

@@ -204,11 +204,15 @@ const projectOperation = (
 	const parameters = readParameters(pathItem, rawOperation, label)
 	for (const parameter of parameters) {
 		const type = parameter.schema["type"]
+		const itemType = recordAt(parameter.schema, "items")?.["type"]
+		const scalar = typeof type === "string" && SCALAR_TYPES.has(type)
+		const scalarArray =
+			type === "array" && typeof itemType === "string" && SCALAR_TYPES.has(itemType)
 		const forwarded =
 			parameter.in === "path"
 				? type === "string"
 				: parameter.in === "query"
-					? typeof type === "string" && SCALAR_TYPES.has(type)
+					? scalar || scalarArray
 					: parameter.in === "header" && parameter.name.toLowerCase() === IDEMPOTENCY_HEADER
 		if (!forwarded) {
 			throw new Error(

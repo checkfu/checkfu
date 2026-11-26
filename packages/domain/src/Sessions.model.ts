@@ -1,3 +1,5 @@
+import { SendSystemMessageDecision } from "./Session/SendSystemMessage.decision.ts"
+import { SystemContext } from "./Session/SystemContext.aggregate.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
@@ -6,6 +8,8 @@ import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
+import { MAX_SESSION_INITIAL_EVENTS } from "./Session/SessionTypes.ts"
+import { SessionTurnCompletion } from "./Session/SessionTurnCompletion.view.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest, StopModelRequestLive } from "./Session/StopModelRequest.policy.ts"
@@ -13,9 +17,14 @@ import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 
 export class Sessions extends Domain.Model("Sessions", {
-	aggregates: [Session, ToolConfirmation],
-	decisions: [RequestToolActionDecision, ConfirmToolDecision, ReturnCustomToolResultDecision],
-	views: [SessionView, TurnInput],
+	aggregates: [Session, ToolConfirmation, SystemContext],
+	decisions: [
+		RequestToolActionDecision,
+		ConfirmToolDecision,
+		ReturnCustomToolResultDecision,
+		SendSystemMessageDecision,
+	],
+	views: [SessionView, SessionTurnCompletion, TurnInput],
 	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
 	sagas: [RunTurn],
 	invariants: {
@@ -79,7 +88,10 @@ export class Sessions extends Domain.Model("Sessions", {
 							...common,
 							view.state.turn === s.state.turn,
 							view.state.input.length === 0,
-							view.state.unsent.length <= 8,
+							s.state.initial_messages_remaining === undefined
+								? view.state.unsent.length <= 8
+								: view.state.unsent.length + s.state.initial_messages_remaining <=
+									MAX_SESSION_INITIAL_EVENTS,
 						].every((ok) => ok)
 					}
 					if (s.state._tag === "Running") {

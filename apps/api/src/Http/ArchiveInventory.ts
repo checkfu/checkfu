@@ -34,7 +34,7 @@ export const withArchiveInventory = <A, E, R>(
 				}
 			}),
 		)
-		if (page.has_more) {
+		if (page.next_page !== null) {
 			return yield* reject(503, "The automation inventory is changing. Run apply again.")
 		}
 		const inventory: ReadonlyArray<AutomationReference> = page.data

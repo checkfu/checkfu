@@ -8,6 +8,7 @@ import {
 	desiredBody,
 	fingerprint,
 	listLiveAutomations,
+	pinAutomationAgent,
 	readRemote,
 	remoteBody,
 } from "./Resources.ts"
@@ -49,7 +50,23 @@ export const pendingDefinition = (source: ProjectResource, pending: PendingCreat
 		return undefined
 	}
 	const definition = desiredBody(withReferenceIds(source, lookup))
-	return fingerprint(definition) === pending.hash ? definition : undefined
+	const resolved =
+		definition.kind === "automation" &&
+		pending.kind === "automation" &&
+		definition.body.agent === pending.dependencies.agent.id
+			? {
+					...definition,
+					body: {
+						...definition.body,
+						agent: {
+							type: "agent" as const,
+							id: pending.dependencies.agent.id,
+							version: pending.dependencies.agent.version,
+						},
+					},
+				}
+			: definition
+	return fingerprint(resolved) === pending.hash ? resolved : undefined
 }
 
 export const planProject = (
@@ -68,7 +85,8 @@ export const planProject = (
 			const current = entry === undefined ? null : yield* readRemote(api, entry.kind, entry.id)
 			const replacing = current === null || current.archived_at !== null
 			const ready = source.references.every((reference) => applied.has(reference.target))
-			const desired = desiredBody(withReferenceIds(source, (ref) => applied.get(ref.target)))
+			const requested = desiredBody(withReferenceIds(source, (ref) => applied.get(ref.target)))
+			const desired = ready ? yield* pinAutomationAgent(api, requested) : requested
 			let row: PlanRow
 			if (entry !== undefined && entry.kind !== definition.kind) {
 				row = {

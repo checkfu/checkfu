@@ -8,12 +8,12 @@ import { hashOf, pendingDefinition } from "./Plan.ts"
 import type { PlanRow, ProjectPlan } from "./Plan.ts"
 import {
 	archiveResource,
-	automationBindings,
 	awaitResource,
 	confirmCreateReplay,
 	createResource,
 	desiredBody,
 	fingerprint,
+	pinAutomationAgent,
 	readRemote,
 	resourceRevision,
 	updateResource,
@@ -40,16 +40,19 @@ const isRejectedCreate = (error: unknown, fresh: boolean): boolean =>
 const matchesDefinition = (hash: string) => (resource: Resource) =>
 	resource.archived_at === null && hashOf(resource) === hash
 
-const pendingCreate = (
+const pendingCreate = Effect.fnUntraced(function* (
 	source: ProjectResource,
 	definition: Definition,
 	key: string,
 	hash: string,
-): PendingCreate => {
+): Effect.fn.Return<PendingCreate, ReturnType<typeof usageError>> {
 	if (definition.kind !== "automation") {
 		return { kind: definition.kind, key, hash }
 	}
-	const bindings = automationBindings(definition.body)
+	const { agent, environment_id } = definition.body
+	if (typeof agent === "string" || agent.version === undefined) {
+		return yield* usageError("An automation requires a pinned agent before applying.")
+	}
 	const agentPath = source.references.find(({ field }) => field === "agent")?.target
 	const environmentPath = source.references.find(({ field }) => field === "environment_id")?.target
 	return {
@@ -57,14 +60,18 @@ const pendingCreate = (
 		key,
 		hash,
 		dependencies: {
-			agent: { ...bindings.agent, ...(agentPath === undefined ? {} : { path: agentPath }) },
+			agent: {
+				id: agent.id,
+				version: agent.version,
+				...(agentPath === undefined ? {} : { path: agentPath }),
+			},
 			environment_id: {
-				...bindings.environment_id,
+				id: environment_id,
 				...(environmentPath === undefined ? {} : { path: environmentPath }),
 			},
 		},
 	}
-}
+})
 
 export const executePlan = (
 	client: CheckfuClient,
@@ -144,7 +151,10 @@ export const executePlan = (
 					)
 				}
 			}
-			const desired = desiredBody(withReferenceIds(source, (ref) => applied.get(ref.target)))
+			const desired = yield* pinAutomationAgent(
+				api,
+				desiredBody(withReferenceIds(source, (ref) => applied.get(ref.target))),
+			)
 			const hash = fingerprint(desired)
 			let confirmed: Resource
 			if (row.action === "create") {
@@ -157,7 +167,7 @@ export const executePlan = (
 				const key = pending?.key ?? (yield* client.generateIdempotencyKey)
 				const requestHash = pending?.hash ?? hash
 				if (pending === undefined) {
-					pendingCreates[file] = pendingCreate(source, requestBody, key, requestHash)
+					pendingCreates[file] = yield* pendingCreate(source, requestBody, key, requestHash)
 					yield* save
 				}
 				const clearPending = () => {

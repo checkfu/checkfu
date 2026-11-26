@@ -834,13 +834,14 @@ export const createIdleSession = (
 		never,
 		HttpServerRequest.HttpServerRequest
 	>,
+	system?: string,
 ) =>
 	Effect.gen(function* () {
 		const agentRes = yield* sendRequest(apiFetch, {
 			method: "POST",
 			path: "/v1/agents",
 			headers: AUTH_HEADERS,
-			body: { name: "Agent", model: "gpt-4o-mini" },
+			body: { name: "Agent", model: "gpt-4o-mini", ...(system === undefined ? {} : { system }) },
 		})
 		const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
 		const envRes = yield* sendRequest(apiFetch, {

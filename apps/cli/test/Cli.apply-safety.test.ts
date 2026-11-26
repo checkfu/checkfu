@@ -706,14 +706,12 @@ it("blocks pruning a dependency used by an automation outside the project", () =
 						if (url.pathname !== "/v1/automations") {
 							return next(request)
 						}
-						const cursor = url.searchParams.get("after")
+						const cursor = url.searchParams.get("page")
 						cursors.push(cursor)
 						if (cursor === null) {
-							return Promise.resolve(
-								Response.json({ data: [], has_more: true, next_cursor: "1:fixture" }),
-							)
+							return Promise.resolve(Response.json({ data: [], next_page: "1:fixture" }))
 						}
-						url.searchParams.delete("after")
+						url.searchParams.delete("page")
 						return next(new Request(url, { headers: request.headers }))
 					},
 				})
@@ -727,7 +725,7 @@ it("blocks pruning a dependency used by an automation outside the project", () =
 					interceptFetch: async (next, request) => {
 						if (new URL(request.url).pathname === "/v1/automations") {
 							listings++
-							return Response.json({ data: [], has_more: false, next_cursor: null })
+							return Response.json({ data: [], next_page: null })
 						}
 						const response = await next(request)
 						if (request.method === "POST") {
@@ -754,23 +752,28 @@ it("clears a pending create only when a not-found response identifies admission 
 				const agent = idOf(dependencies, reporter)
 				yield* write(report, reportSource("Report", agent, "missing-environment"))
 				const interrupted = yield* apply([report], ["--yes"], {
-					interceptFetch: () => Promise.reject(new Error("Connection lost before send.")),
+					interceptFetch: (next, request) =>
+						request.method === "POST"
+							? Promise.reject(new Error("Connection lost before send."))
+							: next(request),
 				})
 				expect(interrupted.exitCode).toBe(1)
 				expect(yield* readLock).toHaveProperty("pending_creates")
 
 				const ambiguous = yield* apply([report], ["--yes"], {
-					interceptFetch: () =>
-						Promise.resolve(
-							Response.json(
-								{
-									type: "error",
-									error: { type: "not_found_error", message: "Endpoint not found." },
-									request_id: "req_fixture",
-								},
-								{ status: 404 },
-							),
-						),
+					interceptFetch: (next, request) =>
+						request.method !== "POST"
+							? next(request)
+							: Promise.resolve(
+									Response.json(
+										{
+											type: "error",
+											error: { type: "not_found_error", message: "Endpoint not found." },
+											request_id: "req_fixture",
+										},
+										{ status: 404 },
+									),
+								),
 				})
 				expect(ambiguous.exitCode).toBe(1)
 				expect(yield* readLock).toHaveProperty("pending_creates")

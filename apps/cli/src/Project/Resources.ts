@@ -52,10 +52,7 @@ export const remoteBody = (resource: Resource): Definition => {
 					environment_id,
 					initial_events,
 					schedule,
-					agent:
-						agent.version === null
-							? agent.id
-							: { type: "agent", id: agent.id, version: agent.version },
+					agent: { type: "agent", id: agent.id, version: agent.version },
 				},
 			}
 		}
@@ -126,41 +123,49 @@ export const configurationChanges = (
 export const resourceRevision = (resource: Resource): number | undefined =>
 	resource.type === "automation" ? resource.revision : resource.version
 
-export const automationBindings = (body: {
-	readonly agent: string | { readonly id: string; readonly version?: number | null }
+export const automationDependencyIds = (body: {
+	readonly agent: string | { readonly id: string }
 	readonly environment_id: string
-}) => {
-	const { agent, environment_id } = body
-	const { id, version } = typeof agent === "string" ? { id: agent } : agent
-	return {
-		agent: version === undefined || version === null ? { id } : { id, version },
-		environment_id: { id: environment_id },
-	}
-}
+}) => [typeof body.agent === "string" ? body.agent : body.agent.id, body.environment_id]
 
-export const automationDependencyIds = (body: Parameters<typeof automationBindings>[0]) => [
-	typeof body.agent === "string" ? body.agent : body.agent.id,
-	body.environment_id,
-]
+export const pinAutomationAgent = (api: CheckfuClient["api"], definition: Definition) => {
+	if (definition.kind !== "automation" || typeof definition.body.agent !== "string") {
+		return Effect.succeed(definition)
+	}
+	const { agent } = definition.body
+	return api.agents.get({ params: { agent_id: AgentId.make(agent) }, query: {} }).pipe(
+		Effect.mapBoth({
+			onSuccess: (resource): Definition => ({
+				...definition,
+				body: {
+					...definition.body,
+					agent: { type: "agent", id: resource.id, version: resource.version },
+				},
+			}),
+			onFailure: formatClientError,
+		}),
+	)
+}
 
 export const listLiveAutomations = (api: CheckfuClient["api"]) =>
 	Effect.gen(function* () {
 		const live: Array<Automation> = []
 		const seen = new Set<string>()
-		let after: string | undefined
+		let token: string | undefined
 		for (;;) {
 			const page = yield* api.automations
-				.list({ query: { limit: 100, ...(after === undefined ? {} : { after }) } })
+				.list({ query: { limit: 100, ...(token === undefined ? {} : { page: token }) } })
 				.pipe(Effect.mapError(formatClientError))
 			live.push(...page.data.filter(({ archived_at }) => archived_at === null))
-			if (!page.has_more) {
+			const next = page.next_page
+			if (next === null) {
 				return live
 			}
-			if (page.next_cursor === null || seen.has(page.next_cursor)) {
-				return yield* networkFailure("The API returned an invalid automation list cursor.")
+			if (seen.has(next)) {
+				return yield* networkFailure("The API returned a repeated automation page token.")
 			}
-			after = page.next_cursor
-			seen.add(after)
+			seen.add(next)
+			token = next
 		}
 	})
 

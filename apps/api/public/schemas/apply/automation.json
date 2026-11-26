@@ -51,7 +51,7 @@
 							"additionalProperties": false
 						}
 					],
-					"description": "Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type \"agent\", id, and version to pin a specific version."
+					"description": "Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
 				},
 				{
 					"type": "object",
