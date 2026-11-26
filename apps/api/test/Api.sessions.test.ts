@@ -2705,8 +2705,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(listText).toBe(
 						JSON.stringify({
 							data: samples.map((sample) => sample.expectedJson),
-							has_more: false,
-							next_cursor: null,
 							next_page: null,
 						}),
 					)

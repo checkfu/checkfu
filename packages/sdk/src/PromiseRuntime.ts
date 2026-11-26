@@ -246,77 +246,49 @@ export class APIPromise<T> extends Promise<T> {
 	}
 }
 
-export class CursorPage<
-	Item,
-	Cursor extends string | number = number,
-> implements AsyncIterable<Item> {
+export class CursorPage<Item> implements AsyncIterable<Item> {
 	readonly data: ReadonlyArray<Item>
-	readonly has_more: boolean
-	readonly next_cursor: Cursor | null
-	declare readonly next_page?: Cursor | string | null
-	readonly #fetchNext: (after: Cursor) => Promise<CursorPage<Item, Cursor>>
-	readonly #requestedAfter: Cursor | undefined
-	readonly #order: "asc" | "desc"
+	readonly next_page: string | null
+	readonly #fetchNext: (page: string) => Promise<CursorPage<Item>>
+	readonly #requestedPage: string | undefined
 
 	constructor(
-		body: PageEnvelope<Item, Cursor>,
-		fetchNext: (after: Cursor) => Promise<CursorPage<Item, Cursor>>,
-		requestedAfter: Cursor | undefined,
-		order: "asc" | "desc",
+		body: PageEnvelope<Item>,
+		fetchNext: (page: string) => Promise<CursorPage<Item>>,
+		requestedPage: string | undefined,
 	) {
 		this.data = body.data
-		if ("has_more" in body) {
-			this.next_cursor = body.next_cursor
-			this.has_more = body.has_more
-		} else {
-			this.next_cursor = body.next_page
-			this.has_more = body.next_page !== null
-		}
-		if (body.next_page !== undefined) {
-			Object.defineProperty(this, "next_page", { value: body.next_page, enumerable: true })
-		}
+		this.next_page = body.next_page
 		this.#fetchNext = fetchNext
-		this.#requestedAfter = requestedAfter
-		this.#order = order
+		this.#requestedPage = requestedPage
 	}
 
 	hasNextPage(): boolean {
-		return this.has_more && this.next_cursor !== null
+		return this.next_page !== null
 	}
 
-	async getNextPage(): Promise<CursorPage<Item, Cursor>> {
-		if (!this.hasNextPage() || this.next_cursor === null) {
+	async getNextPage(): Promise<CursorPage<Item>> {
+		if (this.next_page === null) {
 			throw new BadRequestError({
 				status: 400,
-				message:
-					"No next page expected; please check `.hasNextPage()` before calling `.getNextPage()`.",
+				message: "No next page expected. Check `.hasNextPage()` before calling `.getNextPage()`.",
 			})
 		}
-		return this.#fetchNext(this.next_cursor)
+		return this.#fetchNext(this.next_page)
 	}
 
-	async *iterPages(): AsyncGenerator<CursorPage<Item, Cursor>, void, undefined> {
-		const seenCursors = new Set<Cursor>()
-		if (this.#requestedAfter !== undefined) {
-			seenCursors.add(this.#requestedAfter)
-		}
-		let current: CursorPage<Item, Cursor> = this
-		let prevCursor = this.#requestedAfter
+	async *iterPages(): AsyncGenerator<CursorPage<Item>, void, undefined> {
+		const seen = new Set<string>(this.#requestedPage === undefined ? [] : [this.#requestedPage])
+		let current: CursorPage<Item> = this
 		yield current
-		while (current.hasNextPage() && current.next_cursor !== null) {
-			const nextAfter = current.next_cursor
-			const repeated = seenCursors.has(nextAfter)
-			const regressed =
-				typeof prevCursor === "number" &&
-				typeof nextAfter === "number" &&
-				(this.#order === "asc" ? nextAfter <= prevCursor : nextAfter >= prevCursor)
-			if (repeated || regressed) {
+		while (current.next_page !== null) {
+			const next = current.next_page
+			if (seen.has(next)) {
 				throw new PaginationCursorCycleError({
-					message: `Pagination cursor did not advance (${String(prevCursor)} -> ${String(nextAfter)}).`,
+					message: `Pagination cursor did not advance (${current.#requestedPage} -> ${next}).`,
 				})
 			}
-			seenCursors.add(nextAfter)
-			prevCursor = nextAfter
+			seen.add(next)
 			current = await current.getNextPage()
 			yield current
 		}
@@ -558,47 +530,45 @@ export const executeUnaryPromise = <A>(
 	return new APIPromise(promise)
 }
 
-export const executePaginatedPromise = <Item, Cursor extends string | number = number>(
+export const executePaginatedPromise = <Item>(
 	runtime: PromiseSdkRuntime,
-	initialAfter: Cursor | undefined,
-	order: "asc" | "desc",
+	initialPage: string | undefined,
 	requestOptions: PromiseRequestOptions | undefined,
 	runPage: (
 		effectRuntime: EffectSdkRuntime,
-		after: Cursor | undefined,
+		token: string | undefined,
 		effectOpts: RequestOptions | undefined,
-	) => Effect.Effect<WithResponse<PageEnvelope<Item, Cursor>>, CheckfuSdkError>,
-): PagePromise<CursorPage<IsoDateTimes<Item>, Cursor>, IsoDateTimes<Item>> => {
+	) => Effect.Effect<WithResponse<PageEnvelope<Item>>, CheckfuSdkError>,
+): PagePromise<CursorPage<IsoDateTimes<Item>>, IsoDateTimes<Item>> => {
 	const signal = requestOptions?.signal
 	const effectOpts = toEffectRequestOptions(requestOptions)
 
 	const fetchPageRaw = async (
-		after: Cursor | undefined,
+		token: string | undefined,
 	): Promise<{
-		readonly page: CursorPage<IsoDateTimes<Item>, Cursor>
-		readonly body: PageEnvelope<IsoDateTimes<Item>, Cursor>
-		readonly raw: WithResponse<PageEnvelope<Item, Cursor>>
+		readonly page: CursorPage<IsoDateTimes<Item>>
+		readonly body: PageEnvelope<IsoDateTimes<Item>>
+		readonly raw: WithResponse<PageEnvelope<Item>>
 	}> => {
 		if (isSignalAborted(signal)) {
 			throw new APIUserAbortError({ message: "Request was aborted." })
 		}
 		const exit = await runtime.runExit(
-			(effectRuntime) => runPage(effectRuntime, after, effectOpts),
+			(effectRuntime) => runPage(effectRuntime, token, effectOpts),
 			signal,
 		)
 		const raw = unwrapPromiseExit(exit, isSignalAborted(signal))
 		const body = { ...raw.data, data: raw.data.data.map(toIsoJson) }
-		const page = new CursorPage<IsoDateTimes<Item>, Cursor>(
+		const page = new CursorPage<IsoDateTimes<Item>>(
 			body,
-			async (nextAfter) => (await fetchPageRaw(nextAfter)).page,
-			after,
-			order,
+			async (next) => (await fetchPageRaw(next)).page,
+			token,
 		)
 		return { page, body, raw }
 	}
 
-	const firstPagePromise = fetchPageRaw(initialAfter).then(
-		({ page, body, raw }): LazyPromiseResponse<CursorPage<IsoDateTimes<Item>, Cursor>> => ({
+	const firstPagePromise = fetchPageRaw(initialPage).then(
+		({ page, body, raw }): LazyPromiseResponse<CursorPage<IsoDateTimes<Item>>> => ({
 			data: page,
 			status: raw.status,
 			headers: raw.headers,

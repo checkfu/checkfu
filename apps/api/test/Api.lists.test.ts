@@ -28,8 +28,6 @@ interface Resource {
 
 interface ListBody {
 	readonly data: ReadonlyArray<Resource>
-	readonly has_more: boolean
-	readonly next_cursor: string | null
 	readonly next_page: string | null
 }
 
@@ -86,7 +84,7 @@ describe("List endpoints", () => {
 			Effect.gen(function* () {
 				expect(yield* call<ListBody>(apiFetch, "GET", "/v1/agents")).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null, next_page: null },
+					body: { data: [], next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const name of ["First", "Second", "Third"]) {
@@ -94,28 +92,27 @@ describe("List endpoints", () => {
 				}
 				const all = yield* listed(apiFetch, "/v1/agents", 3)
 				expect(idsOf(all)).toEqual(ids)
-				expect(all.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(all.body).toMatchObject({ next_page: null })
 				const fetched = yield* call<Resource>(apiFetch, "GET", `/v1/agents/${ids[0]}`)
 				expect(all.body.data[0]).toEqual(fetched.body)
 
 				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/agents?limit=2")
 				expect(idsOf(first)).toEqual(ids.slice(0, 2))
-				expect(first.body.has_more).toBe(true)
-				expect(first.body.next_page).toBe(first.body.next_cursor)
+				expect(first.body.next_page).not.toBeNull()
 				const second = yield* call<ListBody>(
 					apiFetch,
 					"GET",
 					`/v1/agents?limit=2&page=${first.body.next_page}`,
 				)
 				expect(idsOf(second)).toEqual(ids.slice(2))
-				expect(second.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(second.body).toMatchObject({ next_page: null })
 
 				const newest = yield* call<ListBody>(apiFetch, "GET", "/v1/agents?order=desc&limit=2")
 				expect(idsOf(newest)).toEqual([ids[2], ids[1]])
 				const oldest = yield* call<ListBody>(
 					apiFetch,
 					"GET",
-					`/v1/agents?order=desc&after=${newest.body.next_cursor}`,
+					`/v1/agents?order=desc&page=${newest.body.next_page}`,
 				)
 				expect(idsOf(oldest)).toEqual([ids[0]])
 
@@ -159,7 +156,7 @@ describe("List endpoints", () => {
 			Effect.gen(function* () {
 				expect(yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts")).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null, next_page: null },
+					body: { data: [], next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const name of ["kept", "deleted", "updated"]) {
@@ -185,14 +182,14 @@ describe("List endpoints", () => {
 
 				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts?order=desc&limit=1")
 				expect(idsOf(first)).toEqual([ids[2]])
-				expect(first.body.has_more).toBe(true)
+				expect(first.body.next_page).not.toBeNull()
 				const rest = yield* call<ListBody>(
 					apiFetch,
 					"GET",
-					`/v1/artifacts?order=desc&limit=1&after=${first.body.next_cursor}`,
+					`/v1/artifacts?order=desc&limit=1&page=${first.body.next_page}`,
 				)
 				expect(idsOf(rest)).toEqual([ids[0]])
-				expect(rest.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(rest.body).toMatchObject({ next_page: null })
 			}),
 		))
 
@@ -240,7 +237,7 @@ describe("List endpoints", () => {
 					yield* call<ListBody>(apiFetch, "GET", "/v1/sessions?agent_id=agent_missing"),
 				).toMatchObject({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null, next_page: null },
+					body: { data: [], next_page: null },
 				})
 			}),
 		))
@@ -269,10 +266,10 @@ describe("List endpoints", () => {
 						expect(page.status).toBe(200)
 						sizes.push([page.body.data.length, utf8.encode(JSON.stringify(page.body.data)).length])
 						seen.push(...idsOf(page))
-						if (page.body.next_cursor === null) {
+						if (page.body.next_page === null) {
 							return { seen, sizes }
 						}
-						path = `/v1/agents?limit=100&after=${encodeURIComponent(page.body.next_cursor)}`
+						path = `/v1/agents?limit=100&page=${encodeURIComponent(page.body.next_page)}`
 					}
 				})
 				const { seen, sizes } = yield* traverse.pipe(
@@ -317,7 +314,7 @@ describe("List endpoints", () => {
 					}).pipe(Effect.scoped, Effect.provide(layer)),
 				)
 				expect(page.data.map((resource) => resource.id)).toHaveLength(1)
-				expect(page.has_more).toBe(true)
+				expect(page.next_page).not.toBeNull()
 			} finally {
 				await closeAll()
 			}
@@ -341,9 +338,9 @@ describe("List endpoints", () => {
 					for (const query of [
 						"limit=0",
 						"limit=101",
-						"after=-1",
-						"after=3",
-						"after=3:a%2Fb",
+						"page=-1",
+						"page=3",
+						"page=3:a%2Fb",
 						"order=newest",
 						...(path === "/v1/artifacts" ? [] : ["include_archived=yes"]),
 					]) {
