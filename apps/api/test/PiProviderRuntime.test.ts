@@ -201,7 +201,11 @@ describe("PiProviderRuntime", () => {
 					}).pipe(
 						Effect.map(({ native }) => {
 							const planned = native.resources["PiHarnessWorker"]
-							return planned?.action === "create" ? Object.keys(planned.props.env ?? {}) : []
+							expect(planned?.action).toBe("create")
+							if (planned?.action !== "create") {
+								return []
+							}
+							return Object.keys(planned.props.env ?? {})
 						}),
 						Effect.scoped,
 						Effect.provide(Alchemist.layer()),
