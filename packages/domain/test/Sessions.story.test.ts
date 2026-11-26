@@ -3861,7 +3861,7 @@ describe("Sessions", () => {
 		}
 	})
 
-	it("records reply truncation while preserving the stop reason", async () => {
+	it("reports a reply cut to the message limit as budget_reached, never as a clean end_turn", async () => {
 		const oversized = {
 			thinking: null,
 			text: "x".repeat(MAX_MESSAGE_TEXT_LENGTH + 1),
@@ -3872,8 +3872,7 @@ describe("Sessions", () => {
 			clampHarnessReply({ ...oversized, stop_reason: { type: "end_turn" } }),
 		)
 		expect(cut.text.length).toBe(MAX_MESSAGE_TEXT_LENGTH)
-		expect(cut.truncated).toBe(true)
-		expect(cut.stop_reason).toEqual({ type: "end_turn" })
+		expect(cut.stop_reason).toEqual({ type: "budget_reached" })
 
 		const refusal = await Effect.runPromise(
 			clampHarnessReply({ ...oversized, stop_reason: { type: "refusal" } }),

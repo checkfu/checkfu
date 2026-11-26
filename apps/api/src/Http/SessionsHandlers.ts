@@ -7,6 +7,8 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomationSession.command"
+import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
@@ -86,6 +88,8 @@ const SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
 const IDEMPOTENCY_CONFLICT_MESSAGE =
 	"Event id or Idempotency-Key was already used for a different event."
 
+const rejectReusedSessionKey = () => reject(409, IDEMPOTENCY_KEY_REUSED)
+
 const sessionEventCommandId = (
 	digest: Digest.Digest["Service"],
 	sessionId: SessionId,
@@ -164,108 +168,30 @@ const encodeSessionEventJson = Schema.encodeSync(
 	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
 )
 
-const sessionEventEnvelope = <const T extends SessionEvent["type"]>(
-	entry: SessionEventEntry,
-	type: T,
-) => ({
-	id: sessionEventId(entry.envelope.id, entry.envelope.seq),
-	seq: entry.envelope.seq,
-	type,
-	created_at: entry.envelope.at,
-	processed_at: entry.envelope.at,
-})
+const isSessionEvent = Schema.is(SessionEvent)
 
-const inputSessionEventEnvelope = <const T extends "user.message" | "user.interrupt">(
-	entry: SessionEventEntry,
-	type: T,
-	eventId: string | undefined,
-) => ({
-	...sessionEventEnvelope(entry, type),
-	id:
-		eventId ??
-		(entry.envelope.commandId.startsWith("evt:")
-			? submittedSessionEventId(entry.envelope.id, entry.envelope.commandId)
-			: sessionEventId(entry.envelope.id, entry.envelope.seq)),
-	processed_at: null,
-})
+export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): SessionEvent => {
+	const { id, commandId, seq, at } = envelope
+	const { _tag: type, ...fields } = event
+	const input = type === "user.message" || type === "user.interrupt"
+	const eventId =
+		input && (commandId.startsWith("evt:") || commandId.startsWith("evt_"))
+			? submittedSessionEventId(id, commandId)
+			: sessionEventId(id, seq)
+	const base = { id: eventId, seq, created_at: at, processed_at: input ? null : at }
 
-export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent => {
-	const { event } = entry
-	switch (event._tag) {
-		case "user.message":
-			return {
-				...inputSessionEventEnvelope(entry, "user.message", event.event_id),
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-			}
+	switch (type) {
 		case "user.interrupt":
-			return inputSessionEventEnvelope(entry, "user.interrupt", event.event_id)
-		case "session.status_running":
-			return {
-				...sessionEventEnvelope(entry, "session.status_running"),
-				turn: event.turn,
-			}
-		case "span.model_request_start":
-			return {
-				...sessionEventEnvelope(entry, "span.model_request_start"),
-				model_request_start_id: event.model_request_start_id,
-			}
-		case "agent.tool_use":
-			return {
-				...sessionEventEnvelope(entry, "agent.tool_use"),
-				tool_use_id: event.tool_use_id,
-				name: event.name,
-				input: event.input,
-				...(event.truncated === true ? { truncated: true as const } : {}),
-			}
-		case "agent.tool_result":
-			return {
-				...sessionEventEnvelope(entry, "agent.tool_result"),
-				tool_use_id: event.tool_use_id,
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-				is_error: event.is_error,
-				...(event.truncated === true ? { truncated: true as const } : {}),
-				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
-			}
 		case "agent.thinking":
-			return sessionEventEnvelope(entry, "agent.thinking")
-		case "agent.message":
-			return {
-				...sessionEventEnvelope(entry, "agent.message"),
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-				...(event.truncated === true ? { truncated: true as const } : {}),
-			}
-		case "span.model_request_end":
-			return {
-				...sessionEventEnvelope(entry, "span.model_request_end"),
-				model_request_start_id: event.model_request_start_id,
-				model_usage: {
-					input_tokens: event.model_usage.input_tokens,
-					output_tokens: event.model_usage.output_tokens,
-				},
-				is_error: event.is_error,
-			}
-		case "session.status_idle":
-			return {
-				...sessionEventEnvelope(entry, "session.status_idle"),
-				stop_reason: { type: event.stop_reason.type },
-				turn: event.turn,
-			}
-		case "session.error":
-			return {
-				...sessionEventEnvelope(entry, "session.error"),
-				error: {
-					type: event.error.type,
-					message: event.error.message,
-					retry_status: { type: event.error.retry_status.type },
-				},
-			}
 		case "session.status_terminated":
-			return sessionEventEnvelope(entry, "session.status_terminated")
 		case "session.archived":
-			return sessionEventEnvelope(entry, "session.archived")
+			return { ...base, type }
 		default: {
-			const exhaustive: never = event
-			throw new Error(`Unhandled session event: ${JSON.stringify(exhaustive)}`)
+			const payload = { ...base, type, ...fields }
+			if (isSessionEvent(payload)) {
+				return payload
+			}
+			throw new Error(`Invalid payload for session event ${type}.`)
 		}
 	}
 }
@@ -274,6 +200,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const startSession = yield* OpenAutomationSessionDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
 		const digest = yield* Digest.Digest
@@ -409,22 +336,29 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					})
 					const id = SessionId.make(identity.id)
 					const sendOptions = identity.options
-					const receipt = yield* admitSession
-						.send(
-							new AdmitSession({
-								session_id: id,
-								agent_id: agentId,
-								agent_version: agentVersion,
-								environment_id: environmentId,
-								title,
-								...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
-							}),
-							sendOptions,
-						)
-						.pipe(
-							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
-						)
-					const pinnedVersion = receipt.reply.agent_version
+					const admission = {
+						session_id: id,
+						agent_id: agentId,
+						agent_version: agentVersion,
+						environment_id: environmentId,
+						title,
+					}
+					const receipt =
+						initialMessage === undefined
+							? yield* admitSession
+									.send(new AdmitSession(admission), sendOptions)
+									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+							: yield* startSession
+									.send(
+										new OpenAutomationSession({ ...admission, text: initialMessage }),
+										sendOptions,
+									)
+									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+					const created = receipt.events.find((event) => event._tag === "session.created")
+					if (created?._tag !== "session.created") {
+						return yield* reject(500, "Failed to load created session.")
+					}
+					const pinnedVersion = created.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
 						agentId,
 						pinnedVersion,
@@ -442,18 +376,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					}
 					const snapshot = yield* present(result, 500, "Failed to load created session.")
 					return {
-						id,
-						type: "session" as const,
-						status: initialMessage !== undefined ? ("running" as const) : ("idle" as const),
-						agent: pinnedAgent(pinnedReady),
-						environment_id: environmentId,
-						title,
-						turn: initialMessage !== undefined ? 1 : 0,
-						usage: {
-							input_tokens: 0,
-							output_tokens: 0,
-						},
-						created_at: snapshot.created_at,
+						...serializeSession(snapshot, pinnedReady),
+						status: initialMessage === undefined ? ("idle" as const) : ("running" as const),
+						turn: initialMessage === undefined ? 0 : 1,
+						usage: { input_tokens: 0, output_tokens: 0 },
 						updated_at: snapshot.created_at,
 						archived_at: null,
 					}
@@ -579,68 +505,42 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 
 					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
-						const sendOptions = { commandId: item.commandId }
-						const eventId = submittedSessionEventId(id, item.commandId)
-						const outcome =
-							item.type === "user.interrupt"
-								? yield* settled(
-										sessions
-											.send(
-												new SendUserInterrupt({ session_id: id, event_id: eventId }),
-												sendOptions,
+						const outcome = yield* settled(
+							Effect.gen(function* () {
+								const options = { commandId: item.commandId }
+								const receipt =
+									item.type === "user.interrupt"
+										? yield* sessions.send(new SendUserInterrupt({ session_id: id }), options)
+										: yield* sessions.send(
+												new SendUserMessage({ session_id: id, text: item.text }),
+												options,
 											)
-											.pipe(
-												Effect.flatMap((receipt) => {
-													const committed = receipt.events.find(
-														(event) => event._tag === "user.interrupt",
-													)
-													if (committed?._tag !== "user.interrupt") {
-														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-													}
-													return Effect.succeed({
-														type: "user.interrupt" as const,
-														id: committed.event_id ?? eventId,
-														processed_at: null,
-													})
-												}),
-											),
-									)
-								: yield* settled(
-										sessions
-											.send(
-												new SendUserMessage({ session_id: id, text: item.text, event_id: eventId }),
-												sendOptions,
-											)
-											.pipe(
-												Effect.flatMap((receipt) => {
-													const committed = receipt.events.find(
-														(event) => event._tag === "user.message",
-													)
-													if (
-														committed?._tag !== "user.message" ||
-														committed.content[0]?.text !== item.text
-													) {
-														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-													}
-													if (receipt.reply === undefined) {
-														return Effect.die(
-															new Error("SendUserMessage receipt is missing reply."),
-														)
-													}
-													const queued = !receipt.events.some(
-														(event) => event._tag === "session.status_running",
-													)
-													return Effect.succeed({
-														type: "user.message" as const,
-														id: committed.event_id ?? eventId,
-														processed_at: null,
-														turn: receipt.reply.turn,
-														queued,
-														content: [{ type: "text" as const, text: item.text }],
-													})
-												}),
-											),
-									)
+								const event = receipt.events[0]
+								const eventId = submittedSessionEventId(id, item.commandId)
+								if (item.type === "user.interrupt" && event?._tag === "user.interrupt") {
+									return { type: "user.interrupt" as const, id: eventId, processed_at: null }
+								}
+								if (
+									item.type !== "user.message" ||
+									event?._tag !== "user.message" ||
+									event.content[0]?.text !== item.text
+								) {
+									return yield* reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+								}
+								if (receipt.reply === undefined) {
+									return yield* Effect.die(new Error("SendUserMessage receipt is missing reply."))
+								}
+								return {
+									type: "user.message" as const,
+									id: eventId,
+									processed_at: null,
+									turn: receipt.reply.turn,
+									queued: !receipt.events.some((event) => event._tag === "session.status_running"),
+									content: event.content,
+								}
+							}),
+						)
+
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure
 							const mapped = toApiError(error, yield* currentRequestId)

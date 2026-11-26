@@ -418,7 +418,7 @@ describe("@checkfu/sdk", () => {
 										queued: false,
 										content: [{ type: "text", text: "hi" }],
 									},
-									{ type: "user.interrupt" },
+									{ type: "user.interrupt", id: "evt_interrupt" },
 								],
 							})
 						}
@@ -544,7 +544,7 @@ describe("@checkfu/sdk", () => {
 						{
 							status: 429,
 							body: apiErrorBody("rate_limit_error", "slow down", {
-								accepted: [{ type: "user.interrupt" }],
+								accepted: [{ type: "user.interrupt", id: "evt_interrupt" }],
 								failed_index: 1,
 							}),
 							tag: "RateLimitError",
@@ -593,7 +593,7 @@ describe("@checkfu/sdk", () => {
 						if (err._tag === "RateLimitError") {
 							expect(err.requestId).toBe("req_err_456")
 							expect(err.requestID).toBe("req_err_456")
-							expect(err.accepted).toEqual([{ type: "user.interrupt" }])
+							expect(err.accepted).toEqual([{ type: "user.interrupt", id: "evt_interrupt" }])
 							expect(err.failedIndex).toBe(1)
 						}
 					}
@@ -1792,7 +1792,7 @@ describe("@checkfu/sdk", () => {
 								{ "retry-after-ms": "1" },
 							)
 						}
-						return jsonResponse({ data: [{ type: "user.interrupt" }] }, 200)
+						return jsonResponse({ data: [{ type: "user.interrupt", id: "evt_interrupt" }] }, 200)
 					}) as typeof globalThis.fetch
 
 					yield* Effect.gen(function* () {

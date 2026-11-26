@@ -285,16 +285,13 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag === "Running" && active.pending_user_messages >= 8) {
 				return new PendingMessageQueueFull({ session_id: ctx.id, limit: 8 })
 			}
-			const message = new UserMessage({
-				...(cmd.event_id === undefined ? {} : { event_id: cmd.event_id }),
-				content: [{ type: "text", text: cmd.text }],
-			})
+			const message = new UserMessage({ content: [{ type: "text", text: cmd.text }] })
 			return active._tag === "Running"
 				? [message]
 				: [message, new SessionStatusRunning({ turn: active.turn + 1 })]
 		},
 
-		SendUserInterrupt: (state, cmd, ctx) => {
+		SendUserInterrupt: (state, _cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
 			if (active._tag !== "Idle" && active._tag !== "Running") {
 				return active
@@ -302,12 +299,7 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag !== "Running") {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
 			}
-			return [
-				new UserInterrupt({
-					...(cmd.event_id === undefined ? {} : { event_id: cmd.event_id }),
-					turn: active.turn,
-				}),
-			]
+			return [new UserInterrupt({ turn: active.turn })]
 		},
 
 		RecordModelRequestStart: (state, cmd, ctx) => {
