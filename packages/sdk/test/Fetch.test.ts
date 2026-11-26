@@ -270,22 +270,22 @@ describe("the fetch client", () => {
 			SDK_OPERATION_BINDINGS.filter((binding) => binding.requiredQueryParams.length > 0).map(
 				(binding) => [binding.operationId, binding.requiredQueryParams],
 			),
-		).toEqual([["artifacts.versions.file", ["path"]]])
+		).toEqual([["artifacts.versions.file", ["file"]]])
 		const loose = operationUrl as (operationId: string, input: LooseInput) => string
 		const path = { artifact_id: "art_1", version: "1" }
 		expect(() => loose("artifacts.versions.file", { path })).toThrow(
-			"Missing path for artifacts.versions.file.",
+			"Missing file for artifacts.versions.file.",
 		)
 		const { sent, fetch } = recording(200, "{}")
 		await expect(
 			untyped(createFetchClient({ fetch }))("artifacts.versions.file", {
 				path,
-				query: { path: null },
+				query: { file: null },
 			}),
-		).rejects.toThrow("Missing path for artifacts.versions.file.")
+		).rejects.toThrow("Missing file for artifacts.versions.file.")
 		expect(sent).toEqual([])
-		expect(loose("artifacts.versions.file", { path, query: { path: "index.html" } })).toBe(
-			"/v1/artifacts/art_1/versions/1/file?path=index.html",
+		expect(loose("artifacts.versions.file", { path, query: { file: "index.html" } })).toBe(
+			"/v1/artifacts/art_1/versions/1/file?file=index.html",
 		)
 	})
 
@@ -392,13 +392,13 @@ describe("the fetch client", () => {
 
 	it("validates and sends the same query values, read once from each declared field", () => {
 		class FileQuery {
-			get path(): string {
+			get file(): string {
 				return "index.html"
 			}
 		}
 		const path = { artifact_id: "art_1", version: 1 }
 		expect(operationUrl("artifacts.versions.file", { path, query: new FileQuery() })).toBe(
-			"/v1/artifacts/art_1/versions/1/file?path=index.html",
+			"/v1/artifacts/art_1/versions/1/file?file=index.html",
 		)
 		const loose = operationUrl as (operationId: string, input: NonScalarQueryInput) => string
 		expect(() => loose("agents.list", { query: { order: { by: "name" } } })).toThrow(
