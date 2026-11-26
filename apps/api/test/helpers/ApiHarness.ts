@@ -27,6 +27,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
+import type { WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
@@ -467,6 +468,13 @@ export const makePiDurableTestLayer = (
 			return { publish: (args: PublishArgs) => publishOutputs(args) }
 		}),
 	)
+	const preparedWorkspaces: Array<{
+		readonly sessionId: string
+		readonly allowedHosts: ReadonlyArray<string> | null
+	}> = []
+	const workspaceCalls: Array<string> = []
+	const refusedWorkspaces = new Set<string>()
+	const preparations: Array<WorkspacePreparation> = []
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -510,6 +518,19 @@ export const makePiDurableTestLayer = (
 				),
 		},
 		{
+			prepareWorkspace: (sessionId, token, allowedHosts) =>
+				Effect.sync((): WorkspacePreparation => {
+					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
+					if (refusedWorkspaces.has(sessionId)) {
+						return { ok: false, interrupted: true }
+					}
+					preparedWorkspaces.push({ sessionId, allowedHosts })
+					return preparations.shift() ?? { ok: true }
+				}),
+			interruptWorkspace: (sessionId, token) =>
+				Effect.sync(() => {
+					workspaceCalls.push(`interrupt ${sessionId} ${token.turn}`)
+				}),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -635,6 +656,10 @@ export const makePiDurableTestLayer = (
 		setBeforeOutputsRead: (run: (sessionId: string) => void | Promise<void>) => {
 			beforeOutputsRead = run
 		},
+		preparedWorkspaces,
+		workspaceCalls,
+		refusedWorkspaces,
+		preparations,
 	}
 }
 

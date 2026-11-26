@@ -275,7 +275,9 @@ export const PiSessionLive = PiSession.make(
 
 				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal) =>
 					runPromise(
-						workspace().runTool(call, { turn: admittedTurn() }),
+						workspace()
+							.runTool(call, { turn: admittedTurn() })
+							.pipe(Effect.onInterrupt(() => Effect.ignore(workspace().stopCall(call.id)))),
 						signal === undefined ? undefined : { signal },
 					),
 				)

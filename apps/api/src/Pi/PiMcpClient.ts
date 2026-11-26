@@ -92,16 +92,14 @@ const leaving = (target: string, exit: McpExit, fetchFn: typeof fetch): HttpClie
 		}),
 	)
 
+const ANOTHER_PROTOCOL = new Set([400, 404, 405, 406, 415])
+
 const speaksAnotherProtocol = (error: McpClientError): boolean => {
 	const { reason } = error
 	return (
 		reason._tag === "ProtocolError" ||
 		reason._tag === "UnsupportedError" ||
-		(reason._tag === "HttpError" &&
-			reason.status >= 400 &&
-			reason.status < 500 &&
-			reason.status !== 401 &&
-			reason.status !== 403)
+		(reason._tag === "HttpError" && ANOTHER_PROTOCOL.has(reason.status))
 	)
 }
 
@@ -206,6 +204,11 @@ export const describeMcpFailure = (error: McpClientError): string => {
 	}
 	if (reason._tag === "HttpError" && reason.status === 403) {
 		return "The MCP server refused the request (403)."
+	}
+	if (reason._tag === "HttpError" && reason.status === 429) {
+		return reason.retryAfter === undefined
+			? "The MCP server is limiting requests (429). Try again later."
+			: `The MCP server is limiting requests (429). Try again after ${reason.retryAfter}.`
 	}
 	const cause = reason._tag === "TransportError" ? reason.cause : undefined
 	return HttpClientError.isHttpClientError(cause) && cause.reason.description !== undefined
