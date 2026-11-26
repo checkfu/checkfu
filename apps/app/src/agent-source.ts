@@ -2,6 +2,8 @@ import type { CreateAgentBody } from "@checkfu/sdk/Api"
 
 import type * as ProjectDocument from "@checkfu/authoring/document"
 
+export const loadAgentSource = () => import("@checkfu/authoring/document")
+
 export type AgentSourceCodec = typeof ProjectDocument
 
 export type AgentSourceReading =

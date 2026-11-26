@@ -6,10 +6,9 @@ import { Field } from "@checkfu/ui/field"
 import { Textarea } from "@checkfu/ui/input"
 import { useState } from "react"
 import type { ReactNode } from "react"
+import { loadAgentSource } from "./agent-source.ts"
 import type { AgentSourceCodec, AgentSourceReading } from "./agent-source.ts"
 import { useAction } from "./use-action.ts"
-
-export const loadAgentSource = () => import("@checkfu/authoring/document")
 
 export function AgentModeControl({
 	showYaml,

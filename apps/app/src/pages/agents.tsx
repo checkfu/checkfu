@@ -31,14 +31,9 @@ import {
 import type { AgentDraft } from "../agent-draft.ts"
 import { AgentToolsFields, AgentToolsSummary } from "./agent-tools.tsx"
 
-import { readAgentSource } from "../agent-source.ts"
+import { loadAgentSource, readAgentSource } from "../agent-source.ts"
 import type { AgentSourceCodec, AgentSourceReading } from "../agent-source.ts"
-import {
-	AgentConfigurationView,
-	AgentModeControl,
-	AgentSourceFields,
-	loadAgentSource,
-} from "../agent-yaml.tsx"
+import { AgentConfigurationView, AgentModeControl, AgentSourceFields } from "../agent-yaml.tsx"
 
 const list = getRouteApi("/_app/agents/")
 const detail = getRouteApi("/_app/agents/$agentId")

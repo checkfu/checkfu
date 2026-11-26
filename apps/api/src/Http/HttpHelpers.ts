@@ -91,6 +91,8 @@ const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined 
 			return 409
 		case 429:
 			return 429
+		case 503:
+			return 503
 		default:
 			return undefined
 	}
