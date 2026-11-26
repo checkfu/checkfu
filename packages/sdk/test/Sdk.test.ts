@@ -1427,12 +1427,13 @@ describe("@checkfu/sdk", () => {
 						next_cursor: 2,
 					})
 				}
-				const after = url.searchParams.get("after")
+				const after = url.searchParams.get("after") ?? url.searchParams.get("page")
 				if (after === null) {
 					return jsonResponse({
 						data: [sampleUserMessageEvent(1), sampleUserMessageEvent(2)],
 						has_more: true,
 						next_cursor: 2,
+						next_page: "2",
 					})
 				}
 				return jsonResponse({
@@ -1452,9 +1453,13 @@ describe("@checkfu/sdk", () => {
 				const firstPage = await client.sessions.events.list("sess_1", { limit: 2 })
 				expect(firstPage.data.map((e) => e.seq)).toEqual([1, 2])
 				expect(firstPage.hasNextPage()).toBe(true)
+				expect(firstPage.next_page).toBe("2")
+				expect(firstPage.next_cursor).toBe(2)
 				const secondPage = await firstPage.getNextPage()
 				expect(secondPage.data.map((e) => e.seq)).toEqual([3])
 				expect(secondPage.hasNextPage()).toBe(false)
+				const selected = await client.sessions.events.list("sess_1", { page: "2" })
+				expect(selected.data.map((event) => event.seq)).toEqual([3])
 
 				const all: Array<JsonSessionEvent> = []
 				for await (const event of client.sessions.events.list("sess_1", { limit: 2 })) {

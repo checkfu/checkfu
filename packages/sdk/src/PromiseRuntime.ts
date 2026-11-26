@@ -253,7 +253,7 @@ export class CursorPage<
 	readonly data: ReadonlyArray<Item>
 	readonly has_more: boolean
 	readonly next_cursor: Cursor | null
-	declare readonly next_page?: Cursor | null
+	declare readonly next_page?: Cursor | string | null
 	readonly #fetchNext: (after: Cursor) => Promise<CursorPage<Item, Cursor>>
 	readonly #requestedAfter: Cursor | undefined
 	readonly #order: "asc" | "desc"
@@ -265,13 +265,15 @@ export class CursorPage<
 		order: "asc" | "desc",
 	) {
 		this.data = body.data
-		if ("next_page" in body) {
-			this.next_cursor = body.next_page
-			this.has_more = body.next_page !== null
-			Object.defineProperty(this, "next_page", { value: body.next_page, enumerable: true })
-		} else {
+		if ("has_more" in body) {
 			this.next_cursor = body.next_cursor
 			this.has_more = body.has_more
+		} else {
+			this.next_cursor = body.next_page
+			this.has_more = body.next_page !== null
+		}
+		if (body.next_page !== undefined) {
+			Object.defineProperty(this, "next_page", { value: body.next_page, enumerable: true })
 		}
 		this.#fetchNext = fetchNext
 		this.#requestedAfter = requestedAfter

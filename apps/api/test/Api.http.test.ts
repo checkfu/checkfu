@@ -217,10 +217,21 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						data: ReadonlyArray<{ type: string }>
 						has_more: boolean
 						next_cursor: number | null
+						next_page: string | null
 					}
 					expect(page1.data).toHaveLength(3)
 					expect(page1.has_more).toBe(true)
 					expect(page1.next_cursor).toBe(3)
+					expect(page1.next_page).toBe("3")
+					const page2 = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events?limit=3&page=${page1.next_page}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(yield* Effect.promise(() => page2.json())).toMatchObject({
+						data: [{ seq: 4 }, { seq: 5 }, { seq: 6 }],
+						next_page: "6",
+					})
 
 					const getSessRes = yield* sendRequest(apiFetch, {
 						method: "GET",

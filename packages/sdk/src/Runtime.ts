@@ -157,6 +157,7 @@ export interface CursorPageEnvelope<Item, Cursor extends string | number = numbe
 	readonly data: ReadonlyArray<Item>
 	readonly has_more: boolean
 	readonly next_cursor: Cursor | null
+	readonly next_page?: string | null
 }
 
 export type PageEnvelope<Item, Cursor extends string | number> =
@@ -165,7 +166,8 @@ export type PageEnvelope<Item, Cursor extends string | number> =
 
 export const nextPageOf = <Item, Cursor extends string | number>(
 	page: PageEnvelope<Item, Cursor>,
-): Cursor | null => ("next_page" in page ? page.next_page : page.has_more ? page.next_cursor : null)
+): Cursor | null =>
+	"has_more" in page ? (page.has_more ? page.next_cursor : null) : page.next_page
 
 export interface RequestOptions {
 	readonly headers?: HeaderMap | undefined

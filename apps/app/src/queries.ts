@@ -20,7 +20,7 @@ export const agentChoices = infiniteQueryOptions({
 	queryKey: ["agents", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.agents.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? page.next_cursor ?? undefined,
 })
 
 export const environmentsPage = (after?: string) =>
@@ -39,7 +39,7 @@ export const environmentChoices = infiniteQueryOptions({
 	queryKey: ["environments", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.environments.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? page.next_cursor ?? undefined,
 })
 
 export const automationsPage = (after?: string) =>
@@ -58,8 +58,9 @@ export const automationRunsQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["automations", "runs", id],
 		queryFn: ({ pageParam, signal }) => checkfu.automations.runs(id, pageParam, signal),
-		initialPageParam: undefined as number | undefined,
-		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) =>
+			page.next_page ?? (page.next_cursor === null ? undefined : String(page.next_cursor)),
 	})
 
 export const sessionsPage = (after?: string) =>
@@ -104,8 +105,9 @@ export const transcriptQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["transcripts", id],
 		queryFn: ({ pageParam, signal }) => checkfu.sessions.events(id, pageParam, signal),
-		initialPageParam: undefined as number | undefined,
-		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: (page) =>
+			page.next_page ?? (page.next_cursor === null ? undefined : String(page.next_cursor)),
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 

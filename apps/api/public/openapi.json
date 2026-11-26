@@ -1282,6 +1282,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -1541,6 +1551,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -5387,6 +5407,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -5560,6 +5590,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -9163,6 +9203,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -9525,6 +9575,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -11976,6 +12036,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}$",
+							"description": "Opaque pagination cursor from the previous response's next_page."
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -12025,6 +12095,16 @@
 											"anyOf": [
 												{
 													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -14243,6 +14323,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -14495,6 +14585,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -18471,6 +18571,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}$",
+							"description": "Opaque pagination cursor from the previous response's next_page."
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -18644,6 +18754,16 @@
 											"anyOf": [
 												{
 													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -20247,6 +20367,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -20383,6 +20513,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -26389,6 +26529,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -26450,6 +26600,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"
@@ -29166,6 +29326,16 @@
 						"required": false
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+						},
+						"required": false
+					},
+					{
 						"name": "limit",
 						"in": "query",
 						"schema": {
@@ -29227,6 +29397,16 @@
 													"type": "string",
 													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
 												},
 												{
 													"type": "null"

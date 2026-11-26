@@ -578,6 +578,7 @@ export class EffectAgentsResource {
 				this.#runtime.raw.agents.list({
 					query: {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 						...(params?.["include_archived"] === undefined
@@ -995,6 +996,7 @@ export class EffectArtifactsResource {
 				this.#runtime.raw.artifacts.list({
 					query: {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 					},
@@ -1212,6 +1214,7 @@ export class EffectAutomationsRunsResource {
 								params: pathParams,
 								query: {
 									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 								},
@@ -1421,6 +1424,7 @@ export class EffectAutomationsResource {
 				this.#runtime.raw.automations.list({
 					query: {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 						...(params?.["include_archived"] === undefined
@@ -1819,6 +1823,7 @@ export class EffectEnvironmentsResource {
 				this.#runtime.raw.environments.list({
 					query: {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 						...(params?.["include_archived"] === undefined
@@ -2000,6 +2005,7 @@ export class EffectSessionsEventsResource {
 								params: pathParams,
 								query: {
 									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 								},
@@ -2272,6 +2278,7 @@ export class EffectSessionsResource {
 				this.#runtime.raw.sessions.list({
 					query: {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 						...(params?.["include_archived"] === undefined
@@ -2546,6 +2553,7 @@ export class EffectVaultsCredentialsResource {
 								params: pathParams,
 								query: {
 									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 									...(params?.["include_archived"] === undefined
@@ -2831,6 +2839,7 @@ export class EffectVaultsResource {
 				this.#runtime.raw.vaults.list({
 					query: {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 						...(params?.["include_archived"] === undefined

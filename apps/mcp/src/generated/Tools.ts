@@ -307,6 +307,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description:
 								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
@@ -1012,6 +1018,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description:
 								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
@@ -1401,6 +1413,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description:
 								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
@@ -1466,6 +1484,11 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							pattern: "^\\d{1,15}$",
 							description:
 								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+						},
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}$",
+							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1948,6 +1971,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
 							description:
@@ -2526,6 +2555,11 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description:
 								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
 						},
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}$",
+							description: "Opaque pagination cursor from the previous response's next_page.",
+						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
@@ -2562,6 +2596,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
 							description:
@@ -3060,6 +3100,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description:
 								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
@@ -3101,6 +3147,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
 							description:

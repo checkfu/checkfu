@@ -1267,10 +1267,13 @@ export const SessionEvent = Schema.Union([
 
 export type SessionEvent = typeof SessionEvent.Type
 
+const NextPage = Schema.optionalKey(Schema.NullOr(Schema.String))
+
 export const ListSessionEventsResponse = Schema.Struct({
 	data: Schema.Array(SessionEvent),
 	has_more: Schema.Boolean,
 	next_cursor: Schema.NullOr(Schema.Finite),
+	next_page: NextPage,
 })
 export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
 
@@ -1278,6 +1281,7 @@ export const ListAutomationRunsResponse = Schema.Struct({
 	data: Schema.Array(AutomationRunResource),
 	has_more: Schema.Boolean,
 	next_cursor: Schema.NullOr(Schema.Finite),
+	next_page: NextPage,
 })
 export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
@@ -1286,6 +1290,7 @@ const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, c
 		data: Schema.Array(resource),
 		has_more: Schema.Boolean,
 		next_cursor: Schema.NullOr(cursor),
+		next_page: NextPage,
 	})
 
 const AgentVersionPage = Schema.String.check(
@@ -1344,6 +1349,10 @@ const EventListAfterFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}
 		),
 	)
 
+const EventListPage = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).annotate({
+	description: "Opaque pagination cursor from the previous response's next_page.",
+})
+
 const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u))
 	.annotate({ description: "Maximum number of events to return (1-100)" })
 	.pipe(
@@ -1392,6 +1401,7 @@ const AgentVersionFromString = positiveIntegerFromString(
 
 const resourceListQuery = {
 	after: Schema.optionalKey(ResourceListCursor),
+	page: Schema.optionalKey(ResourceListCursor),
 	limit: Schema.optionalKey(ListLimitFromString),
 	order: Schema.optionalKey(
 		Schema.Literals(["asc", "desc"]).annotate({
@@ -1854,6 +1864,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			params: sessionParams,
 			query: {
 				after: Schema.optionalKey(EventListAfterFromString),
+				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
@@ -2122,6 +2133,7 @@ const Automations = HttpApiGroup.make("automations")
 			params: automationParams,
 			query: {
 				after: Schema.optionalKey(EventListAfterFromString),
+				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),

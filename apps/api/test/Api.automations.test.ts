@@ -417,13 +417,15 @@ describe("Automations API", () => {
 					data: ReadonlyArray<RunBody>
 					has_more: boolean
 					next_cursor: number | null
+					next_page: string | null
 				}>(apiFetch, "GET", `/v1/automations/${id}/runs?order=asc&limit=1`)
 				expect(oldestFirst.body.data.map((entry) => entry.run)).toEqual([1])
 				expect(oldestFirst.body.has_more).toBe(true)
+				expect(oldestFirst.body.next_page).toBe(String(oldestFirst.body.next_cursor))
 				const rest = yield* call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
 					apiFetch,
 					"GET",
-					`/v1/automations/${id}/runs?order=asc&limit=1&after=${oldestFirst.body.next_cursor}`,
+					`/v1/automations/${id}/runs?order=asc&limit=1&page=${oldestFirst.body.next_page}`,
 				)
 				expect(rest.body.data.map((entry) => entry.run)).toEqual([2])
 
@@ -606,7 +608,7 @@ describe("Automations API", () => {
 				const empty = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
 				expect(empty).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null },
+					body: { data: [], has_more: false, next_cursor: null, next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const [name, agent] of [

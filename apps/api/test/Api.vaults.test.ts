@@ -351,6 +351,7 @@ describe("Vaults", () => {
 					data: [credential],
 					has_more: false,
 					next_cursor: null,
+					next_page: null,
 				})
 				expect(((yield* call("GET", `/v1/vaults/${vault.id}`)).body as VaultBody).custody).toEqual({
 					storing: 0,

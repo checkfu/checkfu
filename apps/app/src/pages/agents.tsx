@@ -87,7 +87,7 @@ export function AgentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_page ?? page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }

@@ -89,10 +89,10 @@ const isArchived = (value: unknown): boolean =>
 
 export const newIdempotencyKey = (): string => crypto.randomUUID()
 
-const newestFirst = (after: string | undefined) => ({
+const newestFirst = (page: string | undefined) => ({
 	limit: 100,
 	order: "desc" as const,
-	...(after === undefined ? {} : { after }),
+	...(page === undefined ? {} : { page }),
 })
 
 const retrieveAgent = (agent_id: string, signal?: AbortSignal): Promise<JsonAgent> =>
@@ -187,10 +187,10 @@ export const checkfu = {
 			).catch(() => null)
 			return { run: queued.run, listed }
 		},
-		runs: (automation_id: string, before?: number, signal?: AbortSignal) =>
+		runs: (automation_id: string, before?: string, signal?: AbortSignal) =>
 			request("automations.runs.list", {
 				path: { automation_id },
-				query: { order: "desc", limit: 20, ...(before === undefined ? {} : { after: before }) },
+				query: { order: "desc", limit: 20, ...(before === undefined ? {} : { page: before }) },
 				...withSignal(signal),
 			}),
 	},
@@ -208,10 +208,10 @@ export const checkfu = {
 			),
 		send: (session_id: string, body: SendSessionEventsBody, idempotencyKey: string) =>
 			request("sessions.events.send", { path: { session_id }, body, idempotencyKey }),
-		events: (session_id: string, before?: number, signal?: AbortSignal) =>
+		events: (session_id: string, before?: string, signal?: AbortSignal) =>
 			request("sessions.events.list", {
 				path: { session_id },
-				query: { order: "desc", limit: 100, ...(before === undefined ? {} : { after: before }) },
+				query: { order: "desc", limit: 100, ...(before === undefined ? {} : { page: before }) },
 				...withSignal(signal),
 			}),
 		streamUrl: (session_id: string, after: number) =>

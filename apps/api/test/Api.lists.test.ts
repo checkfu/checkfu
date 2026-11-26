@@ -30,6 +30,7 @@ interface ListBody {
 	readonly data: ReadonlyArray<Resource>
 	readonly has_more: boolean
 	readonly next_cursor: string | null
+	readonly next_page: string | null
 }
 
 const call = <A>(apiFetch: ApiFetch, method: string, path: string, body?: unknown) =>
@@ -85,7 +86,7 @@ describe("List endpoints", () => {
 			Effect.gen(function* () {
 				expect(yield* call<ListBody>(apiFetch, "GET", "/v1/agents")).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null },
+					body: { data: [], has_more: false, next_cursor: null, next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const name of ["First", "Second", "Third"]) {
@@ -100,10 +101,11 @@ describe("List endpoints", () => {
 				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/agents?limit=2")
 				expect(idsOf(first)).toEqual(ids.slice(0, 2))
 				expect(first.body.has_more).toBe(true)
+				expect(first.body.next_page).toBe(first.body.next_cursor)
 				const second = yield* call<ListBody>(
 					apiFetch,
 					"GET",
-					`/v1/agents?limit=2&after=${first.body.next_cursor}`,
+					`/v1/agents?limit=2&page=${first.body.next_page}`,
 				)
 				expect(idsOf(second)).toEqual(ids.slice(2))
 				expect(second.body).toMatchObject({ has_more: false, next_cursor: null })
@@ -157,7 +159,7 @@ describe("List endpoints", () => {
 			Effect.gen(function* () {
 				expect(yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts")).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null },
+					body: { data: [], has_more: false, next_cursor: null, next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const name of ["kept", "deleted", "updated"]) {
@@ -236,7 +238,10 @@ describe("List endpoints", () => {
 				).toEqual([ids[2], ids[0]])
 				expect(
 					yield* call<ListBody>(apiFetch, "GET", "/v1/sessions?agent_id=agent_missing"),
-				).toMatchObject({ status: 200, body: { data: [], has_more: false, next_cursor: null } })
+				).toMatchObject({
+					status: 200,
+					body: { data: [], has_more: false, next_cursor: null, next_page: null },
+				})
 			}),
 		))
 
