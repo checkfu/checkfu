@@ -150,7 +150,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						path: "/v1/sessions",
 						headers: AUTH_HEADERS,
 						body: {
-							agent: { id: customAgentId, version: 1 },
+							agent: { type: "agent", id: customAgentId, version: 1 },
 							environment_id: env.id,
 						},
 					})
@@ -402,25 +402,24 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					const conflictRes = yield* sendRequest(apiFetch, {
+					const obsoleteFields = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
 						headers: AUTH_HEADERS,
 						body: {
-							agent: { id: agentV1.id, version: 1 },
+							agent: { type: "agent", id: agentV1.id, version: 1 },
 							agent_version: 2,
 							environment_id: env.id,
 						},
 					})
-					expect(conflictRes.status).toBe(400)
+					expect(obsoleteFields.status).toBe(400)
 
 					const pinnedRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
 						headers: AUTH_HEADERS,
 						body: {
-							agent: { id: agentV1.id },
-							agent_version: 1,
+							agent: { type: "agent", id: agentV1.id, version: 1 },
 							environment_id: env.id,
 						},
 					})
@@ -845,7 +844,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		}
 	})
 
-	it("requires at least one agent reference in CreateSessionBody and OpenAPI schema", async () => {
+	it("requires an agent reference in the session create contract", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
 		)
@@ -862,7 +861,10 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 									requestBody?: {
 										content?: {
 											"application/json"?: {
-												schema?: { anyOf?: ReadonlyArray<{ required?: ReadonlyArray<string> }> }
+												schema?: {
+													required?: ReadonlyArray<string>
+													properties?: { agent?: { description?: string } }
+												}
 											}
 										}
 									}
@@ -872,17 +874,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					}>()
 					const sessionBodySchema =
 						spec.paths["/v1/sessions"]?.post?.requestBody?.content?.["application/json"]?.schema
-					const requiredSets = (sessionBodySchema?.anyOf ?? []).map(
-						(branch) => branch.required ?? [],
-					)
-					expect(requiredSets.length).toBeGreaterThanOrEqual(2)
-					expect(
-						requiredSets.every(
-							(req) =>
-								req.includes("environment_id") &&
-								(req.includes("agent") || req.includes("agent_id")),
-						),
-					).toBe(true)
+					expect(sessionBodySchema?.required).toEqual(["agent", "environment_id"])
+					expect(sessionBodySchema?.properties).not.toHaveProperty("agent_id")
+					expect(sessionBodySchema?.properties).not.toHaveProperty("agent_version")
 
 					const missingAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -896,18 +890,17 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						error: { type: "invalid_request_error" },
 					})
 
-					const conflictRes = yield* sendRequest(apiFetch, {
+					const obsoleteFields = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
 						headers: AUTH_HEADERS,
-						body: { agent: "agent_1", agent_id: "agent_2", environment_id: "env_1" },
+						body: { agent_id: "agent_2", environment_id: "env_1" },
 					})
-					expect(conflictRes.status).toBe(400)
-					expect(yield* Effect.promise(() => conflictRes.json())).toMatchObject({
+					expect(obsoleteFields.status).toBe(400)
+					expect(yield* Effect.promise(() => obsoleteFields.json())).toMatchObject({
 						type: "error",
 						error: {
 							type: "invalid_request_error",
-							message: "Conflicting agent and agent_id values.",
 						},
 					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
@@ -3460,7 +3453,7 @@ describe("Agent and environment field length limits", () => {
 						path: "/v1/sessions",
 						headers: AUTH_HEADERS,
 						body: {
-							agent: { id: repairAgentId, version: 1 },
+							agent: { type: "agent", id: repairAgentId, version: 1 },
 							environment_id: repairEnvId,
 						},
 					})
