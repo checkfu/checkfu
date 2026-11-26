@@ -186,6 +186,7 @@ const run = <A, E, R>(
 			agent_version: null,
 			environment_id: BoundedEnvironmentId.make("env_ensure"),
 			title: null,
+			mcp_server_credentials: "[]",
 		})
 		yield* settle(platform)
 		return yield* body(platform, clock)

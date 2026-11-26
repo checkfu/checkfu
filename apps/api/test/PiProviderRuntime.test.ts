@@ -188,6 +188,9 @@ describe("PiProviderRuntime", () => {
 								secretUsable: () => Effect.succeed(false),
 								eraseSecret: () => Effect.void,
 								sealVault: () => Effect.void,
+								pauseUsage: () => Effect.die(new Error("plan only")),
+								answerCall: () => Effect.succeed("gone" as const),
+								customToolFaults: () => Effect.succeed([]),
 							})
 						}).pipe(Effect.provide(providerLayer)),
 					)

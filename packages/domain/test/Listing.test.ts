@@ -78,6 +78,7 @@ describe("ListResources", () => {
 					agent_version: null,
 					environment_id: BoundedEnvironmentId.make("env_list_1"),
 					title: null,
+					mcp_server_credentials: "[]",
 				})
 			}
 			const automations = [

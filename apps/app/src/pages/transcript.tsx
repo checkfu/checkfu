@@ -61,7 +61,30 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 			return <p className="text-control text-muted-foreground">Session terminated.</p>
 		case "agent.tool_use":
 			return <p className="font-mono text-control text-muted-foreground">Called {event.name}</p>
+		case "agent.mcp_tool_use":
+			return (
+				<p className="font-mono text-control text-muted-foreground">
+					Called {event.name} on {event.mcp_server_name}
+				</p>
+			)
+		case "agent.custom_tool_use":
+			return (
+				<p className="font-mono text-control text-muted-foreground">
+					Asked your application to run {event.name}
+				</p>
+			)
+		case "user.tool_confirmation":
+			return (
+				<p className="text-control text-muted-foreground">
+					{event.result === "allow" ? "Allowed" : "Denied"} a tool call.
+				</p>
+			)
+		case "user.custom_tool_result":
+			return (
+				<p className="text-control text-muted-foreground">Your application answered a tool call.</p>
+			)
 		case "agent.tool_result":
+		case "agent.mcp_tool_result":
 			return event.is_error ? (
 				<p className="font-mono text-control text-destructive">Tool call failed.</p>
 			) : null

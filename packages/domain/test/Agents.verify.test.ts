@@ -1,4 +1,9 @@
 import { Story } from "@alchemy.run/domain/Story"
+import {
+	decodeAgentTools,
+	decodeMcpServerCredentials,
+	decodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
@@ -13,6 +18,8 @@ const STANDING = {
 	"Agent.CreatedAgentNeverReturnsToUninitialized": "proved",
 	"Agent.ArchivedAgentStaysArchived": "proved",
 	"Agent.VersionGrowsByOneOrNotAtAll": "proved",
+	"CreateAgent.NewAgentKeepsItsDeclaredServers": "proved",
+	"CreateAgent.NewAgentKeepsItsDeclaredTools": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
@@ -36,6 +43,7 @@ describe("Agents Z3 formal verification", () => {
 					apis: [AgentsApi],
 					story,
 					walks: { count: 50 },
+					opaque: [decodeMcpServers, decodeMcpServerCredentials, decodeAgentTools],
 					lock: "./Agents.verify.lock.json",
 					require: { proved: PROVED },
 				})

@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import { CommitModelReply } from "./CommitModelReply.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
+import { PauseTurn } from "./PauseTurn.command.ts"
 import { HARNESS_UNAVAILABLE, HARNESS_UNAVAILABLE_MESSAGE, Harness } from "./Harness.external.ts"
 import { RecordModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import {
@@ -24,6 +25,11 @@ export type TurnId = typeof TurnId.Type
 export const turnKey = (session_id: SessionId, turn: number): TurnId =>
 	TurnId.make(`${session_id}:turn:${turn}`)
 
+export const segmentKey = (session_id: SessionId, turn: number, segment: number): TurnId =>
+	segment === 1
+		? turnKey(session_id, turn)
+		: TurnId.make(`${session_id}:turn:${turn}:seg:${segment}`)
+
 const PROCEED = { status: "proceed" as const }
 const ABORTED = { status: "aborted" as const }
 
@@ -37,9 +43,10 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
 		last_reply_turn: Schema.optionalKey(NonNegativeInt),
+		segment: Schema.optionalKey(PositiveInt),
 	},
 	result: {
-		status: Schema.Literals(["completed", "failed", "interrupted", "aborted"]),
+		status: Schema.Literals(["completed", "failed", "interrupted", "paused", "aborted"]),
 	},
 }) {}
 
@@ -49,7 +56,8 @@ export const RunTurnLive = RunTurn.toLayer(
 		const harness = yield* Harness
 
 		return Effect.fn(function* (payload: typeof RunTurn.workflow.payloadSchema.Type) {
-			const requestId = `${payload.key}:req:1`
+			const segment = payload.segment ?? 1
+			const requestId = `${payload.key}:req:${segment}`
 
 			const started = yield* runTurnActivity(
 				"startModelRequest",
@@ -58,7 +66,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						new RecordModelRequestStart({
 							session_id: payload.session_id,
 							turn: payload.turn,
-							request_seq: 1,
+							request_seq: segment,
 							model_request_start_id: requestId,
 						}),
 					)
@@ -94,6 +102,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						...(payload.last_reply_turn === undefined
 							? {}
 							: { last_reply_turn: payload.last_reply_turn }),
+						...(segment === 1 ? {} : { segment }),
 					})
 					.pipe(
 						Effect.map((reply) => ({
@@ -106,8 +115,14 @@ export const RunTurnLive = RunTurn.toLayer(
 							stop_reason: reply.stop_reason,
 						})),
 						Effect.catchTag(
-							["TurnFailed", "HarnessUnavailable", "TurnInterrupted"],
+							["TurnFailed", "HarnessUnavailable", "TurnInterrupted", "TurnPaused"],
 							(err): Effect.Effect<typeof TurnOutcome.Type> => {
+								if (err._tag === "TurnPaused") {
+									return Effect.succeed({
+										ok: "paused" as const,
+										model_usage: err.model_usage,
+									})
+								}
 								if (err._tag === "TurnFailed") {
 									return Effect.succeed({
 										ok: false,
@@ -138,6 +153,32 @@ export const RunTurnLive = RunTurn.toLayer(
 					),
 			)
 
+			if (generated.ok === "paused") {
+				const paused = yield* runTurnActivity(
+					"pauseTurn",
+					sessions
+						.send(
+							new PauseTurn({
+								session_id: payload.session_id,
+								turn: payload.turn,
+								request_seq: segment,
+								model_request_start_id: requestId,
+								model_usage: generated.model_usage,
+							}),
+						)
+						.pipe(
+							Effect.andThen(Effect.succeed(PROCEED)),
+							Effect.catchTag(
+								["UnknownModelRequest", "SessionNotFound", "SessionNotRunning", "StaleTurn"],
+								() => Effect.succeed(ABORTED),
+							),
+						),
+				)
+				return paused.status === "aborted"
+					? { status: "aborted" as const }
+					: { status: "paused" as const }
+			}
+
 			if (!generated.ok && generated.interrupted) {
 				const interrupted = yield* runTurnActivity(
 					"interruptModelRequest",
@@ -147,7 +188,7 @@ export const RunTurnLive = RunTurn.toLayer(
 								model_usage: generated.model_usage,
 								session_id: payload.session_id,
 								turn: payload.turn,
-								request_seq: 1,
+								request_seq: segment,
 								model_request_start_id: requestId,
 							}),
 						)
@@ -174,7 +215,7 @@ export const RunTurnLive = RunTurn.toLayer(
 								model_usage: generated.model_usage,
 								session_id: payload.session_id,
 								turn: payload.turn,
-								request_seq: 1,
+								request_seq: segment,
 								model_request_start_id: requestId,
 								error_type: generated.error_type,
 								message: generated.message,
@@ -202,7 +243,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						new CommitModelReply({
 							session_id: payload.session_id,
 							turn: payload.turn,
-							request_seq: 1,
+							request_seq: segment,
 							model_request_start_id: requestId,
 							thinking: generated.thinking,
 							text: generated.text,

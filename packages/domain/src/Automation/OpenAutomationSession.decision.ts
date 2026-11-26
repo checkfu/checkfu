@@ -30,6 +30,9 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 					agent_version: pinnedVersion,
 					environment_id: environment.id,
 					title: cmd.title,
+					...(cmd.mcp_server_credentials === undefined
+						? {}
+						: { mcp_server_credentials: cmd.mcp_server_credentials }),
 				}),
 			),
 			session.record(new UserMessage({ content: [{ type: "text", text: cmd.text }] })),
@@ -51,6 +54,12 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 			events.length === 3,
 		AnAutomationSessionPinsAVersionWithinTheAgentHead: ({ before, command }) =>
 			command.agent_version === null || command.agent_version <= before.agent.version,
+		FirstTurnAdmissionKeepsGivenCredentials: ({ command, events }) =>
+			events.some(
+				(event) =>
+					event._tag === "session.created" &&
+					event.mcp_server_credentials === command.mcp_server_credentials,
+			),
 		OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged: ({ before, after }) =>
 			[
 				after.agent.status === before.agent.status,

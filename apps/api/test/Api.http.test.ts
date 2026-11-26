@@ -316,7 +316,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		)
 		const { layer: unconfiguredLayer, closeAll: closeUnconfigured } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "ok", 1, 1),
-			{},
+			{ env: {} },
 		)
 
 		try {
@@ -506,7 +506,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 	it("fails closed with 503 when CHECKFU_API_KEY is set to an empty string", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "unused", 1, 1),
-			{ CHECKFU_API_KEY: "" },
+			{ env: { CHECKFU_API_KEY: "" } },
 		)
 		try {
 			await Effect.runPromise(
@@ -889,14 +889,17 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		for (const [type, fields] of Object.entries({
 			"user.message": ["content"],
 			"user.interrupt": [],
+			"user.tool_confirmation": ["tool_use_id", "result", "deny_message"],
+			"user.custom_tool_result": ["custom_tool_use_id", "content", "is_error"],
+			"agent.custom_tool_use": ["tool_use_id", "name", "input"],
 			"agent.message": ["content", "truncated"],
 			"agent.thinking": [],
 			"span.model_request_start": ["model_request_start_id"],
 			"span.model_request_end": ["is_error", "model_request_start_id", "model_usage"],
 			"session.status_running": ["turn"],
-			"session.status_idle": ["stop_reason", "turn"],
+			"session.status_idle": ["cancelled_event_ids", "stop_reason", "turn"],
 			"session.error": ["error"],
-			"session.status_terminated": [],
+			"session.status_terminated": ["cancelled_event_ids"],
 			"session.archived": [],
 		})) {
 			expect(Object.keys(byType.get(type)?.properties ?? {}).toSorted()).toEqual(

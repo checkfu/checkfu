@@ -6,6 +6,10 @@ import {
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
+import {
+	MAX_AGENT_TOOLS_TEXT_LENGTH,
+	MAX_MCP_SERVERS_TEXT_LENGTH,
+} from "@checkfu/domain/Mcp/McpServers"
 import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
 import * as Mac from "effect/crypto/Mac"
@@ -29,6 +33,7 @@ import {
 	ArtifactBlobLimit,
 	ArtifactBodyLimit,
 	Authentication,
+	ERROR_CODES,
 	EventBatchBodyLimit,
 	RequestId,
 	RequestValidation,
@@ -47,8 +52,13 @@ import type {
 } from "./Api.ts"
 
 export const MAX_REQUEST_BODY_BYTES = 160 * 1024
+const ESCAPED_UNIT_BYTES = 6
+const ESCAPED_CODE_POINT_BYTES = 2 * ESCAPED_UNIT_BYTES
 export const MAX_AGENT_BODY_BYTES =
-	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) * 12 + 16 * 1024
+	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) *
+		ESCAPED_CODE_POINT_BYTES +
+	(MAX_MCP_SERVERS_TEXT_LENGTH + MAX_AGENT_TOOLS_TEXT_LENGTH) * ESCAPED_UNIT_BYTES +
+	16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
@@ -125,7 +135,14 @@ export const toApiError = (err: unknown, request_id: RequestId): HandlerError =>
 				? undefined
 				: errorStatusOfRejection(rejection.httpApiStatus)
 		if (status !== undefined) {
-			return apiError(status, rejection.description ?? "Request rejected.", request_id)
+			return apiError(
+				status,
+				rejection.description ?? "Request rejected.",
+				request_id,
+				Predicate.isTagged(err, "SessionAwaitingAction")
+					? { code: ERROR_CODES.sessionAwaitingAction }
+					: undefined,
+			)
 		}
 	}
 	if (Predicate.isTagged(err, "ConsistencyTimeout") || Predicate.isTagged(err, "WaitTimeout")) {
@@ -279,7 +296,15 @@ export const createCommandId = (
 		"create",
 		resource,
 		idempotencyKey,
-		stringifyCanonicalJson(payload),
+		stringifyCanonicalJson(
+			payload !== null && typeof payload === "object" && !Array.isArray(payload)
+				? Object.fromEntries(
+						Object.entries(payload).filter(
+							([, value]) => !(Array.isArray(value) && value.length === 0),
+						),
+					)
+				: payload,
+		),
 	])
 
 export const createIdentity = (

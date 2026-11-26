@@ -50,9 +50,11 @@ import {
 	SpanModelRequestStart,
 } from "../src/Session/RecordModelRequestStart.command.ts"
 import {
+	AgentMcpToolResult,
 	AgentToolResult,
 	AgentToolUse,
 	RecordToolCall,
+	RecordToolResult,
 } from "../src/Session/RecordToolCall.command.ts"
 import { boundToolEvents, recordToolEvents, toolUseId } from "../src/Session/RecordToolEvents.ts"
 import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
@@ -220,7 +222,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 12, output_tokens: 5 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
@@ -242,7 +244,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Turn 2" })),
 			Story.then(
@@ -325,7 +327,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 		)
@@ -469,7 +471,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
@@ -547,7 +549,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 3, output_tokens: 2 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
@@ -599,6 +601,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
@@ -640,7 +643,7 @@ describe("Sessions", () => {
 					is_error: true,
 				}),
 				new SessionErrorEvent({ error: terminalError }),
-				new SessionStatusTerminated({ running_turn: 2 }),
+				new SessionStatusTerminated({ running_turn: 2, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Terminated", archived: false }),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "After" })),
@@ -703,7 +706,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 0, output_tokens: 0 },
 					is_error: true,
 				}),
-				new SessionStatusTerminated({ running_turn: 1 }),
+				new SessionStatusTerminated({ running_turn: 1, event_ids: "[]" }),
 				new SessionArchived(),
 			),
 			Story.state(session, { _tag: "Terminated", archived: true }),
@@ -734,7 +737,7 @@ describe("Sessions", () => {
 			Story.when(new ArchiveSession({ session_id: session.id })),
 			Story.then(
 				session,
-				new SessionStatusTerminated({ running_turn: null }),
+				new SessionStatusTerminated({ running_turn: null, event_ids: "[]" }),
 				new SessionArchived(),
 			),
 			Story.when(new ArchiveSession({ session_id: session.id })),
@@ -775,7 +778,7 @@ describe("Sessions", () => {
 				Story.when(new ArchiveSession({ session_id: session.id })),
 				Story.then(
 					session,
-					new SessionStatusTerminated({ running_turn: 1 }),
+					new SessionStatusTerminated({ running_turn: 1, event_ids: "[]" }),
 					new SessionArchived(),
 				),
 				Story.when(claim("fp_alpha"), { commandId: "batch:key-1" }),
@@ -836,7 +839,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.when(commit(sessionA.id, "x:1:y")),
 			Story.then(
@@ -847,7 +850,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 		)
 	})
@@ -926,7 +929,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 10, output_tokens: 4 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
@@ -957,7 +960,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 10, output_tokens: 4 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				]),
 				Story.clock(t2),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Follow up" })),
@@ -990,7 +993,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 20, output_tokens: 6 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 				),
 				Story.saga(RunTurn, turn2Key, {
 					_tag: "Completed",
@@ -1069,6 +1072,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 			),
 			Story.saga(RunTurn, turn1Key, {
@@ -1110,7 +1114,7 @@ describe("Sessions", () => {
 						retry_status: { type: "terminal" },
 					},
 				}),
-				new SessionStatusTerminated({ running_turn: 2 }),
+				new SessionStatusTerminated({ running_turn: 2, event_ids: "[]" }),
 			),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 2 }),
 			Story.succeed(Harness.interrupt, undefined),
@@ -1158,6 +1162,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 				new UserMessage({ content: [{ type: "text", text: "Second" }] }),
 				new SessionStatusRunning({ turn: 2 }),
@@ -1174,7 +1179,7 @@ describe("Sessions", () => {
 						retry_status: { type: "terminal" },
 					},
 				}),
-				new SessionStatusTerminated({ running_turn: 2 }),
+				new SessionStatusTerminated({ running_turn: 2, event_ids: "[]" }),
 				new SessionArchived(),
 			]),
 			Story.view(SessionView, session, {
@@ -1244,7 +1249,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 5, output_tokens: 2 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
@@ -1274,7 +1279,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 8, output_tokens: 3 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
@@ -1335,7 +1340,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
@@ -1394,7 +1399,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 0, output_tokens: 0 },
 					is_error: true,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, event_ids: "[]" }),
 				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
@@ -1425,7 +1430,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 9, output_tokens: 5 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
@@ -1482,6 +1487,7 @@ describe("Sessions", () => {
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 1,
+						event_ids: "[]",
 					}),
 				),
 				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
@@ -1517,7 +1523,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2, event_ids: "[]" }),
 				),
 				Story.saga(RunTurn, turn2Key, { _tag: "Completed", result: { status: "interrupted" } }),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
@@ -1631,6 +1637,7 @@ describe("Sessions", () => {
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 1,
+						event_ids: "[]",
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
@@ -1694,7 +1701,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 1, output_tokens: 1 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
@@ -1742,7 +1749,7 @@ describe("Sessions", () => {
 					session,
 					new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
 					end(1, false),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Two" })),
@@ -1761,7 +1768,7 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					end(2, true),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2, event_ids: "[]" }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Three" })),
@@ -1793,6 +1800,7 @@ describe("Sessions", () => {
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 3,
+						event_ids: "[]",
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 3 }),
@@ -1840,7 +1848,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 5, output_tokens: 2 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 			Story.view(TurnInput, session, { turn: 1, input: [] }),
@@ -1872,7 +1880,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 6, output_tokens: 3 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 			Story.view(TurnInput, session, { turn: 2 }),
@@ -1922,7 +1930,7 @@ describe("Sessions", () => {
 				session,
 				new AgentMessage({ content: [{ type: "text", text: "Reply" }] }),
 				end(1),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				new SessionStatusRunning({ turn: 2 }),
 			),
 			Story.state(session, { _tag: "Running", turn: 2 }),
@@ -1935,7 +1943,7 @@ describe("Sessions", () => {
 				session,
 				new AgentMessage({ content: [{ type: "text", text: "Reply" }], truncated: true }),
 				end(2),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 				new SessionStatusRunning({ turn: 3 }),
 			),
 			Story.state(session, { _tag: "Running", turn: 3 }),
@@ -1963,6 +1971,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 3,
+					event_ids: "[]",
 				}),
 				new SessionStatusRunning({ turn: 4 }),
 			),
@@ -2010,6 +2019,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
@@ -2051,7 +2061,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 3, output_tokens: 1 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 			Story.view(TurnInput, session, { last_reply_turn: 2 }),
@@ -2099,6 +2109,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
@@ -2128,7 +2139,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 3, output_tokens: 1 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 			Story.view(TurnInput, session, { turn: 2 }),
@@ -2165,7 +2176,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, event_ids: "[]" }),
 					new SessionStatusRunning({ turn: 2 }),
 					new SpanModelRequestStart({ model_request_start_id: secondRequest }),
 				),
@@ -2189,12 +2200,15 @@ describe("Sessions", () => {
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 2,
+						event_ids: "[]",
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 				Story.call("deadline", Harness.interrupt, { turn: 2 }),
 				Story.succeed("deadline", Harness.interrupt, undefined),
 				Story.fail("slow-interrupt", Harness.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.call("again", Harness.interrupt, { turn: 1 }),
+				Story.succeed("again", Harness.interrupt, undefined),
 				Story.fail("second", Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 			)
@@ -2235,6 +2249,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 			),
 			Story.when(
@@ -2276,6 +2291,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 			),
 			Story.state(opened, { _tag: "Idle", turn: 1 }),
@@ -2332,6 +2348,7 @@ describe("Sessions", () => {
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 1,
+						event_ids: "[]",
 					}),
 				),
 				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
@@ -2367,7 +2384,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 3, output_tokens: 1 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 				Story.succeed("redelivery", Harness.interrupt, undefined),
@@ -2513,7 +2530,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 12, output_tokens: 6 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
 			Story.saga(RunTurn, turn1Key, {
 				_tag: "Completed",
@@ -2602,6 +2619,7 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
+					event_ids: "[]",
 				}),
 				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
@@ -2632,7 +2650,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 6, output_tokens: 3 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
@@ -2792,7 +2810,7 @@ describe("Sessions", () => {
 				Story.when(new ArchiveSession({ session_id: session.id })),
 				Story.then(
 					session,
-					new SessionStatusTerminated({ running_turn: null }),
+					new SessionStatusTerminated({ running_turn: null, event_ids: "[]" }),
 					new SessionArchived(),
 				),
 				Story.call(Harness.discardWorkspace, { session_id: session.id }),
@@ -2845,7 +2863,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 0, output_tokens: 0 },
 					is_error: true,
 				}),
-				new SessionStatusTerminated({ running_turn: 1 }),
+				new SessionStatusTerminated({ running_turn: 1, event_ids: "[]" }),
 				new SessionArchived(),
 			),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
@@ -2876,7 +2894,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 0, output_tokens: 0 },
 					is_error: true,
 				}),
-				new SessionStatusTerminated({ running_turn: 1 }),
+				new SessionStatusTerminated({ running_turn: 1, event_ids: "[]" }),
 				new SessionArchived(),
 			]),
 			Story.view(SessionView, session, {
@@ -3019,7 +3037,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 4, output_tokens: 6 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
@@ -3030,37 +3048,40 @@ describe("Sessions", () => {
 		},
 	)
 
-	it("encodes and decodes SessionState snapshots at explicit schema_version 1 and rejects unknown versions", () => {
+	it("encodes and decodes SessionState snapshots at explicit schema_version 2, migrates version 1, and rejects unknown versions", () => {
 		const encode = Schema.encodeSync(SessionStateSnapshot)
 		const decode = Schema.decodeUnknownSync(SessionStateSnapshot)
-		const wire = encode({
-			_tag: "Running",
+		const running = {
+			_tag: "Running" as const,
 			turn: 1,
 			open_model_request_id: "req_1",
 			model_requests_started: 1,
 			pending_user_messages: 2,
-		})
-		expect(wire).toEqual({
-			schema_version: SESSION_STATE_SCHEMA_VERSION,
-			state: {
-				_tag: "Running",
-				turn: 1,
-				open_model_request_id: "req_1",
-				model_requests_started: 1,
-				pending_user_messages: 2,
-			},
-		})
-		expect(decode(wire)).toEqual({
-			_tag: "Running",
-			turn: 1,
-			open_model_request_id: "req_1",
-			model_requests_started: 1,
-			pending_user_messages: 2,
-		})
+			awaiting_calls: 1,
+			awaiting_ids: '["tu_1"]',
+			paused: false,
+			asked_calls: 1,
+			interrupted: false,
+		}
+		const wire = encode(running)
+		expect(wire).toEqual({ schema_version: SESSION_STATE_SCHEMA_VERSION, state: running })
+		expect(decode(wire)).toEqual(running)
+		expect(
+			decode({
+				schema_version: 1,
+				state: {
+					_tag: "Running",
+					turn: 1,
+					open_model_request_id: "req_1",
+					model_requests_started: 1,
+					pending_user_messages: 2,
+				},
+			}),
+		).toEqual({ ...running, awaiting_calls: 0, awaiting_ids: "[]", asked_calls: 0 })
 		expect(
 			Exit.isFailure(
 				Schema.decodeExit(SessionStateSnapshot)({
-					schema_version: 2,
+					schema_version: 3,
 					state: { _tag: "Idle", turn: 0 },
 				}),
 			),
@@ -3092,7 +3113,7 @@ describe("Sessions", () => {
 			}),
 			Story.given(
 				session,
-				new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1 }),
+				new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1, event_ids: "[]" }),
 				text("After refusal"),
 				new SessionStatusRunning({ turn: 2 }),
 			),
@@ -3644,10 +3665,66 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 1, output_tokens: 1 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.when(record("req_1")),
 				Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
+			)
+		},
+	)
+
+	it.effect(
+		"records the result of a call whose use is already on the log, only while a model request is open",
+		() => {
+			const session = Session.ref("sess_tools_result_1")
+			const record = (model_request_start_id: string, mcp: boolean) =>
+				new RecordToolResult({
+					session_id: session.id,
+					turn: 1,
+					model_request_start_id,
+					result: {
+						type: "tool_result",
+						tool_use_id: toolUseId(1, 4),
+						content: [{ type: "text", text: "deployed" }],
+						is_error: false,
+						truncated: true,
+						...(mcp ? { mcp: true as const } : {}),
+					},
+				})
+			const recorded = {
+				tool_use_id: toolUseId(1, 4),
+				content: [{ type: "text" as const, text: "deployed" }],
+				is_error: false,
+				truncated: true as const,
+			}
+			return story(
+				Story.given(
+					session,
+					createdEvent,
+					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+					new SessionStatusRunning({ turn: 1 }),
+				),
+				Story.when(record("req_1", true)),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_1" }),
+				),
+				Story.when(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+					}),
+				),
+				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_1" })),
+				Story.when(record("req_1", true)),
+				Story.then(session, new AgentMcpToolResult(recorded)),
+				Story.when(record("req_1", false)),
+				Story.then(session, new AgentToolResult(recorded)),
+				Story.when(record("req_other", true)),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_other" }),
+				),
 			)
 		},
 	)

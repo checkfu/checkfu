@@ -1,4 +1,11 @@
 import { MAX_MESSAGE_TEXT_LENGTH, SessionId } from "@checkfu/sdk/Schemas"
+import {
+	TOOL_REJECTIONS,
+	emptySessionFold,
+	foldSessionEvents,
+	outstandingCalls,
+} from "@checkfu/sdk/SessionFold"
+import type { SessionFold, SessionFoldRetention, ToolCall } from "@checkfu/sdk/SessionFold"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
@@ -19,6 +26,7 @@ import * as Terminal from "effect/Terminal"
 import type { CheckfuClient, SessionStreamEvent } from "../Client.ts"
 import {
 	CliFailure,
+	actionRequired,
 	apiErrorStatus,
 	formatClientError,
 	isApiErrorEnvelope,
@@ -32,15 +40,18 @@ import { RootCommand, getClient, renderOutput } from "../RootCommand.ts"
 import { withSigintHandler } from "../Signals.ts"
 import {
 	escapeTerminalControlCharacters,
+	stringifyTerminalSafeJson,
 	writeStderrLine,
 	writeStdoutLine,
 } from "../TerminalOutput.ts"
 import {
 	applyMessageReceipt,
 	applySessionEvent,
+	awaitingActionOf,
 	beginMessageSend,
 	cancelMessageSend,
 	createInitialConnectState,
+	describeAwaitedAction,
 	evaluateHaltedQueueSnapshot,
 	evaluatePipedSettlement,
 	extractSubmittedMessageReceipt,
@@ -50,7 +61,7 @@ import {
 	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "./SessionsConnectState.ts"
-import type { ConnectState } from "./SessionsConnectState.ts"
+import type { ConnectState, ConnectStopReason } from "./SessionsConnectState.ts"
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
@@ -350,7 +361,7 @@ const renderConnectEvent = (
 
 		let formattedError: string | undefined
 		let errorRetryStatus: string | undefined
-		let stopReason: string | undefined
+		let stopReason: ConnectStopReason | undefined
 		let eventTurn: number | undefined
 
 		switch (event.type) {
@@ -364,6 +375,25 @@ const renderConnectEvent = (
 			case "agent.tool_use": {
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(`[tool] ${escapeTerminalControlCharacters(event.name)}`)
+				}
+				break
+			}
+			case "agent.mcp_tool_use":
+			case "agent.custom_tool_use": {
+				const asks = event.type === "agent.custom_tool_use" || event.evaluated_permission === "ask"
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(
+						`[tool] ${escapeTerminalControlCharacters(event.name)}${asks ? ` (${event.tool_use_id} waits)` : ""}`,
+					)
+				}
+				break
+			}
+			case "agent.tool_result":
+			case "agent.mcp_tool_result": {
+				if (!rawStructuredMode && event.rejected !== undefined) {
+					yield* writeStderrLine(
+						`[tool] ${event.tool_use_id} did not run: ${TOOL_REJECTIONS[event.rejected]}`,
+					)
 				}
 				break
 			}
@@ -425,6 +455,7 @@ const renderConnectEvent = (
 				type: eventType,
 				...(eventTurn !== undefined ? { turn: eventTurn } : {}),
 				...(stopReason !== undefined ? { stopReason } : {}),
+				source: event,
 				...(formattedError !== undefined
 					? { error: { message: formattedError, retryStatus: errorRetryStatus } }
 					: {}),
@@ -433,6 +464,18 @@ const renderConnectEvent = (
 		})
 		if (transition.duplicate) {
 			return
+		}
+		if (
+			!rawStructuredMode &&
+			event.type === "session.status_idle" &&
+			event.stop_reason.type === "requires_action"
+		) {
+			const { calls } = transition.state
+			for (const toolUseId of outstandingCalls(calls)) {
+				for (const line of describeWaitingCall(sessionId, toolUseId, calls.calls.get(toolUseId))) {
+					yield* writeStderrLine(escapeTerminalControlCharacters(line))
+				}
+			}
 		}
 		if (transition.shouldWakeWaiter) {
 			const settleDeferred = yield* Ref.get(settleDeferredRef)
@@ -459,6 +502,63 @@ const renderConnectEvent = (
 			}
 		}
 	})
+
+export const shellQuote = (text: string): string =>
+	/^[A-Za-z0-9_@%+=:,./-]+$/u.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`
+
+export type WaitingCall = Pick<ToolCall, "awaits" | "name" | "server" | "input">
+
+export const MAX_SHOWN_ARGUMENT_CHARACTERS = 2000
+
+const shownArguments = (input: unknown): string => {
+	const characters = Array.from(stringifyTerminalSafeJson(input))
+	return characters.length <= MAX_SHOWN_ARGUMENT_CHARACTERS
+		? characters.join("")
+		: `${characters.slice(0, MAX_SHOWN_ARGUMENT_CHARACTERS).join("")}… (${characters.length - MAX_SHOWN_ARGUMENT_CHARACTERS} more characters)`
+}
+
+export const describeWaitingCall = (
+	sessionId: string,
+	toolUseId: string,
+	call: WaitingCall | undefined,
+): ReadonlyArray<string> => {
+	if (call === undefined) {
+		return [
+			`[waits] ${toolUseId}: read its use event before answering`,
+			`  show: checkfu sessions:events list --session-id ${shellQuote(sessionId)}`,
+			`  ${answerHint(sessionId, toolUseId, undefined)}`,
+		]
+	}
+	const what =
+		call.awaits === "confirmation"
+			? `${call.server ?? "MCP server"}: ${call.name}`
+			: `custom tool ${call.name}`
+	return [
+		`[waits] ${what} (${toolUseId})`,
+		`  arguments: ${shownArguments(call.input)}`,
+		`  ${call.awaits === "confirmation" ? "allow" : "answer"}: ${answerHint(sessionId, toolUseId, call.awaits)}`,
+	]
+}
+
+export const answerHint = (
+	sessionId: string,
+	toolUseId: string,
+	awaits: "confirmation" | "result" | undefined,
+): string => {
+	const event =
+		awaits === "confirmation"
+			? { type: "user.tool_confirmation", tool_use_id: toolUseId, result: "allow" }
+			: awaits === "result"
+				? {
+						type: "user.custom_tool_result",
+						custom_tool_use_id: toolUseId,
+						content: [{ type: "text", text: "<result>" }],
+					}
+				: undefined
+	return event === undefined
+		? `${toolUseId} waits: answer it with a user.tool_confirmation or a user.custom_tool_result event`
+		: `checkfu sessions:events send --session-id ${shellQuote(sessionId)} --event ${shellQuote(JSON.stringify(event))}`
+}
 
 const dispatchUserLine = (
 	client: CheckfuClient,
@@ -575,20 +675,12 @@ const resolveCursorBaselineFromPrefix = (
 	client: CheckfuClient,
 	sessionId: SessionId,
 	after: number,
-): Effect.Effect<
-	{
-		readonly status: ConnectState["status"]
-		readonly observedTurn: number
-		readonly settledTurn: number
-	},
-	CliFailure
-> =>
+	retain: SessionFoldRetention,
+): Effect.Effect<{ readonly calls: SessionFold }, CliFailure> =>
 	Effect.gen(function* () {
 		let pageCursor = 0
 		let lastSeenSeq = 0
-		let observedTurn = 0
-		let settledTurn = 0
-		let status: ConnectState["status"] = "idle"
+		let calls = emptySessionFold(retain)
 		while (true) {
 			const page = yield* client.api.sessions
 				.listEvents({
@@ -601,25 +693,15 @@ const resolveCursorBaselineFromPrefix = (
 				})
 				.pipe(Effect.mapError(formatClientError))
 			let reachedCursor = false
+			calls = foldSessionEvents(
+				calls,
+				page.data.filter((entry) => entry.seq <= after),
+			)
 			for (const entry of page.data) {
 				lastSeenSeq = Math.max(lastSeenSeq, entry.seq)
 				if (entry.seq > after) {
 					reachedCursor = true
 					break
-				}
-				if (entry.type === "session.status_running") {
-					observedTurn = entry.turn ?? observedTurn + 1
-					status = "running"
-				} else if (entry.type === "session.status_idle") {
-					const idleTurn = entry.turn ?? observedTurn
-					observedTurn = Math.max(observedTurn, idleTurn)
-					settledTurn = Math.max(settledTurn, idleTurn)
-					status = "idle"
-				} else if (
-					entry.type === "session.status_terminated" ||
-					entry.type === "session.archived"
-				) {
-					status = "terminated"
 				}
 			}
 			if (
@@ -638,7 +720,7 @@ const resolveCursorBaselineFromPrefix = (
 				`--after cursor ${after} is beyond the latest session event sequence (${lastSeenSeq}).`,
 			)
 		}
-		return { status, observedTurn, settledTurn }
+		return { calls }
 	})
 
 const resolveCursorBaseline = (
@@ -647,22 +729,13 @@ const resolveCursorBaseline = (
 	initialSession: SessionSnapshotResponse,
 	after: number | undefined,
 	headSeq: number,
+	retain: SessionFoldRetention,
 ): Effect.Effect<
-	{
-		readonly status: ConnectState["status"]
-		readonly observedTurn: number
-		readonly settledTurn: number
-		readonly latestSession: SessionSnapshotResponse
-	},
+	{ readonly calls: SessionFold; readonly latestSession: SessionSnapshotResponse },
 	CliFailure
 > => {
 	if (after === undefined || after === 0) {
-		return Effect.succeed({
-			status: "idle" as const,
-			observedTurn: 0,
-			settledTurn: 0,
-			latestSession: initialSession,
-		})
+		return Effect.succeed({ calls: emptySessionFold(retain), latestSession: initialSession })
 	}
 	if (after > headSeq) {
 		return Effect.fail(
@@ -673,7 +746,13 @@ const resolveCursorBaseline = (
 	}
 	return Effect.gen(function* () {
 		let cursor = after + 1
-		let status: ConnectState["status"] | undefined
+		let ended = false
+		let nearestTurn: number | undefined
+		const walked: Array<SessionStreamEvent> = []
+		const baseline = () => ({
+			calls: foldSessionEvents(emptySessionFold(retain), walked.toReversed()),
+			latestSession: initialSession,
+		})
 		let sawMissingTurn = false
 		while (true) {
 			const page = yield* client.api.sessions
@@ -684,49 +763,43 @@ const resolveCursorBaseline = (
 				.pipe(Effect.mapError(formatClientError))
 			for (const entry of page.data) {
 				if (entry.type === "session.status_terminated" || entry.type === "session.archived") {
-					status ??= "terminated"
+					if (nearestTurn !== undefined) {
+						return baseline()
+					}
+					walked.push(entry)
+					ended = true
 					continue
 				}
-				if (entry.type === "session.status_running") {
+				if (entry.type === "session.status_running" || entry.type === "session.status_idle") {
 					if (entry.turn === undefined) {
 						sawMissingTurn = true
 						break
 					}
-					return {
-						status: status ?? "running",
-						observedTurn: entry.turn,
-						settledTurn: Math.max(0, entry.turn - 1),
-						latestSession: initialSession,
+					const paused =
+						entry.type === "session.status_idle" && entry.stop_reason.type === "requires_action"
+					const settled = entry.type === "session.status_idle" && !paused
+					if (nearestTurn !== undefined && (settled || entry.turn < nearestTurn)) {
+						return baseline()
 					}
+					nearestTurn ??= entry.turn
+					walked.push(entry)
+					if (settled || ended) {
+						return baseline()
+					}
+					continue
 				}
-				if (entry.type === "session.status_idle") {
-					if (entry.turn === undefined) {
-						sawMissingTurn = true
-						break
-					}
-					return {
-						status: status ?? "idle",
-						observedTurn: entry.turn,
-						settledTurn: entry.turn,
-						latestSession: initialSession,
-					}
-				}
+				walked.push(entry)
 			}
 			if (sawMissingTurn) {
 				break
 			}
 			if (!page.has_more || page.next_cursor === null || page.next_cursor >= cursor) {
-				return {
-					status: status ?? "idle",
-					observedTurn: 0,
-					settledTurn: 0,
-					latestSession: initialSession,
-				}
+				return baseline()
 			}
 			cursor = page.next_cursor
 		}
 
-		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after)
+		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after, retain)
 		return {
 			...prefix,
 			latestSession: initialSession,
@@ -800,12 +873,14 @@ export const sessionsConnectCommand = Command.make(
 				}
 			}
 
+			const retain: SessionFoldRetention = rawStructuredMode ? "none" : "waiting"
 			const baseline = yield* resolveCursorBaseline(
 				client,
 				sessionId,
 				initialSession,
 				after,
 				headSeq,
+				retain,
 			)
 			const session = baseline.latestSession
 			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
@@ -814,17 +889,26 @@ export const sessionsConnectCommand = Command.make(
 			yield* writeStderrLine(
 				`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
 			)
+			if (!rawStructuredMode) {
+				for (const toolUseId of outstandingCalls(baseline.calls)) {
+					for (const line of describeWaitingCall(
+						sessionId,
+						toolUseId,
+						baseline.calls.calls.get(toolUseId),
+					)) {
+						yield* writeStderrLine(escapeTerminalControlCharacters(line))
+					}
+				}
+			}
 
 			const stateRef = yield* Ref.make<ConnectState>(
 				createInitialConnectState({
 					trackPipedTurns: !isInteractiveTty,
-					status: baseline.status,
 					liveStatus: session.status,
 					liveTurn: session.turn,
 					lastProcessedSeq: after ?? 0,
-					observedTurn: baseline.observedTurn,
-					settledTurn: baseline.settledTurn,
 					ended: initiallyEnded,
+					calls: baseline.calls,
 				}),
 			)
 
@@ -880,7 +964,7 @@ export const sessionsConnectCommand = Command.make(
 					const replayDone =
 						session.archived_at !== null
 							? Deferred.await(streamEndedDeferred)
-							: baseline.status !== "terminated"
+							: !baseline.calls.ended
 								? Deferred.await(stopConnectDeferred)
 								: Effect.void
 
@@ -1231,6 +1315,43 @@ export const sessionsConnectCommand = Command.make(
 						const settlementAction = evaluatePipedSettlement(currentState)
 						if (settlementAction === "ended" || settlementAction === "settled") {
 							break
+						}
+						const pause = awaitingActionOf(currentState)
+						if (settlementAction === "awaiting_action" && pause !== undefined) {
+							const later = yield* Effect.result(
+								client.api.sessions
+									.listEvents({
+										params: { session_id: sessionId },
+										query: {
+											...(pause.seq === undefined ? {} : { after: pause.seq }),
+											limit: 100,
+											order: "asc",
+										},
+									})
+									.pipe(Effect.mapError(formatClientError)),
+							)
+							if (later._tag === "Failure") {
+								yield* Ref.set(incompleteTurnRef, later.failure)
+								break
+							}
+							const since = awaitingActionOf({
+								calls: foldSessionEvents(
+									currentState.calls,
+									later.success.data.filter((entry) => entry.seq > currentState.lastProcessedSeq),
+								),
+							})
+							const stands =
+								pause.seq === undefined
+									? pause
+									: !later.success.has_more &&
+										  since?.seq === pause.seq &&
+										  since.toolUseIds.length > 0
+										? since
+										: undefined
+							if (stands !== undefined) {
+								yield* Ref.set(incompleteTurnRef, actionRequired(describeAwaitedAction(stands)))
+								break
+							}
 						}
 						if (settlementAction === "check_halted_queue") {
 							let haltedQueuedTurn = false

@@ -1,3 +1,9 @@
+import { emptySessionFold, foldSessionEvent } from "@checkfu/sdk/SessionFold"
+import type { SessionFold, SessionFoldEvent } from "@checkfu/sdk/SessionFold"
+import type { StopReason } from "@checkfu/sdk/Schemas"
+
+export type ConnectStopReason = StopReason["type"] | "requires_action"
+
 export interface TurnFailure {
 	readonly turn: number
 	readonly message: string
@@ -9,16 +15,41 @@ export interface TurnErrorSnapshot {
 	readonly retryStatus: string | undefined
 }
 
+export interface AwaitingAction {
+	readonly turn: number
+	readonly seq: number | undefined
+	readonly toolUseIds: ReadonlyArray<string>
+}
+
+export const awaitingActionOf = (state: {
+	readonly calls: SessionFold
+}): AwaitingAction | undefined => {
+	const { turn } = state.calls
+	return turn.status === "paused"
+		? { turn: turn.turn, seq: turn.seq, toolUseIds: Array.from(turn.outstanding) }
+		: undefined
+}
+
+const pausedTurnOf = (state: { readonly calls: SessionFold }): number | undefined =>
+	state.calls.turn.status === "paused" ? state.calls.turn.turn : undefined
+
+export const statusOf = (state: {
+	readonly calls: SessionFold
+}): "idle" | "running" | "terminated" =>
+	state.calls.ended ? "terminated" : state.calls.turn.status === "running" ? "running" : "idle"
+
+export const observedTurnOf = (state: { readonly calls: SessionFold }): number =>
+	state.calls.turn.turn
+
+export const settledTurnOf = (state: { readonly calls: SessionFold }): number =>
+	state.calls.settled.turn
+
 export interface ConnectState {
 	readonly trackPipedTurns: boolean
-	readonly status: "idle" | "running" | "terminated"
 	readonly liveStatus: "idle" | "running" | "terminated"
 	readonly liveTurn: number
 	readonly liveStateVersion: number
 	readonly lastProcessedSeq: number
-	readonly observedTurn: number
-	readonly settledTurn: number
-	readonly latestSettledStopReason: string | undefined
 	readonly targetTurn: number
 	readonly unsettledSubmittedTurns: ReadonlySet<number>
 	readonly unsettledQueuedTurns: ReadonlySet<number>
@@ -26,6 +57,7 @@ export interface ConnectState {
 	readonly pendingTurnErrors: ReadonlyMap<number, string>
 	readonly sendInFlight: boolean
 	readonly latestTurnError: TurnErrorSnapshot | undefined
+	readonly calls: SessionFold
 	readonly ended: boolean
 }
 
@@ -49,7 +81,8 @@ export interface ConnectSessionEvent {
 	readonly seq: number | undefined
 	readonly type: string
 	readonly turn?: number | undefined
-	readonly stopReason?: string | undefined
+	readonly stopReason?: ConnectStopReason | undefined
+	readonly source?: SessionFoldEvent | undefined
 	readonly error?:
 		| {
 				readonly message: string
@@ -64,7 +97,12 @@ export interface EventTransitionResult {
 	readonly shouldWakeWaiter: boolean
 }
 
-export type PipedSettlementAction = "ended" | "settled" | "check_halted_queue" | "wait"
+export type PipedSettlementAction =
+	| "ended"
+	| "settled"
+	| "awaiting_action"
+	| "check_halted_queue"
+	| "wait"
 
 export type HaltedQueueSnapshotDecision =
 	| { readonly action: "continue_waiting" }
@@ -73,23 +111,17 @@ export type HaltedQueueSnapshotDecision =
 
 export const createInitialConnectState = (init: {
 	readonly trackPipedTurns: boolean
-	readonly status: ConnectState["status"]
 	readonly liveStatus: ConnectState["liveStatus"]
 	readonly liveTurn: number
 	readonly lastProcessedSeq: number
-	readonly observedTurn: number
-	readonly settledTurn: number
 	readonly ended: boolean
+	readonly calls?: SessionFold | undefined
 }): ConnectState => ({
 	trackPipedTurns: init.trackPipedTurns,
-	status: init.status,
 	liveStatus: init.liveStatus,
 	liveTurn: init.liveTurn,
 	liveStateVersion: 0,
 	lastProcessedSeq: init.lastProcessedSeq,
-	observedTurn: init.observedTurn,
-	settledTurn: init.settledTurn,
-	latestSettledStopReason: undefined,
 	targetTurn: 0,
 	unsettledSubmittedTurns: new Set<number>(),
 	unsettledQueuedTurns: new Set<number>(),
@@ -97,6 +129,7 @@ export const createInitialConnectState = (init: {
 	pendingTurnErrors: new Map<number, string>(),
 	sendInFlight: false,
 	latestTurnError: undefined,
+	calls: init.calls ?? emptySessionFold("none"),
 	ended: init.ended,
 })
 
@@ -178,7 +211,7 @@ export const cancelMessageSend = (state: ConnectState): ConnectState =>
 		? {
 				...state,
 				sendInFlight: false,
-				pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
+				pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, settledTurnOf(state)),
 			}
 		: state
 
@@ -227,13 +260,13 @@ export const applyMessageReceipt = (
 			? recordFirstFailure(state.firstSubmittedTurnFailure, turn, preRecordedError)
 			: state.firstSubmittedTurnFailure
 	let unsettledSubmittedTurns = state.unsettledSubmittedTurns
-	if (turn > state.settledTurn && !unsettledSubmittedTurns.has(turn)) {
+	if (turn > settledTurnOf(state) && !unsettledSubmittedTurns.has(turn)) {
 		const nextSubmitted = new Set(unsettledSubmittedTurns)
 		nextSubmitted.add(turn)
 		unsettledSubmittedTurns = nextSubmitted
 	}
 	let unsettledQueuedTurns = state.unsettledQueuedTurns
-	if (!initiatedFromIdle && turn > state.settledTurn) {
+	if (!initiatedFromIdle && turn > settledTurnOf(state)) {
 		if (!unsettledQueuedTurns.has(turn)) {
 			const nextQueued = new Set(unsettledQueuedTurns)
 			nextQueued.add(turn)
@@ -250,7 +283,7 @@ export const applyMessageReceipt = (
 		unsettledSubmittedTurns,
 		unsettledQueuedTurns,
 		firstSubmittedTurnFailure,
-		pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
+		pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, settledTurnOf(state)),
 		sendInFlight: false,
 		liveStatus: nextLiveStatus,
 		liveTurn: nextLiveTurn,
@@ -265,17 +298,30 @@ export const applySessionEvent = (
 	if (event.seq !== undefined && event.seq <= state.lastProcessedSeq) {
 		return { state, duplicate: true, shouldWakeWaiter: false }
 	}
-	const baseState: ConnectState =
+	const folded = (turn: number | undefined): SessionFold => {
+		const source = event.source ?? statusOnly(event)
+		return source === undefined
+			? state.calls
+			: foldSessionEvent(
+					state.calls,
+					turn !== undefined &&
+						(source.type === "session.status_running" || source.type === "session.status_idle")
+						? { ...source, turn }
+						: source,
+				)
+	}
+	const seen: ConnectState =
 		event.seq !== undefined ? { ...state, lastProcessedSeq: event.seq } : state
 
 	switch (event.type) {
 		case "session.status_running": {
-			const nextObserved = event.turn ?? baseState.observedTurn + 1
-			const reachedLive = nextObserved > baseState.liveTurn
+			const nextObserved = event.turn ?? observedTurnOf(seen) + 1
+			const baseState: ConnectState = { ...seen, calls: folded(nextObserved) }
+			const reachedLive =
+				nextObserved > baseState.liveTurn ||
+				(nextObserved === baseState.liveTurn && pausedTurnOf(state) === nextObserved)
 			const next: ConnectState = {
 				...baseState,
-				status: "running",
-				observedTurn: nextObserved,
 				liveStatus: reachedLive ? "running" : baseState.liveStatus,
 				liveTurn: reachedLive ? nextObserved : baseState.liveTurn,
 				liveStateVersion: reachedLive ? baseState.liveStateVersion + 1 : baseState.liveStateVersion,
@@ -283,11 +329,12 @@ export const applySessionEvent = (
 			const shouldWakeWaiter =
 				next.trackPipedTurns &&
 				next.targetTurn > 0 &&
-				next.observedTurn >= next.targetTurn &&
+				observedTurnOf(next) >= next.targetTurn &&
 				next.unsettledQueuedTurns.has(next.targetTurn)
 			return { state: next, duplicate: false, shouldWakeWaiter }
 		}
 		case "session.error": {
+			const baseState = seen
 			if (!baseState.trackPipedTurns || event.error === undefined) {
 				return { state: baseState, duplicate: false, shouldWakeWaiter: false }
 			}
@@ -295,7 +342,7 @@ export const applySessionEvent = (
 				state: {
 					...baseState,
 					latestTurnError: {
-						turn: baseState.observedTurn,
+						turn: observedTurnOf(baseState),
 						message: event.error.message,
 						retryStatus: event.error.retryStatus,
 					},
@@ -306,28 +353,38 @@ export const applySessionEvent = (
 		}
 		case "session.status_idle": {
 			const stopReason = event.stopReason
-			const turn = event.turn ?? baseState.observedTurn
-			const nextObservedTurn = Math.max(baseState.observedTurn, turn)
-			const nextSettledTurn = Math.max(baseState.settledTurn, turn)
-			const latestSettledStopReason =
-				turn >= baseState.settledTurn ? stopReason : baseState.latestSettledStopReason
+			const turn = event.turn ?? observedTurnOf(seen)
+			const baseState: ConnectState = { ...seen, calls: folded(turn) }
+			const nextSettledTurn = settledTurnOf(baseState)
 			const reachedLiveIdle =
 				turn > baseState.liveTurn ||
 				(turn === baseState.liveTurn && baseState.liveStatus === "running")
+
+			if (stopReason === "requires_action") {
+				const next: ConnectState = {
+					...baseState,
+					liveStatus: turn >= baseState.liveTurn ? "idle" : baseState.liveStatus,
+					liveTurn: Math.max(baseState.liveTurn, turn),
+					liveStateVersion: reachedLiveIdle
+						? baseState.liveStateVersion + 1
+						: baseState.liveStateVersion,
+				}
+				return {
+					state: next,
+					duplicate: false,
+					shouldWakeWaiter: next.trackPipedTurns && next.targetTurn > 0 && turn <= next.targetTurn,
+				}
+			}
 
 			if (!baseState.trackPipedTurns) {
 				return {
 					state: {
 						...baseState,
-						status: "idle",
-						observedTurn: nextObservedTurn,
 						liveStatus: turn >= baseState.liveTurn ? "idle" : baseState.liveStatus,
 						liveTurn: Math.max(baseState.liveTurn, turn),
 						liveStateVersion: reachedLiveIdle
 							? baseState.liveStateVersion + 1
 							: baseState.liveStateVersion,
-						settledTurn: nextSettledTurn,
-						latestSettledStopReason,
 					},
 					duplicate: false,
 					shouldWakeWaiter: false,
@@ -355,15 +412,11 @@ export const applySessionEvent = (
 
 			const next: ConnectState = {
 				...baseState,
-				status: "idle",
-				observedTurn: nextObservedTurn,
 				liveStatus: turn >= baseState.liveTurn ? "idle" : baseState.liveStatus,
 				liveTurn: Math.max(baseState.liveTurn, turn),
 				liveStateVersion: reachedLiveIdle
 					? baseState.liveStateVersion + 1
 					: baseState.liveStateVersion,
-				settledTurn: nextSettledTurn,
-				latestSettledStopReason,
 				unsettledSubmittedTurns: pruneSettledTurns(
 					baseState.unsettledSubmittedTurns,
 					nextSettledTurn,
@@ -375,19 +428,19 @@ export const applySessionEvent = (
 					baseState.latestTurnError?.turn === turn ? undefined : baseState.latestTurnError,
 			}
 			const shouldWakeWaiter =
-				(next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
+				(next.targetTurn > 0 && settledTurnOf(next) >= next.targetTurn) ||
 				(next.unsettledQueuedTurns.has(next.targetTurn) &&
-					next.settledTurn === next.targetTurn - 1 &&
+					settledTurnOf(next) === next.targetTurn - 1 &&
 					isQueueHaltingStopReason(stopReason))
 			return { state: next, duplicate: false, shouldWakeWaiter }
 		}
 		case "session.status_terminated":
 		case "session.archived": {
+			const baseState: ConnectState = { ...seen, calls: folded(undefined) }
 			if (!baseState.trackPipedTurns) {
 				return {
 					state: {
 						...baseState,
-						status: "terminated",
 						liveStatus: "terminated",
 						liveStateVersion: baseState.liveStateVersion + 1,
 					},
@@ -399,11 +452,11 @@ export const applySessionEvent = (
 			let pendingTurnErrors = baseState.pendingTurnErrors
 			if (
 				event.type === "session.status_terminated" &&
-				baseState.observedTurn > baseState.settledTurn &&
-				baseState.latestTurnError?.turn === baseState.observedTurn &&
+				observedTurnOf(baseState) > settledTurnOf(baseState) &&
+				baseState.latestTurnError?.turn === observedTurnOf(baseState) &&
 				baseState.latestTurnError.retryStatus === "terminal"
 			) {
-				const turn = baseState.observedTurn
+				const turn = observedTurnOf(baseState)
 				const turnError = baseState.latestTurnError.message
 				if (baseState.unsettledSubmittedTurns.has(turn)) {
 					firstSubmittedTurnFailure = recordFirstFailure(firstSubmittedTurnFailure, turn, turnError)
@@ -416,7 +469,6 @@ export const applySessionEvent = (
 			return {
 				state: {
 					...baseState,
-					status: "terminated",
 					liveStatus: "terminated",
 					liveStateVersion: baseState.liveStateVersion + 1,
 					firstSubmittedTurnFailure,
@@ -427,7 +479,35 @@ export const applySessionEvent = (
 			}
 		}
 		default:
-			return { state: baseState, duplicate: false, shouldWakeWaiter: false }
+			return {
+				state: { ...seen, calls: folded(undefined) },
+				duplicate: false,
+				shouldWakeWaiter: false,
+			}
+	}
+}
+
+const statusOnly = (event: ConnectSessionEvent): SessionFoldEvent | undefined => {
+	switch (event.type) {
+		case "session.status_running":
+			return { type: event.type, seq: event.seq }
+		case "session.status_idle":
+			return event.stopReason === "requires_action"
+				? {
+						type: event.type,
+						seq: event.seq,
+						stop_reason: { type: "requires_action", event_ids: [] },
+					}
+				: {
+						type: event.type,
+						seq: event.seq,
+						stop_reason: { type: event.stopReason ?? "end_turn" },
+					}
+		case "session.status_terminated":
+		case "session.archived":
+			return { type: event.type, seq: event.seq }
+		default:
+			return undefined
 	}
 }
 
@@ -437,21 +517,32 @@ export const markSessionEnded = (state: ConnectState): ConnectState =>
 export const shouldInterruptOnCtrlC = (
 	state: ConnectState,
 	interruptedLiveTurn: number | undefined,
-): boolean => state.liveStatus === "running" && interruptedLiveTurn !== state.liveTurn
+): boolean =>
+	(state.liveStatus === "running" || pausedTurnOf(state) === state.liveTurn) &&
+	interruptedLiveTurn !== state.liveTurn
 
 export const evaluatePipedSettlement = (state: ConnectState): PipedSettlementAction => {
 	if (state.ended) {
 		return "ended"
 	}
-	if (state.targetTurn > 0 && state.settledTurn >= state.targetTurn) {
+	if (state.targetTurn > 0 && settledTurnOf(state) >= state.targetTurn) {
 		return "settled"
 	}
+	const pause = awaitingActionOf(state)
 	if (
-		state.status === "idle" &&
+		pause !== undefined &&
+		pause.toolUseIds.length > 0 &&
+		state.targetTurn > 0 &&
+		pause.turn <= state.targetTurn
+	) {
+		return "awaiting_action"
+	}
+	if (
+		statusOf(state) === "idle" &&
 		state.unsettledQueuedTurns.has(state.targetTurn) &&
-		state.settledTurn === state.targetTurn - 1 &&
-		state.observedTurn < state.targetTurn &&
-		isQueueHaltingStopReason(state.latestSettledStopReason)
+		settledTurnOf(state) === state.targetTurn - 1 &&
+		observedTurnOf(state) < state.targetTurn &&
+		isQueueHaltingStopReason(state.calls.settled.stopReason)
 	) {
 		return "check_halted_queue"
 	}
@@ -466,8 +557,8 @@ export const evaluateHaltedQueueSnapshot = (
 ): HaltedQueueSnapshotDecision => {
 	if (
 		refreshedState.ended ||
-		refreshedState.observedTurn >= checkedState.targetTurn ||
-		refreshedState.settledTurn >= checkedState.targetTurn ||
+		observedTurnOf(refreshedState) >= checkedState.targetTurn ||
+		settledTurnOf(refreshedState) >= checkedState.targetTurn ||
 		!refreshedState.unsettledQueuedTurns.has(checkedState.targetTurn)
 	) {
 		return { action: "continue_waiting" }
@@ -475,7 +566,7 @@ export const evaluateHaltedQueueSnapshot = (
 	if (snapshot.turn >= checkedState.targetTurn) {
 		return { action: "continue_waiting" }
 	}
-	const haltedMessage = `Queued turn ${checkedState.targetTurn} did not start because turn ${checkedState.settledTurn} stopped with ${checkedState.latestSettledStopReason}.`
+	const haltedMessage = `Queued turn ${checkedState.targetTurn} did not start because turn ${settledTurnOf(checkedState)} stopped with ${checkedState.calls.settled.stopReason}.`
 	if (snapshot.status !== "running") {
 		return { action: "fail", message: haltedMessage }
 	}
@@ -483,6 +574,15 @@ export const evaluateHaltedQueueSnapshot = (
 		return { action: "fail", message: haltedMessage }
 	}
 	return { action: "retry_snapshot" }
+}
+
+export const describeAwaitedAction = (pause: AwaitingAction): string => {
+	const calls =
+		pause.toolUseIds.length === 0
+			? "tool calls"
+			: `${pause.toolUseIds.length === 1 ? "tool call" : "tool calls"} ${pause.toolUseIds.join(", ")}`
+	const resume = pause.seq === undefined ? "reconnect" : `reconnect with --after ${pause.seq}`
+	return `Turn ${pause.turn} waits on ${calls}. Answer ${pause.toolUseIds.length === 1 ? "it" : "each"}, then ${resume} to read the reply.`
 }
 
 export const resolveStreamEndedError = (state: ConnectState): string | undefined => {

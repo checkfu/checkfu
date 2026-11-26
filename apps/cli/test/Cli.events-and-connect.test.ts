@@ -59,6 +59,8 @@ const createReadySession = (cli: TestCli) =>
 		return sessionId
 	})
 
+import { ACTION_REQUIRED_EXIT_CODE } from "../src/Errors.ts"
+
 describe("CLI sessions:events and sessions connect", () => {
 	it("sends events with auto and explicit idempotency keys, lists, and streams events", async () => {
 		await Effect.runPromise(
@@ -994,6 +996,139 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 	})
+
+	it("stops a piped connection at a pause with its own exit code, showing each call before the command that allows it", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer({
+						asks: (args) =>
+							args.turn === 1
+								? [
+										{
+											tool_use_id: "tu_deploy",
+											name: "deploy",
+											mcp_server_name: "docs",
+											input: { target: "prod" },
+										},
+									]
+								: [],
+					})
+					const sessionId = yield* createReadySession(cli)
+
+					const paused = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdin: "deploy it\n",
+					})
+					expect(paused.exitCode).toBe(ACTION_REQUIRED_EXIT_CODE)
+					expect(paused.stdout).not.toContain("Echo")
+					expect(paused.stderr).toContain("[status: idle (requires_action)]")
+					const shown = paused.stderr.indexOf("[waits] docs: deploy (tu_deploy)")
+					const args = paused.stderr.indexOf('  arguments: {"target":"prod"}')
+					const allow = paused.stderr.indexOf("  allow: checkfu sessions:events send")
+					expect(shown).toBeGreaterThan(-1)
+					expect(args).toBeGreaterThan(shown)
+					expect(allow).toBeGreaterThan(args)
+					expect(paused.stderr).toMatch(
+						/Turn 1 waits on tool call tu_deploy\. Answer it, then reconnect with --after \d+ to read the reply\./u,
+					)
+					expect(paused.stderr).not.toContain("did not start")
+
+					const answered = yield* cli.run([
+						"sessions:events",
+						"send",
+						"--session-id",
+						sessionId,
+						"--event",
+						'{"type":"user.tool_confirmation","tool_use_id":"tu_deploy","result":"allow"}',
+					])
+					expect(answered.exitCode).toBe(0)
+					const replayed = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdin: "and again\n",
+					})
+					expect(replayed.exitCode).toBe(0)
+					expect(replayed.stdout).toContain("Echo: deploy it")
+					expect(replayed.stdout).toContain("Echo: and again")
+				}),
+			),
+		)
+	}, 30_000)
+
+	it("opens inside a pause knowing what still waits, less the answers its cursor already covers", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer({
+						asks: (args) =>
+							args.turn === 1
+								? [
+										{
+											tool_use_id: "tu_deploy",
+											name: "deploy",
+											mcp_server_name: "docs",
+											input: { target: "prod" },
+										},
+										{
+											tool_use_id: "tu_notify",
+											name: "notify",
+											mcp_server_name: "docs",
+											input: { channel: "ops" },
+										},
+									]
+								: [],
+					})
+					const sessionId = yield* createReadySession(cli)
+					const paused = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdin: "deploy it\n",
+					})
+					expect(paused.exitCode).toBe(ACTION_REQUIRED_EXIT_CODE)
+					expect(paused.stderr).toMatch(/Turn 1 waits on tool calls tu_deploy, tu_notify\./u)
+
+					const answered = yield* cli.run([
+						"sessions:events",
+						"send",
+						"--session-id",
+						sessionId,
+						"--event",
+						'{"type":"user.tool_confirmation","tool_use_id":"tu_deploy","result":"allow"}',
+					])
+					expect(answered.exitCode).toBe(0)
+					const history = JSON.parse(
+						(yield* cli.run([
+							"sessions:events",
+							"list",
+							"--session-id",
+							sessionId,
+							"--limit",
+							"100",
+						])).stdout,
+					) as { data: Array<{ seq: number; type: string }> }
+					const pauseSeq = history.data.find((entry) => entry.type === "session.status_idle")?.seq
+					const answerSeq = history.data.find(
+						(entry) => entry.type === "user.tool_confirmation",
+					)?.seq
+					expect(pauseSeq).toBeDefined()
+					expect(answerSeq).toBeGreaterThan(pauseSeq ?? 0)
+
+					const atPause = yield* cli.run(
+						["sessions", "connect", "--session-id", sessionId, "--after", String(pauseSeq)],
+						{ stdin: "" },
+					)
+					expect(atPause.exitCode).toBe(0)
+					expect(atPause.stderr).toContain("[waits] docs: deploy (tu_deploy)")
+					expect(atPause.stderr).toContain("[waits] docs: notify (tu_notify)")
+
+					const pastAnswer = yield* cli.run(
+						["sessions", "connect", "--session-id", sessionId, "--after", String(answerSeq)],
+						{ stdin: "" },
+					)
+					expect(pastAnswer.exitCode).toBe(0)
+					expect(pastAnswer.stderr).toContain("[waits] docs: notify (tu_notify)")
+					expect(pastAnswer.stderr).toContain('  arguments: {"channel":"ops"}')
+					expect(pastAnswer.stderr).not.toContain("tu_deploy")
+				}),
+			),
+		)
+	}, 30_000)
 
 	it("handles queued turns halted by refusal/budget_reached, mid-turn archival, and rejected piped interrupts", async () => {
 		await Effect.runPromise(
@@ -2126,6 +2261,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					JSON.stringify({
 						id: "agent_redirect",
 						type: "agent",
+						mcp_servers: [],
 						version: 1,
 						name: "Unchanged",
 						description: null,
@@ -2144,6 +2280,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					JSON.stringify({
 						id: "sess_subproc",
 						type: "session",
+						mcp_server_credentials: [],
 						status: "idle",
 						agent: {
 							id: "agent_1",
@@ -2991,6 +3128,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						JSON.stringify({
 							id: "sess_pty",
 							type: "session",
+							mcp_server_credentials: [],
 							status: "running",
 							turn: 1,
 							usage: { input_tokens: 0, output_tokens: 0 },
@@ -4416,6 +4554,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					JSON.stringify({
 						id: "sess_env",
 						type: "session",
+						mcp_server_credentials: [],
 						status: "idle",
 						turn: 0,
 						usage: { input_tokens: 0, output_tokens: 0 },

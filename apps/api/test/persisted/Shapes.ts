@@ -16,6 +16,7 @@ import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
 import { CANCELLED_OPS_TABLE } from "../../src/Pi/TurnFence.ts"
+import { TURN_CALLS_TABLE } from "../../src/Pi/PiTurnCalls.ts"
 
 export type PersistedSchema = Schema.Codec<unknown, unknown, never, never>
 
@@ -452,6 +453,11 @@ const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
 		id: "session-table:checkfu_cancelled_ops",
 		kind: "session-table",
 		schema: Schema.Literal(CANCELLED_OPS_TABLE),
+	},
+	{
+		id: "session-table:checkfu_turn_calls",
+		kind: "session-table",
+		schema: Schema.Literal(TURN_CALLS_TABLE),
 	},
 ]
 
