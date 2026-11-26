@@ -45,6 +45,7 @@ import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
+import { SessionTurnCompletion } from "./Session/SessionTurnCompletion.view.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { EnsureTurnStarted, EnsureTurnStartedLive } from "./Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
@@ -78,6 +79,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AgentVersionByNumberView,
 		EnvironmentView,
 		SessionView,
+		SessionTurnCompletion,
 		TurnInput,
 		AutomationView,
 		AutomationRunView,
