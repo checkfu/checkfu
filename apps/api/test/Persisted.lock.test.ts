@@ -861,7 +861,12 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		() =>
 			Effect.gen(function* () {
 				const id = piDocShapeId(SettledUsage.definition.kind)
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+				// Scope this migration fixture to the document whose versions change below.
+				const shipped = yield* cutBaseline(
+					"shipped",
+					"2026-01-01T00:00:00.000Z",
+					persistedShapes.filter((shape) => shape.id === id),
+				)
 				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
 
 				const SettledUsageV2 = Schema.Struct({
