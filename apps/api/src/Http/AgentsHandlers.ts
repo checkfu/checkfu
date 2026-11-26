@@ -13,6 +13,8 @@ import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
 import { UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
+import { encodeMcpServers } from "@checkfu/domain/Mcp/McpServers"
+import type { McpServer } from "@checkfu/domain/Mcp/McpServers"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -53,6 +55,15 @@ const unsupportedModel = (model: AgentModel) =>
 	model.id.length > MAX_MODEL_ID_LENGTH
 		? reject(400, `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`)
 		: reject(400, `Unsupported model "${model.id}".`)
+
+const declaredMcpServers = (servers: ReadonlyArray<McpServer>) =>
+	Effect.gen(function* () {
+		const text = encodeMcpServers(servers)
+		if (text === undefined) {
+			return yield* reject(400, "The MCP servers are too long once their URLs are normalized.")
+		}
+		return { servers, text }
+	})
 
 export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) =>
 	Effect.gen(function* () {
@@ -152,6 +163,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					model: minted.model,
 					system: minted.system,
 					description: minted.description,
+					mcp_servers: minted.mcp_servers,
 					created_at: head.created_at,
 					updated_at: minted.created_at,
 					archived_at: null,
@@ -165,11 +177,18 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null
+					const mcpServers = yield* declaredMcpServers(payload.mcp_servers ?? [])
 					const identity = yield* createIdentity(digest, random, {
 						resource: "agent",
 						prefix: "agent",
 						key: idempotencyKey,
-						body: { name: payload.name, model, system, description },
+						body: {
+							name: payload.name,
+							model,
+							system,
+							description,
+							mcp_servers: mcpServers.servers,
+						},
 					})
 					const id = AgentId.make(identity.id)
 					const versionId = AgentVersionId.make(
@@ -192,6 +211,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 								model,
 								system,
 								description,
+								mcp_servers: mcpServers.text,
 							}),
 							sendOptions,
 						)
@@ -211,11 +231,15 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
-					const { version, model: modelInput, ...fields } = payload
+					const { version, model: modelInput, mcp_servers: servers, ...named } = payload
 					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
 					if (model !== undefined) {
 						yield* supported(model)
 					}
+					const fields =
+						servers === undefined
+							? named
+							: { ...named, mcp_servers: (yield* declaredMcpServers(servers)).text }
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,

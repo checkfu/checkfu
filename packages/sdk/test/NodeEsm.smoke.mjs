@@ -27,6 +27,7 @@ const client = new Checkfu({
 			JSON.stringify({
 				id: "agent_node_smoke",
 				type: "agent",
+				mcp_servers: [],
 				version: 1,
 				name: "Node Smoke",
 				model: { id: "gpt-6.2-sol" },

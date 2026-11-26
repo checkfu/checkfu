@@ -426,6 +426,32 @@
 												}
 											]
 										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
+										},
 										"created_at": {
 											"type": "string"
 										},
@@ -948,6 +974,33 @@
 											}
 										],
 										"description": "Agent description"
+									},
+									"mcp_servers": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["url"]
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 32,
+													"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+												},
+												"url": {
+													"type": "string",
+													"maxLength": 2048,
+													"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$"
+												}
+											},
+											"required": ["type", "name", "url"],
+											"additionalProperties": false
+										},
+										"maxItems": 20,
+										"description": "MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>."
 									}
 								},
 								"required": ["name", "model"],
@@ -1095,6 +1148,32 @@
 																"type": "null"
 															}
 														]
+													},
+													"mcp_servers": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["url"]
+																},
+																"name": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 32,
+																	"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																},
+																"url": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 2048
+																}
+															},
+															"required": ["type", "name", "url"],
+															"additionalProperties": false
+														},
+														"maxItems": 20
 													},
 													"created_at": {
 														"type": "string"
@@ -1568,6 +1647,32 @@
 												}
 											]
 										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
+										},
 										"created_at": {
 											"type": "string"
 										},
@@ -2008,6 +2113,32 @@
 													"type": "null"
 												}
 											]
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
 										},
 										"created_at": {
 											"type": "string"
@@ -2537,6 +2668,33 @@
 											}
 										],
 										"description": "Updated agent description"
+									},
+									"mcp_servers": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["url"]
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 32,
+													"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+												},
+												"url": {
+													"type": "string",
+													"maxLength": 2048,
+													"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$"
+												}
+											},
+											"required": ["type", "name", "url"],
+											"additionalProperties": false
+										},
+										"maxItems": 20,
+										"description": "Replacement list of the agent's MCP servers"
 									}
 								},
 								"required": ["version"],
@@ -2640,6 +2798,32 @@
 													"type": "null"
 												}
 											]
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
 										},
 										"created_at": {
 											"type": "string"
@@ -6378,6 +6562,33 @@
 											"required": ["input_tokens", "output_tokens"],
 											"additionalProperties": false
 										},
+										"mcp_server_credentials": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"mcp_server_name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"credential_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"vault_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													}
+												},
+												"required": ["mcp_server_name", "credential_id"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
+										},
 										"created_at": {
 											"type": "string"
 										},
@@ -6925,6 +7136,37 @@
 													}
 												],
 												"description": "Optional session title"
+											},
+											"vault_ids": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1
+												},
+												"maxItems": 20,
+												"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
+											},
+											"mcp_server_credentials": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"mcp_server_name": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 32,
+															"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+														},
+														"credential_id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["mcp_server_name", "credential_id"],
+													"additionalProperties": false
+												},
+												"maxItems": 20,
+												"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
 											}
 										},
 										"required": ["agent", "environment_id"],
@@ -6989,6 +7231,37 @@
 													}
 												],
 												"description": "Optional session title"
+											},
+											"vault_ids": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1
+												},
+												"maxItems": 20,
+												"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
+											},
+											"mcp_server_credentials": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"mcp_server_name": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 32,
+															"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+														},
+														"credential_id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["mcp_server_name", "credential_id"],
+													"additionalProperties": false
+												},
+												"maxItems": 20,
+												"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
 											}
 										},
 										"required": ["agent_id", "environment_id"],
@@ -7144,6 +7417,33 @@
 														},
 														"required": ["input_tokens", "output_tokens"],
 														"additionalProperties": false
+													},
+													"mcp_server_credentials": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"mcp_server_name": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 32,
+																	"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																},
+																"credential_id": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 256
+																},
+																"vault_id": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 256
+																}
+															},
+															"required": ["mcp_server_name", "credential_id"],
+															"additionalProperties": false
+														},
+														"maxItems": 20
 													},
 													"created_at": {
 														"type": "string"
@@ -7634,6 +7934,33 @@
 											"required": ["input_tokens", "output_tokens"],
 											"additionalProperties": false
 										},
+										"mcp_server_credentials": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"mcp_server_name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"credential_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"vault_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													}
+												},
+												"required": ["mcp_server_name", "credential_id"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
+										},
 										"created_at": {
 											"type": "string"
 										},
@@ -8093,6 +8420,33 @@
 											},
 											"required": ["input_tokens", "output_tokens"],
 											"additionalProperties": false
+										},
+										"mcp_server_credentials": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"mcp_server_name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 32,
+														"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+													},
+													"credential_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"vault_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													}
+												},
+												"required": ["mcp_server_name", "credential_id"],
+												"additionalProperties": false
+											},
+											"maxItems": 20
 										},
 										"created_at": {
 											"type": "string"
@@ -28031,6 +28385,117 @@
 						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
 						"additionalProperties": false,
 						"description": "Records what a call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["agent.mcp_tool_use"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"mcp_server_name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 32,
+								"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+							},
+							"name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"input": {
+								"type": "object"
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							}
+						},
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"tool_use_id",
+							"mcp_server_name",
+							"name",
+							"input"
+						],
+						"additionalProperties": false,
+						"description": "Records an MCP call the model made. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["agent.mcp_tool_result"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								}
+							},
+							"is_error": {
+								"type": "boolean"
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							},
+							"rejected": {
+								"type": "string",
+								"enum": ["unavailable", "invalid_arguments", "blocked"]
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"additionalProperties": false,
+						"description": "Records what an MCP call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
 					{
 						"type": "object",

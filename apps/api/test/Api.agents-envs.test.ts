@@ -4,7 +4,11 @@ import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutput
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
-import { Agent, AgentStateSnapshot } from "@checkfu/domain/Agent/Agent.aggregate"
+import {
+	AGENT_STATE_SCHEMA_VERSION,
+	Agent,
+	AgentStateSnapshot,
+} from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
 import {
@@ -22,6 +26,11 @@ import {
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
+import {
+	MAX_MCP_SERVERS,
+	MAX_MCP_SERVER_NAME_LENGTH,
+	MAX_MCP_SERVER_URL_LENGTH,
+} from "@checkfu/sdk/Schemas"
 import {
 	CreateEnvironment,
 	EnvironmentCreated,
@@ -2511,6 +2520,51 @@ describe("Agent and environment field length limits", () => {
 		})
 	}
 
+	it("accepts a full-size agent sent with every character escaped, its MCP servers included", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		const escaped = (text: string) =>
+			Array.from(
+				{ length: text.length },
+				(_, index) => `\\u${text.charCodeAt(index).toString(16).padStart(4, "0")}`,
+			).join("")
+		const servers = Array.from({ length: MAX_MCP_SERVERS }, (_, index) => {
+			const name = `s${index}`.padEnd(MAX_MCP_SERVER_NAME_LENGTH, "a")
+			const prefix = `https://mcp${index}.example/`
+			const url = prefix + "a".repeat(MAX_MCP_SERVER_URL_LENGTH - prefix.length)
+			return `{"type":"url","name":"${escaped(name)}","url":"${escaped(url)}"}`
+		})
+		const rawBody = `{"name":"${escaped("😀".repeat(MAX_AGENT_NAME_LENGTH))}","model":"gpt-4o-mini","description":"${escaped(
+			"😀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+		)}","system":"${escaped("😀".repeat(MAX_AGENT_SYSTEM_LENGTH))}","mcp_servers":[${servers.join(",")}]}`
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					expect(new TextEncoder().encode(rawBody).length).toBeLessThan(MAX_AGENT_BODY_BYTES)
+					expect(
+						new TextEncoder().encode(rawBody).length -
+							servers.reduce((total, server) => total + server.length, 0),
+					).toBeGreaterThan(MAX_REQUEST_BODY_BYTES)
+					const created = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						rawBody,
+					})
+					expect(created.status).toBe(201)
+					const body = (yield* Effect.promise(() => created.json())) as {
+						readonly mcp_servers: ReadonlyArray<unknown>
+					}
+					expect(body.mcp_servers).toHaveLength(MAX_MCP_SERVERS)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("accepts a full-size non-ASCII agent payload past 160 KiB and advertises every limit in OpenAPI", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
@@ -3097,7 +3151,7 @@ describe("Agent and environment field length limits", () => {
 			persistedStore.get(`AgentAggregate:${doAgentId}`)!.get("meta")!,
 		) as { state: { schema_version: number; state: { name: string } }; version: number }
 		expect(persistedAgentMeta.version).toBe(2)
-		expect(persistedAgentMeta.state.schema_version).toBe(1)
+		expect(persistedAgentMeta.state.schema_version).toBe(AGENT_STATE_SCHEMA_VERSION)
 		expect(persistedAgentMeta.state.state.name).toBe(`${legacyAgentName}!`)
 		expect(persistedStore.get(`AgentAggregate:${doAgentId}`)!.has("event:000000000001")).toBe(true)
 		expect(persistedStore.get(`AgentAggregate:${doAgentId}`)!.has("event:000000000002")).toBe(true)

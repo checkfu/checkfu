@@ -84,6 +84,14 @@ const agentsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "mcpServers",
+			flagName: "mcp-servers",
+			wireName: "mcp_servers",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -113,6 +121,13 @@ const agentsCreateCommand = CommandMake(
 		description: FlagString("description").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
 			FlagWithDescription("Agent description (supports @file)"),
+			FlagOptional,
+		),
+		mcpServers: FlagString("mcp-servers").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>. (JSON, YAML, or @file)",
+			),
 			FlagOptional,
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
@@ -288,6 +303,14 @@ const agentsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "file-text",
 			required: false,
 		},
+		{
+			propName: "mcpServers",
+			flagName: "mcp-servers",
+			wireName: "mcp_servers",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
 	],
 }
 
@@ -316,6 +339,11 @@ const agentsUpdateCommand = CommandMake(
 		description: FlagString("description").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
 			FlagWithDescription("Updated agent description (supports @file)"),
+			FlagOptional,
+		),
+		mcpServers: FlagString("mcp-servers").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("Replacement list of the agent's MCP servers (JSON, YAML, or @file)"),
 			FlagOptional,
 		),
 	},
@@ -1826,6 +1854,22 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "vaultIds",
+			flagName: "vault-ids",
+			wireName: "vault_ids",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "mcpServerCredentials",
+			flagName: "mcp-server-credentials",
+			wireName: "mcp_server_credentials",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -1862,6 +1906,20 @@ const sessionsCreateCommand = CommandMake(
 			FlagOptional,
 		),
 		title: FlagString("title").pipe(FlagWithDescription("Optional session title"), FlagOptional),
+		vaultIds: FlagString("vault-ids").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		mcpServerCredentials: FlagString("mcp-server-credentials").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Explicit credentials for named servers. An explicit binding wins over vault matching. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
 			FlagWithDescription("Optional Idempotency-Key header for safe retries"),

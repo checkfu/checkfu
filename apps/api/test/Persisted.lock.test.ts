@@ -1,4 +1,4 @@
-import { AgentState } from "@checkfu/domain/Agent/Agent.aggregate"
+import { AGENT_STATE_SCHEMA_VERSION, AgentState } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AbandonTurn } from "@checkfu/domain/Session/AbandonTurn.command"
 import { RUN_TURN_ACTIVITIES, RunTurn } from "@checkfu/domain/Session/RunTurn.saga"
 import { UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
@@ -333,16 +333,16 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			const id = "state:Checkfu.Agent"
 			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
 			const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
-			const AgentStateV2 = Schema.Struct({ ...AgentState.fields, tier: Schema.String })
+			const AgentStateNext = Schema.Struct({ ...AgentState.fields, tier: Schema.String })
 
 			const migrated = replacing(
 				id,
 				versionedSnapshot({
-					current: 2,
-					schema: AgentStateV2,
+					current: AGENT_STATE_SCHEMA_VERSION + 1,
+					schema: AgentStateNext,
 					previous: [
 						snapshotVersion({
-							version: 1,
+							version: AGENT_STATE_SCHEMA_VERSION,
 							schema: AgentState,
 							migrate: (state) => ({ ...state, tier: "standard" }),
 						}),
@@ -353,7 +353,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 			const inPlace = yield* lockProblems(
 				lock,
-				replacing(id, versionedSnapshot({ current: 2, schema: AgentStateV2 })),
+				replacing(
+					id,
+					versionedSnapshot({ current: AGENT_STATE_SCHEMA_VERSION + 1, schema: AgentStateNext }),
+				),
 			)
 			expect(inPlace.length).toBe(1)
 			expect(inPlace[0]).toContain(id)

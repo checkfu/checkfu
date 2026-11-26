@@ -23,7 +23,13 @@ import {
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
-import { AgentToolResult, AgentToolUse, RecordToolCall } from "./RecordToolCall.command.ts"
+import {
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+	RecordToolCall,
+} from "./RecordToolCall.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -340,21 +346,25 @@ export class Session extends Domain.Aggregate("Session", {
 				})
 			}
 			const { call } = cmd
-			return [
-				new AgentToolUse({
-					tool_use_id: call.tool_use_id,
-					name: call.name,
-					input: call.input,
-					...(call.input_truncated === true ? { truncated: true as const } : {}),
-				}),
-				new AgentToolResult({
-					tool_use_id: call.tool_use_id,
-					content: call.content,
-					is_error: call.is_error,
-					...(call.result_truncated === true ? { truncated: true as const } : {}),
-					...(call.rejected === undefined ? {} : { rejected: call.rejected }),
-				}),
-			]
+			const use = {
+				tool_use_id: call.tool_use_id,
+				name: call.name,
+				input: call.input,
+				...(call.input_truncated === true ? { truncated: true as const } : {}),
+			}
+			const result = {
+				tool_use_id: call.tool_use_id,
+				content: call.content,
+				is_error: call.is_error,
+				...(call.result_truncated === true ? { truncated: true as const } : {}),
+				...(call.rejected === undefined ? {} : { rejected: call.rejected }),
+			}
+			return call.mcp_server_name === undefined
+				? [new AgentToolUse(use), new AgentToolResult(result)]
+				: [
+						new AgentMcpToolUse({ ...use, mcp_server_name: call.mcp_server_name }),
+						new AgentMcpToolResult(result),
+					]
 		},
 
 		CommitModelReply: (state, cmd, ctx) => {
@@ -511,6 +521,8 @@ export class Session extends Domain.Aggregate("Session", {
 				: state,
 		"agent.tool_use": (state) => state,
 		"agent.tool_result": (state) => state,
+		"agent.mcp_tool_use": (state) => state,
+		"agent.mcp_tool_result": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>

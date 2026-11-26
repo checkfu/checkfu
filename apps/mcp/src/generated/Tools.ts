@@ -100,6 +100,35 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							],
 							description: "Agent description",
 						},
+						mcp_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["url"],
+									},
+									name: {
+										type: "string",
+										minLength: 1,
+										maxLength: 32,
+										pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+									},
+									url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+									},
+								},
+								required: ["type", "name", "url"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description:
+								"MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>.",
+						},
 					},
 					required: ["name", "model"],
 					additionalProperties: false,
@@ -276,6 +305,34 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description: "Updated agent description",
+						},
+						mcp_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["url"],
+									},
+									name: {
+										type: "string",
+										minLength: 1,
+										maxLength: 32,
+										pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+									},
+									url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+									},
+								},
+								required: ["type", "name", "url"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description: "Replacement list of the agent's MCP servers",
 						},
 					},
 					required: ["version"],
@@ -1881,6 +1938,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									],
 									description: "Optional session title",
 								},
+								vault_ids: {
+									type: "array",
+									items: {
+										type: "string",
+										minLength: 1,
+									},
+									maxItems: 20,
+									description:
+										"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+								},
+								mcp_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											mcp_server_name: {
+												type: "string",
+												minLength: 1,
+												maxLength: 32,
+												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+											},
+										},
+										required: ["mcp_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 20,
+									description:
+										"Explicit credentials for named servers. An explicit binding wins over vault matching.",
+								},
 							},
 							required: ["agent", "environment_id"],
 							additionalProperties: false,
@@ -1944,6 +2034,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										},
 									],
 									description: "Optional session title",
+								},
+								vault_ids: {
+									type: "array",
+									items: {
+										type: "string",
+										minLength: 1,
+									},
+									maxItems: 20,
+									description:
+										"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+								},
+								mcp_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											mcp_server_name: {
+												type: "string",
+												minLength: 1,
+												maxLength: 32,
+												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+											},
+										},
+										required: ["mcp_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 20,
+									description:
+										"Explicit credentials for named servers. An explicit binding wins over vault matching.",
 								},
 							},
 							required: ["agent_id", "environment_id"],

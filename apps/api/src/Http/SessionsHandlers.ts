@@ -29,9 +29,29 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
+import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import {
+	NO_MCP_SERVER_CREDENTIALS,
+	decodeMcpServers,
+	encodeMcpServerCredentials,
+	mcpHostAllowed,
+	resolveMcpServerCredentials,
+} from "@checkfu/domain/Mcp/McpServers"
+import type { CredentialRequest } from "@checkfu/domain/Mcp/McpServers"
+import { Credential } from "@checkfu/domain/Vault/Credential.aggregate"
+import { CredentialId } from "@checkfu/domain/Vault/Credential.id"
+import {
+	CredentialUrlClaim,
+	credentialUrlClaimId,
+} from "@checkfu/domain/Vault/CredentialUrlClaim.aggregate"
+import { Vault } from "@checkfu/domain/Vault/Vault.aggregate"
+import { VaultId } from "@checkfu/domain/Vault/Vault.id"
+import * as Result from "effect/Result"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
@@ -173,6 +193,24 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				input: event.input,
 				...(event.truncated === true ? { truncated: true as const } : {}),
 			}
+		case "agent.mcp_tool_use":
+			return {
+				...sessionEventEnvelope(entry, "agent.mcp_tool_use"),
+				tool_use_id: event.tool_use_id,
+				mcp_server_name: event.mcp_server_name,
+				name: event.name,
+				input: event.input,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
+		case "agent.mcp_tool_result":
+			return {
+				...sessionEventEnvelope(entry, "agent.mcp_tool_result"),
+				tool_use_id: event.tool_use_id,
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				is_error: event.is_error,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
+			}
 		case "agent.tool_result":
 			return {
 				...sessionEventEnvelope(entry, "agent.tool_result"),
@@ -229,6 +267,21 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 	}
 }
 
+const created = (snapshot: SessionSnapshot) => ({
+	id: snapshot.id,
+	type: "session" as const,
+	status: "idle" as const,
+	agent: { id: snapshot.agent_id, version: snapshot.agent_version },
+	environment_id: snapshot.environment_id,
+	title: snapshot.title,
+	turn: 0,
+	usage: { input_tokens: 0, output_tokens: 0 },
+	mcp_server_credentials: snapshot.mcp_server_credentials,
+	created_at: snapshot.created_at,
+	updated_at: snapshot.created_at,
+	archived_at: null,
+})
+
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
@@ -249,6 +302,107 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		}
 		const { readArtifact } = yield* artifactReads
 		const artifacts = yield* Artifact
+
+		const agents = yield* Agent
+		const environments = yield* Environment
+		const vaults = yield* Vault
+		const credentials = yield* Credential
+		const urlClaims = yield* CredentialUrlClaim
+
+		const placeOf = (credentialId: string) =>
+			Effect.gen(function* () {
+				const credential = yield* credentials.get(CredentialId.make(credentialId))
+				if (credential.status !== "active") {
+					return { vault_id: null, target: null }
+				}
+				const vault = yield* vaults.get(VaultId.make(credential.vault_id))
+				return vault.status === "active"
+					? { vault_id: credential.vault_id, target: credential.mcp_server_url }
+					: { vault_id: null, target: null }
+			})
+
+		const credentialsFor = (
+			agentId: AgentId,
+			agentVersion: number | null,
+			environmentId: EnvironmentId,
+			payload: {
+				readonly vault_ids?: ReadonlyArray<string>
+				readonly mcp_server_credentials?: ReadonlyArray<{
+					readonly mcp_server_name: string
+					readonly credential_id: string
+				}>
+			},
+		) =>
+			Effect.gen(function* () {
+				const head = yield* agents.get(agentId)
+				const environment = yield* environments.get(environmentId)
+				const pinned = agentVersion ?? head.version
+				const refusal = admissionRefusal(
+					{ id: agentId, state: head },
+					{ id: environmentId, state: environment },
+					pinned,
+				)
+				if (refusal !== undefined) {
+					return yield* refusal
+				}
+				const version =
+					pinned === head.version
+						? { mcp_servers: decodeMcpServers(head.mcp_servers) }
+						: yield* agentVersionsByNumber
+								.waitFor(
+									agentVersionLookupKey(agentId, pinned),
+									{ version: pinned },
+									{ timeout: yield* AgentVersionWaitTimeout },
+								)
+								.pipe(Effect.orElseSucceed(() => null))
+				if (version === null) {
+					return yield* reject(503, `Agent ${agentId} version ${pinned} is not ready yet.`)
+				}
+				const servers = version.mcp_servers
+				const networking = environment.config?.networking
+				for (const server of servers) {
+					const { host } = new URL(server.url)
+					if (!mcpHostAllowed(networking, host)) {
+						return yield* reject(
+							400,
+							`MCP server "${server.name}" (${host}) is not allowed by the environment's network rules.`,
+						)
+					}
+				}
+				const urls = [...new Set(servers.map((server) => server.url))]
+				const claimed: Array<CredentialRequest["vaults"][number]> = []
+				for (const vaultId of new Set(payload.vault_ids)) {
+					const vault = yield* vaults.get(VaultId.make(vaultId))
+					if (vault.status !== "active") {
+						return yield* reject(400, `Vault ${vaultId} is not an active vault.`)
+					}
+					const holders = yield* Effect.forEach(
+						urls,
+						(mcp_server_url) =>
+							Effect.map(urlClaims.get(credentialUrlClaimId(vaultId, mcp_server_url)), (claim) => ({
+								credential_id: claim.holder,
+								mcp_server_url,
+							})),
+						{ concurrency: 8 },
+					)
+					claimed.push({
+						id: vaultId,
+						credentials: holders.filter((entry) => entry.credential_id !== ""),
+					})
+				}
+				const explicit = yield* Effect.forEach(payload.mcp_server_credentials ?? [], (pair) =>
+					Effect.map(placeOf(pair.credential_id), (place) => ({ ...pair, ...place })),
+				)
+				const resolved = resolveMcpServerCredentials({ servers, explicit, vaults: claimed })
+				if (Result.isFailure(resolved)) {
+					return yield* reject(400, resolved.failure)
+				}
+				const text = encodeMcpServerCredentials(resolved.success)
+				if (text === undefined) {
+					return yield* reject(400, "The session's MCP server credentials are too long.")
+				}
+				return { agent_version: pinned, text }
+			})
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -348,18 +502,25 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
+							vault_ids: payload.vault_ids,
+							mcp_server_credentials: payload.mcp_server_credentials,
 						},
 					})
 					const id = SessionId.make(identity.id)
 					const sendOptions = identity.options
+					const given =
+						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
+							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
+							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
 					const receipt = yield* admitSession
 						.send(
 							new AdmitSession({
 								session_id: id,
 								agent_id: agentId,
-								agent_version: agentVersion,
+								agent_version: given.agent_version,
 								environment_id: environmentId,
 								title,
+								mcp_server_credentials: given.text,
 							}),
 							sendOptions,
 						)
@@ -385,23 +546,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(result)) {
 						return result
 					}
-					const snapshot = yield* present(result, 500, "Failed to load created session.")
-					return {
-						id,
-						type: "session" as const,
-						status: "idle" as const,
-						agent: { id: agentId, version: pinnedVersion },
-						environment_id: environmentId,
-						title,
-						turn: 0,
-						usage: {
-							input_tokens: 0,
-							output_tokens: 0,
-						},
-						created_at: snapshot.created_at,
-						updated_at: snapshot.created_at,
-						archived_at: null,
-					}
+					return created(yield* present(result, 500, "Failed to load created session."))
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>

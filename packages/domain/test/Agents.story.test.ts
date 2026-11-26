@@ -51,6 +51,7 @@ describe("Agents", () => {
 			Story.then(
 				agent,
 				new AgentCreated({
+					mcp_servers: "[]",
 					version: 1,
 					version_id: v1,
 					name: "Coding Assistant",
@@ -118,6 +119,7 @@ describe("Agents", () => {
 			Story.then(
 				agent,
 				new AgentCreated({
+					mcp_servers: "[]",
 					version: 1,
 					version_id: v1,
 					name: "Reviewer",
@@ -159,6 +161,7 @@ describe("Agents", () => {
 			Story.then(
 				agent,
 				new AgentUpdated({
+					mcp_servers: "[]",
 					version: 2,
 					version_id: v2,
 					name: "Reviewer",
@@ -242,6 +245,7 @@ describe("Agents", () => {
 			Story.then(
 				agent,
 				new AgentCreated({
+					mcp_servers: "[]",
 					version: 1,
 					version_id: v1,
 					name: "Worker",
@@ -370,7 +374,12 @@ describe("Agents", () => {
 				changes: changes[n - 1]!,
 			})
 		const updated = (n: number) =>
-			new AgentUpdated({ version: n + 1, version_id: v[n]!, ...configs[n]! })
+			new AgentUpdated({
+				version: n + 1,
+				version_id: v[n]!,
+				...configs[n]!,
+				mcp_servers: "[]",
+			})
 		return story(
 			Story.clock(t0),
 			Story.given(agent, new AgentCreated({ version: 1, version_id: v[0]!, ...configs[0] })),

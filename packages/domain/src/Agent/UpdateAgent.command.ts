@@ -8,6 +8,7 @@ import {
 	NonEmptyString,
 	PositiveInt,
 } from "./AgentTypes.ts"
+import { McpServersText } from "../Mcp/McpServers.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentArchivedError } from "./AgentArchived.rejection.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
@@ -20,6 +21,7 @@ export class AgentUpdated extends Domain.Event("agent.updated", {
 	model: AgentModel,
 	system: Schema.NullOr(Schema.String),
 	description: Schema.NullOr(Schema.String),
+	mcp_servers: Schema.optionalKey(McpServersText),
 }) {}
 
 export class AgentVersionConflict extends Domain.Rejection(
@@ -42,6 +44,7 @@ export class UpdateAgent extends Domain.Command("UpdateAgent", {
 			model: Schema.optionalKey(AgentModel),
 			system: Schema.optionalKey(Schema.NullOr(AgentSystem)),
 			description: Schema.optionalKey(Schema.NullOr(AgentDescription)),
+			mcp_servers: Schema.optionalKey(McpServersText),
 		}),
 	},
 	events: [AgentUpdated],
