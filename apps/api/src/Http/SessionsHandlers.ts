@@ -554,9 +554,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								),
 							),
 					)
-					const [initialMessage, ...queuedMessages] = messages
+					const initialMessage = messages[0]
 					const initialPlan =
-						queuedMessages.length === 0
+						messages.length <= 1
 							? undefined
 							: { count: messages.length, messages: encodeInitialMessages(messages) }
 					const identity = yield* createIdentity(digest, random, {
@@ -568,8 +568,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
-							...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
-							...(queuedMessages.length === 0 ? {} : { queued_messages: queuedMessages }),
+							initial_events: messages,
 							vault_ids: payload.vault_ids,
 							mcp_server_credentials: payload.mcp_server_credentials,
 						},
