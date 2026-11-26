@@ -1,11 +1,13 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "../Compatibility.ts"
 import { Connection } from "../Connection/Connection.do.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { piHarnessAiBindingProps } from "./PiModels.ts"
-import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
+import { SandboxesCloudflare, sandboxEgress } from "../Sandbox/CloudflareSandboxes.do.ts"
+import { SessionWorkspace, SessionWorkspaceLive } from "../Workspace/SessionWorkspace.do.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
 import { customToolFaults } from "./PiToolSchema.ts"
 
@@ -43,7 +45,13 @@ export default PiHarnessWorker.make(
 			answerCall: (conversation, toolUseId, answer) =>
 				Effect.orDie(piSession(conversation).answerCall(toolUseId, answer)),
 			customToolFaults: (tools, taken) => Effect.sync(() => customToolFaults(tools, taken)),
-			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
+			prepareWorkspace: (sessionId, token, allowedHosts) =>
+				Effect.orDie(workspace(sessionId).prepare(token, allowedHosts)),
+			interruptWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).interrupt(token)),
+			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard(sessionId)),
+			fetch: yield* sandboxEgress((sessionId, request) =>
+				Effect.orDie(workspace(sessionId).fetch(request)),
+			),
 			putSecret: (vaultId, credentialId, secret, target, mode) =>
 				Effect.orDie(connection(vaultId).putSecret(credentialId, secret, target, mode)),
 			secretUsable: (vaultId, credentialId) =>
@@ -54,7 +62,7 @@ export default PiHarnessWorker.make(
 		})
 	}).pipe(
 		Effect.provide([
-			PiSessionLive,
+			Layer.provideMerge(PiSessionLive, Layer.provide(SessionWorkspaceLive, SandboxesCloudflare)),
 			Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 		]),
 	),
