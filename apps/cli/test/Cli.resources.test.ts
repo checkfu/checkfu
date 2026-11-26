@@ -55,7 +55,7 @@ describe("CLI help, errors, and resource commands", () => {
 
 					const eventsListHelp = yield* cli.run(["sessions:events", "list", "--help"], { env: {} })
 					expect(eventsListHelp.exitCode).toBe(0)
-					expect(eventsListHelp.stdout).toContain("selected order")
+					expect(eventsListHelp.stdout).toContain("--page")
 					expect(eventsListHelp.stdout).toContain("desc")
 
 					const rootVer = yield* cli.run(["--version"], { env: {} })
