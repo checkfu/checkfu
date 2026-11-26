@@ -38,6 +38,7 @@ import { makeLister } from "./Listing.ts"
 import { CustomToolFaults } from "./ToolSchemas.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	commitForStream,
 	createIdentity,
 	handled,
@@ -45,8 +46,8 @@ import {
 	isPending,
 	normalizeModel,
 	orPending,
-	present,
 	randomId,
+	readExisting,
 	reject,
 } from "./HttpHelpers.ts"
 
@@ -138,27 +139,19 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				: providedIsSupportedModel
 		const list = yield* makeLister
 
-		const retrieve = (id: AgentId) =>
-			Effect.gen(function* () {
-				const ref = Agent.ref(id)
-				const found = Option.getOrNull(yield* agentViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const committed = yield* agents.get(id)
-				if (committed.status === "") {
-					return yield* reject(404, `Agent ${id} not found.`)
-				}
-				const projected = yield* agentViews.waitFor(
-					ref,
-					{ version: { gte: 1 } },
-					{ timeout: yield* AgentVersionWaitTimeout },
-				)
-				if (projected === null) {
-					return yield* reject(503, `Agent ${id} projection is not ready.`)
-				}
-				return projected
+		const retrieve = (id: AgentId) => {
+			const ref = Agent.ref(id)
+			return readExisting({
+				current: agentViews.get(ref),
+				missing: Effect.flatMap(agents.get(id), (committed) =>
+					committed.status === "" ? reject(404, `Agent ${id} not found.`) : Effect.void,
+				),
+				projected: Effect.flatMap(AgentVersionWaitTimeout, (timeout) =>
+					agentViews.waitFor(ref, { version: { gte: 1 } }, { timeout }),
+				),
 			})
+		}
+
 		const readVersion = (head: AgentSnapshot, version: number) =>
 			Effect.gen(function* () {
 				const id = head.id
@@ -427,17 +420,13 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}).pipe(handled),
 			)
 			.handle("archive", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.agent_id
-					const receipt = yield* agents.send(new ArchiveAgent({ agent_id: id }))
-					const result = yield* agentViews
-						.get(Agent.ref(id), { atLeast: receipt })
-						.pipe(orPending(id, "agent"))
-					if (isPending(result)) {
-						return result
-					}
-					return yield* present(result, 404, `Agent ${id} not found.`)
-				}).pipe(handled),
+				archiveAndRead(
+					params.agent_id,
+					"agent",
+					"Agent",
+					agents.send(new ArchiveAgent({ agent_id: params.agent_id })),
+					(receipt) => agentViews.get(Agent.ref(params.agent_id), { atLeast: receipt }),
+				).pipe(handled),
 			)
 	}),
 )

@@ -100,6 +100,7 @@ import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type { ClientEventId, SendSessionEventReceipt, SessionResourceItem } from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	commitForStream,
 	createIdentity,
 	currentRequestId,
@@ -110,6 +111,7 @@ import {
 	orPending,
 	present,
 	randomId,
+	readExisting,
 	reject,
 	settled,
 	sha256Json,
@@ -548,27 +550,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					: pinned
 			})
 
-		const existing = (id: SessionId) =>
-			Effect.gen(function* () {
-				const ref = Session.ref(id)
-				const found = Option.getOrNull(yield* sessionViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const committed = yield* sessions.get(id)
-				if (committed._tag === "Uninitialized") {
-					return yield* reject(404, `Session ${id} not found.`)
-				}
-				const projected = yield* sessionViews.waitFor(
-					ref,
-					{ id },
-					{ timeout: yield* SessionReadWaitTimeout },
-				)
-				if (projected === null) {
-					return yield* reject(503, `Session ${id} projection is not ready.`)
-				}
-				return projected
+		const existing = (id: SessionId) => {
+			const ref = Session.ref(id)
+			return readExisting({
+				current: sessionViews.get(ref),
+				missing: Effect.flatMap(sessions.get(id), (committed) =>
+					committed._tag === "Uninitialized"
+						? reject(404, `Session ${id} not found.`)
+						: Effect.void,
+				),
+				projected: Effect.flatMap(SessionReadWaitTimeout, (timeout) =>
+					sessionViews.waitFor(ref, { id }, { timeout }),
+				),
 			})
+		}
 
 		const resolvePinnedAgent = (agentId: string, version: number) =>
 			Effect.gen(function* () {
@@ -806,19 +801,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("get", ({ params }) => retrieve(params.session_id).pipe(handled))
 			.handle("archive", ({ params }) =>
 				Effect.gen(function* () {
-					const id = params.session_id
-					const receipt = yield* sessions.send(new ArchiveSession({ session_id: id }))
-					const result = yield* sessionViews
-						.get(Session.ref(id), { atLeast: receipt })
-						.pipe(orPending(id, "session"))
+					const result = yield* archiveAndRead(
+						params.session_id,
+						"session",
+						"Session",
+						sessions.send(new ArchiveSession({ session_id: params.session_id })),
+						(receipt) => sessionViews.get(Session.ref(params.session_id), { atLeast: receipt }),
+					)
 					if (isPending(result)) {
 						return result
 					}
-					const snapshot = yield* present(result, 404, `Session ${id} not found.`)
-					const agent = yield* resolvePinnedAgent(snapshot.agent_id, snapshot.agent_version).pipe(
-						orPending(id, "session"),
+					const agent = yield* resolvePinnedAgent(result.agent_id, result.agent_version).pipe(
+						orPending(params.session_id, "session"),
 					)
-					return isPending(agent) ? agent : serializeSession(snapshot, agent)
+					return isPending(agent) ? agent : serializeSession(result, agent)
 				}).pipe(handled),
 			)
 			.handle("getOutputs", ({ params }) =>

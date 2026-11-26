@@ -26,6 +26,8 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
+import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import { optionalSecret } from "../Secrets.ts"
 import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "../Artifacts/ArtifactFiles.ts"
 import {
@@ -81,37 +83,15 @@ const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined 
 	}
 }
 
-interface RejectionAnnotationInfo {
-	readonly httpApiStatus?: number
-	readonly description?: string
-}
-
-const rejectionAnnotationInfo = (err: unknown): RejectionAnnotationInfo | undefined => {
-	if (typeof err !== "object" || err === null) {
+const rejectionAnnotationInfo = (err: unknown) => {
+	const rejection = Predicate.isObject(err) && "constructor" in err ? err.constructor : undefined
+	if (!Schema.isSchema(rejection)) {
 		return undefined
 	}
-	const ctor: unknown = "constructor" in err ? err.constructor : undefined
-	if ((typeof ctor !== "function" && typeof ctor !== "object") || ctor === null) {
-		return undefined
-	}
-	if (!("annotations" in ctor)) {
-		return undefined
-	}
-	const annotations = ctor.annotations
-	if (typeof annotations !== "object" || annotations === null) {
-		return undefined
-	}
-	const httpApiStatus =
-		"httpApiStatus" in annotations && typeof annotations.httpApiStatus === "number"
-			? annotations.httpApiStatus
-			: undefined
-	const description =
-		"description" in annotations && typeof annotations.description === "string"
-			? annotations.description
-			: undefined
+	const httpApiStatus = SchemaAST.resolveAt<unknown>("httpApiStatus")(rejection.ast)
 	return {
-		...(httpApiStatus === undefined ? {} : { httpApiStatus }),
-		...(description === undefined ? {} : { description }),
+		httpApiStatus: typeof httpApiStatus === "number" ? httpApiStatus : undefined,
+		description: SchemaAST.resolveDescription(rejection.ast),
 	}
 }
 
@@ -338,6 +318,40 @@ export const createIdentity = (
 				commandId: yield* createCommandId(digest, create.resource, create.key, create.body),
 			},
 		}
+	})
+
+export const readExisting = <S, E1, R1, E2, R2, E3, R3>(options: {
+	readonly current: Effect.Effect<Option.Option<S | null>, E1, R1>
+	readonly missing: Effect.Effect<void, E2, R2>
+	readonly projected: Effect.Effect<S | null, E3, R3>
+	readonly missingFirst?: boolean
+}) =>
+	Effect.gen(function* () {
+		if (options.missingFirst === true) {
+			yield* options.missing
+		}
+		const found = Option.getOrNull(yield* options.current)
+		if (found !== null) {
+			return found
+		}
+		yield* options.missing
+		const projected = yield* options.projected.pipe(Effect.tapError(() => options.missing))
+		return projected ?? (yield* Effect.die(new Error("A view wait matched no row.")))
+	})
+
+export const archiveAndRead = <const T extends PendingResourceType, Receipt, S, E1, R1, E2, R2>(
+	id: string,
+	type: T,
+	label: string,
+	archive: Effect.Effect<Receipt, E1, R1>,
+	read: (receipt: Receipt) => Effect.Effect<Option.Option<S | null>, E2, R2>,
+) =>
+	Effect.gen(function* () {
+		const result = yield* read(yield* archive).pipe(orPending(id, type))
+		if (isPending(result)) {
+			return result
+		}
+		return yield* present(result, 404, `${label} ${id} not found.`)
 	})
 
 const prepareConfiguredCredential = (mac: Mac.Mac["Service"], secret: Redacted.Redacted<string>) =>
