@@ -1,5 +1,9 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import {
+	SessionOutputs,
+	SessionOutputsUnpublished,
+} from "../src/Session/SessionOutputs.external.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -65,6 +69,7 @@ import {
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
 		Layer.provide(ArtifactBytesKept),
+		Layer.provide(SessionOutputsUnpublished),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
@@ -94,6 +99,7 @@ describe("Checkfu unified hosted model stories", () => {
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
 						Layer.provide(ArtifactBytesKept),
+						Layer.provide(SessionOutputsUnpublished),
 						Layer.provide([HarnessStubLayer, ListingStore.memory]),
 					),
 				),
@@ -443,6 +449,11 @@ describe("Checkfu unified hosted model stories", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				),
+				Story.call(SessionOutputs.publish, {
+					session_id: sessionV1.id,
+					turn: 1,
+				}),
+				Story.returned(SessionOutputs.publish, undefined),
 				Story.saga(RunTurn, turnKey(sessionV1.id, 1), {
 					_tag: "Completed",
 					result: { status: "completed" },

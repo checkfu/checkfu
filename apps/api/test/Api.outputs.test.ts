@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { describe, expect, it } from "@effect/vitest"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -13,7 +14,7 @@ import {
 	MAX_ARTIFACT_TOTAL_BYTES,
 } from "../src/Artifacts/ArtifactFiles.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import { HarnessTurnTimeout, OutputsPublishTimeout } from "../src/Pi/PiDurableHarness.ts"
+import { OutputsPublishTimeout } from "../src/Artifacts/SessionOutputsLive.ts"
 import { DEFAULT_STORAGE_SCOPE as SCOPE } from "../src/Placement.ts"
 import {
 	AUTH_HEADERS,
@@ -58,8 +59,6 @@ const OUTPUTS = "/mnt/session/outputs"
 const WALK_LIMIT = 513
 const ATTEMPTS = 2
 const PUBLISH_CUT_OFF = "400 millis"
-const STALLED_PUT = "1 second"
-const SETTLE_DEADLINE = "500 millis"
 
 const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex")
 
@@ -94,11 +93,18 @@ const withSessions = async (
 			| "outputWalks"
 			| "setBeforeOutputsRead"
 			| "failingOutputReads"
+			| "publishedTurns"
+			| "publishOutputs"
 			| "requests"
 		> & {
 			readonly onTurn: (edit: Edit) => void
 			readonly warnings: Array<string>
 			readonly harness: Harness["Service"]
+			readonly replyAndPublish: (
+				sessionId: string,
+				input: ReadonlyArray<string>,
+				turn: number,
+			) => Effect.Effect<void>
 			readonly createSession: (title?: string) => Effect.Effect<SessionBody>
 			readonly outputs: (sessionId: string) => Effect.Effect<Response>
 			readonly viewlessOutputs: (sessionId: string) => Effect.Effect<Response>
@@ -114,7 +120,6 @@ const withSessions = async (
 		},
 	) => Effect.Effect<void>,
 	publishTimeout: Duration.Input = "30 seconds",
-	turnTimeout?: Duration.Input,
 ) => {
 	let edit: Edit = () => undefined
 	const { layer, closeAll, ...world } = makePiDurableTestLayer(async (model, _context, signal) =>
@@ -136,10 +141,18 @@ const withSessions = async (
 				const { fetch: apiFetch } = yield* makeApiHandler
 				const harness = yield* Harness
 				const versions = yield* ArtifactVersionView
+				const sessionViews = yield* SessionView
 				const touched = () => Effect.die(new Error("a head read touched a view"))
 				const viewless = yield* makeApiHandler.pipe(
 					Effect.provideService(ArtifactVersionView, {
 						...versions,
+						get: touched,
+						snapshot: touched,
+						waitFor: touched,
+						list: touched,
+					}),
+					Effect.provideService(SessionView, {
+						...sessionViews,
 						get: touched,
 						snapshot: touched,
 						waitFor: touched,
@@ -156,6 +169,13 @@ const withSessions = async (
 					...world,
 					warnings,
 					harness,
+					replyAndPublish: (sessionId, input, turn) =>
+						Effect.gen(function* () {
+							yield* sendAndSettle(apiFetch, sessionId, input, turn)
+							while (!world.publishedTurns.includes(`${sessionId}:${turn}`)) {
+								yield* Effect.sleep("5 millis")
+							}
+						}),
 					onTurn: (next) => {
 						edit = next
 					},
@@ -205,11 +225,6 @@ const withSessions = async (
 					layer.pipe(
 						Layer.provideMerge(captureWarnings),
 						Layer.provideMerge(Layer.succeed(OutputsPublishTimeout, publishTimeout)),
-						Layer.provideMerge(
-							turnTimeout === undefined
-								? Layer.empty
-								: Layer.succeed(HarnessTurnTimeout, turnTimeout),
-						),
 					),
 				),
 			),
@@ -225,7 +240,18 @@ const keysOf = (store: World["artifactStore"]) =>
 describe("A session's outputs", () => {
 	it("publishes what a turn leaves in the outputs directory as version 1 of the session's artifact", () =>
 		withSessions(
-			(apiFetch, { workspaceFiles, artifactStore, onTurn, createSession, outputs, fileText }) =>
+			(
+				apiFetch,
+				{
+					replyAndPublish,
+					workspaceFiles,
+					artifactStore,
+					onTurn,
+					createSession,
+					outputs,
+					fileText,
+				},
+			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
 					const report = "# Q3\n\nSales rose 12%.\n"
@@ -234,7 +260,7 @@ describe("A session's outputs", () => {
 						workspaceFiles(session.id).set(`${OUTPUTS}/report.md`, report)
 						workspaceFiles(session.id).set(`${OUTPUTS}/data/totals.csv`, totals)
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Write the report."], 1)
+					yield* replyAndPublish(session.id, ["Write the report."], 1)
 
 					const published = yield* outputs(session.id)
 					expect(published.status).toBe(200)
@@ -294,7 +320,7 @@ describe("A session's outputs", () => {
 		))
 
 	it("names the artifact after the session's title, and keeps each session's outputs apart", () =>
-		withSessions((apiFetch, { workspaceFiles, onTurn, createSession, outputs }) =>
+		withSessions((apiFetch, { replyAndPublish, workspaceFiles, onTurn, createSession, outputs }) =>
 			Effect.gen(function* () {
 				const titled = yield* createSession("Quarterly report")
 				const other = yield* createSession("   ")
@@ -302,8 +328,8 @@ describe("A session's outputs", () => {
 					workspaceFiles(titled.id).set(`${OUTPUTS}/a.txt`, "from the first")
 					workspaceFiles(other.id).set(`${OUTPUTS}/a.txt`, "from the second")
 				})
-				yield* sendAndSettle(apiFetch, titled.id, ["Go."], 1)
-				yield* sendAndSettle(apiFetch, other.id, ["Go."], 1)
+				yield* replyAndPublish(titled.id, ["Go."], 1)
+				yield* replyAndPublish(other.id, ["Go."], 1)
 				const first = yield* json<ArtifactBody>(yield* outputs(titled.id))
 				const second = yield* json<ArtifactBody>(yield* outputs(other.id))
 				expect(first.name).toBe("Quarterly report")
@@ -318,7 +344,16 @@ describe("A session's outputs", () => {
 		withSessions(
 			(
 				apiFetch,
-				{ workspaceFiles, artifactStore, outputReads, onTurn, createSession, outputs, fileText },
+				{
+					replyAndPublish,
+					workspaceFiles,
+					artifactStore,
+					outputReads,
+					onTurn,
+					createSession,
+					outputs,
+					fileText,
+				},
 			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
@@ -334,14 +369,14 @@ describe("A session's outputs", () => {
 						files.set(`${OUTPUTS}/index.html`, "<h1>Draft</h1>")
 						files.set(`${OUTPUTS}/app.js`, "run()")
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Build the page."], 1)
+					yield* replyAndPublish(session.id, ["Build the page."], 1)
 					const first = yield* json<ArtifactBody>(yield* outputs(session.id))
 					expect(first.version).toBe(1)
 					expect(outputReads).toEqual([{ sessionId: session.id, paths: ["app.js", "index.html"] }])
 					expect(blobs()).toEqual([sha256("<h1>Draft</h1>"), sha256("run()")].toSorted())
 
 					onTurn(() => void files.set(`${OUTPUTS}/index.html`, "<h1>Final</h1>"))
-					yield* sendAndSettle(apiFetch, session.id, ["Finish the page."], 2)
+					yield* replyAndPublish(session.id, ["Finish the page."], 2)
 					const second = yield* json<ArtifactBody>(yield* outputs(session.id))
 					expect(second).toMatchObject({
 						id: first.id,
@@ -364,7 +399,7 @@ describe("A session's outputs", () => {
 
 					onTurn(() => undefined)
 					const before = keysOf(artifactStore)
-					yield* sendAndSettle(apiFetch, session.id, ["Anything else?"], 3)
+					yield* replyAndPublish(session.id, ["Anything else?"], 3)
 					expect(yield* json(yield* outputs(session.id))).toEqual(second)
 					expect(outputReads).toHaveLength(2)
 					expect(keysOf(artifactStore)).toEqual(before)
@@ -373,7 +408,7 @@ describe("A session's outputs", () => {
 						files.delete(`${OUTPUTS}/app.js`)
 						files.set(`${OUTPUTS}/copy/index.html`, "<h1>Final</h1>")
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Tidy up."], 4)
+					yield* replyAndPublish(session.id, ["Tidy up."], 4)
 					const fourth = yield* json<ArtifactBody>(yield* outputs(session.id))
 					expect(fourth.version).toBe(3)
 					expect(fourth.files.map((file) => file.path)).toEqual(["copy/index.html", "index.html"])
@@ -385,7 +420,7 @@ describe("A session's outputs", () => {
 						files.delete(`${OUTPUTS}/copy/index.html`)
 						files.set(`${OUTPUTS}/app.js`, "run()")
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Put it back."], 5)
+					yield* replyAndPublish(session.id, ["Put it back."], 5)
 					const fifth = yield* json<ArtifactBody>(yield* outputs(session.id))
 					expect([fifth.version, fifth.files]).toEqual([4, second.files])
 					expect(outputReads.slice(2)).toEqual([{ sessionId: session.id, paths: ["app.js"] }])
@@ -394,40 +429,44 @@ describe("A session's outputs", () => {
 		))
 
 	it("answers 404 until something is published, and never publishes a file outside the outputs directory", () =>
-		withSessions((apiFetch, { workspaceFiles, artifactStore, onTurn, createSession, outputs }) =>
-			Effect.gen(function* () {
-				const session = yield* createSession()
-				const refusal = (sessionId: string) =>
-					Effect.flatMap(outputs(sessionId), (res) =>
-						Effect.map(json<{ error: { message: string } }>(res), ({ error }) => [
-							res.status,
-							error.message,
-						]),
-					)
-				const nothing = [404, `Session ${session.id} has published no outputs.`]
-				expect(yield* refusal(session.id)).toEqual(nothing)
-				expect(yield* refusal("sess_nope")).toEqual([404, "Session sess_nope not found."])
+		withSessions(
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, artifactStore, onTurn, createSession, outputs },
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					const refusal = (sessionId: string) =>
+						Effect.flatMap(outputs(sessionId), (res) =>
+							Effect.map(json<{ error: { message: string } }>(res), ({ error }) => [
+								res.status,
+								error.message,
+							]),
+						)
+					const nothing = [404, `Session ${session.id} has published no outputs.`]
+					expect(yield* refusal(session.id)).toEqual(nothing)
+					expect(yield* refusal("sess_nope")).toEqual([404, "Session sess_nope not found."])
 
-				const files = workspaceFiles(session.id)
-				onTurn(() => {
-					files.set("/workspace/notes.md", "private")
-					files.set("/mnt/session/scratch.txt", "private")
-					files.set("/mnt/session/outputs-old/report.md", "private")
-					files.set("/mnt/session/outputs.txt", "private")
-					files.set("/outputs/report.md", "private")
-				})
-				yield* sendAndSettle(apiFetch, session.id, ["Take notes."], 1)
-				expect(yield* refusal(session.id)).toEqual(nothing)
-				expect(keysOf(artifactStore)).toEqual([])
+					const files = workspaceFiles(session.id)
+					onTurn(() => {
+						files.set("/workspace/notes.md", "private")
+						files.set("/mnt/session/scratch.txt", "private")
+						files.set("/mnt/session/outputs-old/report.md", "private")
+						files.set("/mnt/session/outputs.txt", "private")
+						files.set("/outputs/report.md", "private")
+					})
+					yield* replyAndPublish(session.id, ["Take notes."], 1)
+					expect(yield* refusal(session.id)).toEqual(nothing)
+					expect(keysOf(artifactStore)).toEqual([])
 
-				onTurn(() => void files.set(`${OUTPUTS}/report.md`, "public"))
-				yield* sendAndSettle(apiFetch, session.id, ["Now publish."], 2)
-				const artifact = yield* json<ArtifactBody>(yield* outputs(session.id))
-				expect(artifact.files).toEqual([fileOf("report.md", "public", "text/markdown")])
-				expect(keysOf(artifactStore).filter((key) => key.includes("/blobs/"))).toEqual([
-					`artifacts/${SCOPE}/${artifact.id}/blobs/${sha256("public")}`,
-				])
-			}),
+					onTurn(() => void files.set(`${OUTPUTS}/report.md`, "public"))
+					yield* replyAndPublish(session.id, ["Now publish."], 2)
+					const artifact = yield* json<ArtifactBody>(yield* outputs(session.id))
+					expect(artifact.files).toEqual([fileOf("report.md", "public", "text/markdown")])
+					expect(keysOf(artifactStore).filter((key) => key.includes("/blobs/"))).toEqual([
+						`artifacts/${SCOPE}/${artifact.id}/blobs/${sha256("public")}`,
+					])
+				}),
 		))
 
 	it("publishes nothing, and still answers, when the outputs are over a limit or hold a path an artifact cannot", () =>
@@ -435,6 +474,7 @@ describe("A session's outputs", () => {
 			(
 				apiFetch,
 				{
+					replyAndPublish,
 					workspaceFiles,
 					outputReads,
 					outputListReads,
@@ -455,7 +495,7 @@ describe("A session's outputs", () => {
 							onTurn(edit)
 							turn += 1
 							outputListReads.length = 0
-							yield* sendAndSettle(apiFetch, session.id, ["Go."], turn)
+							yield* replyAndPublish(session.id, ["Go."], turn)
 							expect(yield* replies(session.id)).toHaveLength(turn)
 							const response = yield* outputs(session.id)
 							return [
@@ -535,14 +575,17 @@ describe("A session's outputs", () => {
 
 	it("leaves the turn successful when storage fails, and publishes when the next turn ends", () =>
 		withSessions(
-			(apiFetch, { workspaceFiles, artifactStore, onTurn, createSession, outputs, replies }) =>
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, artifactStore, onTurn, createSession, outputs, replies },
+			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
 					onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "kept"))
 					let puts = 0
 					artifactStore.setBeforePut(Effect.sync(() => void (puts += 1)))
 					artifactStore.setFailing(true)
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					yield* replyAndPublish(session.id, ["Write it."], 1)
 					expect(yield* replies(session.id)).toEqual(["ok"])
 					expect(keysOf(artifactStore)).toEqual([])
 					expect(puts).toBe(ATTEMPTS)
@@ -550,7 +593,7 @@ describe("A session's outputs", () => {
 					expect((yield* outputs(session.id)).status).toBe(404)
 
 					onTurn(() => undefined)
-					yield* sendAndSettle(apiFetch, session.id, ["Thanks."], 2)
+					yield* replyAndPublish(session.id, ["Thanks."], 2)
 					const artifact = yield* json<ArtifactBody>(yield* outputs(session.id))
 					expect(artifact).toMatchObject({
 						version: 1,
@@ -559,12 +602,12 @@ describe("A session's outputs", () => {
 
 					onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "changed"))
 					artifactStore.setFailing(true)
-					yield* sendAndSettle(apiFetch, session.id, ["Change it."], 3)
+					yield* replyAndPublish(session.id, ["Change it."], 3)
 					expect(yield* replies(session.id)).toEqual(["ok", "ok", "ok"])
 					artifactStore.setFailing(false)
 					expect((yield* json<ArtifactBody>(yield* outputs(session.id))).version).toBe(1)
 					onTurn(() => undefined)
-					yield* sendAndSettle(apiFetch, session.id, ["Thanks."], 4)
+					yield* replyAndPublish(session.id, ["Thanks."], 4)
 					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
 						version: 2,
 						files: [fileOf("a.txt", "changed", "text/plain")],
@@ -576,7 +619,15 @@ describe("A session's outputs", () => {
 		withSessions(
 			(
 				apiFetch,
-				{ workspaceFiles, artifactStore, setBeforeOutputsRead, onTurn, createSession, outputs },
+				{
+					replyAndPublish,
+					workspaceFiles,
+					artifactStore,
+					setBeforeOutputsRead,
+					onTurn,
+					createSession,
+					outputs,
+				},
 			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
@@ -592,14 +643,14 @@ describe("A session's outputs", () => {
 
 					let edits = 0
 					setBeforeOutputsRead(() => void files.set(`${OUTPUTS}/a.txt`, `edit ${++edits}`))
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					yield* replyAndPublish(session.id, ["Write it."], 1)
 					expect((yield* outputs(session.id)).status).toBe(404)
 					expect(keysOf(artifactStore)).toEqual([])
 					expect(edits).toBe(ATTEMPTS)
 
 					setBeforeOutputsRead(() => void files.set(`${OUTPUTS}/a.txt`, "edited"))
 					onTurn(() => undefined)
-					yield* sendAndSettle(apiFetch, session.id, ["Again."], 2)
+					yield* replyAndPublish(session.id, ["Again."], 2)
 					const published = yield* json<ArtifactBody>(yield* outputs(session.id))
 					expect(published).toMatchObject({
 						version: 1,
@@ -612,7 +663,7 @@ describe("A session's outputs", () => {
 
 					onTurn(() => void files.set(`${OUTPUTS}/c.txt`, "fleeting"))
 					setBeforeOutputsRead(() => void files.delete(`${OUTPUTS}/c.txt`))
-					yield* sendAndSettle(apiFetch, session.id, ["Again."], 3)
+					yield* replyAndPublish(session.id, ["Again."], 3)
 					expect(yield* json(yield* outputs(session.id))).toEqual(published)
 					expect(blobs()).toHaveLength(2)
 				}),
@@ -620,7 +671,10 @@ describe("A session's outputs", () => {
 
 	it("keeps the last complete version when a listed file cannot be read", () =>
 		withSessions(
-			(apiFetch, { workspaceFiles, failingOutputReads, onTurn, createSession, outputs }) =>
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, failingOutputReads, onTurn, createSession, outputs },
+			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
 					const files = workspaceFiles(session.id)
@@ -628,17 +682,17 @@ describe("A session's outputs", () => {
 						files.set(`${OUTPUTS}/a.txt`, "one")
 						files.set(`${OUTPUTS}/b.txt`, "two")
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					yield* replyAndPublish(session.id, ["Write it."], 1)
 					const published = yield* json<ArtifactBody>(yield* outputs(session.id))
 
 					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "changed"))
 					failingOutputReads.add(`${OUTPUTS}/b.txt`)
-					yield* sendAndSettle(apiFetch, session.id, ["Change it."], 2)
+					yield* replyAndPublish(session.id, ["Change it."], 2)
 					expect(yield* json(yield* outputs(session.id))).toEqual(published)
 
 					failingOutputReads.clear()
 					onTurn(() => undefined)
-					yield* sendAndSettle(apiFetch, session.id, ["Again."], 3)
+					yield* replyAndPublish(session.id, ["Again."], 3)
 					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
 						version: 2,
 						files: [fileOf("a.txt", "changed", "text/plain"), fileOf("b.txt", "two", "text/plain")],
@@ -646,11 +700,20 @@ describe("A session's outputs", () => {
 				}),
 		))
 
-	it("publishes in the same turn when the store fails once", () =>
+	it("retries a publish when the store fails once", () =>
 		withSessions(
 			(
 				apiFetch,
-				{ workspaceFiles, artifactStore, onTurn, warnings, createSession, outputs, replies },
+				{
+					replyAndPublish,
+					workspaceFiles,
+					artifactStore,
+					onTurn,
+					warnings,
+					createSession,
+					outputs,
+					replies,
+				},
 			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
@@ -662,7 +725,7 @@ describe("A session's outputs", () => {
 							artifactStore.setFailing(puts === 1)
 						}),
 					)
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					yield* replyAndPublish(session.id, ["Write it."], 1)
 					expect(yield* replies(session.id)).toEqual(["ok"])
 					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
 						version: 1,
@@ -675,12 +738,15 @@ describe("A session's outputs", () => {
 
 	it("builds on a version added while it was publishing, and loses none", () =>
 		withSessions(
-			(apiFetch, { workspaceFiles, artifactStore, onTurn, createSession, outputs, replies }) =>
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, artifactStore, onTurn, createSession, outputs, replies },
+			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
 					const files = workspaceFiles(session.id)
 					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "one"))
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					yield* replyAndPublish(session.id, ["Write it."], 1)
 					const artifact = yield* json<ArtifactBody>(yield* outputs(session.id))
 					const versionFiles = (version: number) =>
 						Effect.flatMap(
@@ -704,7 +770,7 @@ describe("A session's outputs", () => {
 						}),
 					)
 					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "two"))
-					yield* sendAndSettle(apiFetch, session.id, ["Change it."], 2)
+					yield* replyAndPublish(session.id, ["Change it."], 2)
 					expect(yield* replies(session.id)).toEqual(["ok", "ok"])
 					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
 						version: 3,
@@ -719,123 +785,96 @@ describe("A session's outputs", () => {
 					expect((yield* versionFiles(4))[0]).toBe(404)
 
 					onTurn(() => undefined)
-					yield* sendAndSettle(apiFetch, session.id, ["Thanks."], 3)
+					yield* replyAndPublish(session.id, ["Thanks."], 3)
 					expect((yield* json<ArtifactBody>(yield* outputs(session.id))).version).toBe(3)
 				}),
 		))
 
 	it("publishes the directory as it stands: what a failed turn left is published by the next turn that replies, even one that wrote nothing", () =>
-		withSessions((apiFetch, { workspaceFiles, onTurn, createSession, outputs, replies }) =>
-			Effect.gen(function* () {
-				const session = yield* createSession()
-				onTurn(() => {
-					workspaceFiles(session.id).set(`${OUTPUTS}/index.html`, "<h1>Draft</h1>")
-					throw new Error("provider down")
-				})
-				yield* sendAndSettle(apiFetch, session.id, ["Build the page."], 1)
-				expect(yield* replies(session.id)).toEqual([])
-				expect((yield* outputs(session.id)).status).toBe(404)
+		withSessions(
+			(apiFetch, { replyAndPublish, workspaceFiles, onTurn, createSession, outputs, replies }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					onTurn(() => {
+						workspaceFiles(session.id).set(`${OUTPUTS}/index.html`, "<h1>Draft</h1>")
+						throw new Error("provider down")
+					})
+					yield* sendAndSettle(apiFetch, session.id, ["Build the page."], 1)
+					expect(yield* replies(session.id)).toEqual([])
+					expect((yield* outputs(session.id)).status).toBe(404)
 
-				onTurn(() => undefined)
-				yield* sendAndSettle(apiFetch, session.id, ["What is the weather?"], 2)
-				expect(yield* replies(session.id)).toEqual(["ok"])
-				expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
-					version: 1,
-					files: [fileOf("index.html", "<h1>Draft</h1>", "text/html")],
-				})
-			}),
+					onTurn(() => undefined)
+					yield* replyAndPublish(session.id, ["What is the weather?"], 2)
+					expect(yield* replies(session.id)).toEqual(["ok"])
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 1,
+						files: [fileOf("index.html", "<h1>Draft</h1>", "text/html")],
+					})
+				}),
 		))
 
 	it("stops publishing once the session's artifact is deleted, and leaves nothing in storage", () =>
-		withSessions((apiFetch, { workspaceFiles, artifactStore, onTurn, createSession, outputs }) =>
-			Effect.gen(function* () {
-				const racing = yield* createSession()
-				const files = workspaceFiles(racing.id)
-				onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "one"))
-				yield* sendAndSettle(apiFetch, racing.id, ["Write it."], 1)
-				const artifact = yield* json<ArtifactBody>(yield* outputs(racing.id))
-
-				artifactStore.setBeforePut(
-					Effect.asVoid(request(apiFetch, "DELETE", `/v1/artifacts/${artifact.id}`)).pipe(
-						Effect.andThen(Effect.sync(() => artifactStore.setBeforePut(Effect.void))),
-					),
-				)
-				onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "two"))
-				yield* sendAndSettle(apiFetch, racing.id, ["Change it."], 2)
-				expect((yield* outputs(racing.id)).status).toBe(404)
-				expect(keysOf(artifactStore)).toEqual([])
-
-				onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "three"))
-				yield* sendAndSettle(apiFetch, racing.id, ["Change it again."], 3)
-				expect((yield* outputs(racing.id)).status).toBe(404)
-				expect(keysOf(artifactStore)).toEqual([])
-			}),
-		))
-
-	it("publishes when a turn that already ran is settled again", () =>
 		withSessions(
 			(
 				apiFetch,
-				{ workspaceFiles, artifactStore, requests, harness, onTurn, createSession, outputs },
+				{ replyAndPublish, workspaceFiles, artifactStore, onTurn, createSession, outputs },
 			) =>
 				Effect.gen(function* () {
-					const session = yield* createSession()
-					onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "kept"))
-					artifactStore.setFailing(true)
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
-					artifactStore.setFailing(false)
-					expect((yield* outputs(session.id)).status).toBe(404)
-					expect(requests).toHaveLength(1)
+					const racing = yield* createSession()
+					const files = workspaceFiles(racing.id)
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "one"))
+					yield* replyAndPublish(racing.id, ["Write it."], 1)
+					const artifact = yield* json<ArtifactBody>(yield* outputs(racing.id))
 
-					const settleAgain = harness.runTurn({
-						session_id: SessionId.make(session.id),
-						agent_id: session.agent.id,
-						agent_version: session.agent.version,
-						environment_id: session.environment_id,
-						turn: 1,
-						input: ["Write it."],
-					})
-					expect((yield* Effect.orDie(settleAgain)).text).toBe("ok")
-					expect((yield* json<ArtifactBody>(yield* outputs(session.id))).version).toBe(1)
-					expect((yield* Effect.orDie(settleAgain)).text).toBe("ok")
-					expect((yield* json<ArtifactBody>(yield* outputs(session.id))).version).toBe(1)
+					artifactStore.setBeforePut(
+						Effect.asVoid(request(apiFetch, "DELETE", `/v1/artifacts/${artifact.id}`)).pipe(
+							Effect.andThen(Effect.sync(() => artifactStore.setBeforePut(Effect.void))),
+						),
+					)
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "two"))
+					yield* replyAndPublish(racing.id, ["Change it."], 2)
+					expect((yield* outputs(racing.id)).status).toBe(404)
+					expect(keysOf(artifactStore)).toEqual([])
 
-					workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "late")
-					yield* Effect.orDie(settleAgain)
-					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
-						version: 2,
-						files: [fileOf("a.txt", "late", "text/plain")],
-					})
-
-					workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "kept")
-					yield* Effect.orDie(settleAgain)
-					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
-						version: 3,
-						files: [fileOf("a.txt", "kept", "text/plain")],
-					})
-					expect(requests).toHaveLength(1)
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "three"))
+					yield* replyAndPublish(racing.id, ["Change it again."], 3)
+					expect((yield* outputs(racing.id)).status).toBe(404)
+					expect(keysOf(artifactStore)).toEqual([])
 				}),
 		))
 
 	it("reads the outputs at the version the artifact has committed, without reading a projection", () =>
-		withSessions((apiFetch, { workspaceFiles, onTurn, createSession, viewlessOutputs }) =>
-			Effect.gen(function* () {
-				const session = yield* createSession()
-				const files = workspaceFiles(session.id)
-				onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "one"))
-				yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
-				expect((yield* json<ArtifactBody>(yield* viewlessOutputs(session.id))).version).toBe(1)
+		withSessions(
+			(apiFetch, { replyAndPublish, workspaceFiles, onTurn, createSession, viewlessOutputs }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					const files = workspaceFiles(session.id)
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "one"))
+					yield* replyAndPublish(session.id, ["Write it."], 1)
+					expect((yield* json<ArtifactBody>(yield* viewlessOutputs(session.id))).version).toBe(1)
 
-				onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "two"))
-				yield* sendAndSettle(apiFetch, session.id, ["Change it."], 2)
-				const head = yield* json<ArtifactBody>(yield* viewlessOutputs(session.id))
-				expect([head.version, head.files]).toEqual([2, [fileOf("a.txt", "two", "text/plain")]])
-			}),
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "two"))
+					yield* replyAndPublish(session.id, ["Change it."], 2)
+					const head = yield* json<ArtifactBody>(yield* viewlessOutputs(session.id))
+					expect([head.version, head.files]).toEqual([2, [fileOf("a.txt", "two", "text/plain")]])
+				}),
 		))
 
 	it("holds outputs to the rules an upload is held to, and refuses a path that is also a folder as an upload does", () =>
 		withSessions(
-			(apiFetch, { workspaceFiles, onTurn, warnings, createSession, outputs, upload, replies }) =>
+			(
+				apiFetch,
+				{
+					replyAndPublish,
+					workspaceFiles,
+					onTurn,
+					warnings,
+					createSession,
+					outputs,
+					upload,
+					replies,
+				},
+			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
 					const files = workspaceFiles(session.id)
@@ -845,7 +884,7 @@ describe("A session's outputs", () => {
 						files.set(`${OUTPUTS}/docs`, "a file")
 						files.set(`${OUTPUTS}/docs/index.md`, "# Docs")
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Write the docs."], 1)
+					yield* replyAndPublish(session.id, ["Write the docs."], 1)
 					expect(yield* replies(session.id)).toEqual(["ok"])
 					expect((yield* outputs(session.id)).status).toBe(404)
 					expect(warnings).toEqual([`Outputs not published ${conflict}`])
@@ -863,7 +902,7 @@ describe("A session's outputs", () => {
 						files.delete(`${OUTPUTS}/docs`)
 						files.set(`${OUTPUTS}/html`, "<p>")
 					})
-					yield* sendAndSettle(apiFetch, session.id, ["Fix it."], 2)
+					yield* replyAndPublish(session.id, ["Fix it."], 2)
 					const published = yield* json<ArtifactBody>(yield* outputs(session.id))
 					const byHand = yield* json<ArtifactBody>(
 						yield* upload([
@@ -882,17 +921,28 @@ describe("A session's outputs", () => {
 
 	it("keeps the last version when a turn empties the outputs directory", () =>
 		withSessions(
-			(apiFetch, { workspaceFiles, artifactStore, onTurn, warnings, createSession, outputs }) =>
+			(
+				apiFetch,
+				{
+					replyAndPublish,
+					workspaceFiles,
+					artifactStore,
+					onTurn,
+					warnings,
+					createSession,
+					outputs,
+				},
+			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
 					const files = workspaceFiles(session.id)
 					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "kept"))
-					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					yield* replyAndPublish(session.id, ["Write it."], 1)
 					const first = yield* json<ArtifactBody>(yield* outputs(session.id))
 					const stored = keysOf(artifactStore)
 
 					onTurn(() => void files.delete(`${OUTPUTS}/a.txt`))
-					yield* sendAndSettle(apiFetch, session.id, ["Clear it."], 2)
+					yield* replyAndPublish(session.id, ["Clear it."], 2)
 					expect(yield* json(yield* outputs(session.id))).toEqual(first)
 					expect(first).toMatchObject({
 						version: 1,
@@ -908,6 +958,7 @@ describe("A session's outputs", () => {
 			(
 				apiFetch,
 				{
+					replyAndPublish,
 					workspaceFiles,
 					artifactStore,
 					outputListReads,
@@ -983,7 +1034,7 @@ describe("A session's outputs", () => {
 					yield* unpublished
 
 					onTurn(() => void files.set(`${OUTPUTS}/app.js`, "run()"))
-					yield* sendAndSettle(apiFetch, session.id, ["Finish it."], 3)
+					yield* replyAndPublish(session.id, ["Finish it."], 3)
 					expect(yield* replies(session.id)).toEqual(["ok"])
 					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
 						version: 1,
@@ -995,58 +1046,21 @@ describe("A session's outputs", () => {
 				}),
 		))
 
-	it(
-		"cuts off publishing that stalls, so the turn still answers, and publishes when the next turn ends",
-		() =>
-			withSessions(
-				(
-					apiFetch,
-					{ workspaceFiles, artifactStore, onTurn, warnings, createSession, outputs, replies },
-				) =>
-					Effect.gen(function* () {
-						const session = yield* createSession()
-						onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "kept"))
-						artifactStore.setBeforePut(Effect.never)
-						yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
-						expect(yield* replies(session.id)).toEqual(["ok"])
-						expect(warnings).toEqual(["Outputs not published in time"])
-						expect((yield* outputs(session.id)).status).toBe(404)
-
-						let reached = 0
-						artifactStore.setBeforePut(
-							Effect.andThen(
-								Effect.sync(() => void (reached += 1)),
-								Effect.sleep(STALLED_PUT),
-							),
-						)
-						onTurn(() => undefined)
-						yield* sendAndSettle(apiFetch, session.id, ["Thanks."], 2)
-						expect(yield* replies(session.id)).toEqual(["ok", "ok"])
-						expect(warnings).toHaveLength(2)
-						yield* Effect.sleep(STALLED_PUT)
-						yield* Effect.sleep(PUBLISH_CUT_OFF)
-						expect(reached).toBe(1)
-						expect(keysOf(artifactStore)).toEqual([])
-						expect((yield* outputs(session.id)).status).toBe(404)
-
-						artifactStore.setBeforePut(Effect.void)
-						yield* sendAndSettle(apiFetch, session.id, ["Thanks again."], 3)
-						expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
-							version: 1,
-							files: [fileOf("a.txt", "kept", "text/plain")],
-						})
-						expect(warnings).toHaveLength(2)
-					}),
-				PUBLISH_CUT_OFF,
-			),
-		20_000,
-	)
-
-	it("ends publishing by the turn's settle deadline, however long a publish may otherwise take", () =>
+	it("commits the reply without waiting for its outputs, and gives up on a publish that stalls", () =>
 		withSessions(
 			(
 				apiFetch,
-				{ workspaceFiles, artifactStore, onTurn, warnings, createSession, outputs, replies },
+				{
+					replyAndPublish,
+					workspaceFiles,
+					artifactStore,
+					publishedTurns,
+					onTurn,
+					warnings,
+					createSession,
+					outputs,
+					replies,
+				},
 			) =>
 				Effect.gen(function* () {
 					const session = yield* createSession()
@@ -1054,10 +1068,67 @@ describe("A session's outputs", () => {
 					artifactStore.setBeforePut(Effect.never)
 					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
 					expect(yield* replies(session.id)).toEqual(["ok"])
+					expect(publishedTurns).toEqual([])
+					while (publishedTurns.length === 0) {
+						yield* Effect.sleep("5 millis")
+					}
 					expect(warnings).toEqual(["Outputs not published in time"])
 					expect((yield* outputs(session.id)).status).toBe(404)
+
+					artifactStore.setBeforePut(Effect.void)
+					onTurn(() => undefined)
+					yield* replyAndPublish(session.id, ["Thanks."], 2)
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 1,
+						files: [fileOf("a.txt", "kept", "text/plain")],
+					})
 				}),
-			"1 hour",
-			SETTLE_DEADLINE,
+			PUBLISH_CUT_OFF,
+		))
+
+	it("publishes nothing for a turn once a later turn has started in the workspace", () =>
+		withSessions(
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, publishOutputs, onTurn, createSession, outputs },
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					const files = workspaceFiles(session.id)
+					onTurn(() => void files.set(`${OUTPUTS}/a.txt`, "one"))
+					yield* replyAndPublish(session.id, ["Write it."], 1)
+					const first = yield* json<ArtifactBody>(yield* outputs(session.id))
+
+					onTurn(() => {
+						files.set(`${OUTPUTS}/a.txt`, "unfinished")
+						throw new Error("provider down")
+					})
+					yield* sendAndSettle(apiFetch, session.id, ["Change it."], 2)
+					yield* publishOutputs({ session_id: SessionId.make(session.id), turn: 1 })
+					expect(yield* json(yield* outputs(session.id))).toEqual(first)
+
+					onTurn(() => undefined)
+					yield* replyAndPublish(session.id, ["Again."], 3)
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 2,
+						files: [fileOf("a.txt", "unfinished", "text/plain")],
+					})
+				}),
+		))
+
+	it("publishes nothing, and does not retry, when the outputs path is a file", () =>
+		withSessions(
+			(
+				apiFetch,
+				{ replyAndPublish, workspaceFiles, outputWalks, onTurn, warnings, createSession, outputs },
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					onTurn(() => void workspaceFiles(session.id).set(OUTPUTS, "not a folder"))
+					yield* replyAndPublish(session.id, ["Write it."], 1)
+					expect((yield* outputs(session.id)).status).toBe(404)
+					expect(outputWalks).toHaveLength(1)
+					expect(warnings).toEqual([`Outputs not published ${OUTPUTS} is a file, not a directory.`])
+				}),
 		))
 })

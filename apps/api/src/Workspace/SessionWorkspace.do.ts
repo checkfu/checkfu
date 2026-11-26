@@ -62,13 +62,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 			const outputs = async () => {
 				const { fs } = await workspace()
 				return makeSessionOutputs({
-					list: (directory, limit) =>
-						fs.find(directory, undefined, { limit }).catch((error: unknown) => {
-							if (isMissing(error)) {
-								return []
-							}
-							throw error
-						}),
+					list: (directory, limit) => fs.find(directory, undefined, { limit }),
 					size: async (file) => (await fs.stat(file)).size,
 					read: async (file) =>
 						new Uint8Array(await new Response(await fs.readFile(file)).arrayBuffer()),
@@ -98,17 +92,20 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 							result ?? failed("This turn has ended; the workspace no longer accepts its calls.")
 						)
 					}),
-				listOutputs: (): Effect.Effect<OutputsListing> =>
-					Effect.promise(() =>
+				listOutputs: (turn: number): Effect.Effect<OutputsListing | null> =>
+					Effect.promise(async () =>
 						storage.kv.get(DISCARDED) === true
-							? Promise.resolve<OutputsListing>({ ok: true, files: [] })
-							: outputs().then((found) => found.list()),
+							? { ok: true, files: [] }
+							: ((await fence.run({ turn }, async () => (await outputs()).list())) ?? null),
 					),
-				readOutputs: (paths: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<OutputBytes>> =>
-					Effect.promise(() =>
+				readOutputs: (
+					turn: number,
+					paths: ReadonlyArray<string>,
+				): Effect.Effect<ReadonlyArray<OutputBytes> | null> =>
+					Effect.promise(async () =>
 						storage.kv.get(DISCARDED) === true
-							? Promise.resolve([])
-							: outputs().then((found) => found.read(paths)),
+							? []
+							: ((await fence.run({ turn }, async () => (await outputs()).read(paths))) ?? null),
 					),
 				discard: (): Effect.Effect<void> =>
 					Effect.promise(async () => {

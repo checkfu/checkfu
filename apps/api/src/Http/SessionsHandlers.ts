@@ -443,13 +443,18 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			)
 			.handle("getOutputs", ({ params }) =>
 				Effect.gen(function* () {
-					const session = yield* existing(params.session_id)
-					const id = yield* outputsArtifactId(digest, session.id)
+					const sessionId = params.session_id
+					const id = yield* outputsArtifactId(digest, sessionId)
 					const artifact = yield* artifacts.get(id)
-					if (artifact.status !== "active") {
-						return yield* reject(404, `Session ${session.id} has published no outputs.`)
+					if (artifact.status === "active") {
+						return yield* readArtifact(id, artifact)
 					}
-					return yield* readArtifact(id, artifact)
+					return yield* reject(
+						404,
+						(yield* sessions.get(sessionId))._tag === "Uninitialized"
+							? `Session ${sessionId} not found.`
+							: `Session ${sessionId} has published no outputs.`,
+					)
 				}).pipe(handled),
 			)
 			.handle("sendEvents", ({ params, headers, payload }) =>

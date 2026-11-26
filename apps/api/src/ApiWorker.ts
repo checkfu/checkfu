@@ -11,6 +11,7 @@ import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
+import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
@@ -43,12 +44,12 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
-			listOutputs: (sessionId) =>
-				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId))).pipe(
+			listOutputs: (sessionId, turn) =>
+				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId, turn))).pipe(
 					Effect.withSpan("PiHarness.listOutputs"),
 				),
-			readOutputs: (sessionId, paths) =>
-				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, paths))).pipe(
+			readOutputs: (sessionId, turn, paths) =>
+				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, paths))).pipe(
 					Effect.withSpan("PiHarness.readOutputs"),
 				),
 			discardWorkspace: (sessionId) =>
@@ -67,6 +68,7 @@ const ArtifactStoreLive = ArtifactStoreR2.pipe(
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(PiDurableHarnessLive),
+		Layer.provide(SessionOutputsLive),
 		Layer.provide(ArtifactBytesLive),
 		Layer.provide(D1ListingStore),
 		Layer.provide(Cloudflare.D1.QueryDatabaseBinding),

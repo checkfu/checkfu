@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import {
 	ArtifactPath,
@@ -40,6 +41,9 @@ const isArtifactPath = Schema.is(ArtifactPath)
 
 const refused = (reason: string): OutputsListing => ({ ok: false, reason })
 
+const hasCode = (error: unknown, code: string): boolean =>
+	Predicate.hasProperty(error, "code") && error.code === code
+
 const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
 	Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
 		byte.toString(16).padStart(2, "0"),
@@ -47,7 +51,20 @@ const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
 
 export const makeSessionOutputs = (files: OutputFiles) => ({
 	list: async (): Promise<OutputsListing> => {
-		const entries = await files.list(SESSION_OUTPUTS_PATH, MAX_OUTPUT_ENTRIES + 1)
+		const entries = await files
+			.list(SESSION_OUTPUTS_PATH, MAX_OUTPUT_ENTRIES + 1)
+			.catch((error: unknown) => {
+				if (hasCode(error, "ENOENT")) {
+					return []
+				}
+				if (hasCode(error, "ENOTDIR")) {
+					return null
+				}
+				throw error
+			})
+		if (entries === null) {
+			return refused(`${SESSION_OUTPUTS_PATH} is a file, not a directory.`)
+		}
 		if (entries.length > MAX_OUTPUT_ENTRIES) {
 			return refused(`More than ${MAX_OUTPUT_ENTRIES} files and directories.`)
 		}

@@ -1084,9 +1084,21 @@ describe("PiSession real Durable Object under workerd", () => {
 				readonly version: number
 				readonly files: ReadonlyArray<PublishedFile>
 			}>(`/v1/sessions/${session.id}/outputs`)
+		const publishedAt = async (version: number) => {
+			const deadline = Date.now() + 30_000
+			for (;;) {
+				const current = await published()
+				if ((current.status === 200 && current.body.version >= version) || Date.now() > deadline) {
+					return current
+				}
+				await new Promise((resolve) => {
+					setTimeout(resolve, 100)
+				})
+			}
+		}
 		expect((await published()).status).toBe(404)
 		await replyAfterTurn(session.id, "Write the report.", 1)
-		const first = await published()
+		const first = await publishedAt(1)
 		expect(first.status).toBe(200)
 		expect(first.body).toMatchObject({
 			name: `Session ${session.id} outputs`,
@@ -1113,7 +1125,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect((await published()).body.version).toBe(1)
 
 		await replyAfterTurn(session.id, "Add a summary.", 3)
-		const second = await published()
+		const second = await publishedAt(2)
 		expect(second.body.version).toBe(2)
 		expect(second.body.files.map((file) => file.path)).toEqual([
 			"data/totals.csv",

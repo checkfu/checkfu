@@ -61,10 +61,13 @@ export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
-	listOutputs: { args: Schema.Tuple([Schema.String]), result: OutputsListing },
+	listOutputs: {
+		args: Schema.Tuple([Schema.String, Schema.Int]),
+		result: Schema.NullOr(OutputsListing),
+	},
 	readOutputs: {
-		args: Schema.Tuple([Schema.String, Schema.Array(Schema.String)]),
-		result: Schema.Array(OutputBytes),
+		args: Schema.Tuple([Schema.String, Schema.Int, Schema.Array(Schema.String)]),
+		result: Schema.NullOr(Schema.Array(OutputBytes)),
 	},
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 } as const

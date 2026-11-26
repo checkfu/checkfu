@@ -1,5 +1,9 @@
 import { Story } from "@alchemy.run/domain/Story"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import {
+	SessionOutputs,
+	SessionOutputsUnpublished,
+} from "../src/Session/SessionOutputs.external.ts"
 import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -88,6 +92,7 @@ import { SessionView } from "../src/Session/SessionView.view.ts"
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
 		Layer.provide(ArtifactBytesKept),
+		Layer.provide(SessionOutputsUnpublished),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
@@ -261,6 +266,8 @@ const opened = (
 		}),
 		new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 	),
+	Story.call(SessionOutputs.publish, { session_id: sessionOf(run).id, turn: 1 }),
+	Story.returned(SessionOutputs.publish, undefined),
 ]
 
 describe("Checkfu automations", () => {

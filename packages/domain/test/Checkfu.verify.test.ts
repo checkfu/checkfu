@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
 import * as Verify from "@alchemy.run/domain/Verify"
@@ -303,6 +304,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const layer = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide([HarnessStubLayer, ListingStore.memory]),
 			),
 		).pipe(

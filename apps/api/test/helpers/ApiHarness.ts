@@ -47,6 +47,8 @@ import {
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import { makeSessionOutputs } from "../../src/Workspace/SessionOutputs.ts"
+import { makeSessionOutputsPublisher } from "../../src/Artifacts/SessionOutputsLive.ts"
+import { SessionOutputs } from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -284,6 +286,12 @@ export const makePiDurableTestLayer = (
 		}
 		return makeSessionOutputs({
 			list: (directory, limit) => {
+				if (files.has(directory)) {
+					outputWalks.push({ limit, found: 0 })
+					return Promise.reject(
+						Object.assign(new Error(`not a directory: ${directory}`), { code: "ENOTDIR" }),
+					)
+				}
 				const found = new Map<string, "file" | "dir">()
 				for (const file of files.keys()) {
 					if (file.startsWith(`${directory}/`)) {
@@ -321,6 +329,26 @@ export const makePiDurableTestLayer = (
 		readonly paths: ReadonlyArray<string>
 	}> = []
 	let beforeOutputsRead: ((sessionId: string) => void) | undefined
+	const enteredTurns = new Map<string, number>()
+	const superseded = (sessionId: string, turn: number) => (enteredTurns.get(sessionId) ?? 0) > turn
+	const publishedTurns: Array<string> = []
+	type PublishArgs = Parameters<SessionOutputs["Service"]["publish"]>[0]
+	let publish: ((args: PublishArgs) => Effect.Effect<void>) | undefined
+	const publishOutputs = (args: PublishArgs) =>
+		Effect.suspend(() => publish?.(args) ?? Effect.die(new Error("no publisher yet")))
+	const SessionOutputsRecorded = SessionOutputs.toLayer(
+		Effect.map(makeSessionOutputsPublisher, (publisher) => {
+			publish = (args) =>
+				publisher
+					.publish(args)
+					.pipe(
+						Effect.ensuring(
+							Effect.sync(() => publishedTurns.push(`${args.session_id}:${args.turn}`)),
+						),
+					)
+			return { publish: (args: PublishArgs) => publishOutputs(args) }
+		}),
+	)
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -338,6 +366,8 @@ export const makePiDurableTestLayer = (
 					}
 					requests.push(request)
 					conversations.push(conversation)
+					const sessionId = conversation.split("#")[0] ?? conversation
+					enteredTurns.set(sessionId, Math.max(enteredTurns.get(sessionId) ?? 0, request.turn))
 					return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
 				}),
 			abortTurn: (conversation, operationId) =>
@@ -354,17 +384,20 @@ export const makePiDurableTestLayer = (
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
 				}),
-			listOutputs: (sessionId) =>
+			listOutputs: (sessionId, turn) =>
 				Effect.tryPromise({
-					try: () => sessionOutputs(sessionId, (file) => outputListReads.push(file)).list(),
+					try: async () =>
+						superseded(sessionId, turn)
+							? null
+							: sessionOutputs(sessionId, (file) => outputListReads.push(file)).list(),
 					catch: (cause) => new HarnessCallFailed({ cause }),
 				}),
-			readOutputs: (sessionId, paths) =>
+			readOutputs: (sessionId, turn, paths) =>
 				Effect.tryPromise({
-					try: () => {
+					try: async () => {
 						outputReads.push({ sessionId, paths })
 						beforeOutputsRead?.(sessionId)
-						return sessionOutputs(sessionId).read(paths)
+						return superseded(sessionId, turn) ? null : sessionOutputs(sessionId).read(paths)
 					},
 					catch: (cause) => new HarnessCallFailed({ cause }),
 				}),
@@ -388,6 +421,7 @@ export const makePiDurableTestLayer = (
 			Layer.provide(ListingStore.memory),
 			Layer.provide(HarnessLive),
 			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
+			Layer.provide(SessionOutputsRecorded.pipe(Layer.provide(artifactStore.layer))),
 		),
 	).pipe(Layer.provide(executorLayer))
 	const PiProviderLive = PiDurableHarnessLive.pipe(
@@ -443,6 +477,8 @@ export const makePiDurableTestLayer = (
 		outputListReads,
 		outputWalks,
 		failingOutputReads,
+		publishedTurns,
+		publishOutputs,
 		setBeforeOutputsRead: (run: (sessionId: string) => void) => {
 			beforeOutputsRead = run
 		},
