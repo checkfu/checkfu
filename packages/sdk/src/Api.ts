@@ -405,6 +405,7 @@ export const RESERVED_TOOL_NAMES: ReadonlyArray<string> = [
 	"write",
 	"edit",
 	"delete",
+	"bash",
 	"codemode",
 	"tool_search",
 ]
@@ -1630,7 +1631,10 @@ const Environments = HttpApiGroup.make("environments")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Update an environment")
-			.annotate(OpenApi.Description, "Update an environment")
+			.annotate(
+				OpenApi.Description,
+				"Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "update",

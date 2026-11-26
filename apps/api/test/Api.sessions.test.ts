@@ -73,6 +73,7 @@ import {
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	readSseUntil,
+	sendAndSettle,
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 
@@ -146,6 +147,43 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		}
 	})
 
+	it("enters the workspace and gives it the hosts the environment allows before each turn, and ends a turn whose preparation was interrupted", async () => {
+		let modelCalls = 0
+		const { layer, closeAll, workspaceCalls, preparedWorkspaces, preparations } =
+			makePiDurableTestLayer(async (model) => {
+				modelCalls += 1
+				return makeAssistantReply(model, null, "ok", 1, 1)
+			})
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch)
+					yield* sendAndSettle(apiFetch, session.id, ["Hello."], 1)
+					expect(workspaceCalls).toEqual([`prepare ${session.id} 1`])
+					expect(preparedWorkspaces).toEqual([{ sessionId: session.id, allowedHosts: null }])
+					expect(modelCalls).toBe(1)
+
+					preparations.push({ ok: false, interrupted: true })
+					yield* sendAndSettle(apiFetch, session.id, ["Stop."], 2)
+					const listed = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const events = (yield* Effect.promise(() => listed.json())) as {
+						data: ReadonlyArray<{ type: string; stop_reason?: unknown }>
+					}
+					expect(events.data.at(-1)?.stop_reason).toEqual({ type: "interrupted" })
+					expect(events.data.some(({ type }) => type === "session.error")).toBe(false)
+					expect(modelCalls).toBe(1)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("ends an interrupted turn only when the harness stops, and stops the harness and discards the workspace when a session is archived", async () => {
 		let aborted = 0
 		const starts: Array<() => void> = []
@@ -156,7 +194,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				}),
 		)
 		let calls = 0
-		const { layer, closeAll, discardedWorkspaces } = makePiDurableTestLayer(
+		const { layer, closeAll, discardedWorkspaces, workspaceCalls } = makePiDurableTestLayer(
 			async (model, _context, signal) => {
 				starts[calls++]?.()
 				await new Promise<void>((resolve) => {
@@ -230,6 +268,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					])
 					expect(events.at(-1)?.stop_reason).toEqual({ type: "interrupted" })
 					expect(aborted).toBe(1)
+					expect(workspaceCalls).toContain(`interrupt ${interrupted.id} 1`)
 
 					const archived = yield* createIdleSession(apiFetch)
 					yield* post(archived.id, "/events", message)
