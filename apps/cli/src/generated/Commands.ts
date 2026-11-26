@@ -2417,7 +2417,7 @@ const vaultsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
 	),
 )
 
@@ -2491,7 +2491,7 @@ const vaultsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsDeleteCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		"Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 	),
 )
 
@@ -2665,7 +2665,7 @@ const vaultsCredentialsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
 	),
 )
 
@@ -2775,7 +2775,7 @@ const vaultsCredentialsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsDeleteCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		"Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
 	),
 )
 
