@@ -19,6 +19,7 @@ export const StepOutcome = Schema.Struct({
 export const TurnOutcome = Schema.Union([
 	Schema.Struct({
 		ok: Schema.Literal(true),
+		response_started_at: Schema.optionalKey(NonNegativeInt),
 		thinking: Schema.NullOr(ThinkingText),
 		text: MessageText,
 		truncated: Schema.optional(Schema.Literal(true)),

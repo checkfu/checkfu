@@ -11,6 +11,8 @@ import type { AgentTool, CustomTool } from "@checkfu/domain/Mcp/McpServers"
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import type { PiHarness } from "agents/harness/pi"
 import * as Effect from "effect/Effect"
+import * as PubSub from "effect/PubSub"
+import * as Stream from "effect/Stream"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
 import { Connection } from "../Connection/Connection.do.ts"
@@ -39,6 +41,8 @@ import { toProviderRuntimeConfig } from "./PiModels.ts"
 import type { ProviderApiKeysInput } from "./PiModels.ts"
 import { PiProviderRuntime, loadEnvPiProviderRuntime } from "./PiProviderRuntime.ts"
 import type { SessionMcp } from "./PiMcpSession.ts"
+import { previewModelRequests } from "./PiEventPreviews.ts"
+import type { PreviewPacket } from "./PiEventPreviews.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import { MCP_TURN_KEY } from "./PiTurn.ts"
 import type { PiActionAnswer, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
@@ -159,6 +163,7 @@ export const makePiHarnessBackend = (
 }
 
 export interface PiSessionShape {
+	readonly watchPreviews: (sessionId: string) => Stream.Stream<PreviewPacket>
 	readonly alarm: (info?: Cloudflare.AlarmInvocationInfo) => Effect.Effect<void>
 	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
 	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnOutcome>
@@ -217,6 +222,7 @@ export const PiSessionLive = PiSession.make(
 				const workspace = () => workspaceStub(sessionId)
 				const workspaceDeclarations = yield* Effect.promise(() => workspaceToolDeclarations())
 				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
+				const previews = yield* PubSub.sliding<PreviewPacket>(128)
 				const writeScriptOutput = (path: string, content: string | Uint8Array) =>
 					runPromise(workspace().writeScriptOutput(path, content, { turn: admittedTurn() }))
 				const outputEnv = scriptOutputEnv(writeScriptOutput)
@@ -302,7 +308,14 @@ export const PiSessionLive = PiSession.make(
 				// PiHarness calls this factory again when it reopens after a storage error.
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
-						const models = sessionProviders.createModels()
+						const models = previewModelRequests(
+							sessionProviders.createModels(),
+							sessionId,
+							admittedTurn,
+							(packet) => {
+								PubSub.publishUnsafe(previews, packet)
+							},
+						)
 						registry = createCheckfuRegistry()
 						installTools()
 						return Harness.open(
@@ -362,6 +375,8 @@ export const PiSessionLive = PiSession.make(
 				}
 
 				return {
+					watchPreviews: (askedSessionId) =>
+						askedSessionId === sessionId ? Stream.fromPubSub(previews) : Stream.empty,
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
 					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
 					runTurn: (request) => runPiDurableTurn(backend, request),

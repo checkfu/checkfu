@@ -108,6 +108,9 @@ export const RunTurnLive = RunTurn.toLayer(
 						Effect.map((reply) => ({
 							ok: true as const,
 							thinking: reply.thinking,
+							...(reply.response_started_at === undefined
+								? {}
+								: { response_started_at: reply.response_started_at }),
 							text: reply.text,
 							truncated: reply.truncated,
 							input_tokens: reply.input_tokens,
@@ -246,6 +249,9 @@ export const RunTurnLive = RunTurn.toLayer(
 							request_seq: segment,
 							model_request_start_id: requestId,
 							thinking: generated.thinking,
+							...(generated.response_started_at === undefined
+								? {}
+								: { response_started_at: generated.response_started_at }),
 							text: generated.text,
 							truncated: generated.truncated,
 							model_usage: {

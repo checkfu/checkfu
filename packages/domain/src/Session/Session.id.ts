@@ -14,3 +14,10 @@ export const toolUseIdFromEvent = (sessionId: string, eventId: string): string =
 	const prefix = toolUseEventId(sessionId, "")
 	return eventId.startsWith(prefix) ? eventId.slice(prefix.length) : eventId
 }
+
+export const modelEventId = (
+	sessionId: string,
+	turn: number,
+	startedAt: number,
+	type: "agent.message" | "agent.thinking",
+) => sessionEventId(sessionId, `${type}_${turn}_${startedAt}`)

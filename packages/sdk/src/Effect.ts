@@ -76,6 +76,8 @@ export {
 	SendSessionEventsBody,
 	SendSessionEventsResponse,
 	SessionEvent,
+	SessionEventPreview,
+	SessionStreamEvent,
 	SessionResource,
 	UpdateAgentBody,
 	UpdateEnvironmentBody,

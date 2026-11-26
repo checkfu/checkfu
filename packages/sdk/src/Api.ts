@@ -1267,6 +1267,33 @@ export const SessionEvent = Schema.Union([
 
 export type SessionEvent = typeof SessionEvent.Type
 
+const SessionPreviewType = Schema.Literals(["agent.message", "agent.thinking"])
+export type SessionPreviewType = typeof SessionPreviewType.Type
+
+export const SessionEventPreview = Schema.Union([
+	Schema.Struct({
+		type: Schema.Literal("event_start"),
+		event: Schema.Struct({ id: Schema.String, type: SessionPreviewType }),
+	}),
+	Schema.Struct({
+		type: Schema.Literal("event_delta"),
+		event_id: Schema.String,
+		delta: Schema.Struct({
+			type: Schema.Literal("content_delta"),
+			index: NonNegativeInt,
+			content: Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+		}),
+	}),
+]).annotate({ identifier: "SessionEventPreview" })
+export type SessionEventPreview = typeof SessionEventPreview.Type
+
+export const SessionStreamEvent = Schema.Union([SessionEvent, SessionEventPreview])
+export type SessionStreamEvent = typeof SessionStreamEvent.Type
+
+const SessionPreviewTypes = Schema.Array(SessionPreviewType)
+	.check(Schema.isMaxLength(100))
+	.annotate({ description: "Event types to preview on this connection." })
+
 const NextPage = Schema.optionalKey(Schema.NullOr(Schema.String))
 
 export const ListSessionEventsResponse = Schema.Struct({
@@ -1895,13 +1922,14 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("streamEvents", "/v1/sessions/:session_id/events/stream", {
 			params: sessionParams,
 			query: {
+				"event_deltas[]": Schema.optionalKey(SessionPreviewTypes),
 				after: Schema.optionalKey(
 					Schema.String.annotate({
 						description: "Resume stream strictly after this sequence number",
 					}),
 				),
 			},
-			success: [HttpApiSchema.StreamSse({ data: SessionEvent }), HttpApiSchema.NoContent],
+			success: [HttpApiSchema.StreamSse({ data: SessionStreamEvent }), HttpApiSchema.NoContent],
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Stream session events")

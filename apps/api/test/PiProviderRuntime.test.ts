@@ -1,3 +1,4 @@
+import * as Stream from "effect/Stream"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -178,6 +179,7 @@ describe("PiProviderRuntime", () => {
 						Effect.gen(function* () {
 							yield* PiSession
 							return PiHarnessWorker.of({
+								watchPreviews: () => Stream.empty,
 								recoverTurn: () => Effect.succeed(null),
 								runTurn: () => Effect.die(new Error("plan only")),
 								abortTurn: () => Effect.succeed(false),

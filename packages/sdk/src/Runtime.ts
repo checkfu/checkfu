@@ -36,7 +36,7 @@ import {
 } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { streamApiSse, streamSessionEvents } from "./Sse.ts"
-import type { StreamSseOptions } from "./Sse.ts"
+import type { StreamSessionEventsOptions } from "./Sse.ts"
 import {
 	CurrentRequestTransportMeta,
 	computeRetryDelayMs,
@@ -195,7 +195,7 @@ export interface WithResponse<A> {
 	readonly requestId: string | undefined
 }
 
-export interface SessionEventsStreamOptions extends StreamSseOptions {
+export interface SessionEventsStreamOptions extends StreamSessionEventsOptions {
 	readonly headers?: HeaderMap | undefined
 }
 

@@ -95,8 +95,10 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 
 export function Transcript({
 	events,
+	preview,
 }: {
 	readonly events: ReadonlyArray<JsonSessionEvent>
+	readonly preview?: { readonly id: string; readonly text: string } | undefined
 }): React.JSX.Element {
 	const rows = events.flatMap((event) => {
 		const entry = entryOf(event)
@@ -108,6 +110,11 @@ export function Transcript({
 				<li className="text-sm text-muted-foreground">No messages yet.</li>
 			) : (
 				rows
+			)}
+			{preview === undefined || preview.text === "" ? null : (
+				<li key={preview.id}>
+					<Bubble from="Agent">{preview.text}</Bubble>
+				</li>
 			)}
 		</ol>
 	)

@@ -2751,11 +2751,15 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const encoded = encodeEvent(mapped)
 					const expectedId =
-						mapped.type === "agent.tool_use" ||
-						mapped.type === "agent.mcp_tool_use" ||
-						mapped.type === "agent.custom_tool_use"
-							? mapped.tool_use_id
-							: `sevt_sess_generated_${seq}`
+						Schema.is(AgentThinking)(generated) || Schema.is(AgentMessage)(generated)
+							? generated.preview_origin === undefined
+								? `sevt_sess_generated_${seq}`
+								: `sevt_sess_generated_${generated._tag}_${generated.preview_origin.turn}_${generated.preview_origin.started_at}`
+							: mapped.type === "agent.tool_use" ||
+								  mapped.type === "agent.mcp_tool_use" ||
+								  mapped.type === "agent.custom_tool_use"
+								? mapped.tool_use_id
+								: `sevt_sess_generated_${seq}`
 					expect(encoded).toMatchObject({
 						id: expectedId,
 						seq,

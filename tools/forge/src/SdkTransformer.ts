@@ -110,6 +110,7 @@ const generateResourcesFile = (
 	const errorsMod = module("../Errors.ts")
 	const runtimeMod = module("../Runtime.ts")
 	const promiseRuntimeMod = module("../PromiseRuntime.ts")
+	const SessionEvent = module("../Api.ts").ident("SessionEvent").ty()
 
 	const EffectType = effectMod.ident("Effect").ty()
 	const EffectFlatMap = effectMod.ident("flatMap").as("EffectFlatMap")
@@ -214,6 +215,30 @@ const generateResourcesFile = (
 		}))
 
 		if (op.kind === "sse") {
+			if (op.operationId === "sessions.events.stream") {
+				for (const previews of [false, true]) {
+					out(op.methodName, "(")
+					out.indent(() => {
+						out("sessionId: ", PathParam, "<", g, ", ", e, ', "session_id">,')
+						out("params?: { readonly after?: number | undefined },")
+						out(
+							"options?: ",
+							SessionEventsStreamOptions,
+							previews ? "," : " & { readonly event_deltas?: undefined },",
+						)
+					})
+					out(
+						"): ",
+						StreamType,
+						"<",
+						previews ? EndpointSseEvent : SessionEvent,
+						...(previews ? ["<", g, ", ", e, ">"] : []),
+						", ",
+						CheckfuSdkError,
+						">",
+					)
+				}
+			}
 			out("/** ", docText, " */")
 			out(op.methodName, "(")
 			out.indent(() => {
@@ -650,6 +675,30 @@ const generateResourcesFile = (
 		}))
 
 		if (op.kind === "sse") {
+			if (op.operationId === "sessions.events.stream") {
+				for (const previews of [false, true]) {
+					out(op.methodName, "(")
+					out.indent(() => {
+						out("sessionId: ", PathParam, "<", g, ", ", e, ', "session_id">,')
+						out("params?: { readonly after?: number | undefined },")
+						out(
+							"options?: ",
+							PromiseStreamOptions,
+							previews ? "," : " & { readonly event_deltas?: undefined },",
+						)
+					})
+					out(
+						"): ",
+						EventStreamPromise,
+						"<",
+						IsoDateTimes,
+						"<",
+						previews ? EndpointSseEvent : SessionEvent,
+						...(previews ? ["<", g, ", ", e, ">"] : []),
+						">>",
+					)
+				}
+			}
 			out("/** ", docText, " */")
 			out(op.methodName, "(")
 			out.indent(() => {

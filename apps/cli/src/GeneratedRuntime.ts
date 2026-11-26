@@ -390,9 +390,17 @@ export const invokeGeneratedStream = (
 			endpoint.params !== undefined
 				? yield* decodeWithTop(endpoint.params, parts.params, `${spec.cliLabel} params`)
 				: undefined
+		const rawDeltas = parts.query["event_deltas[]"]
+		const deltaTypes = rawDeltas === undefined ? undefined : rawDeltas.split(",")
 		const decodedQuery =
 			endpoint.query !== undefined
-				? yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
+				? yield* decodeWithTop(
+						endpoint.query,
+						deltaTypes === undefined
+							? parts.query
+							: { ...parts.query, ["event_deltas[]"]: deltaTypes },
+						`${spec.cliLabel} query`,
+					)
 				: undefined
 		const decodedHeaders =
 			endpoint.headers !== undefined
@@ -407,6 +415,9 @@ export const invokeGeneratedStream = (
 			yield* client
 				.streamSessionEvents(sessionId, {
 					...(after === undefined ? {} : { after }),
+					...(deltaTypes === undefined
+						? {}
+						: { event_deltas: deltaTypes as ReadonlyArray<"agent.message" | "agent.thinking"> }),
 					...(Object.keys(parts.headers).length > 0 ? { headers: parts.headers } : {}),
 				})
 				.pipe(Stream.runForEach((event) => renderOutput(event, { streaming: true })))

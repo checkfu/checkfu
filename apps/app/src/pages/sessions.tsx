@@ -207,7 +207,7 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, reconnecting, earlier } = useSessionEvents({
+	const { events, preview, reconnecting, earlier } = useSessionEvents({
 		session,
 		onSnapshotChange: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
@@ -313,7 +313,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					{earlier.error === undefined ? null : <Callout tone="error">{earlier.error}</Callout>}
 				</div>
 			)}
-			<Transcript events={events} />
+			<Transcript events={events} preview={preview} />
 			{open ? (
 				<form
 					className="sticky bottom-0 space-y-2 bg-background pt-2 pb-4"

@@ -18,6 +18,7 @@ import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import {
 	SessionId,
 	sessionEventId,
+	modelEventId,
 	submittedSessionEventId,
 	toolUseEventId,
 	toolUseIdFromEvent,
@@ -98,6 +99,7 @@ import {
 	toApiError,
 } from "./HttpHelpers.ts"
 import { listPage, makeLister } from "./Listing.ts"
+import { SessionPreviewSource } from "./SessionPreviewSource.ts"
 import { ViewEventsOverObjectSockets, objectSocketChanges } from "./ObjectSocketEvents.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
@@ -245,10 +247,16 @@ export const serializeSessionEvent = (
 	const { id, commandId, seq, at } = envelope
 	const { _tag: type, ...fields } = event
 	const input = type.startsWith("user.")
+	const preview =
+		event._tag === "agent.message" || event._tag === "agent.thinking"
+			? event.preview_origin
+			: undefined
 	const eventId =
-		input && (commandId.startsWith("evt:") || commandId.startsWith("evt_"))
-			? submittedSessionEventId(id, commandId)
-			: sessionEventId(id, seq)
+		preview !== undefined && (type === "agent.message" || type === "agent.thinking")
+			? modelEventId(id, preview.turn, preview.started_at, type)
+			: input && (commandId.startsWith("evt:") || commandId.startsWith("evt_"))
+				? submittedSessionEventId(id, commandId)
+				: sessionEventId(id, seq)
 	const processedAt =
 		event._tag === "user.message" || event._tag === "user.interrupt" ? (completedAt ?? null) : at
 	const base = { id: eventId, seq, created_at: at, processed_at: processedAt }
@@ -259,6 +267,13 @@ export const serializeSessionEvent = (
 		case "user.interrupt":
 		case "agent.thinking":
 			return { ...base, type }
+		case "agent.message":
+			return {
+				...base,
+				type,
+				content: event.content,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
 		case "session.status_idle": {
 			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
 				toolUseEventId(id, call),
@@ -339,6 +354,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sseMaxConnectionDuration = yield* SseMaxConnectionDuration
 		const list = yield* makeLister
 		const overObjectSockets = yield* ViewEventsOverObjectSockets
+		const watchPreviews = yield* SessionPreviewSource
 		const connectSessionView = overObjectSockets
 			? (yield* Model.Internals).views.get(SessionView.viewName)?.connect
 			: undefined
@@ -976,6 +992,43 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								),
 							),
 						).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
+					const deltaTypes = query["event_deltas[]"] ?? []
+					let caughtUp = false
+					const previews = Stream.suspend(() => {
+						const offsets = new Map<string, number>()
+						return watchPreviews(id).pipe(
+							Stream.catchCause(() => Stream.empty),
+							Stream.filter(({ event, offset }) => {
+								if (!caughtUp) {
+									return false
+								}
+								if (event.type === "event_start") {
+									if (!deltaTypes.includes(event.event.type)) {
+										return false
+									}
+									if (offsets.size >= 32) {
+										offsets.clear()
+									}
+									offsets.set(event.event.id, 0)
+									return true
+								}
+								if (offsets.get(event.event_id) !== offset - 1) {
+									offsets.delete(event.event_id)
+									return false
+								}
+								offsets.set(event.event_id, offset)
+								return true
+							}),
+							Stream.map(({ event }) =>
+								Sse.encoder.write({
+									_tag: "Event",
+									id: undefined,
+									event: event.type,
+									data: JSON.stringify(event),
+								}),
+							),
+						)
+					})
 					const catchUp = cursor < head.cursor ? pagesAfterCursor("empty") : Stream.empty
 					const live: Stream.Stream<SessionEventEntry> =
 						connectSessionView === undefined
@@ -990,7 +1043,16 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										),
 									)
 								})
-					const frames = Stream.concat(catchUp, live).pipe(
+					const frames = Stream.concat(
+						catchUp.pipe(
+							Stream.onEnd(
+								Effect.sync(() => {
+									caughtUp = true
+								}),
+							),
+						),
+						live,
+					).pipe(
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
 						Stream.filter((entry) => entry.envelope.seq > from),
 						Stream.mapEffect(publishedEvent),
@@ -1009,7 +1071,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						Stream.as(SSE_KEEPALIVE_FRAME),
 					)
 					return HttpServerResponse.stream(
-						Stream.merge(frames, keepalive, { haltStrategy: "left" }).pipe(Stream.encodeText),
+						Stream.merge(
+							deltaTypes.length === 0
+								? frames
+								: Stream.merge(frames, previews, { haltStrategy: "left" }),
+							keepalive,
+							{ haltStrategy: "left" },
+						).pipe(Stream.encodeText),
 						{
 							status: 200,
 							headers: {
