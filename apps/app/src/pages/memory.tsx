@@ -29,7 +29,7 @@ const list = getRouteApi("/_app/memory-stores/")
 const store = getRouteApi("/_app/memory-stores/$memoryStoreId/")
 const one = getRouteApi("/_app/memory-stores/$memoryStoreId/memories/$memoryId")
 
-export const sizeOf = (bytes: number): string =>
+const sizeOf = (bytes: number): string =>
 	bytes < 1000 ? `${bytes} B` : `${(bytes / 1000).toFixed(bytes < 10_000 ? 1 : 0)} kB`
 
 export function MemoryStoresPage(): React.JSX.Element {
