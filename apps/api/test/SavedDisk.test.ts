@@ -56,6 +56,28 @@ const read = async (disk: ReturnType<typeof makeDisk>["disk"]) => {
 }
 
 describe("saved disk", () => {
+	it("reads legacy seals and commits a rooted archive's format only when all its bytes are saved", async () => {
+		const { sql, disk } = makeDisk()
+		const legacy = patterned(32, 1)
+		sql.exec("INSERT INTO machine_disk VALUES (?, ?, ?)", 1, 0, legacy)
+		sql.exec("INSERT INTO machine_disk VALUES (?, ?, ?)", 1, -1, Uint8Array.of(1))
+		expect(disk.read()?.rooted).toBeUndefined()
+		expect(await read(disk)).toEqual({ bytes: legacy, compressed: true })
+		const rooted = patterned(64, 2)
+		await disk.replace({ chunks: of(rooted), compressed: true, rooted: true })
+		expect(disk.read()?.rooted).toBe(true)
+		expect(await read(disk)).toEqual({ bytes: rooted, compressed: true })
+		const interrupted = async function* (): AsyncGenerator<Uint8Array> {
+			yield patterned(128, 3)
+			throw new Error("interrupted snapshot")
+		}
+		await expect(disk.replace({ chunks: interrupted(), compressed: false })).rejects.toThrow(
+			"interrupted snapshot",
+		)
+		expect(disk.read()?.rooted).toBe(true)
+		expect(await read(disk)).toEqual({ bytes: rooted, compressed: true })
+	})
+
 	it("holds nothing until an archive is saved, then gives back its bytes however they arrived", async () => {
 		const { disk, rows } = makeDisk()
 		expect(disk.read()).toBeUndefined()
