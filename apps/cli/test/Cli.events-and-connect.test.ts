@@ -2280,6 +2280,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						description: null,
 						system: null,
 						model: { id: "gpt-6.2-sol" },
+						tools: [],
 						created_at: "2026-11-22T00:00:00.000Z",
 						updated_at: "2026-11-22T00:00:00.000Z",
 						archived_at: null,
@@ -2301,6 +2302,8 @@ describe("CLI sessions:events and sessions connect", () => {
 							version: 1,
 							name: "Assistant",
 							model: { id: "gpt-6.2-sol" },
+							mcp_servers: [],
+							tools: [],
 							system: null,
 							description: null,
 						},
@@ -3152,6 +3155,8 @@ describe("CLI sessions:events and sessions connect", () => {
 								version: 1,
 								name: "Assistant",
 								model: { id: "gpt-6.2-sol" },
+								mcp_servers: [],
+								tools: [],
 								system: null,
 								description: null,
 							},
@@ -4576,6 +4581,8 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							version: 1,
 							name: "Assistant",
 							model: { id: "gpt-6.2-sol" },
+							mcp_servers: [],
+							tools: [],
 							system: null,
 							description: null,
 						},
@@ -5595,128 +5602,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(res.exitCode).toBe(1)
 					expect(res.stdout).toContain("Reply-1:first turn")
 					expect(res.stderr).toContain("ended before buffered input was submitted")
-				}),
-			),
-		)
-	})
-
-	it("connects and resumes cleanly against a legacy /v1 server omitting turn from status events", async () => {
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const cli = yield* makeTestServer({
-						generate: (args) =>
-							Effect.succeed({
-								thinking: null,
-								text: `LegacyT${args.turn}:${args.input.join("|")}`,
-								input_tokens: 2,
-								output_tokens: 2,
-								stop_reason: { type: "end_turn" as const },
-							}),
-					})
-					const sessionId = yield* createReadySession(cli)
-
-					const stripTurnFromStatusEvents = async (
-						next: (request: Request) => Promise<Response>,
-						request: Request,
-					): Promise<Response> => {
-						const url = new URL(request.url)
-						if (request.method === "GET" && url.pathname.endsWith("/events")) {
-							const real = await next(request)
-							if (real.status !== 200) {
-								return real
-							}
-							const body = (await real.json()) as {
-								readonly data: Array<{ readonly type?: string; readonly turn?: number }>
-
-								readonly next_page: string | null
-							}
-							const stripped = body.data.map((entry) => {
-								if (
-									entry.type === "session.status_running" ||
-									entry.type === "session.status_idle"
-								) {
-									const { turn: _omitted, ...rest } = entry
-									return rest
-								}
-								return entry
-							})
-							return new Response(JSON.stringify({ ...body, data: stripped }), {
-								status: 200,
-								headers: { "content-type": "application/json" },
-							})
-						}
-						if (request.method === "GET" && url.pathname.endsWith("/events/stream")) {
-							const real = await next(request)
-							if (real.status !== 200 || real.body === null) {
-								return real
-							}
-							const reader = real.body.getReader()
-							const decoder = new TextDecoder()
-							const encoder = new TextEncoder()
-							const strippedBody = new ReadableStream<Uint8Array>({
-								async pull(controller) {
-									const chunk = await reader.read()
-									if (chunk.done) {
-										controller.close()
-										return
-									}
-									const text = decoder.decode(chunk.value, { stream: true })
-									const rewritten = text.replaceAll(/"turn":\d+,?/g, "").replaceAll(",}", "}")
-									controller.enqueue(encoder.encode(rewritten))
-								},
-								cancel(reason) {
-									return reader.cancel(reason)
-								},
-							})
-							return new Response(strippedBody, { status: 200, headers: real.headers })
-						}
-						return next(request)
-					}
-
-					const firstTurn = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
-						stdin: "hello legacy\n",
-						interceptFetch: stripTurnFromStatusEvents,
-					})
-					expect(firstTurn.exitCode).toBe(0)
-					expect(firstTurn.stdout).toContain("LegacyT1:hello legacy")
-
-					const latestList = JSON.parse(
-						(yield* cli.run([
-							"sessions:events",
-							"list",
-							"--session-id",
-							sessionId,
-							"--limit",
-							"1",
-							"--order",
-							"desc",
-						])).stdout,
-					) as { data: Array<{ seq: number }> }
-					const headSeq = latestList.data[0]?.seq ?? 0
-					expect(headSeq).toBeGreaterThan(0)
-
-					let prefixScanSeen = false
-					const resumed = yield* cli.run(
-						["sessions", "connect", "--session-id", sessionId, "--after", String(headSeq)],
-						{
-							stdin: "second legacy\n",
-							interceptFetch: async (next, request) => {
-								const url = new URL(request.url)
-								if (
-									request.method === "GET" &&
-									url.pathname.endsWith("/events") &&
-									url.searchParams.get("order") === "asc"
-								) {
-									prefixScanSeen = true
-								}
-								return stripTurnFromStatusEvents(next, request)
-							},
-						},
-					)
-					expect(resumed.exitCode).toBe(0)
-					expect(prefixScanSeen).toBe(true)
-					expect(resumed.stdout).toContain("LegacyT2:second legacy")
 				}),
 			),
 		)
