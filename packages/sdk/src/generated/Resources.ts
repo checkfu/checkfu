@@ -98,7 +98,9 @@ export interface CheckfuOperations {
 		EndpointParams<"agents", "listVersions">,
 		RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
 		EndpointBody<"agents", "listVersions">,
-		EndpointSuccess<"agents", "listVersions">
+		EndpointSuccess<"agents", "listVersions">,
+		EndpointJsonSuccess<"agents", "listVersions">,
+		EndpointJsonBody<"agents", "listVersions">
 	>
 	readonly "artifacts.create": OperationShape<
 		EndpointParams<"artifacts", "create">,
