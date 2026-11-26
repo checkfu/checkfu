@@ -26,7 +26,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
-import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
+import { beginTurnUsage, isStaleTurn, settleTurnUsage } from "./PiTurnUsage.ts"
 
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
@@ -369,7 +369,10 @@ const admitPiTurnUnderWay = (
 						if ((await submissionOf(pi, operationId)) !== undefined) {
 							return "submitted"
 						}
-						if (backend.isCancelled(operationId)) {
+						if (
+							backend.isCancelled(operationId) ||
+							(await isStaleTurn(pi, operationId, request.turn))
+						) {
 							return "cancelled"
 						}
 						return "check_credentials"
@@ -430,7 +433,11 @@ const admitPiTurnUnderWay = (
 							if ((await submissionOf(pi, operationId)) !== undefined) {
 								return "submitted"
 							}
-							if (credentialOutcome === "aborted" || backend.isCancelled(operationId)) {
+							if (
+								credentialOutcome === "aborted" ||
+								backend.isCancelled(operationId) ||
+								(await isStaleTurn(pi, operationId, request.turn))
+							) {
 								return "cancelled"
 							}
 							return "missing"
@@ -453,7 +460,10 @@ const admitPiTurnUnderWay = (
 					if ((await submissionOf(pi, operationId)) !== undefined) {
 						return true
 					}
-					if (backend.isCancelled(operationId)) {
+					if (
+						backend.isCancelled(operationId) ||
+						(await isStaleTurn(pi, operationId, request.turn))
+					) {
 						return false
 					}
 					await backend.ensureRoot(agent)

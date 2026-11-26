@@ -2,6 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Cloudflare from "@alchemy.run/cloudflare"
+import type { ProviderCredentialCheck } from "@checkfu/pi-providers/catalog"
+import { createProviderModels } from "@checkfu/pi-providers/runtime"
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
+import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
+import type { AgentChange } from "@earendil-works/pi-durable"
 import { describe, expect, it, vi } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
@@ -15,6 +20,7 @@ import {
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
+import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
 import { PiHarnessWorker } from "../src/Pi/PiHarness.ts"
 import {
 	EnvPiProviderRuntimeLive,
@@ -22,8 +28,12 @@ import {
 	loadEnvPiProviderRuntime,
 	staticPiProviderRuntime,
 } from "../src/Pi/PiProviderRuntime.ts"
+import type { PiSessionProviders } from "../src/Pi/PiProviderRuntime.ts"
 import { PiSession, PiSessionLive, makePiHarnessBackend } from "../src/Pi/PiSession.do.ts"
 import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
+import { ActiveUsage } from "../src/Pi/PiTurnUsage.ts"
+import { makeAssistantReply, makeScriptedPiModels } from "./helpers/ApiHarness.ts"
+import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
 const makeTurnRequest = (turn: number, provider = "openai"): PiTurnRequest => ({
 	operationId: `turn:${turn}`,
@@ -57,6 +67,7 @@ describe("PiProviderRuntime", () => {
 				{
 					pi: async () => ({
 						commit: async () => undefined,
+						snapshot: async () => undefined,
 					}),
 				} as unknown as Parameters<typeof makePiHarnessBackend>[0],
 				{
@@ -109,6 +120,7 @@ describe("PiProviderRuntime", () => {
 					{
 						pi: async () => ({
 							commit: async () => undefined,
+							snapshot: async () => undefined,
 						}),
 						abort: async ({ operationId }: { readonly operationId: string }) => {
 							harnessAborts.push(operationId)
@@ -175,6 +187,7 @@ describe("PiProviderRuntime", () => {
 				{
 					pi: async () => ({
 						commit: async () => undefined,
+						snapshot: async () => undefined,
 					}),
 				} as unknown as Parameters<typeof makePiHarnessBackend>[0],
 				{
@@ -256,7 +269,8 @@ describe("PiProviderRuntime", () => {
 											: undefined,
 									doc: async () => ({ operation: null }),
 								}),
-							snapshot: async () => ({ input_tokens: 5, output_tokens: 3 }),
+							snapshot: async (token: unknown) =>
+								token === ActiveUsage ? undefined : { input_tokens: 5, output_tokens: 3 },
 							conversation: async () => ({
 								entries: async () => ({
 									items: [{ id: 2, model: [assistantMessage] }],
@@ -304,6 +318,159 @@ describe("PiProviderRuntime", () => {
 				} finally {
 					releaseCheck()
 				}
+			}),
+	)
+
+	it.live(
+		"rejects a stale turn before reconfiguring the root agent when a newer turn submits during credential checks",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) =>
+							makeAssistantReply(model, null, `reply from ${model.id}`, 6, 3),
+						),
+					),
+				)
+				let markTurn1Entered!: () => void
+				const turn1Entered = new Promise<void>((resolve) => {
+					markTurn1Entered = resolve
+				})
+				let releaseTurn1Check!: () => void
+				const turn1Gate = new Promise<void>((resolve) => {
+					releaseTurn1Check = resolve
+				})
+				const ensureRootCalls: Array<AgentChange> = []
+				let checkCall = 0
+
+				const backend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: async () => {
+						checkCall += 1
+						if (checkCall === 1) {
+							markTurn1Entered()
+							await turn1Gate
+						}
+						return { ok: true }
+					},
+					ensureRoot: async (agent) => {
+						ensureRootCalls.push(agent)
+						return rawBackend.ensureRoot(agent)
+					},
+				}
+
+				try {
+					const turn1Fiber = yield* Effect.forkChild(
+						runPiDurableTurn(backend, {
+							operationId: "turn:1",
+							turn: 1,
+							provider: "openai",
+							modelId: "gpt-4o-mini",
+							system: "stale turn 1 instructions",
+							text: "hello from turn 1",
+						}),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => turn1Entered)
+
+					const turn2Outcome = yield* runPiDurableTurn(backend, {
+						operationId: "turn:2",
+						turn: 2,
+						provider: "openai",
+						modelId: "gpt-4.1-mini",
+						system: "newer turn 2 instructions",
+						text: "hello from turn 2",
+					})
+					expect(turn2Outcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply from gpt-4.1-mini" },
+					})
+
+					releaseTurn1Check()
+					const turn1Outcome = yield* Fiber.join(turn1Fiber)
+					expect(turn1Outcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+
+					expect(ensureRootCalls).toEqual([
+						{
+							model: { provider: "openai", modelId: "gpt-4.1-mini" },
+							instructions: "newer turn 2 instructions",
+						},
+					])
+
+					const pi = yield* Effect.promise(() => rawBackend.pi())
+					const root = yield* Effect.promise(() =>
+						pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT),
+					)
+					expect(root).toBeDefined()
+					const rootAgent = yield* Effect.promise(() =>
+						root === undefined ? Promise.resolve(undefined) : root.agent(BACKGROUND_CONTEXT),
+					)
+					expect(rootAgent).toMatchObject({
+						model: { provider: "openai", modelId: "gpt-4.1-mini" },
+						instructions: "newer turn 2 instructions",
+					})
+				} finally {
+					releaseTurn1Check()
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
+	it.effect(
+		"preserves the receiver and abort signal for class-based PiSessionProviders.checkCredentials",
+		() =>
+			Effect.gen(function* () {
+				let seenSignal: AbortSignal | undefined
+				class ScopedSessionProviders implements PiSessionProviders {
+					readonly #allowedProvider: string
+					constructor(allowedProvider: string) {
+						this.#allowedProvider = allowedProvider
+					}
+					createModels() {
+						return createProviderModels({ env: {} })
+					}
+					checkCredentials(provider: string, signal?: AbortSignal): ProviderCredentialCheck {
+						seenSignal = signal
+						if (provider === this.#allowedProvider) {
+							return { ok: true }
+						}
+						return {
+							ok: false,
+							missing: ["OPENAI_API_KEY"],
+							message: `Only "${this.#allowedProvider}" is enabled for this session.`,
+						}
+					}
+				}
+
+				const sessionProviders = new ScopedSessionProviders("anthropic")
+				const backend = makePiHarnessBackend(
+					{
+						pi: async () => ({
+							commit: async () => undefined,
+							snapshot: async () => undefined,
+						}),
+					} as unknown as Parameters<typeof makePiHarnessBackend>[0],
+					{
+						isCancelled: () => false,
+						markCancelled: () => undefined,
+					} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+					{},
+					() => undefined,
+					() => Promise.resolve(true),
+					sessionProviders,
+				)
+
+				const outcome = yield* runPiDurableTurn(backend, makeTurnRequest(1, "openai"))
+				expect(seenSignal).toBeDefined()
+				expect(outcome).toEqual({
+					ok: false,
+					error: {
+						_tag: "TurnFailed",
+						error_type: "missing_api_key_error",
+						message: 'Only "anthropic" is enabled for this session.',
+						terminal: false,
+					},
+				})
 			}),
 	)
 

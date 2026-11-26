@@ -71,10 +71,13 @@ export const makePiHarnessBackend = (
 		lock.withPermit(Effect.uninterruptible(effect))
 	const runtimeConfig = toProviderRuntimeConfig(apiKeys, undefined, options)
 	const customProviders = options?.customProviders
-	const checkCredentials =
-		options?.checkCredentials ??
-		((provider: string) =>
-			checkCatalogProviderCredentials(provider, runtimeConfig, customProviders))
+	const checkCredentials = (
+		provider: string,
+		signal?: AbortSignal,
+	): ProviderCredentialCheck | Promise<ProviderCredentialCheck> =>
+		options?.checkCredentials !== undefined
+			? options.checkCredentials(provider, signal)
+			: checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
 
 	return {
 		withLock,
@@ -150,22 +153,23 @@ const piSessionInit = Effect.gen(function* () {
 
 export const PiSessionLive = PiSession.make(
 	Effect.map(piSessionInit, ({ state, providerRuntime, workspaces, where }) =>
-		Effect.promise(async () => {
-			// Load workerd-only modules after Alchemy has evaluated the stack.
-			const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
-				import("agents/lifecycle"),
-				import("agents/harness/pi"),
-			])
-
+		Effect.gen(function* () {
 			const rawCtx = state.raw
 			const sessionId = rawCtx.id.name
 			if (sessionId === undefined) {
-				throw new Error("PiSession must be addressed by its session id.")
+				return yield* Effect.die(new Error("PiSession must be addressed by its session id."))
 			}
-			const sessionProviders = await Effect.runPromise(providerRuntime.forSession({ sessionId }))
+			const sessionProviders = yield* providerRuntime.forSession({ sessionId })
+			const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+
+			// Load workerd-only modules after Alchemy has evaluated the stack.
+			const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = yield* Effect.promise(
+				() => Promise.all([import("agents/lifecycle"), import("agents/harness/pi")]),
+			)
+
 			const workspaceStub = placedStub(workspaces, where)
 			const workspace = () => workspaceStub(sessionId)
-			const workspaceTools = await workspaceToolDeclarations()
+			const workspaceTools = yield* Effect.promise(() => workspaceToolDeclarations())
 			const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
 
 			// PiHarness calls this factory again when it reopens after a storage error.
@@ -175,7 +179,7 @@ export const PiSessionLive = PiSession.make(
 					const registry = createCheckfuRegistry()
 					registry.install(
 						workspaceExtension(workspaceTools, (call, signal) =>
-							Effect.runPromise(
+							runPromise(
 								workspace().runTool(call, { turn: admittedTurn() }),
 								signal === undefined ? undefined : { signal },
 							),
@@ -205,13 +209,16 @@ export const PiSessionLive = PiSession.make(
 					rawCtx.abort("A turn did not stop when aborted")
 				},
 				async (turn) => {
-					const entered = await Effect.runPromise(workspace().enter({ turn }))
+					const entered = await runPromise(workspace().enter({ turn }))
 					if (entered) {
 						rawCtx.storage.kv.put(ADMITTED_TURN, turn)
 					}
 					return entered
 				},
-				{ checkCredentials: sessionProviders.checkCredentials },
+				{
+					checkCredentials: (provider, signal) =>
+						sessionProviders.checkCredentials(provider, signal),
+				},
 			)
 
 			return {

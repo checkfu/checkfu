@@ -49,6 +49,15 @@ export type BeginTurnUsageResult =
 	| { readonly status: "finalize"; readonly operationId: string }
 	| { readonly status: "stale" }
 
+export const isStaleTurn = async (
+	pi: Harness,
+	operation: string,
+	turn: number,
+): Promise<boolean> => {
+	const active = await pi.snapshot(ActiveUsage, BACKGROUND_CONTEXT)
+	return active !== undefined && active.operation !== operation && turn < active.turn
+}
+
 export const beginTurnUsage = (
 	pi: Harness,
 	operation: string,
