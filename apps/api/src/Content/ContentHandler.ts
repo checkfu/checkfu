@@ -111,7 +111,20 @@ export interface ContentRequest {
 	readonly method: string
 	readonly url: string
 	readonly ifNoneMatch?: string | undefined
+	readonly headers?: Readonly<Record<string, string | undefined>> | undefined
 }
+
+export type ContentAccessTarget =
+	| {
+			readonly kind: "publication"
+			readonly address: string
+			readonly artifactId: string
+	  }
+	| {
+			readonly kind: "artifact_link"
+			readonly artifactId: string
+			readonly version: number
+	  }
 
 export const contentRequestOf = (request: HttpServerRequest.HttpServerRequest): ContentRequest => ({
 	method: request.method,
@@ -134,6 +147,10 @@ export const serveContent = (options: {
 	readonly scope: string
 	readonly publishDomain?: string | undefined
 	readonly nowMillis: Effect.Effect<number>
+	readonly authorize?: (
+		target: ContentAccessTarget,
+		request: ContentRequest,
+	) => Effect.Effect<HttpServerResponse.HttpServerResponse | null>
 }) => {
 	const {
 		mac,
@@ -145,6 +162,7 @@ export const serveContent = (options: {
 		scope,
 		publishDomain,
 		nowMillis,
+		authorize,
 	} = options
 
 	const target = (prefix: string, name: string) =>
@@ -154,14 +172,34 @@ export const serveContent = (options: {
 					return null
 				}
 				const found = yield* resolvePublication(name)
-				return found === null ? null : { artifactId: found.artifact_id, manifest: found.manifest }
+				return found === null
+					? null
+					: {
+							access: {
+								kind: "publication" as const,
+								address: name,
+								artifactId: found.artifact_id,
+							},
+							artifactId: found.artifact_id,
+							manifest: found.manifest,
+						}
 			}
 			const claims = yield* verifyLink(mac, key, name, yield* nowMillis)
 			if (claims === null || claims.scope !== scope) {
 				return null
 			}
 			const manifest = yield* resolveArtifactVersion(claims.artifactId, claims.version)
-			return manifest === null ? null : { artifactId: claims.artifactId, manifest }
+			return manifest === null
+				? null
+				: {
+						access: {
+							kind: "artifact_link" as const,
+							artifactId: claims.artifactId,
+							version: claims.version,
+						},
+						artifactId: claims.artifactId,
+						manifest,
+					}
 		})
 
 	return (request: ContentRequest): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
@@ -203,6 +241,12 @@ export const serveContent = (options: {
 			const requested = decodePath(rest.slice(slash + 1))
 			if (found === null || requested === null) {
 				return notFound
+			}
+			if (authorize !== undefined) {
+				const denied = yield* authorize(found.access, request)
+				if (denied !== null) {
+					return denied
+				}
 			}
 			const manifest = yield* store.getManifest(found.artifactId, found.manifest)
 			if (manifest === null) {
