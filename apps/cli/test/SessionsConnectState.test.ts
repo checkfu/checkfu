@@ -5,15 +5,20 @@ import {
 	beginMessageSend,
 	cancelMessageSend,
 	createInitialConnectState,
+	awaitingActionOf,
+	describeAwaitedAction,
 	evaluateHaltedQueueSnapshot,
 	evaluatePipedSettlement,
 	extractSubmittedMessageReceipt,
 	hasInterruptReceipt,
 	markSessionEnded,
+	observedTurnOf,
 	resolveFinalPipedError,
 	resolveStreamEndedError,
+	settledTurnOf,
 	shouldInterruptOnCtrlC,
 } from "../src/Commands/SessionsConnectState.ts"
+import { emptySessionFold, foldSessionEvents } from "@checkfu/sdk/SessionFold"
 import type {
 	ConnectSessionEvent,
 	ConnectState,
@@ -83,25 +88,24 @@ const runSequence = (initial: ConnectState, steps: ReadonlyArray<Step>): Sequenc
 const pipedIdleInitial = (after = 0): ConnectState =>
 	createInitialConnectState({
 		trackPipedTurns: true,
-		status: "idle",
 		liveStatus: "idle",
 		liveTurn: 0,
 		lastProcessedSeq: after,
-		observedTurn: 0,
-		settledTurn: 0,
 		ended: false,
 	})
 
 const ttyIdleInitial = (liveTurn = 0): ConnectState =>
 	createInitialConnectState({
 		trackPipedTurns: false,
-		status: "idle",
 		liveStatus: "idle",
 		liveTurn,
 		lastProcessedSeq: 0,
-		observedTurn: liveTurn,
-		settledTurn: liveTurn,
 		ended: false,
+		calls: {
+			...emptySessionFold("none"),
+			turn: { status: "settled", turn: liveTurn, stopReason: undefined },
+			settled: { turn: liveTurn, stopReason: undefined },
+		},
 	})
 
 describe("SessionsConnectState pure turn-tracking transitions", () => {
@@ -178,8 +182,8 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			const { state } = runSequence(pipedIdleInitial(), scenario.steps)
 			expect({
 				scenario: scenario.name,
-				observedTurn: state.observedTurn,
-				settledTurn: state.settledTurn,
+				observedTurn: observedTurnOf(state),
+				settledTurn: settledTurnOf(state),
 				targetTurn: state.targetTurn,
 				settlement: evaluatePipedSettlement(state),
 				finalError: resolveFinalPipedError(state),
@@ -208,8 +212,8 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		])
 		expect(duplicates).toEqual([2])
 		expect(wokeAtEvents).toEqual([])
-		expect(state.observedTurn).toBe(1)
-		expect(state.settledTurn).toBe(1)
+		expect(observedTurnOf(state)).toBe(1)
+		expect(settledTurnOf(state)).toBe(1)
 		expect(evaluatePipedSettlement(state)).toBe("wait")
 	})
 
@@ -490,7 +494,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: resumedRunning } = runSequence(ttyIdleInitial(0), [
 			{ _tag: "event", event: { seq: 15, type: "session.status_running", turn: 4 } },
 		])
-		expect(resumedRunning.observedTurn).toBe(4)
+		expect(observedTurnOf(resumedRunning)).toBe(4)
 		expect(resumedRunning.liveTurn).toBe(4)
 		expect(resumedRunning.liveStatus).toBe("running")
 
@@ -500,9 +504,229 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 				event: { seq: 16, type: "session.status_idle", turn: 4, stopReason: "end_turn" },
 			},
 		])
-		expect(resumedIdle.observedTurn).toBe(4)
-		expect(resumedIdle.settledTurn).toBe(4)
+		expect(observedTurnOf(resumedIdle)).toBe(4)
+		expect(settledTurnOf(resumedIdle)).toBe(4)
 		expect(resumedIdle.liveTurn).toBe(4)
 		expect(resumedIdle.liveStatus).toBe("idle")
+	})
+
+	it("keeps a turn that pauses for an answer unsettled, and settles it when it ends", () => {
+		const pause: ConnectSessionEvent = {
+			seq: 12,
+			type: "session.status_idle",
+			turn: 1,
+			stopReason: "requires_action",
+			source: {
+				type: "session.status_idle",
+				turn: 1,
+				seq: 12,
+				stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
+			},
+		}
+		const paused = runSequence(pipedIdleInitial(), [
+			{ _tag: "begin_send", label: "m1" },
+			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
+			{ _tag: "begin_send", label: "m2" },
+			{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
+			{ _tag: "event", event: { seq: 10, type: "session.status_running", turn: 1 } },
+			{ _tag: "event", event: pause },
+		])
+		expect(settledTurnOf(paused.state)).toBe(0)
+		expect(Array.from(paused.state.unsettledSubmittedTurns)).toEqual([1, 2])
+		expect(Array.from(paused.state.unsettledQueuedTurns)).toEqual([2])
+		expect(paused.state.calls.settled.stopReason).toBeUndefined()
+		expect(awaitingActionOf(paused.state)).toEqual({
+			turn: 1,
+			seq: 12,
+			toolUseIds: ["tu_1", "tu_2"],
+		})
+		expect(paused.wokeAtEvents).toEqual([12])
+		expect(evaluatePipedSettlement(paused.state)).toBe("awaiting_action")
+		expect(describeAwaitedAction(awaitingActionOf(paused.state)!)).toBe(
+			"Turn 1 waits on tool calls tu_1, tu_2. Answer each, then reconnect with --after 12 to read the reply.",
+		)
+		expect(resolveFinalPipedError(paused.state)).toBe("Turn 1 did not complete.")
+		expect(shouldInterruptOnCtrlC(paused.state, undefined)).toBe(true)
+
+		const answered = runSequence(paused.state, [
+			{ _tag: "event", event: { seq: 14, type: "session.status_running", turn: 1 } },
+		])
+		expect(awaitingActionOf(answered.state)).toBeUndefined()
+		expect(answered.state.liveStatus).toBe("running")
+		expect(evaluatePipedSettlement(answered.state)).toBe("wait")
+
+		const ended = runSequence(answered.state, [
+			{
+				_tag: "event",
+				event: { seq: 16, type: "session.status_idle", turn: 1, stopReason: "end_turn" },
+			},
+			{ _tag: "event", event: { seq: 17, type: "session.status_running", turn: 2 } },
+			{
+				_tag: "event",
+				event: { seq: 19, type: "session.status_idle", turn: 2, stopReason: "end_turn" },
+			},
+		])
+		expect(settledTurnOf(ended.state)).toBe(2)
+		expect(evaluatePipedSettlement(ended.state)).toBe("settled")
+		expect(resolveFinalPipedError(ended.state)).toBeUndefined()
+
+		const interrupted = runSequence(paused.state, [
+			{
+				_tag: "event",
+				event: { seq: 14, type: "session.status_idle", turn: 1, stopReason: "interrupted" },
+			},
+		])
+		expect(awaitingActionOf(interrupted.state)).toBeUndefined()
+		expect(settledTurnOf(interrupted.state)).toBe(1)
+	})
+
+	it("does not take a pause of a turn behind the awaited one, or one with nothing sent, for its own", () => {
+		const watching = runSequence(pipedIdleInitial(), [
+			{
+				_tag: "event",
+				event: {
+					seq: 5,
+					type: "session.status_idle",
+					turn: 3,
+					stopReason: "requires_action",
+					source: {
+						type: "session.status_idle",
+						turn: 3,
+						seq: 5,
+						stop_reason: { type: "requires_action", event_ids: ["tu_9"] },
+					},
+				},
+			},
+		])
+		expect(watching.wokeAtEvents).toEqual([])
+		expect(evaluatePipedSettlement(watching.state)).toBe("wait")
+		const settled = runSequence(pipedIdleInitial(), [
+			{ _tag: "begin_send", label: "m1" },
+			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
+			{
+				_tag: "event",
+				event: { seq: 3, type: "session.status_idle", turn: 1, stopReason: "end_turn" },
+			},
+			{
+				_tag: "event",
+				event: {
+					seq: 8,
+					type: "session.status_idle",
+					turn: 2,
+					stopReason: "requires_action",
+					source: {
+						type: "session.status_idle",
+						turn: 2,
+						seq: 8,
+						stop_reason: { type: "requires_action", event_ids: ["tu_2"] },
+					},
+				},
+			},
+		])
+		expect(evaluatePipedSettlement(settled.state)).toBe("settled")
+	})
+
+	it("subtracts each answer from a pause, and waits on one whose calls are all answered", () => {
+		const source = (event: NonNullable<ConnectSessionEvent["source"]>, seq: number) => ({
+			_tag: "event" as const,
+			event: { seq, type: event.type, source: event },
+		})
+		const paused = runSequence(pipedIdleInitial(), [
+			{ _tag: "begin_send", label: "m1" },
+			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
+			{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
+			source(
+				{
+					type: "agent.mcp_tool_use",
+					tool_use_id: "tu_1",
+					mcp_server_name: "github",
+					name: "merge",
+					input: { pr: 4 },
+					evaluated_permission: "ask",
+				},
+				3,
+			),
+			source({ type: "agent.custom_tool_use", tool_use_id: "tu_2", name: "refund", input: {} }, 4),
+			{
+				_tag: "event",
+				event: {
+					seq: 5,
+					type: "session.status_idle",
+					turn: 1,
+					stopReason: "requires_action",
+					source: {
+						type: "session.status_idle",
+						turn: 1,
+						seq: 5,
+						stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
+					},
+				},
+			},
+			source({ type: "user.tool_confirmation", tool_use_id: "tu_1", result: "allow" }, 6),
+		])
+		expect(awaitingActionOf(paused.state)).toEqual({ turn: 1, seq: 5, toolUseIds: ["tu_2"] })
+		expect(describeAwaitedAction(awaitingActionOf(paused.state)!)).toBe(
+			"Turn 1 waits on tool call tu_2. Answer it, then reconnect with --after 5 to read the reply.",
+		)
+		expect(evaluatePipedSettlement(paused.state)).toBe("awaiting_action")
+
+		const answered = runSequence(paused.state, [
+			source(
+				{
+					type: "user.custom_tool_result",
+					custom_tool_use_id: "tu_2",
+					content: [{ type: "text", text: "refunded" }],
+				},
+				7,
+			),
+		])
+		expect(awaitingActionOf(answered.state)?.toolUseIds).toEqual([])
+		expect(evaluatePipedSettlement(answered.state)).toBe("wait")
+		expect(shouldInterruptOnCtrlC(answered.state, undefined)).toBe(true)
+	})
+
+	it("opens on the pause its cursor sits in, so the turn can be interrupted and go on", () => {
+		const calls = foldSessionEvents(emptySessionFold("waiting"), [
+			{ type: "session.status_running", turn: 2, seq: 7 },
+			{
+				type: "agent.mcp_tool_use",
+				tool_use_id: "tu_1",
+				mcp_server_name: "github",
+				name: "merge",
+				input: { pr: 4 },
+				evaluated_permission: "ask",
+				seq: 8,
+			},
+			{
+				type: "agent.custom_tool_use",
+				tool_use_id: "tu_2",
+				name: "refund",
+				input: { order: 7 },
+				seq: 9,
+			},
+			{
+				type: "session.status_idle",
+				turn: 2,
+				seq: 10,
+				stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
+			},
+			{ type: "user.tool_confirmation", tool_use_id: "tu_1", result: "allow", seq: 12 },
+		])
+		const restored = createInitialConnectState({
+			trackPipedTurns: false,
+			liveStatus: "idle",
+			liveTurn: 2,
+			lastProcessedSeq: 12,
+			ended: false,
+			calls,
+		})
+		expect(awaitingActionOf(restored)).toEqual({ turn: 2, seq: 10, toolUseIds: ["tu_2"] })
+		expect(Array.from(restored.calls.calls.keys())).toEqual(["tu_2"])
+		expect(shouldInterruptOnCtrlC(restored, undefined)).toBe(true)
+		const resumed = runSequence(restored, [
+			{ _tag: "event", event: { seq: 14, type: "session.status_running", turn: 2 } },
+		])
+		expect(resumed.state.liveStatus).toBe("running")
+		expect(awaitingActionOf(resumed.state)).toBeUndefined()
 	})
 })

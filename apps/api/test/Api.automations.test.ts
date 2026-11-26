@@ -132,8 +132,7 @@ const run = async <A>(
 	const { layer, closeAll } = makePiDurableTestLayer(
 		async (model, context) =>
 			makeAssistantReply(model, null, `Done: ${extractLastUserText(context)}`, 4, 2),
-		undefined,
-		InMemory.make({ now: () => Date.parse(NOW) }).layer,
+		{ platform: InMemory.make({ now: () => Date.parse(NOW) }).layer },
 	)
 	try {
 		return await Effect.runPromise(
@@ -228,6 +227,69 @@ describe("Automations API", () => {
 				})
 				expect(pinned.status).toBe(201)
 				expect(pinned.body.agent).toEqual({ id: agentId, version: 1 })
+			}),
+		))
+
+	it("opens its sessions whatever the network rules say or come to say, with no credentials", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const docs = "https://docs.mcp.example/mcp"
+				const agent = yield* call<{ id: string }>(apiFetch, "POST", "/v1/agents", {
+					name: "Reporter",
+					model: "gpt-4o-mini",
+					mcp_servers: [{ type: "url", name: "docs", url: docs }],
+				})
+				const open = yield* call<{ id: string }>(apiFetch, "POST", "/v1/environments", {
+					name: "Open",
+				})
+				const forbidding = {
+					type: "cloud",
+					networking: {
+						type: "limited",
+						allow_mcp_servers: false,
+						allow_package_managers: false,
+						allowed_hosts: [],
+					},
+				}
+				const closed = yield* call<{ id: string }>(apiFetch, "POST", "/v1/environments", {
+					name: "Closed",
+					config: forbidding,
+				})
+				const automationIn = (environmentId: string) =>
+					call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+						name: "Docs digest",
+						agent: agent.body.id,
+						environment_id: environmentId,
+						initial_events: message("Summarize the docs."),
+						schedule: weekdayMornings,
+					})
+
+				const allowed = yield* automationIn(open.body.id)
+				yield* call(apiFetch, "POST", `/v1/automations/${allowed.body.id}/run`)
+				const started = yield* settledRuns(apiFetch, allowed.body.id, 1)
+				expect(started.body.data[0]).toMatchObject({ status: "started", error: null })
+				const session = yield* call<{ mcp_server_credentials: ReadonlyArray<unknown> }>(
+					apiFetch,
+					"GET",
+					`/v1/sessions/sess_${allowed.body.id}_1`,
+				)
+				expect(session.body.mcp_server_credentials).toEqual([])
+
+				const tightened = yield* call(apiFetch, "POST", `/v1/environments/${open.body.id}`, {
+					version: 1,
+					config: forbidding,
+				})
+				expect(tightened.status).toBe(200)
+				yield* call(apiFetch, "POST", `/v1/automations/${allowed.body.id}/run`)
+				const both = yield* settledRuns(apiFetch, allowed.body.id, 2)
+				expect(both.body.data.map((fired) => [fired.status, fired.error])).toEqual([
+					["started", null],
+					["started", null],
+				])
+				const fromTheStart = yield* automationIn(closed.body.id)
+				yield* call(apiFetch, "POST", `/v1/automations/${fromTheStart.body.id}/run`)
+				const opened = yield* settledRuns(apiFetch, fromTheStart.body.id, 1)
+				expect(opened.body.data[0]).toMatchObject({ status: "started", error: null })
 			}),
 		))
 

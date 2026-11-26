@@ -128,10 +128,7 @@ const runTurn = async (
 ): Promise<ReadonlyArray<Schema.JsonObject>> => {
 	const { layer, closeAll } = makePiDurableTestLayer(
 		(model, context) => Promise.resolve(handler(model, context)),
-		undefined,
-		undefined,
-		surface.registry,
-		{ env: surface.env },
+		{ registry: surface.registry, executionEnv: surface.env },
 	)
 	try {
 		return await Effect.runPromise(

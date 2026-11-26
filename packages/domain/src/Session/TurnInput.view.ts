@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { TurnAbandoned } from "./AbandonTurn.command.ts"
 import { SessionStatusIdle } from "./CommitModelReply.command.ts"
+import { TurnContinued } from "./PauseTurn.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { Session } from "./Session.aggregate.ts"
@@ -16,17 +17,19 @@ export const TurnInputState = Schema.Struct({
 	input: Schema.Array(MessageText),
 	unsent: Schema.Array(MessageText),
 	last_reply_turn: Schema.optionalKey(NonNegativeInt),
+	segment: Schema.optionalKey(PositiveInt),
 })
 export type TurnInputState = typeof TurnInputState.Type
 
 export class TurnInput extends Domain.View("TurnInput", {
-	version: 3,
+	version: 4,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(TurnInputState),
 	initial: null,
 	events: [
 		SessionStatusRunning,
+		TurnContinued,
 		SessionStatusIdle,
 		UserInterrupt,
 		TurnAbandoned,
@@ -44,6 +47,7 @@ export class TurnInput extends Domain.View("TurnInput", {
 						input: [],
 						unsent: [],
 						last_reply_turn: 0,
+						segment: 1,
 					},
 		"user.message": (state, e) =>
 			state === null
@@ -58,14 +62,14 @@ export class TurnInput extends Domain.View("TurnInput", {
 		"session.status_running": (state, e) =>
 			state === null
 				? null
-				: {
-						...state,
-						turn: e.turn,
-						input: state.unsent,
-						unsent: [],
-					},
+				: e.turn === state.turn
+					? { ...state, segment: (state.segment ?? 1) + 1 }
+					: { ...state, turn: e.turn, input: state.unsent, unsent: [], segment: 1 },
+		"turn.continued": (state, e) =>
+			state === null || e.turn !== state.turn ? state : { ...state, segment: e.segment },
 		"agent.message": (state) => (state === null ? null : { ...state, last_reply_turn: state.turn }),
-		"session.status_idle": (state) => (state === null ? null : { ...state, input: [] }),
+		"session.status_idle": (state, e) =>
+			state === null || e.stop_reason.type === "requires_action" ? state : { ...state, input: [] },
 		"session.status_terminated": (state) =>
 			state === null ? null : { ...state, input: [], unsent: [] },
 	},

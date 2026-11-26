@@ -1,7 +1,10 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
+import type * as Schema from "effect/Schema"
+import type { McpToolDescriptor } from "../Pi/PiMcpTypes.ts"
 import { makeSecretCustody } from "./SecretCustody.ts"
 import type { HeldSecret, PutMode, PutOutcome } from "./SecretCustody.ts"
+import { makeVaultConnection, makeVaultMcp } from "./VaultMcp.ts"
 
 export class Connection extends Cloudflare.DurableObject<Connection>()(
 	"Connection",
@@ -13,6 +16,10 @@ export class Connection extends Cloudflare.DurableObject<Connection>()(
 				exec: (query, ...bindings) => storage.sql.exec(query, ...bindings),
 				transaction: (run) => storage.transactionSync(run),
 			}))
+		let mcpMade: ReturnType<typeof makeVaultMcp> | undefined
+		const mcp = () => (mcpMade ??= makeVaultMcp(custody()))
+		let connectionMade: ReturnType<typeof makeVaultConnection> | undefined
+		const connection = () => (connectionMade ??= makeVaultConnection(custody(), mcp()))
 		return Effect.succeed({
 			putSecret: (
 				credentialId: string,
@@ -20,12 +27,30 @@ export class Connection extends Cloudflare.DurableObject<Connection>()(
 				target: string,
 				mode: PutMode,
 			): Effect.Effect<PutOutcome> =>
-				Effect.sync(() => custody().put(credentialId, secret, target, mode)),
+				Effect.promise(() => connection().put(credentialId, secret, target, mode)),
 			eraseSecret: (credentialId: string): Effect.Effect<void> =>
-				Effect.sync(() => custody().erase(credentialId)),
-			seal: (): Effect.Effect<void> => Effect.sync(() => custody().seal()),
+				Effect.promise(() => connection().erase(credentialId)),
+			seal: (): Effect.Effect<void> => Effect.promise(() => connection().seal()),
 			usable: (credentialId: string): Effect.Effect<boolean> =>
 				Effect.sync(() => custody().usable(credentialId)),
+			mcpList: (
+				credentialId: string,
+				sessionKey: string,
+				url: string,
+				limit: number,
+				callId: string,
+			): Effect.Effect<Schema.Json> =>
+				Effect.promise(() => mcp().list(credentialId, sessionKey, url, limit, callId)),
+			mcpCall: (
+				credentialId: string,
+				sessionKey: string,
+				url: string,
+				tool: McpToolDescriptor,
+				args: Schema.JsonObject,
+				callId: string,
+			): Effect.Effect<Schema.Json> =>
+				Effect.promise(() => mcp().call(credentialId, sessionKey, url, tool, args, callId)),
+			mcpCancel: (callId: string): Effect.Effect<void> => Effect.sync(() => mcp().cancel(callId)),
 		})
 	}),
 ) {}

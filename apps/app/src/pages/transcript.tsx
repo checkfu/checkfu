@@ -1,6 +1,10 @@
 import { cn } from "@checkfu/ui/cn"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import type * as React from "react"
+import { toolCallsOf } from "../tool-calls.ts"
+import type { ToolCalls } from "../tool-calls.ts"
+import { ToolCallRow } from "./tool-call.tsx"
+import type { SendAnswer } from "./tool-call.tsx"
 
 const text = (content: ReadonlyArray<{ readonly text: string }>): string =>
 	content.map((block) => block.text).join("")
@@ -22,7 +26,11 @@ function Bubble({
 	)
 }
 
-const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
+const entryOf = (
+	event: JsonSessionEvent,
+	calls: ToolCalls,
+	send: SendAnswer | undefined,
+): React.JSX.Element | null => {
 	switch (event.type) {
 		case "user.message":
 			return (
@@ -57,7 +65,8 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 				</p>
 			)
 		case "session.status_idle":
-			return event.stop_reason.type === "end_turn" ? null : (
+			return event.stop_reason.type === "end_turn" ||
+				event.stop_reason.type === "requires_action" ? null : (
 				<p className="text-control text-muted-foreground">
 					Turn ended: {event.stop_reason.type.replaceAll("_", " ")}
 				</p>
@@ -65,11 +74,11 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 		case "session.status_terminated":
 			return <p className="text-control text-muted-foreground">Session terminated.</p>
 		case "agent.tool_use":
-			return <p className="font-mono text-control text-muted-foreground">Called {event.name}</p>
-		case "agent.tool_result":
-			return event.is_error ? (
-				<p className="font-mono text-control text-destructive">Tool call failed.</p>
-			) : null
+		case "agent.mcp_tool_use":
+		case "agent.custom_tool_use": {
+			const call = calls.calls.get(event.tool_use_id)
+			return call === undefined ? null : <ToolCallRow call={call} send={send} />
+		}
 		default:
 			return null
 	}
@@ -77,11 +86,15 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 
 export function Transcript({
 	events,
+	calls = toolCallsOf(events),
+	send,
 }: {
 	readonly events: ReadonlyArray<JsonSessionEvent>
+	readonly calls?: ToolCalls | undefined
+	readonly send?: SendAnswer | undefined
 }): React.JSX.Element {
 	const rows = events.flatMap((event) => {
-		const entry = entryOf(event)
+		const entry = entryOf(event, calls, send)
 		return entry === null ? [] : [<li key={event.seq}>{entry}</li>]
 	})
 	return (

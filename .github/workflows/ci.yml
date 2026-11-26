@@ -72,7 +72,7 @@ jobs:
   # The Z3 proofs in packages/domain take minutes, so they get a runner of their own.
   domain:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         with:
@@ -80,7 +80,23 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain
-      - run: bun x turbo run test --filter=@checkfu/domain
+      - run: bun x turbo run test --filter=@checkfu/domain -- --exclude test/Checkfu.verify.test.ts
+      - if: ${{ !cancelled() }}
+        name: Fail if a test changed any tracked file
+        run: git diff --exit-code
+
+  # The unified Checkfu proof alone takes about ten minutes, so it runs beside the other proofs.
+  domain-checkfu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          turbo-cache: domain-checkfu
+      - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code

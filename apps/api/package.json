@@ -36,6 +36,7 @@
 	"devDependencies": {
 		"@effect/platform-bun": "catalog:",
 		"@effect/vitest": "catalog:",
+		"@modelcontextprotocol/server": "catalog:",
 		"fast-check": "catalog:",
 		"vitest": "catalog:"
 	}

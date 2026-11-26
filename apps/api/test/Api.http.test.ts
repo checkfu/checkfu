@@ -316,7 +316,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		)
 		const { layer: unconfiguredLayer, closeAll: closeUnconfigured } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "ok", 1, 1),
-			{},
+			{ env: {} },
 		)
 
 		try {
@@ -506,7 +506,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 	it("fails closed with 503 when CHECKFU_API_KEY is set to an empty string", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "unused", 1, 1),
-			{ CHECKFU_API_KEY: "" },
+			{ env: { CHECKFU_API_KEY: "" } },
 		)
 		try {
 			await Effect.runPromise(
@@ -942,6 +942,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			"type",
 		])
 		expect(Object.keys(byType.get("session.status_idle")?.properties ?? {}).toSorted()).toEqual([
+			"cancelled_event_ids",
 			"created_at",
 			"id",
 			"seq",
@@ -956,7 +957,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			"seq",
 			"type",
 		])
-		for (const emptyTag of ["user.interrupt", "session.status_terminated", "session.archived"]) {
+		expect(
+			Object.keys(byType.get("session.status_terminated")?.properties ?? {}).toSorted(),
+		).toEqual(["cancelled_event_ids", "created_at", "id", "seq", "type"])
+		for (const emptyTag of ["user.interrupt", "session.archived"]) {
 			expect(Object.keys(byType.get(emptyTag)?.properties ?? {}).toSorted()).toEqual([
 				"created_at",
 				"id",

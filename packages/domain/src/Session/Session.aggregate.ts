@@ -17,13 +17,25 @@ import { ClaimIdempotencyKey, IdempotencyKeyClaimed } from "./ClaimIdempotencyKe
 import { CreateSession, SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
+import { PauseTurn, TurnAwaiting, TurnContinued } from "./PauseTurn.command.ts"
 import {
 	DuplicateModelRequest,
 	OutOfOrderModelRequest,
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
-import { AgentToolResult, AgentToolUse, RecordToolCall } from "./RecordToolCall.command.ts"
+import { UserToolConfirmation } from "./ConfirmTool.command.ts"
+import { UserCustomToolResult } from "./ReturnCustomToolResult.command.ts"
+import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
+import {
+	AgentCustomToolUse,
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+	RecordToolCall,
+	RecordToolResult,
+} from "./RecordToolCall.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -35,32 +47,67 @@ import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
-import { NonEmptyString, NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
+import {
+	NO_TOOL_USE_IDS,
+	NonEmptyString,
+	NonNegativeInt,
+	PositiveInt,
+	ToolUseIdsText,
+	addToolUseId,
+	removeToolUseId,
+} from "./SessionTypes.ts"
 import type { StopReason, ModelUsage } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
-import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
-export const SESSION_STATE_SCHEMA_VERSION = 1 as const
+export const SESSION_STATE_SCHEMA_VERSION = 2 as const
+
+const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
+const Idle = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
+const Terminated = Schema.TaggedStruct("Terminated", { archived: Schema.Boolean })
+const RunningV1 = Schema.TaggedStruct("Running", {
+	turn: PositiveInt,
+	open_model_request_id: Schema.NullOr(NonEmptyString),
+	model_requests_started: NonNegativeInt,
+	pending_user_messages: NonNegativeInt,
+})
 
 export const SessionState = Schema.Union([
-	Schema.TaggedStruct("Uninitialized", {}),
-	Schema.TaggedStruct("Idle", { turn: NonNegativeInt }),
+	Uninitialized,
+	Idle,
 	Schema.TaggedStruct("Running", {
-		turn: PositiveInt,
-		open_model_request_id: Schema.NullOr(NonEmptyString),
-		model_requests_started: NonNegativeInt,
-		pending_user_messages: NonNegativeInt,
+		...RunningV1.fields,
+		awaiting_calls: NonNegativeInt,
+		awaiting_ids: ToolUseIdsText,
+		paused: Schema.Boolean,
+		asked_calls: NonNegativeInt,
+		interrupted: Schema.Boolean,
 	}),
-	Schema.TaggedStruct("Terminated", {
-		archived: Schema.Boolean,
-	}),
+	Terminated,
 ])
 export type SessionState = typeof SessionState.Type
 
 export const SessionStateSnapshot = versionedSnapshot({
 	current: SESSION_STATE_SCHEMA_VERSION,
 	schema: SessionState,
+	previous: [
+		snapshotVersion({
+			version: 1,
+			schema: Schema.Union([Uninitialized, Idle, RunningV1, Terminated]),
+			migrate: (state) =>
+				state._tag === "Running"
+					? {
+							...state,
+							awaiting_calls: 0,
+							awaiting_ids: NO_TOOL_USE_IDS,
+							paused: false,
+							asked_calls: 0,
+							interrupted: false,
+						}
+					: state,
+		}),
+	],
 })
 
 type ActiveState = Extract<SessionState, { readonly _tag: "Idle" | "Running" }>
@@ -73,11 +120,26 @@ const shouldDrainQueue = (pending_user_messages: number, stop_reason: StopReason
 		stop_reason.type === "interrupted")
 
 const endTurn = (running: RunningState, stop_reason: StopReason) => {
-	const idle = new SessionStatusIdle({ stop_reason, turn: running.turn })
+	const idle = new SessionStatusIdle({
+		stop_reason,
+		turn: running.turn,
+		event_ids: running.awaiting_ids,
+	})
 	return shouldDrainQueue(running.pending_user_messages, stop_reason)
 		? [idle, new SessionStatusRunning({ turn: running.turn + 1 })]
 		: [idle]
 }
+
+const endSession = (state: ActiveState) =>
+	new SessionStatusTerminated({
+		running_turn: state._tag === "Running" ? state.turn : null,
+		event_ids: state._tag === "Running" ? state.awaiting_ids : NO_TOOL_USE_IDS,
+	})
+
+const segmentOf = (running: RunningState) =>
+	running.open_model_request_id === null && !running.paused
+		? running.model_requests_started + 1
+		: running.model_requests_started
 
 const abandonTurn = (
 	running: RunningState,
@@ -151,6 +213,8 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserInterrupt,
 		RecordModelRequestStart,
 		RecordToolCall,
+		RecordToolResult,
+		PauseTurn,
 		CommitModelReply,
 		FailModelRequest,
 		InterruptModelRequest,
@@ -158,6 +222,7 @@ export class Session extends Domain.Aggregate("Session", {
 		ArchiveSession,
 		ClaimIdempotencyKey,
 	],
+	events: [AgentCustomToolUse, UserToolConfirmation, UserCustomToolResult],
 	keyOf: (cmd) => cmd.session_id,
 	invariants: {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
@@ -167,6 +232,11 @@ export class Session extends Domain.Aggregate("Session", {
 			s._tag !== "Running" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8),
 		OpenModelRequestRequiresStartedCount: (s) =>
 			s._tag !== "Running" || s.open_model_request_id === null || s.model_requests_started >= 1,
+		APausedTurnHoldsNoModelRequest: (s) =>
+			s._tag !== "Running" || !s.paused || s.open_model_request_id === null,
+		APausedTurnWaitsOnACall: (s) => s._tag !== "Running" || !s.paused || s.awaiting_calls >= 1,
+		APausedTurnAskedWhatItWaitsOn: (s) => s._tag !== "Running" || !s.paused || s.asked_calls >= 1,
+		AnInterruptedTurnIsNotPaused: (s) => s._tag !== "Running" || !s.interrupted || !s.paused,
 	},
 	transitions: {
 		TerminatedSessionStaysTerminated: ({ before, after }) =>
@@ -263,6 +333,85 @@ export class Session extends Domain.Aggregate("Session", {
 			)
 			return endIndex >= 0 && (leaveIndex < 0 || endIndex < leaveIndex)
 		},
+		OnlyAPauseMakesATurnWait: ({ before, after, events }) =>
+			after._tag !== "Running" ||
+			!after.paused ||
+			(before._tag === "Running" && before.turn === after.turn && before.paused) ||
+			events.some((event) => event._tag === "turn.awaiting"),
+		APausedTurnTakesNoUserMessage: ({ before, events }) =>
+			before._tag !== "Running" ||
+			!before.paused ||
+			events.every((event) => event._tag !== "user.message"),
+		APausedTurnIsNotAbandoned: ({ before, events }) =>
+			before._tag !== "Running" ||
+			!before.paused ||
+			events.every((event) => event._tag !== "turn.abandoned"),
+		APauseKeepsTheTurn: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "turn.awaiting" ||
+					(before._tag === "Running" &&
+						after._tag === "Running" &&
+						after.turn === before.turn &&
+						after.paused),
+			),
+		AContinuationKeepsTheTurn: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "turn.continued" ||
+					(before._tag === "Running" &&
+						after._tag === "Running" &&
+						after.turn === before.turn &&
+						!after.paused),
+			),
+		APausedTurnGoesOnOnceAnswered: ({ before, after, events }) =>
+			before._tag !== "Running" ||
+			!before.paused ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.awaiting_calls >= 1 ||
+			(!after.paused && events.some((event) => event._tag === "turn.continued")),
+		AnInterruptEndsAPausedTurn: ({ before, after, command }) =>
+			before._tag !== "Running" ||
+			!before.paused ||
+			command._tag !== "SendUserInterrupt" ||
+			after._tag === "Idle" ||
+			(after._tag === "Running" && after.turn === before.turn + 1),
+		AnInterruptedTurnNeitherWaitsNorGoesOn: ({ before, events }) =>
+			before._tag !== "Running" ||
+			!before.interrupted ||
+			events.every((event) => event._tag !== "turn.awaiting" && event._tag !== "turn.continued"),
+		AnInterruptedTurnStaysInterrupted: ({ before, after }) =>
+			before._tag !== "Running" ||
+			!before.interrupted ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.interrupted,
+		ADeadlineAbandonsOnlyItsOwnSegment: ({ before, command, events }) =>
+			command._tag !== "AbandonTurn" ||
+			before._tag !== "Running" ||
+			events.length === 0 ||
+			(command.segment ?? 1) ===
+				(before.open_model_request_id === null && !before.paused
+					? before.model_requests_started + 1
+					: before.model_requests_started),
+		AnEndedTurnStartsTheQueuedOne: ({ before, after, events }) =>
+			before._tag !== "Running" ||
+			before.pending_user_messages === 0 ||
+			after._tag !== "Idle" ||
+			events.every(
+				(event) =>
+					event._tag !== "session.status_idle" ||
+					(event.stop_reason.type !== "end_turn" &&
+						event.stop_reason.type !== "retries_exhausted" &&
+						event.stop_reason.type !== "interrupted"),
+			),
+		AStopNamesTheUnansweredCalls: ({ before, events }) =>
+			events.every(
+				(event) =>
+					(event._tag !== "session.status_idle" && event._tag !== "session.status_terminated") ||
+					event.event_ids === (before._tag === "Running" ? before.awaiting_ids : NO_TOOL_USE_IDS),
+			),
 	},
 	decide: {
 		CreateSession: (state, cmd, ctx) =>
@@ -282,6 +431,9 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag !== "Idle" && active._tag !== "Running") {
 				return active
 			}
+			if (active._tag === "Running" && active.paused) {
+				return new SessionAwaitingAction({ session_id: ctx.id })
+			}
 			if (active._tag === "Running" && active.pending_user_messages >= 8) {
 				return new PendingMessageQueueFull({ session_id: ctx.id, limit: 8 })
 			}
@@ -299,7 +451,11 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag !== "Running") {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
 			}
-			return [new UserInterrupt({ turn: active.turn })]
+			const segment = segmentOf(active)
+			const interrupt = new UserInterrupt(
+				segment === 1 ? { turn: active.turn } : { turn: active.turn, segment },
+			)
+			return active.paused ? [interrupt, ...endTurn(active, { type: "interrupted" })] : [interrupt]
 		},
 
 		RecordModelRequestStart: (state, cmd, ctx) => {
@@ -318,7 +474,7 @@ export class Session extends Domain.Aggregate("Session", {
 					model_requests_started: running.model_requests_started,
 				})
 			}
-			if (cmd.request_seq !== running.model_requests_started + 1) {
+			if (cmd.request_seq !== running.model_requests_started + 1 || running.paused) {
 				return new OutOfOrderModelRequest({
 					session_id: ctx.id,
 					expected_request_seq: running.model_requests_started + 1,
@@ -340,19 +496,106 @@ export class Session extends Domain.Aggregate("Session", {
 				})
 			}
 			const { call } = cmd
+			const use = {
+				tool_use_id: call.tool_use_id,
+				name: call.name,
+				input: call.input,
+				...(call.input_truncated === true ? { truncated: true as const } : {}),
+			}
+			const result = {
+				tool_use_id: call.tool_use_id,
+				content: call.content,
+				is_error: call.is_error,
+				...(call.result_truncated === true ? { truncated: true as const } : {}),
+				...(call.rejected === undefined ? {} : { rejected: call.rejected }),
+			}
+			return call.mcp_server_name === undefined
+				? [new AgentToolUse(use), new AgentToolResult(result)]
+				: [
+						new AgentMcpToolUse({
+							...use,
+							mcp_server_name: call.mcp_server_name,
+							...(call.evaluated_permission === undefined
+								? {}
+								: { evaluated_permission: call.evaluated_permission }),
+						}),
+						new AgentMcpToolResult(result),
+					]
+		},
+
+		RecordToolResult: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") {
+				return running
+			}
+			if (running.open_model_request_id !== cmd.model_request_start_id) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			const result = {
+				tool_use_id: cmd.result.tool_use_id,
+				content: cmd.result.content,
+				is_error: cmd.result.is_error,
+				...(cmd.result.truncated === true ? { truncated: true as const } : {}),
+				...(cmd.result.rejected === undefined ? {} : { rejected: cmd.result.rejected }),
+			}
 			return [
-				new AgentToolUse({
-					tool_use_id: call.tool_use_id,
-					name: call.name,
-					input: call.input,
-					...(call.input_truncated === true ? { truncated: true as const } : {}),
-				}),
-				new AgentToolResult({
-					tool_use_id: call.tool_use_id,
-					content: call.content,
-					is_error: call.is_error,
-					...(call.result_truncated === true ? { truncated: true as const } : {}),
-					...(call.rejected === undefined ? {} : { rejected: call.rejected }),
+				cmd.result.mcp === true ? new AgentMcpToolResult(result) : new AgentToolResult(result),
+			]
+		},
+
+		PauseTurn: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") {
+				return running
+			}
+			if (
+				running.open_model_request_id !== cmd.model_request_start_id ||
+				running.model_requests_started !== cmd.request_seq
+			) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			const end = new SpanModelRequestEnd({
+				model_request_start_id: cmd.model_request_start_id,
+				model_usage: cmd.model_usage,
+				is_error: false,
+			})
+			const failed = new SpanModelRequestEnd({
+				model_request_start_id: cmd.model_request_start_id,
+				model_usage: cmd.model_usage,
+				is_error: true,
+			})
+			if (running.interrupted) {
+				return [failed, ...endTurn(running, { type: "interrupted" })]
+			}
+			if (running.asked_calls === 0) {
+				return [
+					failed,
+					new SessionErrorEvent({
+						error: {
+							type: "harness_paused_without_calls",
+							message: "The harness paused a turn that asked for no answer.",
+							retry_status: { type: "exhausted" },
+						},
+					}),
+					...endTurn(running, { type: "retries_exhausted" }),
+				]
+			}
+			if (running.awaiting_calls === 0) {
+				return [end, new TurnContinued({ turn: running.turn, segment: cmd.request_seq + 1 })]
+			}
+			return [
+				end,
+				new TurnAwaiting({ turn: running.turn }),
+				new SessionStatusIdle({
+					stop_reason: { type: "requires_action" },
+					turn: running.turn,
+					event_ids: running.awaiting_ids,
 				}),
 			]
 		},
@@ -417,7 +660,7 @@ export class Session extends Domain.Aggregate("Session", {
 				},
 			})
 			if (cmd.disposition === "terminal") {
-				return [end, errorEvent, new SessionStatusTerminated({ running_turn: running.turn })]
+				return [end, errorEvent, endSession(running)]
 			}
 			return [end, errorEvent, ...endTurn(running, { type: "retries_exhausted" })]
 		},
@@ -445,7 +688,12 @@ export class Session extends Domain.Aggregate("Session", {
 		},
 
 		AbandonTurn: (state, cmd) => {
-			if (state._tag !== "Running" || state.turn !== cmd.turn) {
+			if (
+				state._tag !== "Running" ||
+				state.turn !== cmd.turn ||
+				state.paused ||
+				segmentOf(state) !== (cmd.segment ?? 1)
+			) {
 				return []
 			}
 			return abandonTurn(state, cmd.error_type, cmd.message, { input_tokens: 0, output_tokens: 0 })
@@ -465,14 +713,11 @@ export class Session extends Domain.Aggregate("Session", {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusTerminated({ running_turn: state.turn }),
+					endSession(state),
 					new SessionArchived(),
 				]
 			}
-			return [
-				new SessionStatusTerminated({ running_turn: state._tag === "Running" ? state.turn : null }),
-				new SessionArchived(),
-			]
+			return [endSession(state), new SessionArchived()]
 		},
 
 		ClaimIdempotencyKey: (state, cmd, ctx) =>
@@ -490,7 +735,30 @@ export class Session extends Domain.Aggregate("Session", {
 							state.pending_user_messages < 8 ? state.pending_user_messages + 1 : 8,
 					}
 				: state,
-		"user.interrupt": (state) => state,
+		"user.interrupt": (state) =>
+			state._tag === "Running" ? { ...state, interrupted: true } : state,
+		"user.tool_confirmation": (state, e) =>
+			state._tag === "Running" && state.awaiting_calls > 0
+				? {
+						...state,
+						awaiting_calls: state.awaiting_calls - 1,
+						awaiting_ids: removeToolUseId(state.awaiting_ids, e.tool_use_id),
+					}
+				: state,
+		"user.custom_tool_result": (state, e) =>
+			state._tag === "Running" && state.awaiting_calls > 0
+				? {
+						...state,
+						awaiting_calls: state.awaiting_calls - 1,
+						awaiting_ids: removeToolUseId(state.awaiting_ids, e.custom_tool_use_id),
+					}
+				: state,
+		"turn.awaiting": (state, e) =>
+			state._tag === "Running" && state.turn === e.turn ? { ...state, paused: true } : state,
+		"turn.continued": (state, e) =>
+			state._tag === "Running" && state.turn === e.turn
+				? { ...state, paused: false, asked_calls: 0 }
+				: state,
 		"session.status_running": (state, e) =>
 			state._tag === "Idle"
 				? {
@@ -499,6 +767,11 @@ export class Session extends Domain.Aggregate("Session", {
 						open_model_request_id: null,
 						model_requests_started: 0,
 						pending_user_messages: 0,
+						awaiting_calls: 0,
+						awaiting_ids: NO_TOOL_USE_IDS,
+						paused: false,
+						asked_calls: 0,
+						interrupted: false,
 					}
 				: state,
 		"span.model_request_start": (state, e) =>
@@ -511,6 +784,25 @@ export class Session extends Domain.Aggregate("Session", {
 				: state,
 		"agent.tool_use": (state) => state,
 		"agent.tool_result": (state) => state,
+		"agent.mcp_tool_use": (state, e) =>
+			state._tag === "Running" && e.evaluated_permission === "ask"
+				? {
+						...state,
+						awaiting_calls: state.awaiting_calls + 1,
+						awaiting_ids: addToolUseId(state.awaiting_ids, e.tool_use_id),
+						asked_calls: state.asked_calls + 1,
+					}
+				: state,
+		"agent.custom_tool_use": (state, e) =>
+			state._tag === "Running"
+				? {
+						...state,
+						awaiting_calls: state.awaiting_calls + 1,
+						awaiting_ids: addToolUseId(state.awaiting_ids, e.tool_use_id),
+						asked_calls: state.asked_calls + 1,
+					}
+				: state,
+		"agent.mcp_tool_result": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>
@@ -521,7 +813,9 @@ export class Session extends Domain.Aggregate("Session", {
 					}
 				: state,
 		"session.status_idle": (state, e) =>
-			state._tag === "Running" ? { _tag: "Idle" as const, turn: e.turn } : state,
+			state._tag === "Running" && e.stop_reason.type !== "requires_action"
+				? { _tag: "Idle" as const, turn: e.turn }
+				: state,
 		"session.error": (state) => state,
 		"turn.abandoned": (state) => state,
 		"session.status_terminated": (state) =>

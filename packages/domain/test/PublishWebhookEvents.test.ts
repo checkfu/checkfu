@@ -80,6 +80,7 @@ describe("PublishWebhookEvents policy", () => {
 					agent_version: 1,
 					environment_id: BoundedEnvironmentId.make(envId),
 					title: "Session 1",
+					mcp_server_credentials: "[]",
 				})
 				yield* domain.ReserveArtifact({ artifact_id: artifactId })
 				yield* domain.CreateArtifact({

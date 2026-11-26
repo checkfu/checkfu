@@ -45,7 +45,7 @@ const bucketPropsFor = (env: Record<string, string>) =>
 
 describe("Alchemy stack and worker entry", () => {
 	it.effect(
-		"loads ApiWorker and alchemy.run.ts without workerd, uses local state in dev, and keeps AgentView unversioned",
+		"loads ApiWorker and alchemy.run.ts without workerd, uses local state in dev, and bumps AgentView only with its shape",
 		() =>
 			Effect.gen(function* () {
 				expect(ApiWorker).toBeDefined()
@@ -81,7 +81,7 @@ describe("Alchemy stack and worker entry", () => {
 					logs: { enabled: true, invocationLogs: false },
 				})
 				expect(stack).toBeDefined()
-				expect(AgentView.definition.version).toBeUndefined()
+				expect(AgentView.definition.version).toBe(3)
 
 				const devStateLayer = stack.state.pipe(
 					Layer.provide(

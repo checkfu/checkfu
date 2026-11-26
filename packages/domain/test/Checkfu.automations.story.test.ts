@@ -264,7 +264,7 @@ const opened = (
 			model_usage: { input_tokens: 10, output_tokens: 5 },
 			is_error: false,
 		}),
-		new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+		new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 	),
 	Story.call(SessionOutputs.publish, { session_id: sessionOf(run).id, turn: 1 }),
 	Story.returned(SessionOutputs.publish, undefined),

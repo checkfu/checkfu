@@ -13,6 +13,8 @@ const agent = (
 	model: { id: "claude-sonnet-5-5" },
 	system: "Be brief.",
 	description: null,
+	mcp_servers: [],
+	tools: [],
 	created_at: "2026-11-24T00:00:00.000Z",
 	updated_at: "2026-11-24T00:00:00.000Z",
 	archived_at: null,

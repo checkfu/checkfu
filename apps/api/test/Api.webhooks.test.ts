@@ -52,9 +52,6 @@ describe("Webhooks HTTP API", () => {
 		let nextStatus = 200
 		const harness = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "ok", 5, 3),
-			undefined,
-			undefined,
-			undefined,
 			{
 				webhookSender: {
 					send: () => Effect.succeed({ kind: "response", status: nextStatus }),
@@ -615,9 +612,6 @@ describe("Webhooks HTTP API", () => {
 	it("returns 202 PendingWebhook with committed id and secret on listing timeout, isolates concurrent unkeyed secret rotations, and fans out vault/credential lifecycle events", async () => {
 		const harness = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "ok", 5, 3),
-			undefined,
-			undefined,
-			undefined,
 			{
 				webhookSender: {
 					send: () => Effect.succeed({ kind: "response", status: 200 }),

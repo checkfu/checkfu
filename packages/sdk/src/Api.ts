@@ -1,4 +1,4 @@
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
@@ -53,8 +53,20 @@ import {
 	MAX_ARTIFACT_FILES,
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
+	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
+	McpServerCredentials,
+	McpServer,
+	McpServerName,
 	McpServerUrl,
+	McpServers,
+	AgentTools,
+	DenyMessage,
+	MAX_CUSTOM_TOOL_RESULT_LENGTH,
+	CancelledEventIds,
+	RequiresActionStopReason,
+	StopReason,
+	ToolConfirmationResult,
 	NonEmptyString,
 	PositiveInt,
 	PublicationAddress,
@@ -81,8 +93,13 @@ import {
 	WebhookEventSubscription,
 	WebhookId,
 	WebhookUrl,
+	CustomTool,
+	CustomToolName,
+	McpToolset,
+	MAX_CUSTOM_TOOLS,
+	MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH,
 } from "./Schemas.ts"
-import type { SessionEventType } from "./Schemas.ts"
+import type { AgentTool, SessionEventType } from "./Schemas.ts"
 
 export const REQUEST_ID_HEADER = "request-id"
 
@@ -114,12 +131,17 @@ export type ErrorStatus = keyof typeof ERROR_TYPES
 export type HandlerErrorType = (typeof HANDLER_ERROR_TYPES)[HandlerErrorStatus]
 export type ApiErrorType = (typeof ERROR_TYPES)[ErrorStatus]
 
+export const ERROR_CODES = {
+	sessionAwaitingAction: "session_awaiting_action",
+} as const
+
 const errorEnvelope = <const S extends ErrorStatus>(status: S) =>
 	Schema.Struct({
 		type: Schema.Literal("error"),
 		error: Schema.Struct({
 			type: Schema.Literal(ERROR_TYPES[status]),
 			message: Schema.String,
+			code: Schema.optionalKey(Schema.String),
 		}),
 		request_id: RequestId,
 		accepted: Schema.optionalKey(ErrorAccepted),
@@ -143,6 +165,7 @@ export type ApiError = (typeof ERRORS)[ErrorStatus]["Type"]
 export type HandlerError = (typeof ERRORS)[HandlerErrorStatus]["Type"]
 
 interface ApiErrorExtra {
+	readonly code?: string
 	readonly accepted?: ReadonlyArray<unknown>
 	readonly failed_index?: number
 	readonly unconfirmed_index?: number
@@ -150,9 +173,9 @@ interface ApiErrorExtra {
 
 const makeError =
 	<const S extends ErrorStatus>(status: S) =>
-	(message: string, request_id: RequestId, extra?: ApiErrorExtra) => ({
+	(message: string, request_id: RequestId, { code, ...extra }: ApiErrorExtra = {}) => ({
 		type: "error" as const,
-		error: { type: ERROR_TYPES[status], message },
+		error: { type: ERROR_TYPES[status], message, ...(code === undefined ? {} : { code }) },
 		request_id: RequestId.make(request_id),
 		...extra,
 	})
@@ -241,6 +264,7 @@ const HandlerErrorInput = Schema.Struct({
 			HANDLER_ERROR_TYPES[503],
 		]),
 		message: Schema.String,
+		code: Schema.optional(Schema.String),
 	}),
 	accepted: Schema.optional(ErrorAccepted),
 	failed_index: Schema.optional(ErrorIndex),
@@ -260,6 +284,7 @@ export const parseHandlerError = (
 	const { error, accepted, failed_index, unconfirmed_index } = decoded.value
 	const status = HANDLER_ERROR_STATUS_BY_TYPE.get(error.type) ?? 500
 	return apiError(status, error.message, request_id, {
+		...(error.code === undefined ? {} : { code: error.code }),
 		...(accepted === undefined ? {} : { accepted }),
 		...(failed_index === undefined ? {} : { failed_index }),
 		...(unconfirmed_index === undefined ? {} : { unconfirmed_index }),
@@ -338,6 +363,113 @@ export class ArtifactBlobLimit extends HttpApiMiddleware.Service<ArtifactBlobLim
 	{ error: ERRORS[413] },
 ) {}
 
+const MCP_SERVER_URL =
+	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
+
+export const canonicalMcpServerUrl = (input: string): string => {
+	const url = new URL(input)
+	url.hash = ""
+	return url.href
+}
+
+const McpServerUrlInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
+	Schema.makeFilter((input) => URL.canParse(input) || "a URL that can be parsed"),
+).pipe(
+	Schema.decodeTo(McpServerUrl, {
+		decode: SchemaGetter.transform(canonicalMcpServerUrl),
+		encode: SchemaGetter.passthrough(),
+	}),
+)
+
+const distinct = <A>(key: (item: A) => string | undefined, twice: (key: string) => string) =>
+	Schema.makeFilter<ReadonlyArray<A>>((items) => {
+		const seen = new Set<string>()
+		for (const item of items) {
+			const name = key(item)
+			if (name !== undefined) {
+				if (seen.has(name)) {
+					return twice(name)
+				}
+				seen.add(name)
+			}
+		}
+		return true
+	})
+
+const McpServersInput = Schema.Array(
+	Schema.Struct({ ...McpServer.fields, url: McpServerUrlInput }),
+).check(
+	distinct(
+		(server: McpServer) => server.name,
+		(name) => `Two MCP servers are named "${name}".`,
+	),
+	Schema.isMaxLength(MAX_MCP_SERVERS),
+)
+
+export const RESERVED_TOOL_NAMES: ReadonlyArray<string> = [
+	"read",
+	"ls",
+	"find",
+	"grep",
+	"write",
+	"edit",
+	"delete",
+	"codemode",
+	"tool_search",
+]
+
+const McpToolsetInput = Schema.Struct({
+	...McpToolset.fields,
+	configs: Schema.optionalKey(
+		McpToolset.fields.configs.schema.check(
+			distinct(
+				(config: { readonly name: string }) => config.name,
+				(name) => `An mcp_toolset configures "${name}" twice.`,
+			),
+		),
+	),
+})
+
+const CustomToolInput = Schema.Struct({
+	...CustomTool.fields,
+	name: CustomToolName.check(
+		Schema.makeFilter(
+			(name) =>
+				(!RESERVED_TOOL_NAMES.includes(name) && !name.startsWith("mcp__")) ||
+				`The custom tool name "${name}" is taken by a built-in tool.`,
+		),
+	),
+	input_schema: Schema.JsonObject.check(
+		Schema.makeFilter(
+			(schema) => schema["type"] === "object" || 'An input_schema must have type "object".',
+		),
+		Schema.makeFilter(
+			(schema) =>
+				JSON.stringify(schema).length <= MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH ||
+				`An input_schema is at most ${MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH} characters of JSON.`,
+		),
+	),
+})
+
+const AgentToolsInput = Schema.Array(Schema.Union([McpToolsetInput, CustomToolInput])).check(
+	distinct(
+		(tool: AgentTool) => (tool.type === "mcp_toolset" ? tool.mcp_server_name : undefined),
+		(name) => `Two mcp_toolset entries name "${name}".`,
+	),
+	distinct(
+		(tool: AgentTool) => (tool.type === "custom" ? tool.name : undefined),
+		(name) => `Two custom tools are named "${name}".`,
+	),
+	Schema.makeFilter(
+		(tools: ReadonlyArray<AgentTool>) =>
+			tools.filter((tool) => tool.type === "custom").length <= MAX_CUSTOM_TOOLS ||
+			`An agent has at most ${MAX_CUSTOM_TOOLS} custom tools.`,
+	),
+	Schema.isMaxLength(MAX_MCP_SERVERS + MAX_CUSTOM_TOOLS),
+)
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -350,6 +482,18 @@ export const CreateAgentBody = Schema.Struct({
 	),
 	description: Schema.optionalKey(
 		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
+	),
+	mcp_servers: Schema.optionalKey(
+		McpServersInput.annotate({
+			description:
+				"MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>.",
+		}),
+	),
+	tools: Schema.optionalKey(
+		AgentToolsInput.annotate({
+			description:
+				"Permission policies for MCP servers' tools (mcp_toolset) and custom tools the caller's application runs (custom).",
+		}),
 	),
 })
 export type CreateAgentBody = typeof CreateAgentBody.Type
@@ -371,6 +515,12 @@ export const UpdateAgentBody = Schema.Struct({
 		Schema.NullOr(AgentDescription).annotate({
 			description: "Updated agent description",
 		}),
+	),
+	mcp_servers: Schema.optionalKey(
+		McpServersInput.annotate({ description: "Replacement list of the agent's MCP servers" }),
+	),
+	tools: Schema.optionalKey(
+		AgentToolsInput.annotate({ description: "Replacement list of the agent's tool declarations" }),
 	),
 })
 export type UpdateAgentBody = typeof UpdateAgentBody.Type
@@ -433,6 +583,7 @@ export const CreateArtifactVersionBody = Schema.Struct({
 	}),
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
+const MAX_SESSION_VAULTS = 20
 
 const AgentReference = Schema.Union([
 	ResourceId,
@@ -446,6 +597,25 @@ const CreateSessionCommonFields = {
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
 		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
+	),
+	vault_ids: Schema.optionalKey(
+		Schema.Array(VaultId).check(Schema.isMaxLength(MAX_SESSION_VAULTS)).annotate({
+			description:
+				"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+		}),
+	),
+	mcp_server_credentials: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				mcp_server_name: McpServerName,
+				credential_id: CredentialId,
+			}),
+		)
+			.check(Schema.isMaxLength(MAX_MCP_SERVERS))
+			.annotate({
+				description:
+					"Explicit credentials for named servers. An explicit binding wins over vault matching.",
+			}),
 	),
 }
 
@@ -561,14 +731,40 @@ export const SendSessionEventsBody = Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.interrupt"),
 			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("user.tool_confirmation"),
+				tool_use_id: ResourceId.annotate({
+					description: "The agent.mcp_tool_use event that waits for this answer",
+				}),
+				result: ToolConfirmationResult,
+				deny_message: Schema.optionalKey(
+					DenyMessage.annotate({ description: "Why the call was denied; the model reads it" }),
+				),
+			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("user.custom_tool_result"),
+				custom_tool_use_id: ResourceId.annotate({
+					description: "The agent.custom_tool_use event this result answers",
+				}),
+				content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }))
+					.check(Schema.isMaxLength(64))
+					.annotate({
+						description: `The result the model reads; at most ${MAX_CUSTOM_TOOL_RESULT_LENGTH} characters in all`,
+					}),
+				is_error: Schema.optionalKey(Schema.Boolean),
+			}),
 		]),
 	).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 
-export const AgentResource = Schema.Struct(
-	Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
-)
+export const AgentResource = Schema.Struct({
+	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
+	mcp_servers: McpServers.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+	tools: AgentTools.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+})
 export type Agent = typeof AgentResource.Type
 
 export type Environment = EnvironmentSnapshot
@@ -590,26 +786,6 @@ export const UpdateVaultBody = Schema.Struct({
 	),
 })
 export type UpdateVaultBody = typeof UpdateVaultBody.Type
-
-const MCP_SERVER_URL =
-	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
-
-export const canonicalMcpServerUrl = (input: string): string => {
-	const url = new URL(input)
-	url.hash = ""
-	return url.href
-}
-
-const McpServerUrlInput = Schema.String.check(
-	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
-	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
-	Schema.makeFilter((input) => URL.canParse(input) || "a URL that can be parsed"),
-).pipe(
-	Schema.decodeTo(McpServerUrl, {
-		decode: SchemaGetter.transform(canonicalMcpServerUrl),
-		encode: SchemaGetter.passthrough(),
-	}),
-)
 
 export const CreateCredentialBody = Schema.Struct({
 	auth: Schema.Union([
@@ -675,6 +851,9 @@ export type CredentialDeleted = typeof CredentialDeleted.Type
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
+	mcp_server_credentials: McpServerCredentials.pipe(
+		Schema.withDecodingDefaultKey(Effect.succeed([])),
+	),
 })
 export type Session = typeof SessionResource.Type
 
@@ -1027,9 +1206,26 @@ export const UserInterruptEventReceipt = Schema.Struct({
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
+export const UserToolConfirmationEventReceipt = Schema.Struct({
+	type: Schema.Literal("user.tool_confirmation"),
+	id: Schema.optionalKey(ClientEventId),
+	tool_use_id: ResourceId,
+	result: ToolConfirmationResult,
+})
+export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventReceipt.Type
+
+export const UserCustomToolResultEventReceipt = Schema.Struct({
+	type: Schema.Literal("user.custom_tool_result"),
+	id: Schema.optionalKey(ClientEventId),
+	custom_tool_use_id: ResourceId,
+})
+export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
+
 export const SendSessionEventReceipt = Schema.Union([
 	UserMessageEventReceipt,
 	UserInterruptEventReceipt,
+	UserToolConfirmationEventReceipt,
+	UserCustomToolResultEventReceipt,
 ]).annotate({ identifier: "SendSessionEventReceipt" })
 export type SendSessionEventReceipt = typeof SendSessionEventReceipt.Type
 
@@ -1058,6 +1254,18 @@ export const UserInterruptSessionEvent = wireSessionEvent(
 	"user.interrupt",
 	SessionEventFields["user.interrupt"],
 )
+export const UserToolConfirmationSessionEvent = wireSessionEvent(
+	"user.tool_confirmation",
+	SessionEventFields["user.tool_confirmation"],
+)
+export const UserCustomToolResultSessionEvent = wireSessionEvent(
+	"user.custom_tool_result",
+	SessionEventFields["user.custom_tool_result"],
+)
+export const AgentCustomToolUseSessionEvent = wireSessionEvent(
+	"agent.custom_tool_use",
+	SessionEventFields["agent.custom_tool_use"],
+)
 export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
 	...SessionEventFields["session.status_running"],
 	turn: Schema.optionalKey(PositiveInt),
@@ -1078,6 +1286,16 @@ export const AgentToolResultSessionEvent = wireSessionEvent(
 ).annotate({
 	description: `Records what a call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
 })
+export const AgentMcpToolUseSessionEvent = wireSessionEvent(
+	"agent.mcp_tool_use",
+	SessionEventFields["agent.mcp_tool_use"],
+).annotate({ description: `Records an MCP call the model made. ${TOOL_CALL_RECORD}` })
+export const AgentMcpToolResultSessionEvent = wireSessionEvent(
+	"agent.mcp_tool_result",
+	SessionEventFields["agent.mcp_tool_result"],
+).annotate({
+	description: `Records what an MCP call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
+})
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
@@ -1092,16 +1310,18 @@ export const SpanModelRequestEndEvent = wireSessionEvent(
 )
 export const SessionStatusIdleEvent = wireSessionEvent("session.status_idle", {
 	...SessionEventFields["session.status_idle"],
+	stop_reason: Schema.Union([StopReason, RequiresActionStopReason]),
 	turn: Schema.optionalKey(PositiveInt),
+	cancelled_event_ids: Schema.optionalKey(CancelledEventIds),
 })
 export const SessionErrorSessionEvent = wireSessionEvent(
 	"session.error",
 	SessionEventFields["session.error"],
 )
-export const SessionStatusTerminatedEvent = wireSessionEvent(
-	"session.status_terminated",
-	SessionEventFields["session.status_terminated"],
-)
+export const SessionStatusTerminatedEvent = wireSessionEvent("session.status_terminated", {
+	...SessionEventFields["session.status_terminated"],
+	cancelled_event_ids: Schema.optionalKey(CancelledEventIds),
+})
 export const SessionArchivedEvent = wireSessionEvent(
 	"session.archived",
 	SessionEventFields["session.archived"],
@@ -1110,10 +1330,15 @@ export const SessionArchivedEvent = wireSessionEvent(
 export const SessionEvent = Schema.Union([
 	UserMessageSessionEvent,
 	UserInterruptSessionEvent,
+	UserToolConfirmationSessionEvent,
+	UserCustomToolResultSessionEvent,
 	SessionStatusRunningEvent,
 	SpanModelRequestStartEvent,
 	AgentToolUseSessionEvent,
 	AgentToolResultSessionEvent,
+	AgentMcpToolUseSessionEvent,
+	AgentMcpToolResultSessionEvent,
+	AgentCustomToolUseSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,
