@@ -341,6 +341,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
+					const initialMessages = yield* Effect.forEach(payload.initial_events ?? [], (event, i) =>
+						Schema.decodeEffect(MessageText)(event.content.map(({ text }) => text).join("\n")).pipe(
+							Effect.catch(() =>
+								reject(
+									400,
+									`initial_events[${i}] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
+								),
+							),
+						),
+					)
+					const hasInitialMessages = initialMessages.length > 0
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
@@ -353,6 +364,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
+								...(hasInitialMessages ? { initial_messages: initialMessages } : {}),
 							}),
 						}
 					} else {
@@ -366,6 +378,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
+								...(hasInitialMessages ? { initial_messages: initialMessages } : {}),
 							}),
 							sendOptions,
 						)
@@ -395,11 +408,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					return {
 						id,
 						type: "session" as const,
-						status: "idle" as const,
+						status: hasInitialMessages ? ("running" as const) : ("idle" as const),
 						agent: { id: agentId, version: pinnedVersion },
 						environment_id: environmentId,
 						title,
-						turn: 0,
+						turn: hasInitialMessages ? 1 : 0,
 						usage: {
 							input_tokens: 0,
 							output_tokens: 0,

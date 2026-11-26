@@ -2585,6 +2585,74 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		)
 	})
 
+	it("creates a session and its initial events together and replays the same create", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const base = yield* createIdleSession(apiFetch)
+					const previous = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${base.id}`,
+						headers: AUTH_HEADERS,
+					})
+					const { agent } = (yield* Effect.promise(() => previous.json())) as {
+						agent: { id: string }
+					}
+					const create = (messages: ReadonlyArray<string>) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: { ...AUTH_HEADERS, "idempotency-key": "create-with-initial-events" },
+							body: {
+								agent: agent.id,
+								environment_id: base.environment_id,
+								initial_events: messages.map((text) => ({
+									type: "user.message",
+									content: [{ type: "text", text }],
+								})),
+							},
+						})
+
+					const created = yield* create(["first", "second"])
+					expect(created.status).toBe(201)
+					const session = (yield* Effect.promise(() => created.json())) as { id: string }
+					expect(session).toMatchObject({ status: "running", turn: 1 })
+
+					const replay = yield* create(["first", "second"])
+					expect(replay.status).toBe(201)
+					expect(yield* Effect.promise(() => replay.json())).toEqual(session)
+					const conflict = yield* create(["different"])
+					expect(conflict.status).toBe(409)
+
+					const listed = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const { data } = (yield* Effect.promise(() => listed.json())) as {
+						data: ReadonlyArray<{ type: string; content: ReadonlyArray<{ text: string }> }>
+					}
+					expect(data.slice(0, 3).map(({ type }) => type)).toEqual([
+						"user.message",
+						"session.status_running",
+						"user.message",
+					])
+					expect(
+						data
+							.filter(({ type }) => type === "user.message")
+							.map(({ content }) => content[0]?.text),
+					).toEqual(["first", "second"])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("enforces Idempotency-Key deduplication and payload conflict checks on session creates", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),

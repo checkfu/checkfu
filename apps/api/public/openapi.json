@@ -6923,6 +6923,40 @@
 												"maxLength": 256,
 												"description": "Agent ID (alternative to agent)"
 											},
+											"initial_events": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["user.message"]
+														},
+														"content": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["text"]
+																	},
+																	"text": {
+																		"type": "string"
+																	}
+																},
+																"required": ["type", "text"],
+																"additionalProperties": false
+															},
+															"minItems": 1
+														}
+													},
+													"required": ["type", "content"],
+													"additionalProperties": false
+												},
+												"maxItems": 8,
+												"description": "User messages to send when the session is created, in order."
+											},
 											"agent_version": {
 												"type": "integer",
 												"minimum": 1,
@@ -6991,6 +7025,40 @@
 												"maxLength": 256,
 												"description": "Agent ID (alternative to agent)"
 											},
+											"initial_events": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["user.message"]
+														},
+														"content": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["text"]
+																	},
+																	"text": {
+																		"type": "string"
+																	}
+																},
+																"required": ["type", "text"],
+																"additionalProperties": false
+															},
+															"minItems": 1
+														}
+													},
+													"required": ["type", "content"],
+													"additionalProperties": false
+												},
+												"maxItems": 8,
+												"description": "User messages to send when the session is created, in order."
+											},
 											"agent_version": {
 												"type": "integer",
 												"minimum": 1,
@@ -7037,6 +7105,11 @@
 				},
 				"x-checkfu-cli": {
 					"textOrObjectFields": ["agent"],
+					"repeatArrayField": {
+						"field": "initial_events",
+						"flag": "initial-event",
+						"description": "Initial user message as JSON, YAML, or @file (repeatable, up to 8)"
+					},
 					"examples": [
 						{
 							"command": "checkfu sessions create --agent agent_123 --environment-id env_456",

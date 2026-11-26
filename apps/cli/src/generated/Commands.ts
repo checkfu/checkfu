@@ -1822,6 +1822,16 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "initialEvents",
+			flagName: "initial-event",
+			wireName: "initial_events",
+			location: "body",
+			kind: "repeat-structured",
+			required: false,
+			min: 0,
+			max: 8,
+		},
+		{
 			propName: "agentVersion",
 			flagName: "agent-version",
 			wireName: "agent_version",
@@ -1870,6 +1880,11 @@ const sessionsCreateCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Agent ID (alternative to agent)"),
 			FlagOptional,
+		),
+		initialEvents: FlagString("initial-event").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("Initial user message as JSON, YAML, or @file (repeatable, up to 8)"),
+			FlagBetween(0, 8),
 		),
 		agentVersion: FlagInt("agent-version").pipe(
 			FlagWithMetavar("INT"),

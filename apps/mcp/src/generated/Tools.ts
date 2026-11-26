@@ -1885,6 +1885,40 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									maxLength: 256,
 									description: "Agent ID (alternative to agent)",
 								},
+								initial_events: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["user.message"],
+											},
+											content: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["text"],
+														},
+														text: {
+															type: "string",
+														},
+													},
+													required: ["type", "text"],
+													additionalProperties: false,
+												},
+												minItems: 1,
+											},
+										},
+										required: ["type", "content"],
+										additionalProperties: false,
+									},
+									maxItems: 8,
+									description: "User messages to send when the session is created, in order.",
+								},
 								agent_version: {
 									type: "integer",
 									minimum: 1,
@@ -1953,6 +1987,40 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									minLength: 1,
 									maxLength: 256,
 									description: "Agent ID (alternative to agent)",
+								},
+								initial_events: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["user.message"],
+											},
+											content: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["text"],
+														},
+														text: {
+															type: "string",
+														},
+													},
+													required: ["type", "text"],
+													additionalProperties: false,
+												},
+												minItems: 1,
+											},
+										},
+										required: ["type", "content"],
+										additionalProperties: false,
+									},
+									maxItems: 8,
+									description: "User messages to send when the session is created, in order.",
 								},
 								agent_version: {
 									type: "integer",

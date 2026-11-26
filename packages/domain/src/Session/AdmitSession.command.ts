@@ -6,8 +6,9 @@ import { AgentNotFound } from "../Agent/AgentNotFound.rejection.ts"
 import { EnvironmentArchivedError } from "../Environment/EnvironmentArchived.rejection.ts"
 import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejection.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
+import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
-import { MAX_IDENTIFIER_LENGTH, PositiveInt, SessionTitle } from "./SessionTypes.ts"
+import { MAX_IDENTIFIER_LENGTH, MessageText, PositiveInt, SessionTitle } from "./SessionTypes.ts"
 
 export const BoundedAgentId = Schema.String.check(
 	Schema.isMinLength(1),
@@ -35,8 +36,9 @@ export class AdmitSession extends Domain.Command("AdmitSession", {
 		agent_version: Schema.NullOr(PositiveInt),
 		environment_id: BoundedEnvironmentId,
 		title: Schema.NullOr(SessionTitle),
+		initial_messages: Schema.optionalKey(Schema.Array(MessageText).check(Schema.isMaxLength(8))),
 	},
-	events: [SessionCreated],
+	events: [SessionCreated, UserMessage, SessionStatusRunning],
 	rejects: [
 		AgentNotFound,
 		AgentArchivedError,

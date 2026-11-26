@@ -435,6 +435,11 @@ const AutomationAgentReference = AgentReference.annotate({
 })
 
 const CreateSessionCommonFields = {
+	initial_events: Schema.optionalKey(
+		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
+			.check(Schema.isMaxLength(8))
+			.annotate({ description: "User messages to send when the session is created, in order." }),
+	),
 	agent_version: Schema.optionalKey(
 		PositiveInt.annotate({ description: "Optional pinned agent version" }),
 	),
@@ -1321,6 +1326,11 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-mcp": { name: "sessions_createSession", destructive: false },
 				"x-checkfu-cli": {
 					textOrObjectFields: ["agent"],
+					repeatArrayField: {
+						field: "initial_events",
+						flag: "initial-event",
+						description: "Initial user message as JSON, YAML, or @file (repeatable, up to 8)",
+					},
 					examples: [
 						{
 							command: "checkfu sessions create --agent agent_123 --environment-id env_456",
@@ -1328,7 +1338,8 @@ const Sessions = HttpApiGroup.make("sessions")
 						},
 					],
 				},
-			}),
+			})
+			.middleware(EventBatchBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("list", "/v1/sessions", {
