@@ -1,4 +1,4 @@
-import * as Effect from "effect/Effect"
+import type * as Effect from "effect/Effect"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
@@ -55,14 +55,12 @@ import {
 	MIN_LINK_TTL_SECONDS,
 	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
-	McpServerCredentials,
 	McpServer,
 	McpServerName,
 	McpServerUrl,
-	McpServers,
-	AgentTools,
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
+	MAX_IDENTIFIER_LENGTH,
 	CancelledEventIds,
 	RequiresActionStopReason,
 	StopReason,
@@ -609,6 +607,11 @@ const AutomationAgentReference = AgentReference.annotate({
 
 export const CreateSessionBody = Schema.Struct({
 	agent: SessionAgentReference,
+	initial_events: Schema.optionalKey(
+		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
+			.check(Schema.isMaxLength(1))
+			.annotate({ description: "A text user message to send when the session is created." }),
+	),
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
 		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
@@ -704,6 +707,11 @@ export const ClientEventId = Schema.String.check(
 )
 export type ClientEventId = typeof ClientEventId.Type
 
+const ToolUseEventId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(2 * MAX_IDENTIFIER_LENGTH + "sevt__tool_".length),
+)
+
 export const SendSessionEventsBody = Schema.Struct({
 	events: Schema.Array(
 		Schema.Union([
@@ -721,7 +729,7 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.tool_confirmation"),
-				tool_use_id: ResourceId.annotate({
+				tool_use_id: ToolUseEventId.annotate({
 					description: "The agent.mcp_tool_use event that waits for this answer",
 				}),
 				result: ToolConfirmationResult,
@@ -732,7 +740,7 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.custom_tool_result"),
-				custom_tool_use_id: ResourceId.annotate({
+				custom_tool_use_id: ToolUseEventId.annotate({
 					description: "The agent.custom_tool_use event this result answers",
 				}),
 				content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }))
@@ -752,11 +760,9 @@ export const SendSessionEventsBody = Schema.Struct({
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 
-export const AgentResource = Schema.Struct({
-	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
-	mcp_servers: McpServers.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-	tools: AgentTools.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-})
+export const AgentResource = Schema.Struct(
+	Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
+)
 export type Agent = typeof AgentResource.Type
 
 export type Environment = EnvironmentSnapshot
@@ -842,10 +848,19 @@ export type CredentialDeleted = typeof CredentialDeleted.Type
 
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
-	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
-	mcp_server_credentials: McpServerCredentials.pipe(
-		Schema.withDecodingDefaultKey(Effect.succeed([])),
-	),
+	agent: Schema.Struct({
+		...Struct.pick(AgentResource.fields, [
+			"id",
+			"type",
+			"version",
+			"name",
+			"model",
+			"system",
+			"description",
+			"mcp_servers",
+			"tools",
+		]),
+	}).annotate({ description: "The pinned agent configuration used by the session." }),
 })
 export type Session = typeof SessionResource.Type
 
@@ -1187,7 +1202,8 @@ export const isPendingResource = <T extends { readonly type: string }>(
 
 export const UserMessageEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.message"),
-	id: Schema.optionalKey(ClientEventId),
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 	turn: PositiveInt,
 	queued: Schema.Boolean,
 	content: TextBlocks,
@@ -1196,22 +1212,28 @@ export type UserMessageEventReceipt = typeof UserMessageEventReceipt.Type
 
 export const UserInterruptEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.interrupt"),
-	id: Schema.optionalKey(ClientEventId),
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
 export const UserToolConfirmationEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.tool_confirmation"),
-	id: Schema.optionalKey(ClientEventId),
-	tool_use_id: ResourceId,
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	tool_use_id: ToolUseEventId,
 	result: ToolConfirmationResult,
+	deny_message: Schema.optionalKey(DenyMessage),
 })
 export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventReceipt.Type
 
 export const UserCustomToolResultEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.custom_tool_result"),
-	id: Schema.optionalKey(ClientEventId),
-	custom_tool_use_id: ResourceId,
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	custom_tool_use_id: ToolUseEventId,
+	content: Schema.optionalKey(TextBlocks),
+	is_error: Schema.optionalKey(Schema.Boolean),
 })
 export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
 
@@ -1237,6 +1259,7 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		seq: PositiveInt,
 		type: Schema.Literal(type),
 		created_at: Schema.DateTimeUtc,
+		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 		...fields,
 	})
 
@@ -1248,52 +1271,52 @@ export const UserInterruptSessionEvent = wireSessionEvent(
 	"user.interrupt",
 	SessionEventFields["user.interrupt"],
 ).annotate({ description: "An interrupt that stops the agent's current turn." })
-export const UserToolConfirmationSessionEvent = wireSessionEvent(
-	"user.tool_confirmation",
-	SessionEventFields["user.tool_confirmation"],
-)
-export const UserCustomToolResultSessionEvent = wireSessionEvent(
-	"user.custom_tool_result",
-	SessionEventFields["user.custom_tool_result"],
-)
-export const AgentCustomToolUseSessionEvent = wireSessionEvent(
-	"agent.custom_tool_use",
-	SessionEventFields["agent.custom_tool_use"],
-)
-export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
-	...SessionEventFields["session.status_running"],
-	turn: Schema.optionalKey(PositiveInt),
-}).annotate({ description: "The agent is processing a turn." })
+export const UserToolConfirmationSessionEvent = wireSessionEvent("user.tool_confirmation", {
+	...SessionEventFields["user.tool_confirmation"],
+	tool_use_id: ToolUseEventId,
+})
+export const UserCustomToolResultSessionEvent = wireSessionEvent("user.custom_tool_result", {
+	...SessionEventFields["user.custom_tool_result"],
+	custom_tool_use_id: ToolUseEventId,
+})
+export const AgentCustomToolUseSessionEvent = wireSessionEvent("agent.custom_tool_use", {
+	...SessionEventFields["agent.custom_tool_use"],
+	tool_use_id: ToolUseEventId,
+})
+export const SessionStatusRunningEvent = wireSessionEvent(
+	"session.status_running",
+	SessionEventFields["session.status_running"],
+).annotate({ description: "The agent is processing a turn." })
 export const SpanModelRequestStartEvent = wireSessionEvent(
 	"span.model_request_start",
 	SessionEventFields["span.model_request_start"],
 ).annotate({ description: "A model request started." })
 const TOOL_CALL_RECORD =
 	"A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
-export const AgentToolUseSessionEvent = wireSessionEvent(
-	"agent.tool_use",
-	SessionEventFields["agent.tool_use"],
-).annotate({ description: `The agent called a tool. ${TOOL_CALL_RECORD}` })
-export const AgentToolResultSessionEvent = wireSessionEvent(
-	"agent.tool_result",
-	SessionEventFields["agent.tool_result"],
-).annotate({
+export const AgentToolUseSessionEvent = wireSessionEvent("agent.tool_use", {
+	...SessionEventFields["agent.tool_use"],
+	tool_use_id: ToolUseEventId,
+}).annotate({ description: `The agent called a tool. ${TOOL_CALL_RECORD}` })
+export const AgentToolResultSessionEvent = wireSessionEvent("agent.tool_result", {
+	...SessionEventFields["agent.tool_result"],
+	tool_use_id: ToolUseEventId,
+}).annotate({
 	description: `The result of a tool call, including why the call was rejected when applicable. ${TOOL_CALL_RECORD}`,
 })
-export const AgentMcpToolUseSessionEvent = wireSessionEvent(
-	"agent.mcp_tool_use",
-	SessionEventFields["agent.mcp_tool_use"],
-).annotate({ description: `Records an MCP call the model made. ${TOOL_CALL_RECORD}` })
-export const AgentMcpToolResultSessionEvent = wireSessionEvent(
-	"agent.mcp_tool_result",
-	SessionEventFields["agent.mcp_tool_result"],
-).annotate({
+export const AgentMcpToolUseSessionEvent = wireSessionEvent("agent.mcp_tool_use", {
+	...SessionEventFields["agent.mcp_tool_use"],
+	tool_use_id: ToolUseEventId,
+}).annotate({ description: `Records an MCP call the model made. ${TOOL_CALL_RECORD}` })
+export const AgentMcpToolResultSessionEvent = wireSessionEvent("agent.mcp_tool_result", {
+	...SessionEventFields["agent.mcp_tool_result"],
+	tool_use_id: ToolUseEventId,
+}).annotate({
 	description: `Records what an MCP call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
 })
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
-).annotate({ description: "The agent's thinking text when the model returns it." })
+).annotate({ description: "The agent is thinking." })
 export const AgentMessageSessionEvent = wireSessionEvent(
 	"agent.message",
 	SessionEventFields["agent.message"],
@@ -1305,7 +1328,6 @@ export const SpanModelRequestEndEvent = wireSessionEvent(
 export const SessionStatusIdleEvent = wireSessionEvent("session.status_idle", {
 	...SessionEventFields["session.status_idle"],
 	stop_reason: Schema.Union([StopReason, RequiresActionStopReason]),
-	turn: Schema.optionalKey(PositiveInt),
 	cancelled_event_ids: Schema.optionalKey(CancelledEventIds),
 }).annotate({
 	description: "The agent stopped processing a turn. See stop_reason for why it stopped.",
@@ -1841,6 +1863,11 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-mcp": { name: "sessions_createSession", destructive: false },
 				"x-checkfu-cli": {
 					textOrObjectFields: ["agent"],
+					repeatArrayField: {
+						field: "initial_events",
+						flag: "initial-event",
+						description: "Initial user message as JSON, YAML, or @file",
+					},
 					examples: [
 						{
 							command: "checkfu sessions create --agent agent_123 --environment-id env_456",
@@ -1848,7 +1875,8 @@ const Sessions = HttpApiGroup.make("sessions")
 						},
 					],
 				},
-			}),
+			})
+			.middleware(EventBatchBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("list", "/v1/sessions", {

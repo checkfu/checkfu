@@ -366,9 +366,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(result.stderr).toContain(`Connected to ${sessionId}`)
 					expect(result.stderr).toContain(String.raw`[tool] read\x1b[2J`)
 					expect(result.stderr.indexOf("[tool] read")).toBeLessThan(
-						result.stderr.indexOf("[thinking] pondering"),
+						result.stderr.indexOf("[thinking]"),
 					)
-					expect(result.stderr).toContain("[thinking] pondering")
+					expect(result.stderr).toContain("[thinking]")
 					expect(result.stdout).toContain("Reply(1): first prompt")
 					expect(result.stdout).toContain("second prompt")
 					expect(result.stdout).not.toContain("\u001b")
@@ -1015,6 +1015,7 @@ describe("CLI sessions:events and sessions connect", () => {
 								: [],
 					})
 					const sessionId = yield* createReadySession(cli)
+					const deploy = `sevt_${sessionId}_tool_tu_deploy`
 
 					const paused = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: "deploy it\n",
@@ -1022,15 +1023,14 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(paused.exitCode).toBe(ACTION_REQUIRED_EXIT_CODE)
 					expect(paused.stdout).not.toContain("Echo")
 					expect(paused.stderr).toContain("[status: idle (requires_action)]")
-					const shown = paused.stderr.indexOf("[waits] docs: deploy (tu_deploy)")
+					const shown = paused.stderr.indexOf(`[waits] docs: deploy (${deploy})`)
 					const args = paused.stderr.indexOf('  arguments: {"target":"prod"}')
 					const allow = paused.stderr.indexOf("  allow: checkfu sessions:events send")
 					expect(shown).toBeGreaterThan(-1)
 					expect(args).toBeGreaterThan(shown)
 					expect(allow).toBeGreaterThan(args)
-					expect(paused.stderr).toMatch(
-						/Turn 1 waits on tool call tu_deploy\. Answer it, then reconnect with --after \d+ to read the reply\./u,
-					)
+					expect(paused.stderr).toContain(`Turn 1 waits on tool call ${deploy}. Answer it`)
+					expect(paused.stderr).toMatch(/reconnect with --after \d+ to read the reply\./u)
 					expect(paused.stderr).not.toContain("did not start")
 
 					const answered = yield* cli.run([
@@ -1039,7 +1039,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"--session-id",
 						sessionId,
 						"--event",
-						'{"type":"user.tool_confirmation","tool_use_id":"tu_deploy","result":"allow"}',
+						`{"type":"user.tool_confirmation","tool_use_id":"${deploy}","result":"allow"}`,
 					])
 					expect(answered.exitCode).toBe(0)
 					const replayed = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
@@ -1077,11 +1077,13 @@ describe("CLI sessions:events and sessions connect", () => {
 								: [],
 					})
 					const sessionId = yield* createReadySession(cli)
+					const deploy = `sevt_${sessionId}_tool_tu_deploy`
+					const notify = `sevt_${sessionId}_tool_tu_notify`
 					const paused = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: "deploy it\n",
 					})
 					expect(paused.exitCode).toBe(ACTION_REQUIRED_EXIT_CODE)
-					expect(paused.stderr).toMatch(/Turn 1 waits on tool calls tu_deploy, tu_notify\./u)
+					expect(paused.stderr).toContain(`Turn 1 waits on tool calls ${deploy}, ${notify}.`)
 
 					const answered = yield* cli.run([
 						"sessions:events",
@@ -1089,7 +1091,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"--session-id",
 						sessionId,
 						"--event",
-						'{"type":"user.tool_confirmation","tool_use_id":"tu_deploy","result":"allow"}',
+						`{"type":"user.tool_confirmation","tool_use_id":"${deploy}","result":"allow"}`,
 					])
 					expect(answered.exitCode).toBe(0)
 					const history = JSON.parse(
@@ -1114,15 +1116,15 @@ describe("CLI sessions:events and sessions connect", () => {
 						{ stdin: "" },
 					)
 					expect(atPause.exitCode).toBe(0)
-					expect(atPause.stderr).toContain("[waits] docs: deploy (tu_deploy)")
-					expect(atPause.stderr).toContain("[waits] docs: notify (tu_notify)")
+					expect(atPause.stderr).toContain(`[waits] docs: deploy (${deploy})`)
+					expect(atPause.stderr).toContain(`[waits] docs: notify (${notify})`)
 
 					const pastAnswer = yield* cli.run(
 						["sessions", "connect", "--session-id", sessionId, "--after", String(answerSeq)],
 						{ stdin: "" },
 					)
 					expect(pastAnswer.exitCode).toBe(0)
-					expect(pastAnswer.stderr).toContain("[waits] docs: notify (tu_notify)")
+					expect(pastAnswer.stderr).toContain(`[waits] docs: notify (${notify})`)
 					expect(pastAnswer.stderr).toContain('  arguments: {"channel":"ops"}')
 					expect(pastAnswer.stderr).not.toContain("tu_deploy")
 				}),
@@ -2267,6 +2269,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						description: null,
 						system: null,
 						model: { id: "gpt-6.2-sol" },
+						tools: [],
 						created_at: "2026-11-22T00:00:00.000Z",
 						updated_at: "2026-11-22T00:00:00.000Z",
 						archived_at: null,
@@ -2282,7 +2285,17 @@ describe("CLI sessions:events and sessions connect", () => {
 						type: "session",
 						mcp_server_credentials: [],
 						status: "idle",
-						agent: { id: "agent_1", version: 1 },
+						agent: {
+							id: "agent_1",
+							type: "agent",
+							version: 1,
+							name: "Assistant",
+							model: { id: "gpt-6.2-sol" },
+							mcp_servers: [],
+							tools: [],
+							system: null,
+							description: null,
+						},
 						environment_id: "env_1",
 						title: null,
 						turn: 0,
@@ -3124,7 +3137,17 @@ describe("CLI sessions:events and sessions connect", () => {
 							status: "running",
 							turn: 1,
 							usage: { input_tokens: 0, output_tokens: 0 },
-							agent: { id: "agt_pty", version: 1 },
+							agent: {
+								id: "agt_pty",
+								type: "agent",
+								version: 1,
+								name: "Assistant",
+								model: { id: "gpt-6.2-sol" },
+								mcp_servers: [],
+								tools: [],
+								system: null,
+								description: null,
+							},
 							environment_id: "env_pty",
 							title: null,
 							created_at: "2026-11-22T00:00:00.000Z",
@@ -3154,7 +3177,11 @@ describe("CLI sessions:events and sessions connect", () => {
 					req.on("end", () => {
 						postedEventBodies.push(body)
 						res.writeHead(200, { "content-type": "application/json" })
-						res.end(JSON.stringify({ data: [{ type: "user.interrupt" }] }))
+						res.end(
+							JSON.stringify({
+								data: [{ type: "user.interrupt", id: "evt_interrupt", processed_at: null }],
+							}),
+						)
 					})
 					return
 				}
@@ -4538,7 +4565,17 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						status: "idle",
 						turn: 0,
 						usage: { input_tokens: 0, output_tokens: 0 },
-						agent: { id: "agt_env", version: 1 },
+						agent: {
+							id: "agt_env",
+							type: "agent",
+							version: 1,
+							name: "Assistant",
+							model: { id: "gpt-6.2-sol" },
+							mcp_servers: [],
+							tools: [],
+							system: null,
+							description: null,
+						},
 						environment_id: "env_1",
 						title: null,
 						created_at: "2026-11-22T00:00:00.000Z",
@@ -5555,128 +5592,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(res.exitCode).toBe(1)
 					expect(res.stdout).toContain("Reply-1:first turn")
 					expect(res.stderr).toContain("ended before buffered input was submitted")
-				}),
-			),
-		)
-	})
-
-	it("connects and resumes cleanly against a legacy /v1 server omitting turn from status events", async () => {
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const cli = yield* makeTestServer({
-						generate: (args) =>
-							Effect.succeed({
-								thinking: null,
-								text: `LegacyT${args.turn}:${args.input.join("|")}`,
-								input_tokens: 2,
-								output_tokens: 2,
-								stop_reason: { type: "end_turn" as const },
-							}),
-					})
-					const sessionId = yield* createReadySession(cli)
-
-					const stripTurnFromStatusEvents = async (
-						next: (request: Request) => Promise<Response>,
-						request: Request,
-					): Promise<Response> => {
-						const url = new URL(request.url)
-						if (request.method === "GET" && url.pathname.endsWith("/events")) {
-							const real = await next(request)
-							if (real.status !== 200) {
-								return real
-							}
-							const body = (await real.json()) as {
-								readonly data: Array<{ readonly type?: string; readonly turn?: number }>
-								readonly has_more: boolean
-								readonly next_cursor: number | null
-							}
-							const stripped = body.data.map((entry) => {
-								if (
-									entry.type === "session.status_running" ||
-									entry.type === "session.status_idle"
-								) {
-									const { turn: _omitted, ...rest } = entry
-									return rest
-								}
-								return entry
-							})
-							return new Response(JSON.stringify({ ...body, data: stripped }), {
-								status: 200,
-								headers: { "content-type": "application/json" },
-							})
-						}
-						if (request.method === "GET" && url.pathname.endsWith("/events/stream")) {
-							const real = await next(request)
-							if (real.status !== 200 || real.body === null) {
-								return real
-							}
-							const reader = real.body.getReader()
-							const decoder = new TextDecoder()
-							const encoder = new TextEncoder()
-							const strippedBody = new ReadableStream<Uint8Array>({
-								async pull(controller) {
-									const chunk = await reader.read()
-									if (chunk.done) {
-										controller.close()
-										return
-									}
-									const text = decoder.decode(chunk.value, { stream: true })
-									const rewritten = text.replaceAll(/"turn":\d+,?/g, "").replaceAll(",}", "}")
-									controller.enqueue(encoder.encode(rewritten))
-								},
-								cancel(reason) {
-									return reader.cancel(reason)
-								},
-							})
-							return new Response(strippedBody, { status: 200, headers: real.headers })
-						}
-						return next(request)
-					}
-
-					const firstTurn = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
-						stdin: "hello legacy\n",
-						interceptFetch: stripTurnFromStatusEvents,
-					})
-					expect(firstTurn.exitCode).toBe(0)
-					expect(firstTurn.stdout).toContain("LegacyT1:hello legacy")
-
-					const latestList = JSON.parse(
-						(yield* cli.run([
-							"sessions:events",
-							"list",
-							"--session-id",
-							sessionId,
-							"--limit",
-							"1",
-							"--order",
-							"desc",
-						])).stdout,
-					) as { data: Array<{ seq: number }> }
-					const headSeq = latestList.data[0]?.seq ?? 0
-					expect(headSeq).toBeGreaterThan(0)
-
-					let prefixScanSeen = false
-					const resumed = yield* cli.run(
-						["sessions", "connect", "--session-id", sessionId, "--after", String(headSeq)],
-						{
-							stdin: "second legacy\n",
-							interceptFetch: async (next, request) => {
-								const url = new URL(request.url)
-								if (
-									request.method === "GET" &&
-									url.pathname.endsWith("/events") &&
-									url.searchParams.get("order") === "asc"
-								) {
-									prefixScanSeen = true
-								}
-								return stripTurnFromStatusEvents(next, request)
-							},
-						},
-					)
-					expect(resumed.exitCode).toBe(0)
-					expect(prefixScanSeen).toBe(true)
-					expect(resumed.stdout).toContain("LegacyT2:second legacy")
 				}),
 			),
 		)

@@ -2,21 +2,31 @@ import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import type { AgentVersionSnapshot } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomationSession.command"
+import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
-import { SessionId } from "@checkfu/domain/Session/Session.id"
+import {
+	SessionId,
+	sessionEventId,
+	submittedSessionEventId,
+	toolUseEventId,
+	toolUseIdFromEvent,
+} from "@checkfu/domain/Session/Session.id"
 import {
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_MESSAGE_TEXT_LENGTH,
 	MessageText,
+	ResourceId,
 	decodeToolUseIds,
 } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
@@ -77,6 +87,7 @@ import {
 	isPending,
 	orPending,
 	present,
+	randomId,
 	reject,
 	settled,
 	sha256Json,
@@ -110,6 +121,8 @@ const SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
 const IDEMPOTENCY_CONFLICT_MESSAGE =
 	"Event id or Idempotency-Key was already used for a different event."
 
+const rejectReusedSessionKey = () => reject(409, IDEMPOTENCY_KEY_REUSED)
+
 const sessionEventCommandId = (
 	digest: Digest.Digest["Service"],
 	sessionId: SessionId,
@@ -141,6 +154,11 @@ type PreparedEvent =
 			readonly is_error: boolean
 	  }
 
+const readToolUseId = (sessionId: string, eventId: string) =>
+	Schema.decodeEffect(ResourceId)(toolUseIdFromEvent(sessionId, eventId)).pipe(
+		Effect.catch(() => reject(400, "Invalid tool use ID.")),
+	)
+
 const eventFields = (item: PreparedEvent) => {
 	switch (item.type) {
 		case "user.interrupt":
@@ -171,15 +189,42 @@ const eventBatchFingerprint = (
 		})),
 	)
 
-const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnapshot) => ({
-	...snapshot,
-	agent: { id: agent_id, version: agent_version },
+const pinnedAgent = ({
+	agent_id,
+	type,
+	version,
+	name,
+	model,
+	system,
+	description,
+	mcp_servers,
+	tools,
+}: AgentVersionSnapshot) => ({
+	id: agent_id,
+	type,
+	version,
+	name,
+	model,
+	system,
+	description,
+	mcp_servers,
+	tools,
 })
+
+const serializeSession = (
+	{ agent_id: _agentId, agent_version: _agentVersion, ...snapshot }: SessionSnapshot,
+	agent: AgentVersionSnapshot,
+) => ({ ...snapshot, agent: pinnedAgent(agent) })
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
 
 export interface SessionEventEntry {
-	readonly envelope: { readonly seq: number; readonly at: DateTime.Utc }
+	readonly envelope: {
+		readonly id: string
+		readonly commandId: string
+		readonly seq: number
+		readonly at: DateTime.Utc
+	}
 	readonly event: DomainSessionEvent
 }
 
@@ -187,175 +232,81 @@ const encodeSessionEventJson = Schema.encodeSync(
 	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
 )
 
-const sessionEventEnvelope = <const T extends SessionEvent["type"]>(
-	entry: SessionEventEntry,
-	type: T,
-) => ({
-	id: `evt_${entry.envelope.seq}`,
-	seq: entry.envelope.seq,
-	type,
-	created_at: entry.envelope.at,
-})
+const isSessionEvent = Schema.is(SessionEvent)
 
-export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent => {
-	const { event } = entry
-	switch (event._tag) {
-		case "user.message":
-			return {
-				...sessionEventEnvelope(entry, "user.message"),
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-			}
+export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): SessionEvent => {
+	const { id, commandId, seq, at } = envelope
+	const { _tag: type, ...fields } = event
+	const input = type.startsWith("user.")
+	const eventId =
+		input && (commandId.startsWith("evt:") || commandId.startsWith("evt_"))
+			? submittedSessionEventId(id, commandId)
+			: sessionEventId(id, seq)
+	const base = { id: eventId, seq, created_at: at, processed_at: input ? null : at }
+
+	switch (type) {
 		case "user.interrupt":
-			return sessionEventEnvelope(entry, "user.interrupt")
-		case "user.tool_confirmation":
-			return {
-				...sessionEventEnvelope(entry, "user.tool_confirmation"),
-				tool_use_id: event.tool_use_id,
-				result: event.result,
-				...(event.deny_message === undefined ? {} : { deny_message: event.deny_message }),
-			}
-		case "user.custom_tool_result":
-			return {
-				...sessionEventEnvelope(entry, "user.custom_tool_result"),
-				custom_tool_use_id: event.custom_tool_use_id,
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-				...(event.is_error === undefined ? {} : { is_error: event.is_error }),
-			}
-		case "agent.custom_tool_use":
-			return {
-				...sessionEventEnvelope(entry, "agent.custom_tool_use"),
-				tool_use_id: event.tool_use_id,
-				name: event.name,
-				input: event.input,
-			}
-		case "session.status_running":
-			return {
-				...sessionEventEnvelope(entry, "session.status_running"),
-				turn: event.turn,
-			}
-		case "span.model_request_start":
-			return {
-				...sessionEventEnvelope(entry, "span.model_request_start"),
-				model_request_start_id: event.model_request_start_id,
-			}
-		case "agent.tool_use":
-			return {
-				...sessionEventEnvelope(entry, "agent.tool_use"),
-				tool_use_id: event.tool_use_id,
-				name: event.name,
-				input: event.input,
-				...(event.truncated === true ? { truncated: true as const } : {}),
-			}
-		case "agent.mcp_tool_use":
-			return {
-				...sessionEventEnvelope(entry, "agent.mcp_tool_use"),
-				tool_use_id: event.tool_use_id,
-				mcp_server_name: event.mcp_server_name,
-				name: event.name,
-				input: event.input,
-				...(event.truncated === true ? { truncated: true as const } : {}),
-				...(event.evaluated_permission === undefined
-					? {}
-					: { evaluated_permission: event.evaluated_permission }),
-			}
-		case "agent.mcp_tool_result":
-			return {
-				...sessionEventEnvelope(entry, "agent.mcp_tool_result"),
-				tool_use_id: event.tool_use_id,
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-				is_error: event.is_error,
-				...(event.truncated === true ? { truncated: true as const } : {}),
-				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
-			}
-		case "agent.tool_result":
-			return {
-				...sessionEventEnvelope(entry, "agent.tool_result"),
-				tool_use_id: event.tool_use_id,
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-				is_error: event.is_error,
-				...(event.truncated === true ? { truncated: true as const } : {}),
-				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
-			}
 		case "agent.thinking":
-			return {
-				...sessionEventEnvelope(entry, "agent.thinking"),
-				thinking: event.thinking,
-			}
-		case "agent.message":
-			return {
-				...sessionEventEnvelope(entry, "agent.message"),
-				content: event.content.map((block) => ({ type: block.type, text: block.text })),
-				...(event.truncated === true ? { truncated: true as const } : {}),
-			}
-		case "span.model_request_end":
-			return {
-				...sessionEventEnvelope(entry, "span.model_request_end"),
-				model_request_start_id: event.model_request_start_id,
-				model_usage: {
-					input_tokens: event.model_usage.input_tokens,
-					output_tokens: event.model_usage.output_tokens,
-				},
-				is_error: event.is_error,
-			}
+			return { ...base, type }
 		case "session.status_idle": {
-			const unanswered = decodeToolUseIds(event.event_ids ?? "[]")
+			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
+				toolUseEventId(id, call),
+			)
 			return event.stop_reason.type === "requires_action"
 				? {
-						...sessionEventEnvelope(entry, "session.status_idle"),
+						...base,
+						type,
 						stop_reason: { type: "requires_action", event_ids: unanswered },
 						turn: event.turn,
 					}
 				: {
-						...sessionEventEnvelope(entry, "session.status_idle"),
+						...base,
+						type,
 						stop_reason: { type: event.stop_reason.type },
 						turn: event.turn,
 						...(unanswered.length === 0 ? {} : { cancelled_event_ids: unanswered }),
 					}
 		}
-		case "session.error":
-			return {
-				...sessionEventEnvelope(entry, "session.error"),
-				error: {
-					type: event.error.type,
-					message: event.error.message,
-					retry_status: { type: event.error.retry_status.type },
-				},
-			}
 		case "session.status_terminated": {
-			const unanswered = decodeToolUseIds(event.event_ids ?? "[]")
+			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
+				toolUseEventId(id, call),
+			)
 			return {
-				...sessionEventEnvelope(entry, "session.status_terminated"),
+				...base,
+				type,
 				...(unanswered.length === 0 ? {} : { cancelled_event_ids: unanswered }),
 			}
 		}
 		case "session.archived":
-			return sessionEventEnvelope(entry, "session.archived")
+			return { ...base, type }
 		default: {
-			const exhaustive: never = event
-			throw new Error(`Unhandled session event: ${JSON.stringify(exhaustive)}`)
+			const payload = { ...base, type, ...fields }
+			if ("tool_use_id" in payload) {
+				payload.tool_use_id = toolUseEventId(id, payload.tool_use_id)
+				if (
+					type === "agent.tool_use" ||
+					type === "agent.mcp_tool_use" ||
+					type === "agent.custom_tool_use"
+				) {
+					payload.id = payload.tool_use_id
+				}
+			}
+			if ("custom_tool_use_id" in payload) {
+				payload.custom_tool_use_id = toolUseEventId(id, payload.custom_tool_use_id)
+			}
+			if (isSessionEvent(payload)) {
+				return payload
+			}
+			throw new Error(`Invalid payload for session event ${type}.`)
 		}
 	}
 }
-
-const created = (snapshot: SessionSnapshot) => ({
-	id: snapshot.id,
-	type: "session" as const,
-	status: "idle" as const,
-	agent: { id: snapshot.agent_id, version: snapshot.agent_version },
-	environment_id: snapshot.environment_id,
-	title: snapshot.title,
-	turn: 0,
-	usage: { input_tokens: 0, output_tokens: 0 },
-	mcp_server_credentials: snapshot.mcp_server_credentials,
-	created_at: snapshot.created_at,
-	updated_at: snapshot.created_at,
-	archived_at: null,
-})
 
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const startSession = yield* OpenAutomationSessionDecision
 		const confirmTool = yield* ConfirmToolDecision
 		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
 		const sessions = yield* Session
@@ -479,11 +430,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
 				const lookupKey = agentVersionLookupKey(agentId, version)
-				if (Option.isSome(yield* agentVersionsByNumber.get(lookupKey))) {
-					return true
+				const found = yield* agentVersionsByNumber.get(lookupKey)
+				if (Option.isSome(found) && found.value !== null) {
+					return found.value
 				}
-				const found = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
-				return found !== null
+				const pinned = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
+				return pinned === null
+					? yield* reject(503, `Agent ${agentId} version ${version} projection is not ready.`)
+					: pinned
 			})
 
 		const existing = (id: SessionId) =>
@@ -508,7 +462,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return projected
 			})
 
-		const pinnedVersionReady = (agentId: string, version: number) =>
+		const resolvePinnedAgent = (agentId: string, version: number) =>
 			Effect.gen(function* () {
 				const timeout = Duration.min(
 					Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
@@ -517,13 +471,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return yield* waitForPinnedAgentVersion(agentId, version, timeout)
 			})
 
-		const retrieve = (id: SessionId, ready: typeof pinnedVersionReady = pinnedVersionReady) =>
+		const retrieve = (id: SessionId, resolve: typeof resolvePinnedAgent = resolvePinnedAgent) =>
 			Effect.gen(function* () {
 				const snapshot = yield* existing(id)
-				if (!(yield* ready(snapshot.agent_id, snapshot.agent_version))) {
-					return yield* reject(503, `Session ${id} pinned agent version projection is not ready.`)
-				}
-				return serializeSession(snapshot)
+				const agent = yield* resolve(snapshot.agent_id, snapshot.agent_version)
+				return serializeSession(snapshot, agent)
 			})
 
 		return handlers
@@ -544,6 +496,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = typeof agent === "string" ? null : (agent.version ?? null)
 					const title = payload.title ?? null
+					const first = payload.initial_events?.[0]
+					const initialMessage =
+						first === undefined
+							? undefined
+							: yield* Schema.decodeEffect(MessageText)(
+									first.content.map(({ text }) => text).join("\n"),
+								).pipe(
+									Effect.catch(() =>
+										reject(
+											400,
+											`initial_events[0] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
+										),
+									),
+								)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
 						prefix: "sess",
@@ -553,6 +519,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
+							...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
 							vault_ids: payload.vault_ids,
 							mcp_server_credentials: payload.mcp_server_credentials,
 						},
@@ -563,22 +530,30 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
 							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
 							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
-					const receipt = yield* admitSession
-						.send(
-							new AdmitSession({
-								session_id: id,
-								agent_id: agentId,
-								agent_version: given.agent_version,
-								environment_id: environmentId,
-								title,
-								mcp_server_credentials: given.text,
-							}),
-							sendOptions,
-						)
-						.pipe(
-							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
-						)
-					const pinnedVersion = receipt.reply.agent_version
+					const admission = {
+						session_id: id,
+						agent_id: agentId,
+						agent_version: given.agent_version,
+						mcp_server_credentials: given.text,
+						environment_id: environmentId,
+						title,
+					}
+					const receipt =
+						initialMessage === undefined
+							? yield* admitSession
+									.send(new AdmitSession(admission), sendOptions)
+									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+							: yield* startSession
+									.send(
+										new OpenAutomationSession({ ...admission, text: initialMessage }),
+										sendOptions,
+									)
+									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+					const created = receipt.events.find((event) => event._tag === "session.created")
+					if (created?._tag !== "session.created") {
+						return yield* reject(500, "Failed to load created session.")
+					}
+					const pinnedVersion = created.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
 						agentId,
 						pinnedVersion,
@@ -587,9 +562,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(pinnedReady)) {
 						return pinnedReady
 					}
-					if (!pinnedReady) {
-						return { id, type: "session" as const, pending: true as const }
-					}
 					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
 					const result = yield* sessionViews
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
@@ -597,7 +569,15 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(result)) {
 						return result
 					}
-					return created(yield* present(result, 500, "Failed to load created session."))
+					const snapshot = yield* present(result, 500, "Failed to load created session.")
+					return {
+						...serializeSession(snapshot, pinnedReady),
+						status: initialMessage === undefined ? ("idle" as const) : ("running" as const),
+						turn: initialMessage === undefined ? 0 : 1,
+						usage: { input_tokens: 0, output_tokens: 0 },
+						updated_at: snapshot.created_at,
+						archived_at: null,
+					}
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
@@ -605,7 +585,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const pinned = yield* Cache.make({
 						capacity: LIST_PAGE_MAX,
 						lookup: (key: string) =>
-							pinnedVersionReady(
+							resolvePinnedAgent(
 								key.slice(key.indexOf(":") + 1),
 								Number(key.slice(0, key.indexOf(":"))),
 							),
@@ -628,7 +608,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(result)) {
 						return result
 					}
-					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
+					const snapshot = yield* present(result, 404, `Session ${id} not found.`)
+					const agent = yield* resolvePinnedAgent(snapshot.agent_id, snapshot.agent_version).pipe(
+						orPending(id, "session"),
+					)
+					return isPending(agent) ? agent : serializeSession(snapshot, agent)
 				}).pipe(handled),
 			)
 			.handle("getOutputs", ({ params }) =>
@@ -655,7 +639,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const prepared: Array<
 						PreparedEvent & {
 							readonly eventId: ClientEventId | undefined
-							readonly commandId: string | undefined
+							readonly commandId: string
 						}
 					> = []
 					for (const [index, event] of payload.events.entries()) {
@@ -674,7 +658,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 											key: idempotencyKey,
 											index,
 										})
-									: undefined
+									: yield* randomId(random, "evt")
 						if (event.type === "user.interrupt") {
 							prepared.push({ type: "user.interrupt", eventId: event.id, commandId })
 							continue
@@ -690,7 +674,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								type: "user.tool_confirmation",
 								eventId: event.id,
 								commandId,
-								tool_use_id: event.tool_use_id,
+								tool_use_id: yield* readToolUseId(id, event.tool_use_id),
 								result: event.result,
 								deny_message: event.deny_message ?? "",
 							})
@@ -708,7 +692,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								type: "user.custom_tool_result",
 								eventId: event.id,
 								commandId,
-								custom_tool_use_id: event.custom_tool_use_id,
+								custom_tool_use_id: yield* readToolUseId(id, event.custom_tool_use_id),
 								text: resultText,
 								is_error: event.is_error === true,
 							})
@@ -744,10 +728,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 
 					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
-						const sendOptions =
-							item.commandId === undefined ? undefined : { commandId: item.commandId }
+						const sendOptions = { commandId: item.commandId }
+						const eventId = submittedSessionEventId(id, item.commandId)
 						const claimed =
-							sendOptions === undefined
+							item.eventId === undefined && idempotencyKey === undefined
 								? Effect.void
 								: Effect.gen(function* () {
 										const fingerprint = yield* eventBatchFingerprint(digest, [item])
@@ -783,9 +767,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 											),
 											Effect.as({
 												type: "user.tool_confirmation" as const,
-												...(item.eventId === undefined ? {} : { id: item.eventId }),
-												tool_use_id: item.tool_use_id,
+												id: eventId,
+												processed_at: null,
+												tool_use_id: toolUseEventId(id, item.tool_use_id),
 												result: item.result,
+												...(item.deny_message === "" ? {} : { deny_message: item.deny_message }),
 											}),
 										),
 									)
@@ -806,8 +792,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 												),
 												Effect.as({
 													type: "user.custom_tool_result" as const,
-													...(item.eventId === undefined ? {} : { id: item.eventId }),
-													custom_tool_use_id: item.custom_tool_use_id,
+													id: eventId,
+													processed_at: null,
+													custom_tool_use_id: toolUseEventId(id, item.custom_tool_use_id),
+													content: [{ type: "text" as const, text: item.text }],
+													...(item.is_error ? { is_error: true } : {}),
 												}),
 											),
 										)
@@ -818,7 +807,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 														receipt.events.some((event) => event._tag === "user.interrupt")
 															? Effect.succeed({
 																	type: "user.interrupt" as const,
-																	...(item.eventId === undefined ? {} : { id: item.eventId }),
+																	id: eventId,
+																	processed_at: null,
 																})
 															: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
 													),
@@ -851,7 +841,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 															)
 															return Effect.succeed({
 																type: "user.message" as const,
-																...(item.eventId === undefined ? {} : { id: item.eventId }),
+																id: eventId,
+																processed_at: null,
 																turn: receipt.reply.turn,
 																queued,
 																content: [{ type: "text" as const, text: item.text }],
