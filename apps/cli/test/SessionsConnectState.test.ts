@@ -142,22 +142,54 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 					{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
 					{ _tag: "begin_send", label: "m2" },
 					{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
-					{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
-					{ _tag: "event", event: { seq: 5, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 7, type: "session.status_idle", stopReason: "end_turn" } },
+					{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
+					{
+						_tag: "event",
+						event: {
+							seq: 4,
+							type: "session.status_idle",
+							turn: 1,
+							stop_reason: { type: "end_turn" },
+						},
+					},
+					{ _tag: "event", event: { seq: 5, type: "session.status_running", turn: 2 } },
+					{
+						_tag: "event",
+						event: {
+							seq: 7,
+							type: "session.status_idle",
+							turn: 2,
+							stop_reason: { type: "end_turn" },
+						},
+					},
 				],
 			},
 			{
 				name: "SSE running arrives before receipt 1, and SSE idle arrives before receipt 2",
 				steps: [
 					{ _tag: "begin_send", label: "m1" },
-					{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
+					{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
 					{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
-					{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
+					{
+						_tag: "event",
+						event: {
+							seq: 4,
+							type: "session.status_idle",
+							turn: 1,
+							stop_reason: { type: "end_turn" },
+						},
+					},
 					{ _tag: "begin_send", label: "m2" },
-					{ _tag: "event", event: { seq: 5, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 7, type: "session.status_idle", stopReason: "end_turn" } },
+					{ _tag: "event", event: { seq: 5, type: "session.status_running", turn: 2 } },
+					{
+						_tag: "event",
+						event: {
+							seq: 7,
+							type: "session.status_idle",
+							turn: 2,
+							stop_reason: { type: "end_turn" },
+						},
+					},
 					{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: false } },
 				],
 			},
@@ -168,12 +200,36 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 					{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
 					{ _tag: "begin_send", label: "m2" },
 					{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
-					{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
-					{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
-					{ _tag: "event", event: { seq: 5, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 7, type: "session.status_idle", stopReason: "end_turn" } },
+					{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
+					{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
+					{
+						_tag: "event",
+						event: {
+							seq: 4,
+							type: "session.status_idle",
+							turn: 1,
+							stop_reason: { type: "end_turn" },
+						},
+					},
+					{
+						_tag: "event",
+						event: {
+							seq: 4,
+							type: "session.status_idle",
+							turn: 1,
+							stop_reason: { type: "end_turn" },
+						},
+					},
+					{ _tag: "event", event: { seq: 5, type: "session.status_running", turn: 2 } },
+					{
+						_tag: "event",
+						event: {
+							seq: 7,
+							type: "session.status_idle",
+							turn: 2,
+							stop_reason: { type: "end_turn" },
+						},
+					},
 				],
 			},
 		]
@@ -206,9 +262,12 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
 			{ _tag: "begin_send", label: "m2" },
 			{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
-			{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
-			{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
-			{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
+			{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
+			{ _tag: "event", event: { seq: 2, type: "session.status_running", turn: 1 } },
+			{
+				_tag: "event",
+				event: { seq: 4, type: "session.status_idle", turn: 1, stop_reason: { type: "end_turn" } },
+			},
 		])
 		expect(duplicates).toEqual([2])
 		expect(wokeAtEvents).toEqual([])
@@ -252,9 +311,17 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 				name: "delayed receipt queued:true arriving AFTER SSE idle(refusal) for turn 1 -> stays idle",
 				initial: ttyIdleInitial(0),
 				steps: [
-					{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+					{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 					{ _tag: "begin_send", label: "m2" },
-					{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "refusal" } },
+					{
+						_tag: "event",
+						event: {
+							seq: 2,
+							type: "session.status_idle",
+							turn: 1,
+							stop_reason: { type: "refusal" },
+						},
+					},
 					{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
 				],
 				expectInterrupt: false,
@@ -266,8 +333,16 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 				initial: ttyIdleInitial(0),
 				steps: [
 					{ _tag: "begin_send", label: "m1" },
-					{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
-					{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "end_turn" } },
+					{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
+					{
+						_tag: "event",
+						event: {
+							seq: 2,
+							type: "session.status_idle",
+							turn: 1,
+							stop_reason: { type: "end_turn" },
+						},
+					},
 					{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
 				],
 				expectInterrupt: false,
@@ -306,14 +381,22 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		}
 
 		const { state: turn1Running } = runSequence(ttyIdleInitial(0), [
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 		])
 		expect(shouldInterruptOnCtrlC(turn1Running, undefined)).toBe(true)
 		expect(shouldInterruptOnCtrlC(turn1Running, turn1Running.liveTurn)).toBe(false)
 
 		const { state: turn2Running } = runSequence(turn1Running, [
-			{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "interrupted" } },
-			{ _tag: "event", event: { seq: 3, type: "session.status_running" } },
+			{
+				_tag: "event",
+				event: {
+					seq: 2,
+					type: "session.status_idle",
+					turn: 1,
+					stop_reason: { type: "interrupted" },
+				},
+			},
+			{ _tag: "event", event: { seq: 3, type: "session.status_running", turn: 2 } },
 		])
 		expect(turn2Running.liveTurn).toBe(2)
 		expect(shouldInterruptOnCtrlC(turn2Running, turn1Running.liveTurn)).toBe(true)
@@ -324,10 +407,13 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: afterRefusal, wokeAtEvents } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{ _tag: "begin_send", label: "m2" },
 			{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
-			{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "refusal" } },
+			{
+				_tag: "event",
+				event: { seq: 2, type: "session.status_idle", turn: 1, stop_reason: { type: "refusal" } },
+			},
 		])
 		expect(wokeAtEvents).toEqual([2])
 		expect(evaluatePipedSettlement(afterRefusal)).toBe("check_halted_queue")
@@ -359,6 +445,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const turn2RunningTransition = applySessionEvent(afterRefusal, {
 			seq: 3,
 			type: "session.status_running",
+			turn: 2,
 		})
 		expect(turn2RunningTransition.shouldWakeWaiter).toBe(true)
 		expect(
@@ -380,10 +467,13 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: startedInsteadOfQueued } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{ _tag: "begin_send", label: "m2" },
 			{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: false } },
-			{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "refusal" } },
+			{
+				_tag: "event",
+				event: { seq: 2, type: "session.status_idle", turn: 1, stop_reason: { type: "refusal" } },
+			},
 		])
 		expect(evaluatePipedSettlement(startedInsteadOfQueued)).toBe("wait")
 	})
@@ -391,18 +481,27 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 	it("attributes retries_exhausted and terminal vs retrying errors accurately regardless of receipt order", () => {
 		const { state: failedBeforeReceipt } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{
 				_tag: "event",
 				event: {
 					seq: 2,
 					type: "session.error",
-					error: { message: "model_error: overloaded", retryStatus: "exhausted" },
+					error: {
+						type: "model_error",
+						message: "overloaded",
+						retry_status: { type: "exhausted" },
+					},
 				},
 			},
 			{
 				_tag: "event",
-				event: { seq: 3, type: "session.status_idle", stopReason: "retries_exhausted" },
+				event: {
+					seq: 3,
+					type: "session.status_idle",
+					turn: 1,
+					stop_reason: { type: "retries_exhausted" },
+				},
 			},
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
 		])
@@ -414,13 +513,17 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: archivedAfterRetrying } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{
 				_tag: "event",
 				event: {
 					seq: 2,
 					type: "session.error",
-					error: { message: "model_error: temporary 503", retryStatus: "retrying" },
+					error: {
+						type: "model_error",
+						message: "temporary 503",
+						retry_status: { type: "retrying" },
+					},
 				},
 			},
 			{ _tag: "event", event: { seq: 3, type: "session.status_terminated" } },
@@ -433,13 +536,13 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: terminatedAfterTerminalErr } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{
 				_tag: "event",
 				event: {
 					seq: 2,
 					type: "session.error",
-					error: { message: "model_error: fatal auth", retryStatus: "terminal" },
+					error: { type: "model_error", message: "fatal auth", retry_status: { type: "terminal" } },
 				},
 			},
 			{ _tag: "event", event: { seq: 3, type: "session.status_terminated" } },
@@ -451,10 +554,15 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 
 		const { state: cancelled } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{
 				_tag: "event",
-				event: { seq: 2, type: "session.status_idle", stopReason: "retries_exhausted" },
+				event: {
+					seq: 2,
+					type: "session.status_idle",
+					turn: 1,
+					stop_reason: { type: "retries_exhausted" },
+				},
 			},
 			{ _tag: "cancel_send" },
 		])
@@ -467,12 +575,18 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: completedAndArchived } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
-			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running", turn: 1 } },
 			{ _tag: "begin_send", label: "m2" },
 			{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
-			{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "refusal" } },
-			{ _tag: "event", event: { seq: 3, type: "session.status_running" } },
-			{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
+			{
+				_tag: "event",
+				event: { seq: 2, type: "session.status_idle", turn: 1, stop_reason: { type: "refusal" } },
+			},
+			{ _tag: "event", event: { seq: 3, type: "session.status_running", turn: 2 } },
+			{
+				_tag: "event",
+				event: { seq: 4, type: "session.status_idle", turn: 2, stop_reason: { type: "end_turn" } },
+			},
 			{ _tag: "event", event: { seq: 5, type: "session.archived" } },
 			{ _tag: "mark_ended" },
 		])
@@ -490,7 +604,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		expect(resolveStreamEndedError(pipedIdleInitial())).toBe("Event stream ended unexpectedly.")
 	})
 
-	it("uses wire turn directly on session.status_running and session.status_idle when present", () => {
+	it("uses wire turn directly on session.status_running and session.status_idle on reconnect", () => {
 		const { state: resumedRunning } = runSequence(ttyIdleInitial(0), [
 			{ _tag: "event", event: { seq: 15, type: "session.status_running", turn: 4 } },
 		])
@@ -501,7 +615,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const { state: resumedIdle } = runSequence(ttyIdleInitial(0), [
 			{
 				_tag: "event",
-				event: { seq: 16, type: "session.status_idle", turn: 4, stopReason: "end_turn" },
+				event: { seq: 16, type: "session.status_idle", turn: 4, stop_reason: { type: "end_turn" } },
 			},
 		])
 		expect(observedTurnOf(resumedIdle)).toBe(4)
@@ -515,13 +629,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			seq: 12,
 			type: "session.status_idle",
 			turn: 1,
-			stopReason: "requires_action",
-			source: {
-				type: "session.status_idle",
-				turn: 1,
-				seq: 12,
-				stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
-			},
+			stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
 		}
 		const paused = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
@@ -558,12 +666,12 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const ended = runSequence(answered.state, [
 			{
 				_tag: "event",
-				event: { seq: 16, type: "session.status_idle", turn: 1, stopReason: "end_turn" },
+				event: { seq: 16, type: "session.status_idle", turn: 1, stop_reason: { type: "end_turn" } },
 			},
 			{ _tag: "event", event: { seq: 17, type: "session.status_running", turn: 2 } },
 			{
 				_tag: "event",
-				event: { seq: 19, type: "session.status_idle", turn: 2, stopReason: "end_turn" },
+				event: { seq: 19, type: "session.status_idle", turn: 2, stop_reason: { type: "end_turn" } },
 			},
 		])
 		expect(settledTurnOf(ended.state)).toBe(2)
@@ -573,7 +681,12 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		const interrupted = runSequence(paused.state, [
 			{
 				_tag: "event",
-				event: { seq: 14, type: "session.status_idle", turn: 1, stopReason: "interrupted" },
+				event: {
+					seq: 14,
+					type: "session.status_idle",
+					turn: 1,
+					stop_reason: { type: "interrupted" },
+				},
 			},
 		])
 		expect(awaitingActionOf(interrupted.state)).toBeUndefined()
@@ -588,13 +701,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 					seq: 5,
 					type: "session.status_idle",
 					turn: 3,
-					stopReason: "requires_action",
-					source: {
-						type: "session.status_idle",
-						turn: 3,
-						seq: 5,
-						stop_reason: { type: "requires_action", event_ids: ["tu_9"] },
-					},
+					stop_reason: { type: "requires_action", event_ids: ["tu_9"] },
 				},
 			},
 		])
@@ -605,7 +712,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
 			{
 				_tag: "event",
-				event: { seq: 3, type: "session.status_idle", turn: 1, stopReason: "end_turn" },
+				event: { seq: 3, type: "session.status_idle", turn: 1, stop_reason: { type: "end_turn" } },
 			},
 			{
 				_tag: "event",
@@ -613,13 +720,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 					seq: 8,
 					type: "session.status_idle",
 					turn: 2,
-					stopReason: "requires_action",
-					source: {
-						type: "session.status_idle",
-						turn: 2,
-						seq: 8,
-						stop_reason: { type: "requires_action", event_ids: ["tu_2"] },
-					},
+					stop_reason: { type: "requires_action", event_ids: ["tu_2"] },
 				},
 			},
 		])
@@ -627,9 +728,9 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 	})
 
 	it("subtracts each answer from a pause, and waits on one whose calls are all answered", () => {
-		const source = (event: NonNullable<ConnectSessionEvent["source"]>, seq: number) => ({
+		const source = (event: ConnectSessionEvent, seq: number) => ({
 			_tag: "event" as const,
-			event: { seq, type: event.type, source: event },
+			event: { ...event, seq },
 		})
 		const paused = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
@@ -653,13 +754,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 					seq: 5,
 					type: "session.status_idle",
 					turn: 1,
-					stopReason: "requires_action",
-					source: {
-						type: "session.status_idle",
-						turn: 1,
-						seq: 5,
-						stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
-					},
+					stop_reason: { type: "requires_action", event_ids: ["tu_1", "tu_2"] },
 				},
 			},
 			source({ type: "user.tool_confirmation", tool_use_id: "tu_1", result: "allow" }, 6),
