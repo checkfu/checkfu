@@ -509,11 +509,62 @@ export const GitHubRepositoryResource = Schema.Struct({
 })
 export type GitHubRepositoryResource = typeof GitHubRepositoryResource.Type
 
-export const SessionMount = GitHubRepositoryResource.mapFields((fields) => ({
+export const MAX_SESSION_MEMORY_STORES = 8
+export const MAX_MEMORY_INSTRUCTIONS_LENGTH = 4096
+export const MEMORY_MOUNT_ROOT = "/mnt/memory"
+
+export const MemoryAccess = Schema.Literals(["read_write", "read_only"])
+export type MemoryAccess = typeof MemoryAccess.Type
+
+export const MemoryInstructions = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_INSTRUCTIONS_LENGTH),
+)
+
+export const MemoryMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/memory\/[^/]+$/u, {
+		expected: `a directory directly inside ${MEMORY_MOUNT_ROOT}`,
+	}),
+)
+
+export const memoryMountPath = (name: string, memoryStoreId: string): string => {
+	const slug = name
+		.toLowerCase()
+		.replaceAll(/[^\p{L}\p{N}]+/gu, "-")
+		.replaceAll(/^-+|-+$/gu, "")
+	return `${MEMORY_MOUNT_ROOT}/${slug.length === 0 ? memoryStoreId : slug}`
+}
+
+export const MemoryStoreResource = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("memory_store"),
+	memory_store_id: Schema.String.check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+	),
+	access: MemoryAccess,
+	instructions: Schema.NullOr(MemoryInstructions),
+	name: Schema.String,
+	description: Schema.String,
+	mount_path: MemoryMountPath,
+})
+export type MemoryStoreResource = typeof MemoryStoreResource.Type
+
+const GitHubRepositoryMount = GitHubRepositoryResource.mapFields((fields) => ({
 	...fields,
 	requires_token: Schema.optionalKey(Schema.Literal(true)),
 }))
+export const SessionMount = Schema.Union([GitHubRepositoryMount, MemoryStoreResource])
 export type SessionMount = typeof SessionMount.Type
+
+export const repositoriesOf = (
+	resources: ReadonlyArray<SessionMount>,
+): ReadonlyArray<typeof GitHubRepositoryMount.Type> =>
+	resources.filter((resource) => resource.type === "github_repository")
+
+export const memoryStoresOf = (
+	resources: ReadonlyArray<SessionMount>,
+): ReadonlyArray<MemoryStoreResource> =>
+	resources.filter((resource) => resource.type === "memory_store")
 
 export const mountsOverlap = (a: string, b: string): boolean =>
 	a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
@@ -528,11 +579,26 @@ const haveDisjointMounts = (resources: ReadonlyArray<SessionMount>): boolean =>
 const haveDistinctIds = (resources: ReadonlyArray<SessionMount>): boolean =>
 	new Set(resources.map((resource) => resource.id)).size === resources.length
 
-const mountEachRepositoryOnce = (resources: ReadonlyArray<SessionMount>): boolean =>
-	new Set(resources.map((resource) => resource.url.toLowerCase())).size === resources.length
+const mountEachRepositoryOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
+	const urls = repositoriesOf(resources).map((resource) => resource.url.toLowerCase())
+	return new Set(urls).size === urls.length
+}
+
+const areWithinLimits = (resources: ReadonlyArray<SessionMount>): boolean =>
+	repositoriesOf(resources).length <= MAX_SESSION_REPOSITORIES &&
+	memoryStoresOf(resources).length <= MAX_SESSION_MEMORY_STORES
+
+const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
+	const stores = memoryStoresOf(resources).map((resource) => resource.memory_store_id)
+	return new Set(stores).size === stores.length
+}
 
 export const SessionMounts = Schema.Array(SessionMount).check(
-	Schema.isMaxLength(MAX_SESSION_REPOSITORIES),
+	Schema.isMaxLength(MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES),
+	Schema.makeFilter(areWithinLimits, {
+		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories and ${MAX_SESSION_MEMORY_STORES} memory stores`,
+	}),
+	Schema.makeFilter(attachEachStoreOnce, { expected: "each memory store attached once" }),
 	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),
 	Schema.makeFilter(mountEachRepositoryOnce, { expected: "each repository mounted once" }),
 	Schema.makeFilter(haveDisjointMounts, {

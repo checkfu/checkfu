@@ -1138,6 +1138,25 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						Effect.provideService(SessionView, laggingSessionViews),
 					)
 					const session = yield* createIdleSession(apiFetch)
+					const created = <A>(path: string, body: Readonly<Record<string, string>>) =>
+						Effect.flatMap(
+							sendRequest(apiFetch, { method: "POST", path, headers: AUTH_HEADERS, body }),
+							(res) => Effect.promise(() => res.json() as Promise<A>),
+						)
+					const agent = yield* created<{ id: string }>("/v1/agents", {
+						name: "Keyed",
+						model: "gpt-4o-mini",
+					})
+					const environment = yield* created<{ id: string }>("/v1/environments", { name: "Keyed" })
+					const keyedCreate = sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "lagging-retry" },
+						body: { agent: agent.id, environment_id: environment.id },
+					})
+					const keyed = yield* Effect.flatMap(keyedCreate, (res) =>
+						Effect.promise(() => res.json() as Promise<{ id: string }>),
+					)
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -1165,6 +1184,14 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						})
 					}
 					expect(waitCalls).toBe(3)
+					const retried = yield* keyedCreate
+					expect(retried.status).toBe(202)
+					expect(yield* Effect.promise(() => retried.json())).toEqual({
+						id: keyed.id,
+						type: "session",
+						pending: true,
+					})
+					waitCalls = 3
 
 					const missingRes = yield* sendRequest(apiFetch, {
 						method: "GET",

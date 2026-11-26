@@ -17,7 +17,11 @@ import {
 	repositoryTokenGate,
 	withRepositoryCredentials,
 } from "./Repositories.ts"
+import { ApiWorker } from "../Api.ts"
+import { makeMemoryMount } from "./MemoryMount.ts"
 import { makeSandboxMount } from "./SandboxMount.ts"
+import { makeSessionMemory } from "./SessionMemory.ts"
+import type { PendingReceipts } from "./SessionMemory.ts"
 import { makeSessionOutputs } from "./SessionOutputs.ts"
 import type { OutputBytes, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
@@ -36,6 +40,7 @@ import {
 	decodeBashToolArguments,
 } from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
+import { withCallSignal } from "./CallSignal.ts"
 
 const DISCARDED = "discarded"
 const NEWEST_TURN = "newest-turn"
@@ -46,6 +51,8 @@ const isScriptOutputPath = (path: string): boolean =>
 	path.startsWith(`${SCRIPT_OUTPUT_DIRECTORY}/`) && !path.split("/").includes("..")
 const ALLOWED_HOSTS = "allowed-hosts"
 const SLEEP = "sleep"
+const MEMORY_ROOT = "/mnt/memory"
+const MEMORY_RECEIPTS = "memory-receipts"
 const CLONE_SECONDS = 600
 const tokenKey = (resourceId: string) => `token:${resourceId}`
 const REPOSITORIES = "repositories"
@@ -133,8 +140,10 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 			sandboxes: Sandboxes,
 			idleAfter: Effect.orDie(machineIdle),
 			baseUrl: githubBaseUrl,
+			api: Cloudflare.Workers.bindWorker(Cloudflare.Worker.ref(ApiWorker)),
+			services: Effect.context<never>(),
 		}),
-		({ state, sandboxes, idleAfter, baseUrl }) =>
+		({ state, sandboxes, idleAfter, baseUrl, api, services }) =>
 			Effect.gen(function* () {
 				const { storage } = state.raw
 				const tokens = yield* repositoryTokenGate(
@@ -144,6 +153,25 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 				const fork = Effect.runForkWith(context)
 				const runPromise = Effect.runPromiseWith(context)
 				const sessionId = state.raw.id.name ?? ""
+				const call = Effect.runPromiseWith(services)
+				const memory = makeSessionMemory(
+					{
+						mounts: () => call(api.memoryMounts(sessionId)),
+						list: (name, after) => call(api.memoryList(sessionId, name, after)),
+						read: (name, path) => call(api.memoryRead(sessionId, name, path)),
+						write: (name, path, content, exclusive) =>
+							call(api.memoryWrite(sessionId, name, path, content, exclusive)),
+						remove: (name, path, expected) =>
+							call(api.memoryRemove(sessionId, name, path, expected)),
+					},
+					{
+						get: () => storage.kv.get<PendingReceipts>(MEMORY_RECEIPTS),
+						put: (pending) => storage.kv.put(MEMORY_RECEIPTS, pending),
+					},
+				)
+				const mounts = () => ({
+					[MEMORY_ROOT]: makeMemoryMount(memory),
+				})
 				const allowedHosts = (): ReadonlyArray<string> | null => {
 					const allowed = storage.kv.get<ReadonlyArray<string> | null>(ALLOWED_HOSTS)
 					return allowed === undefined ? [] : allowed
@@ -153,7 +181,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						import("@cloudflare/computer"),
 						import("@cloudflare/computer/tools/pi-ai"),
 					])
-					const { fs } = new Workspace({ storage })
+					const { fs } = new Workspace({ storage, mounts: mounts() })
 					let overMachine: Files | undefined
 					return {
 						fs,
@@ -163,6 +191,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								const over = new Workspace({
 									storage,
 									mounts: {
+										...mounts(),
 										[WORKING_DIRECTORY]: makeSandboxMount(WORKING_DIRECTORY, machine.inMachine),
 									},
 								})
@@ -342,7 +371,9 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					if (call.name === BASH_TOOL.name) {
 						return runBash(call.arguments, signal)
 					}
-					return onActive((on) => on.tools.execute(asLiteral(call), { abortSignal: signal }))
+					return withCallSignal(signal, () =>
+						onActive((on) => on.tools.execute(asLiteral(call), { abortSignal: signal })),
+					)
 				}
 
 				const underWay = new Map<
