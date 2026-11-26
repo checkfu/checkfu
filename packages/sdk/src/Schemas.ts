@@ -470,7 +470,7 @@ export const AutomationSnapshot = Schema.Struct({
 	name: AutomationName,
 	description: Schema.NullOr(AutomationDescription),
 	agent_id: ResourceId,
-	agent_version: Schema.NullOr(PositiveInt),
+	agent_version: PositiveInt,
 	environment_id: ResourceId,
 	text: MessageText,
 	schedule: AutomationSchedule,
