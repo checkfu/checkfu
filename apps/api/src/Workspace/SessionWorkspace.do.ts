@@ -25,7 +25,7 @@ import { makeSandboxMount } from "./SandboxMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
 import type { PendingReceipts } from "./SessionMemory.ts"
-import { makeSessionOutputs } from "./SessionOutputs.ts"
+import { makeSessionOutputs, SESSION_OUTPUTS_PATH } from "./SessionOutputs.ts"
 import type { OutputBytes, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { FencedTurn, TurnToken } from "./WorkspaceFence.ts"
@@ -204,6 +204,10 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 									mounts: {
 										...mounts(PASSTHROUGH_WALK_LIMIT),
 										[WORKING_DIRECTORY]: makeSandboxMount(WORKING_DIRECTORY, machine.inMachine),
+										[SESSION_OUTPUTS_PATH]: makeSandboxMount(
+											SESSION_OUTPUTS_PATH,
+											machine.inMachine,
+										),
 									},
 								})
 								overMachine = {
@@ -254,6 +258,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						replace: (archive) => disk().replace(archive),
 					},
 					directory: WORKING_DIRECTORY,
+					extraDirectories: [SESSION_OUTPUTS_PATH],
 					stored: {
 						readdir: async (path) => (await workspace()).fs.readdir(path),
 						lstat: async (path) => (await workspace()).fs.lstat(path),

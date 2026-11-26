@@ -18,6 +18,7 @@ import {
 	unpackInto,
 } from "../../src/Workspace/WorkspaceMachine.ts"
 import type { StoredFiles } from "../../src/Workspace/WorkspaceMachine.ts"
+import type { Archive } from "../../src/Workspace/SavedDisk.ts"
 
 const IMAGE = resolve(import.meta.dirname, "../../src/Sandbox/image")
 
@@ -103,7 +104,7 @@ const storedFiles = (tree: ReadonlyMap<string, Stored>): StoredFiles => {
 	const at = (path: string): Stored => {
 		const entry = tree.get(path)
 		if (entry === undefined) {
-			throw new Error(`Nothing stored at ${path}`)
+			throw Object.assign(new Error(`Nothing stored at ${path}`), { code: "ENOENT" })
 		}
 		return entry
 	}
@@ -129,6 +130,8 @@ const storedFiles = (tree: ReadonlyMap<string, Stored>): StoredFiles => {
 				mode: entry.kind === "link" ? 0o777 : entry.mode,
 				size: entry.kind === "file" ? entry.content.byteLength : 0,
 				mtime: Date.UTC(2026, 0, 2),
+				isDirectory: entry.kind === "dir",
+				isSymbolicLink: entry.kind === "link",
 			})
 		},
 		readlink: (path) => {
@@ -313,6 +316,158 @@ describe("a session's machine, in a container of its image", () => {
 		})
 		expect(await sh("ls -A /workspace/back | wc -l")).toBe("0\n")
 		await sh("rm -rf /workspace/gone /workspace/back")
+	}, 120_000)
+
+	it("upgrades a legacy workspace snapshot and saves outputs with the workspace across sleep", async () => {
+		const directory = "/workspace/output-upgrade"
+		const outputs = "/mnt/session/outputs/upgrade"
+		const kept = new Map<string, unknown>()
+		let saved: { parts: ReadonlyArray<Uint8Array>; compressed: boolean; rooted?: true } | undefined
+		const save = async (archive: Archive) => {
+			const parts: Array<Uint8Array> = []
+			for await (const part of archive.chunks) {
+				parts.push(part)
+			}
+			saved = {
+				parts,
+				compressed: archive.compressed,
+				...(archive.rooted ? { rooted: true as const } : {}),
+			}
+		}
+		const tree = new Map<string, Stored>([
+			[outputs, { kind: "dir", mode: 0o755 }],
+			[`${outputs}/original.txt`, { kind: "file", mode: 0o644, content: text("STORED\n") }],
+		])
+		const make = () =>
+			makeWorkspaceMachine({
+				sandboxes: {
+					open: () => Effect.succeed(sandbox),
+					remove: () =>
+						Effect.promise(async () => {
+							await sh(`rm -rf -- ${directory} ${outputs}`)
+						}),
+				},
+				key: "outputs-upgrade",
+				store: {
+					get: <A>(key: string) => kept.get(key) as A | undefined,
+					put: (key, value) => {
+						kept.set(key, value)
+					},
+					delete: (key) => {
+						kept.delete(key)
+					},
+				},
+				disk: {
+					read: () => {
+						const image = saved
+						return image === undefined
+							? undefined
+							: {
+									chunks: (async function* () {
+										yield* image.parts
+									})(),
+									compressed: image.compressed,
+									...(image.rooted ? { rooted: true as const } : {}),
+								}
+					},
+					replace: save,
+				},
+				directory,
+				extraDirectories: [outputs],
+				stored: storedFiles(tree),
+				settled: () => Promise.resolve(),
+				touched: () => undefined,
+			})
+		const run = async (machine: ReturnType<typeof make>, command: string) => {
+			const result = await machine.command(
+				["bash", "-c", command],
+				{ cwd: directory, seconds: 20 },
+				undefined,
+			)
+			expect(result.isError).toBe(false)
+			return result.content[0]?.type === "text" ? result.content[0].text : ""
+		}
+		try {
+			await sh(`mkdir -p ${directory}; printf 'LEGACY\\n' > ${directory}/legacy.txt`)
+			await save({ chunks: archiveOf(sandbox, directory), compressed: true })
+			await sh(`rm -rf -- ${directory} ${outputs}`)
+			const first = make()
+			expect(await run(first, `cat legacy.txt ${outputs}/original.txt`)).toBe("LEGACY\nSTORED")
+			await run(
+				first,
+				`printf 'AFTER\\n' > new.txt; printf 'NEW\\n' > ${outputs}/current.txt; rm ${outputs}/original.txt`,
+			)
+			await first.sleep()
+			expect(saved?.rooted).toBe(true)
+			expect(await sh(`[ -e ${directory} ] || [ -e ${outputs} ]; echo $?`)).toBe("1\n")
+			const again = make()
+			expect(
+				await run(
+					again,
+					`cat legacy.txt new.txt ${outputs}/current.txt; test ! -e ${outputs}/original.txt`,
+				),
+			).toBe("LEGACY\nAFTER\nNEW")
+		} finally {
+			await sh(`rm -rf -- ${directory} ${outputs}`)
+		}
+	}, 120_000)
+
+	it("imports stored outputs into an already running machine without overwriting its files or reviving later deletions", async () => {
+		const directory = "/workspace/warm-output-upgrade"
+		const outputs = "/mnt/session/outputs/warm-upgrade"
+		const kept = new Map<string, unknown>([["machine", { incarnation: sandbox.incarnation }]])
+		const tree = new Map<string, Stored>([
+			[outputs, { kind: "dir", mode: 0o755 }],
+			[`${outputs}/conflict.txt`, { kind: "file", mode: 0o644, content: text("STORED_OLD\n") }],
+			[`${outputs}/imported.txt`, { kind: "file", mode: 0o644, content: text("IMPORTED\n") }],
+		])
+		const make = () =>
+			makeWorkspaceMachine({
+				sandboxes: { open: () => Effect.succeed(sandbox), remove: () => Effect.void },
+				key: "warm-output-upgrade",
+				store: {
+					get: <A>(key: string) => kept.get(key) as A | undefined,
+					put: (key, value) => {
+						kept.set(key, value)
+					},
+					delete: (key) => {
+						kept.delete(key)
+					},
+				},
+				disk: { read: () => undefined, replace: async () => undefined },
+				directory,
+				extraDirectories: [outputs],
+				stored: storedFiles(tree),
+				settled: () => Promise.resolve(),
+				touched: () => undefined,
+			})
+		try {
+			await sh(
+				`mkdir -p ${directory} ${outputs}; printf 'MACHINE_NEW\\n' > ${outputs}/conflict.txt`,
+			)
+			const first = make()
+			const seen = await first.command(
+				["cat", `${outputs}/conflict.txt`, `${outputs}/imported.txt`],
+				{ cwd: directory, seconds: 20 },
+				undefined,
+			)
+			expect(seen.isError).toBe(false)
+			expect(seen.content).toEqual([{ type: "text", text: "MACHINE_NEW\nIMPORTED" }])
+			await first.command(
+				["rm", `${outputs}/imported.txt`],
+				{ cwd: directory, seconds: 20 },
+				undefined,
+			)
+			const again = make()
+			const absent = await again.command(
+				["test", "!", "-e", `${outputs}/imported.txt`],
+				{ cwd: directory, seconds: 20 },
+				undefined,
+			)
+			expect(absent.isError).toBe(false)
+		} finally {
+			await sh(`rm -rf -- ${directory} ${outputs}`)
+		}
 	}, 120_000)
 
 	it("reads and lists what is in the machine", async () => {
