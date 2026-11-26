@@ -4,6 +4,7 @@ import { Environment } from "../Environment/Environment.aggregate.ts"
 import { AdmitSession } from "./AdmitSession.command.ts"
 import { admissionRefusal } from "./AdmissionRefusal.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
+import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 
 export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
@@ -22,33 +23,42 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 		if (refused !== undefined) {
 			return refused
 		}
+		const created = session.record(
+			new SessionCreated({
+				agent_id: agent.id,
+				agent_version: pinnedVersion,
+				environment_id: environment.id,
+				title: cmd.title,
+			}),
+		)
+		if (cmd.initial_message === undefined) {
+			return [created]
+		}
 		return [
-			session.record(
-				new SessionCreated({
-					agent_id: agent.id,
-					agent_version: pinnedVersion,
-					environment_id: environment.id,
-					title: cmd.title,
-				}),
-			),
+			created,
+			session.record(new UserMessage({ content: [{ type: "text", text: cmd.initial_message }] })),
+			session.record(new SessionStatusRunning({ turn: 1 })),
 		]
 	},
 	transitions: {
-		OnlyActiveAgentAndEnvironmentAdmitSession: ({ before, after }) =>
+		OnlyActiveAgentAndEnvironmentAdmitSession: ({ before, after, command }) =>
 			before.agent.status === "active" &&
 			before.environment.status === "active" &&
 			before.session._tag === "Uninitialized" &&
-			after.session._tag === "Idle" &&
-			after.session.turn === 0,
+			(command.initial_message === undefined
+				? after.session._tag === "Idle" && after.session.turn === 0
+				: after.session._tag === "Running" &&
+					after.session.turn === 1 &&
+					after.session.pending_user_messages === 0),
 		PinnedVersionWithinAgentHead: ({ before, command, events }) => {
 			const pinned = command.agent_version ?? before.agent.version
 			return (
 				before.agent.version >= 1 &&
 				pinned >= 1 &&
 				pinned <= before.agent.version &&
-				events.length === 1 &&
-				events.every(
+				events.some(
 					(event) =>
+						event._tag === "session.created" &&
 						event.agent_id === command.agent_id &&
 						event.agent_version === pinned &&
 						event.environment_id === command.environment_id,

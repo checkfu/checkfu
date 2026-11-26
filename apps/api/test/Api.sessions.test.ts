@@ -1513,7 +1513,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						unconfirmed_index?: number
 					}
 					expect(firstBatchBody.accepted).toHaveLength(1)
-					expect(firstBatchBody.accepted[0]).toMatchObject({ id: "evt-a1", turn: 1 })
+					expect(firstBatchBody.accepted[0]).toMatchObject({
+						id: expect.stringContaining(`sevt_${sessA.id}_input_`),
+						processed_at: null,
+						turn: 1,
+					})
 					expect(firstBatchBody.unconfirmed_index).toBe(1)
 
 					const suffixRetryRes = yield* sendRequest(apiFetch, {
@@ -1543,7 +1547,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(suffixRetryBody).toEqual({
 						data: [
 							{
-								id: "evt-a2",
+								id: expect.stringContaining(`sevt_${sessA.id}_input_`),
+								processed_at: null,
 								type: "user.message",
 								turn: 2,
 								queued: expect.any(Boolean),
@@ -1576,14 +1581,16 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(yield* Effect.promise(() => fullRetryRes.json())).toEqual({
 						data: [
 							{
-								id: "evt-a1",
+								id: firstBatchBody.accepted[0]?.id,
+								processed_at: null,
 								type: "user.message",
 								turn: 1,
 								queued: false,
 								content: [{ type: "text", text: "msg-a1" }],
 							},
 							{
-								id: "evt-a2",
+								id: suffixRetryBody.data[0]?.id,
+								processed_at: null,
 								type: "user.message",
 								turn: 2,
 								queued: evtA2Queued,
@@ -1602,6 +1609,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const eventsA = (
 						(yield* Effect.promise(() => eventsARes.json())) as {
 							data: ReadonlyArray<{
+								id: string
 								type: string
 								content?: ReadonlyArray<{ text: string }>
 							}>
@@ -1611,6 +1619,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						.filter((e) => e.type === "user.message")
 						.map((e) => e.content?.[0]?.text)
 					expect(userMessagesA).toEqual(["msg-a1", "msg-a2"])
+					expect(eventsA.filter((e) => e.type === "user.message").map(({ id }) => id)).toEqual([
+						firstBatchBody.accepted[0]?.id,
+						suffixRetryBody.data[0]?.id,
+					])
 					expect(seenPrompts).toEqual(["msg-a1", "msg-a2"])
 
 					const conflictTextRes = yield* sendRequest(apiFetch, {
@@ -1680,12 +1692,16 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(yield* Effect.promise(() => keyRetryRes.json())).toEqual({
 						data: [
 							{
+								id: expect.stringContaining(`sevt_${sessB.id}_input_`),
+								processed_at: null,
 								type: "user.message",
 								turn: 1,
 								queued: false,
 								content: [{ type: "text", text: "msg-b1" }],
 							},
 							{
+								id: expect.stringContaining(`sevt_${sessB.id}_input_`),
+								processed_at: null,
 								type: "user.message",
 								turn: 2,
 								queued: expect.any(Boolean),
@@ -1749,7 +1765,13 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(interruptRetryRes.status).toBe(200)
 					expect(yield* Effect.promise(() => interruptRetryRes.json())).toEqual({
-						data: [{ id: "int-c1", type: "user.interrupt" }],
+						data: [
+							{
+								id: expect.stringContaining(`sevt_${sessC.id}_input_`),
+								type: "user.interrupt",
+								processed_at: null,
+							},
+						],
 					})
 
 					const interruptConflictRes = yield* sendRequest(apiFetch, {
@@ -2264,6 +2286,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 
 	it("maps every emitted session event type to the exact public JSON on list and SSE endpoints", async () => {
 		const at = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
+		const sessionId = SessionId.make("sess_capture")
 		const samples: ReadonlyArray<{
 			readonly event: DomainSessionEvent
 			readonly expectedJson: object
@@ -2271,39 +2294,43 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new UserMessage({ content: [{ type: "text", text: "Hello" }] }),
 				expectedJson: {
-					id: "evt_1",
+					id: `sevt_${sessionId}_1`,
 					seq: 1,
 					type: "user.message",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: null,
 					content: [{ type: "text", text: "Hello" }],
 				},
 			},
 			{
 				event: new UserInterrupt({ turn: 1 }),
 				expectedJson: {
-					id: "evt_2",
+					id: `sevt_${sessionId}_2`,
 					seq: 2,
 					type: "user.interrupt",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: null,
 				},
 			},
 			{
 				event: new SessionStatusRunning({ turn: 1 }),
 				expectedJson: {
-					id: "evt_3",
+					id: `sevt_${sessionId}_3`,
 					seq: 3,
 					type: "session.status_running",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					turn: 1,
 				},
 			},
 			{
 				event: new SpanModelRequestStart({ model_request_start_id: "sess_1:turn:1:req:1" }),
 				expectedJson: {
-					id: "evt_4",
+					id: `sevt_${sessionId}_4`,
 					seq: 4,
 					type: "span.model_request_start",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
 				},
 			},
@@ -2314,10 +2341,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					input: { path: "/workspace/notes.md", lines: [1, 20] },
 				}),
 				expectedJson: {
-					id: "evt_5",
+					id: `sevt_${sessionId}_5`,
 					seq: 5,
 					type: "agent.tool_use",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					tool_use_id: "call_1",
 					name: "read",
 					input: { path: "/workspace/notes.md", lines: [1, 20] },
@@ -2331,10 +2359,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					truncated: true,
 				}),
 				expectedJson: {
-					id: "evt_6",
+					id: `sevt_${sessionId}_6`,
 					seq: 6,
 					type: "agent.tool_result",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					tool_use_id: "call_1",
 					content: [{ type: "text", text: "# Notes" }],
 					is_error: false,
@@ -2344,20 +2373,21 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new AgentThinking({ thinking: "Let me think" }),
 				expectedJson: {
-					id: "evt_7",
+					id: `sevt_${sessionId}_7`,
 					seq: 7,
 					type: "agent.thinking",
 					created_at: "2026-01-01T00:00:00.000Z",
-					thinking: "Let me think",
+					processed_at: "2026-01-01T00:00:00.000Z",
 				},
 			},
 			{
 				event: new AgentMessage({ content: [{ type: "text", text: "Hi there" }] }),
 				expectedJson: {
-					id: "evt_8",
+					id: `sevt_${sessionId}_8`,
 					seq: 8,
 					type: "agent.message",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					content: [{ type: "text", text: "Hi there" }],
 				},
 			},
@@ -2367,10 +2397,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					truncated: true,
 				}),
 				expectedJson: {
-					id: "evt_9",
+					id: `sevt_${sessionId}_9`,
 					seq: 9,
 					type: "agent.message",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					content: [{ type: "text", text: "Hi..." }],
 					truncated: true,
 				},
@@ -2382,10 +2413,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					is_error: false,
 				}),
 				expectedJson: {
-					id: "evt_10",
+					id: `sevt_${sessionId}_10`,
 					seq: 10,
 					type: "span.model_request_end",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
 					model_usage: { input_tokens: 10, output_tokens: 5 },
 					is_error: false,
@@ -2398,10 +2430,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					is_error: null,
 				}),
 				expectedJson: {
-					id: "evt_11",
+					id: `sevt_${sessionId}_11`,
 					seq: 11,
 					type: "span.model_request_end",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
 					model_usage: { input_tokens: 0, output_tokens: 0 },
 					is_error: null,
@@ -2410,10 +2443,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				expectedJson: {
-					id: "evt_12",
+					id: `sevt_${sessionId}_12`,
 					seq: 12,
 					type: "session.status_idle",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					stop_reason: { type: "end_turn" },
 					turn: 1,
 				},
@@ -2427,10 +2461,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					},
 				}),
 				expectedJson: {
-					id: "evt_13",
+					id: `sevt_${sessionId}_13`,
 					seq: 13,
 					type: "session.error",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 					error: {
 						type: "provider_error",
 						message: "boom",
@@ -2441,19 +2476,21 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionStatusTerminated({ running_turn: null }),
 				expectedJson: {
-					id: "evt_14",
+					id: `sevt_${sessionId}_14`,
 					seq: 14,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 				},
 			},
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_15",
+					id: `sevt_${sessionId}_15`,
 					seq: 15,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
 				},
 			},
 		]
@@ -2462,7 +2499,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		expect([...new Set(samples.map((sample) => sample.event._tag))].toSorted()).toEqual(viewTags)
 
 		const encodeEvent = Schema.encodeSync(Schema.toCodecJson(SessionEvent))
-		const sessionId = SessionId.make("sess_capture")
 		const entries = samples.map((sample, index) => ({
 			event: sample.event,
 			state: null,
@@ -2569,12 +2605,15 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const seq = index + 1
 					const mapped = serializeSessionEvent({
-						envelope: { seq, at },
+						envelope: { id: "sess_generated", commandId: "cmd", seq, at },
 						event: generated as DomainSessionEvent,
 					})
 					const encoded = encodeEvent(mapped)
 					expect(encoded).toMatchObject({
-						id: `evt_${seq}`,
+						id:
+							generated !== undefined && "event_id" in generated && generated.event_id !== undefined
+								? generated.event_id
+								: `sevt_sess_generated_${seq}`,
 						seq,
 						type: eventSchema.tag,
 						created_at: "2026-01-01T00:00:00.000Z",
@@ -2583,6 +2622,73 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				}),
 			),
 		)
+	})
+
+	it("creates a session and its initial events together and replays the same create", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const base = yield* createIdleSession(apiFetch)
+					const previous = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${base.id}`,
+						headers: AUTH_HEADERS,
+					})
+					const { agent } = (yield* Effect.promise(() => previous.json())) as {
+						agent: { id: string }
+					}
+					const create = (messages: ReadonlyArray<string>) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: { ...AUTH_HEADERS, "idempotency-key": "create-with-initial-events" },
+							body: {
+								agent: agent.id,
+								environment_id: base.environment_id,
+								initial_events: messages.map((text) => ({
+									type: "user.message",
+									content: [{ type: "text", text }],
+								})),
+							},
+						})
+
+					const created = yield* create(["first"])
+					expect(created.status).toBe(201)
+					const session = (yield* Effect.promise(() => created.json())) as { id: string }
+					expect(session).toMatchObject({ status: "running", turn: 1 })
+
+					const replay = yield* create(["first"])
+					expect(replay.status).toBe(201)
+					expect(yield* Effect.promise(() => replay.json())).toEqual(session)
+					const conflict = yield* create(["different"])
+					expect(conflict.status).toBe(409)
+
+					const listed = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const { data } = (yield* Effect.promise(() => listed.json())) as {
+						data: ReadonlyArray<{ type: string; content: ReadonlyArray<{ text: string }> }>
+					}
+					expect(data.slice(0, 2).map(({ type }) => type)).toEqual([
+						"user.message",
+						"session.status_running",
+					])
+					expect(
+						data
+							.filter(({ type }) => type === "user.message")
+							.map(({ content }) => content[0]?.text),
+					).toEqual(["first"])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
 	})
 
 	it("enforces Idempotency-Key deduplication and payload conflict checks on session creates", async () => {
@@ -2701,7 +2807,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						created_at: string
 					}
 					expect(sess1.id).toMatch(/^sess_/)
-					expect(sess1.agent).toEqual({ id: agent.id, version: 1 })
+					expect(sess1.agent).toMatchObject({ type: "agent", id: agent.id, version: 1 })
 
 					const updateAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",

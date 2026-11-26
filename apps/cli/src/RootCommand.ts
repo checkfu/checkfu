@@ -40,7 +40,7 @@ export const SharedFlags = {
 } as const
 
 export const RootCommand = Command.make("checkfu").pipe(
-	Command.withDescription("Manage Checkfu agents, environments, and sessions"),
+	Command.withDescription("Run managed agents in sessions and on a schedule"),
 	Command.withSharedFlags(SharedFlags),
 )
 

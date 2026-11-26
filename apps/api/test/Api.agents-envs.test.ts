@@ -338,8 +338,46 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						method: "POST",
 						path: `/v1/agents/${agentV1.id}`,
 						headers: AUTH_HEADERS,
-						body: { version: 1, system: "V2 prompt" },
+						body: { system: "V2 prompt" },
 					})
+					const original = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/agents/${agentV1.id}?version=1`,
+						headers: AUTH_HEADERS,
+					})
+					expect(original.status).toBe(200)
+					expect(yield* Effect.promise(() => original.json())).toMatchObject({
+						id: agentV1.id,
+						version: 1,
+						system: "V1 prompt",
+					})
+					const missingVersion = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/agents/${agentV1.id}?version=99`,
+						headers: AUTH_HEADERS,
+					})
+					expect(missingVersion.status).toBe(404)
+
+					const versions = (page?: string) =>
+						sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/agents/${agentV1.id}/versions?limit=1${page === undefined ? "" : `&page=${encodeURIComponent(page)}`}`,
+							headers: AUTH_HEADERS,
+						})
+					const headPage = yield* versions()
+					expect(headPage.status).toBe(200)
+					const latest = (yield* Effect.promise(() => headPage.json())) as {
+						data: ReadonlyArray<{ version: number }>
+						next_page: string
+					}
+					expect(latest.data.map(({ version }) => version)).toEqual([2])
+					const earlierPage = yield* versions(latest.next_page)
+					expect(earlierPage.status).toBe(200)
+					expect(yield* Effect.promise(() => earlierPage.json())).toMatchObject({
+						data: [{ version: 1, system: "V1 prompt" }],
+						next_page: null,
+					})
+					expect((yield* versions("wrong-page")).status).toBe(400)
 
 					const envRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -376,7 +414,12 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						id: string
 						agent: { id: string; version: number }
 					}
-					expect(pinnedSession.agent).toEqual({ id: agentV1.id, version: 1 })
+					expect(pinnedSession.agent).toMatchObject({
+						type: "agent",
+						id: agentV1.id,
+						version: 1,
+						system: "V1 prompt",
+					})
 
 					const reply = yield* provider.runTurn({
 						session_id: SessionId.make("sess_pinned_version"),

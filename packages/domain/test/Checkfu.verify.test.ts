@@ -264,7 +264,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				apis: [CheckfuLifecycleApi],
 				instances: 1,
 				depth: 3,
-				budget: 12_000,
+				budget: 24_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 400, length: 12 },
 

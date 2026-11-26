@@ -124,7 +124,7 @@ export const checkfu = {
 		retrieve: retrieveAgent,
 		create: async (body: CreateAgentBody, idempotencyKey: string) =>
 			settled(retrieveAgent, await request("agents.create", { body, idempotencyKey })),
-		update: async (agent_id: string, body: UpdateAgentBody) =>
+		update: async (agent_id: string, body: UpdateAgentBody & { readonly version: number }) =>
 			settled(
 				retrieveAgent,
 				await request("agents.update", { path: { agent_id }, body }),

@@ -345,9 +345,11 @@ export const CreateAgentBody = Schema.Struct({
 export type CreateAgentBody = typeof CreateAgentBody.Type
 
 export const UpdateAgentBody = Schema.Struct({
-	version: PositiveInt.annotate({
-		description: "Current agent version for optimistic concurrency",
-	}),
+	version: Schema.optionalKey(
+		PositiveInt.annotate({
+			description: "Apply the update only if the agent is still at this version",
+		}),
+	),
 	name: Schema.optionalKey(AgentName.annotate({ description: "Updated agent name" })),
 	model: Schema.optionalKey(
 		ModelInput.annotate({
@@ -426,10 +428,29 @@ export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
 
 const AgentReference = Schema.Union([
 	ResourceId,
-	Schema.Struct({ id: ResourceId, version: Schema.optionalKey(PositiveInt) }),
+	Schema.Struct({
+		type: Schema.optionalKey(Schema.Literal("agent")),
+		id: ResourceId,
+		version: Schema.optionalKey(PositiveInt),
+	}),
 ])
 
+const SessionAgentReference = AgentReference.annotate({
+	description:
+		'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
+})
+
+const AutomationAgentReference = AgentReference.annotate({
+	description:
+		'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
+})
+
 const CreateSessionCommonFields = {
+	initial_events: Schema.optionalKey(
+		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
+			.check(Schema.isMaxLength(1))
+			.annotate({ description: "A text user message to send when the session is created." }),
+	),
 	agent_version: Schema.optionalKey(
 		PositiveInt.annotate({ description: "Optional pinned agent version" }),
 	),
@@ -441,20 +462,14 @@ const CreateSessionCommonFields = {
 
 export const CreateSessionBody = Schema.Union([
 	Schema.Struct({
-		agent: AgentReference.annotate({
-			description: "Agent ID string or agent reference object ({id, version})",
-		}),
+		agent: SessionAgentReference,
 		agent_id: Schema.optionalKey(
 			ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
 		),
 		...CreateSessionCommonFields,
 	}),
 	Schema.Struct({
-		agent: Schema.optionalKey(
-			AgentReference.annotate({
-				description: "Agent ID string or agent reference object ({id, version})",
-			}),
-		),
+		agent: Schema.optionalKey(SessionAgentReference),
 		agent_id: ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
 		...CreateSessionCommonFields,
 	}),
@@ -480,13 +495,11 @@ export const CreateAutomationBody = Schema.Struct({
 			description: "What the automation is for, up to 2048 characters",
 		}),
 	),
-	agent: AgentReference.annotate({
-		description:
-			"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version.",
-	}),
+	agent: AutomationAgentReference,
 	environment_id: ResourceId.annotate({ description: "Environment ID each run's session uses" }),
 	initial_events: AutomationInitialEvents.annotate({
-		description: "The one user message each run's session starts with",
+		description:
+			"Initial events sent when each run creates a session. Supply one text user.message event.",
 	}),
 	schedule: AutomationSchedule.annotate({
 		description:
@@ -503,18 +516,13 @@ export const UpdateAutomationBody = Schema.Struct({
 				"New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text.",
 		}),
 	),
-	agent: Schema.optionalKey(
-		AgentReference.annotate({
-			description:
-				"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version.",
-		}),
-	),
+	agent: Schema.optionalKey(AutomationAgentReference),
 	environment_id: Schema.optionalKey(
 		ResourceId.annotate({ description: "Environment ID later runs' sessions use" }),
 	),
 	initial_events: Schema.optionalKey(
 		AutomationInitialEvents.annotate({
-			description: "The one user message later runs' sessions start with",
+			description: "Initial events for future runs. Supply one text user.message event.",
 		}),
 	),
 	schedule: Schema.optionalKey(
@@ -552,7 +560,12 @@ export const SendSessionEventsBody = Schema.Struct({
 				type: Schema.Literal("user.interrupt"),
 			}),
 		]),
-	).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+	)
+		.check(Schema.isMinLength(1), Schema.isMaxLength(8))
+		.annotate({
+			description:
+				"Events to send to the session. Send user.message to give the agent work or user.interrupt to stop the current turn.",
+		}),
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 
@@ -664,7 +677,17 @@ export type CredentialDeleted = typeof CredentialDeleted.Type
 
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
-	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
+	agent: Schema.Struct({
+		...Struct.pick(AgentSnapshot.fields, [
+			"id",
+			"type",
+			"version",
+			"name",
+			"model",
+			"system",
+			"description",
+		]),
+	}).annotate({ description: "The pinned agent configuration used by the session." }),
 })
 export type Session = typeof SessionResource.Type
 
@@ -887,7 +910,8 @@ export const isPendingResource = <T extends { readonly type: string }>(
 
 export const UserMessageEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.message"),
-	id: Schema.optionalKey(ClientEventId),
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 	turn: PositiveInt,
 	queued: Schema.Boolean,
 	content: TextBlocks,
@@ -896,7 +920,8 @@ export type UserMessageEventReceipt = typeof UserMessageEventReceipt.Type
 
 export const UserInterruptEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.interrupt"),
-	id: Schema.optionalKey(ClientEventId),
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
@@ -920,57 +945,63 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		seq: PositiveInt,
 		type: Schema.Literal(type),
 		created_at: Schema.DateTimeUtc,
+		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 		...fields,
 	})
 
 export const UserMessageSessionEvent = wireSessionEvent(
 	"user.message",
 	SessionEventFields["user.message"],
-)
+).annotate({ description: "A user message in the session conversation, with text content blocks." })
 export const UserInterruptSessionEvent = wireSessionEvent(
 	"user.interrupt",
 	SessionEventFields["user.interrupt"],
-)
+).annotate({ description: "An interrupt that stops the agent's current turn." })
 export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
 	...SessionEventFields["session.status_running"],
 	turn: Schema.optionalKey(PositiveInt),
-})
+}).annotate({ description: "The agent is processing a turn." })
 export const SpanModelRequestStartEvent = wireSessionEvent(
 	"span.model_request_start",
 	SessionEventFields["span.model_request_start"],
-)
+).annotate({ description: "A model request started." })
 const TOOL_CALL_RECORD =
 	"A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 export const AgentToolUseSessionEvent = wireSessionEvent(
 	"agent.tool_use",
 	SessionEventFields["agent.tool_use"],
-).annotate({ description: `Records a call the model made. ${TOOL_CALL_RECORD}` })
+).annotate({ description: `The agent called a tool. ${TOOL_CALL_RECORD}` })
 export const AgentToolResultSessionEvent = wireSessionEvent(
 	"agent.tool_result",
 	SessionEventFields["agent.tool_result"],
 ).annotate({
-	description: `Records what a call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
+	description: `The result of a tool call, including why the call was rejected when applicable. ${TOOL_CALL_RECORD}`,
 })
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
-)
+).annotate({ description: "The agent's thinking text when the model returns it." })
 export const AgentMessageSessionEvent = wireSessionEvent(
 	"agent.message",
 	SessionEventFields["agent.message"],
-)
+).annotate({ description: "The agent's response, with text content blocks." })
 export const SpanModelRequestEndEvent = wireSessionEvent(
 	"span.model_request_end",
 	SessionEventFields["span.model_request_end"],
-)
+).annotate({ description: "A model request finished. Includes token usage in model_usage." })
 export const SessionStatusIdleEvent = wireSessionEvent("session.status_idle", {
 	...SessionEventFields["session.status_idle"],
 	turn: Schema.optionalKey(PositiveInt),
+}).annotate({
+	description: "The agent stopped processing a turn. See stop_reason for why it stopped.",
 })
 export const SessionErrorSessionEvent = wireSessionEvent(
 	"session.error",
 	SessionEventFields["session.error"],
-)
+).annotate({
+	description:
+		"An error occurred while processing a turn. Includes the error and its retry status.",
+})
 export const SessionStatusTerminatedEvent = wireSessionEvent(
 	"session.status_terminated",
 	SessionEventFields["session.status_terminated"],
@@ -1018,6 +1049,16 @@ const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, c
 		has_more: Schema.Boolean,
 		next_cursor: Schema.NullOr(cursor),
 	})
+
+const AgentVersionPage = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(512),
+).annotate({ description: "Opaque cursor returned by the previous page." })
+
+export const ListAgentVersionsResponse = Schema.Struct({
+	data: Schema.Array(AgentResource),
+	next_page: Schema.NullOr(AgentVersionPage),
+})
 
 export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
@@ -1093,17 +1134,23 @@ const booleanQuery = (description: string) =>
 			}),
 		)
 
-const RunNumberFromString = Schema.String.check(Schema.isPattern(/^[1-9]\d{0,14}$/u))
-	.annotate({ description: "Run number: a whole number from 1, written in decimal" })
-	.pipe(
-		Schema.decodeTo(
-			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999_999_999 })),
-			{
-				decode: SchemaGetter.transform(Number),
-				encode: SchemaGetter.transform(String),
-			},
-		),
-	)
+const positiveIntegerFromString = (description: string) =>
+	Schema.String.check(Schema.isPattern(/^[1-9]\d{0,14}$/u))
+		.annotate({ description })
+		.pipe(
+			Schema.decodeTo(
+				Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999_999_999 })),
+				{
+					decode: SchemaGetter.transform(Number),
+					encode: SchemaGetter.transform(String),
+				},
+			),
+		)
+
+const RunNumberFromString = positiveIntegerFromString("Run number as a positive integer")
+const AgentVersionFromString = positiveIntegerFromString(
+	"Agent version. Omit to retrieve the latest version.",
+)
 
 const resourceListQuery = {
 	after: Schema.optionalKey(ResourceListCursor),
@@ -1189,7 +1236,10 @@ const Agents = HttpApiGroup.make("agents")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Create an agent")
-			.annotate(OpenApi.Description, "Create an agent")
+			.annotate(
+				OpenApi.Description,
+				"Create a reusable agent configuration with a model and an optional system prompt.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "agents",
 				"x-forge-method-name": "create",
@@ -1234,6 +1284,9 @@ const Agents = HttpApiGroup.make("agents")
 	.add(
 		HttpApiEndpoint.get("get", "/v1/agents/:agent_id", {
 			params: agentParams,
+			query: {
+				version: Schema.optionalKey(AgentVersionFromString),
+			},
 			success: AgentResource,
 			error: HandlerErrors,
 		})
@@ -1244,6 +1297,27 @@ const Agents = HttpApiGroup.make("agents")
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "agents", endpoint: "get" },
 				"x-checkfu-mcp": { name: "agents_getAgent" },
+				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listVersions", "/v1/agents/:agent_id/versions", {
+			params: agentParams,
+			query: {
+				page: Schema.optionalKey(AgentVersionPage),
+				limit: Schema.optionalKey(ListLimitFromString),
+			},
+			success: ListAgentVersionsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List agent versions")
+			.annotate(OpenApi.Description, "List the published versions of an agent, newest first.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents.versions",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "listVersions" },
+				"x-checkfu-mcp": { name: "agents_listVersions" },
+				"x-checkfu-cli": { intQueryParams: { limit: { min: 1, max: 100, metavar: "N" } } },
 			}),
 	)
 	.add(
@@ -1254,7 +1328,10 @@ const Agents = HttpApiGroup.make("agents")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Update an agent")
-			.annotate(OpenApi.Description, "Update an agent (creates a new agent version)")
+			.annotate(
+				OpenApi.Description,
+				"Update an agent's configuration. Changes create a new version for future sessions.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "agents",
 				"x-forge-method-name": "update",
@@ -1283,7 +1360,7 @@ const Agents = HttpApiGroup.make("agents")
 				"x-checkfu-idempotent": true,
 			}),
 	)
-	.annotate(OpenApi.Description, "Manage agents")
+	.annotate(OpenApi.Description, "Create and manage versioned agent configurations")
 	.middleware(Authentication)
 
 const Environments = HttpApiGroup.make("environments")
@@ -1295,7 +1372,10 @@ const Environments = HttpApiGroup.make("environments")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Create an environment")
-			.annotate(OpenApi.Description, "Create an environment")
+			.annotate(
+				OpenApi.Description,
+				"Create an environment that configures the cloud sandbox where sessions run.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "create",
@@ -1397,7 +1477,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-checkfu-idempotent": true,
 			}),
 	)
-	.annotate(OpenApi.Description, "Manage environments")
+	.annotate(OpenApi.Description, "Create and manage environments where agents run")
 	.middleware(Authentication)
 
 const Sessions = HttpApiGroup.make("sessions")
@@ -1409,7 +1489,10 @@ const Sessions = HttpApiGroup.make("sessions")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Create a session")
-			.annotate(OpenApi.Description, "Create a session")
+			.annotate(
+				OpenApi.Description,
+				"Create an agent instance in an environment. Send a user.message event to start work.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions",
 				"x-forge-method-name": "create",
@@ -1417,14 +1500,20 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-mcp": { name: "sessions_createSession", destructive: false },
 				"x-checkfu-cli": {
 					textOrObjectFields: ["agent"],
+					repeatArrayField: {
+						field: "initial_events",
+						flag: "initial-event",
+						description: "Initial user message as JSON, YAML, or @file",
+					},
 					examples: [
 						{
 							command: "checkfu sessions create --agent agent_123 --environment-id env_456",
-							description: "Create a session with flags",
+							description: "Create a session using the latest agent version",
 						},
 					],
 				},
-			}),
+			})
+			.middleware(EventBatchBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("list", "/v1/sessions", {
@@ -1490,7 +1579,10 @@ const Sessions = HttpApiGroup.make("sessions")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Send session events")
-			.annotate(OpenApi.Description, "Send user events to a session")
+			.annotate(
+				OpenApi.Description,
+				"Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "send",
@@ -1533,7 +1625,10 @@ const Sessions = HttpApiGroup.make("sessions")
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "List session events")
-			.annotate(OpenApi.Description, "List historical events for a session")
+			.annotate(
+				OpenApi.Description,
+				"List persisted events for a session. Use the returned cursor to continue through its history.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "list",
@@ -1561,7 +1656,10 @@ const Sessions = HttpApiGroup.make("sessions")
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Stream session events")
-			.annotate(OpenApi.Description, "Stream live session events over Server-Sent Events")
+			.annotate(
+				OpenApi.Description,
+				"Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "stream",
@@ -1606,7 +1704,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				},
 			}),
 	)
-	.annotate(OpenApi.Description, "Manage sessions")
+	.annotate(OpenApi.Description, "Run agents in sessions and follow their events")
 	.middleware(Authentication)
 
 const Automations = HttpApiGroup.make("automations")
@@ -1620,7 +1718,7 @@ const Automations = HttpApiGroup.make("automations")
 			.annotate(OpenApi.Summary, "Create an automation")
 			.annotate(
 				OpenApi.Description,
-				"Create an automation that opens a new session with its message every time its schedule fires",
+				"Create an automation that runs an agent on a cron schedule. Each run starts a new session in the configured environment and sends the initial events.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "automations",
@@ -1632,7 +1730,8 @@ const Automations = HttpApiGroup.make("automations")
 					repeatArrayField: {
 						field: "initial_events",
 						flag: "initial-event",
-						description: "The user message each run starts with, as JSON, YAML, or @file",
+						description:
+							"The initial user.message event sent to each session, as JSON, YAML, or @file",
 					},
 					examples: [
 						{
@@ -1719,7 +1818,7 @@ const Automations = HttpApiGroup.make("automations")
 			.annotate(OpenApi.Summary, "Pause an automation")
 			.annotate(
 				OpenApi.Description,
-				"Stop an automation's schedule until it is unpaused; it can still be run on request",
+				"Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "automations",
@@ -1771,7 +1870,7 @@ const Automations = HttpApiGroup.make("automations")
 			.annotate(OpenApi.Summary, "Run an automation now")
 			.annotate(
 				OpenApi.Description,
-				"Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+				"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "automations",
@@ -1829,7 +1928,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-checkfu-mcp": { name: "automations_getRun" },
 			}),
 	)
-	.annotate(OpenApi.Description, "Manage automations")
+	.annotate(OpenApi.Description, "Run agents on a schedule and inspect their runs")
 	.middleware(Authentication)
 
 const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. Content sent inline in JSON is at most ${MAX_INLINE_FILE_BYTES / 1024 / 1024} MiB per file and ${MAX_INLINE_TOTAL_BYTES / 1024 / 1024} MiB per request, in a body of at most ${MAX_ARTIFACT_BODY_BYTES} bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.`

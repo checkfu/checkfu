@@ -16,10 +16,9 @@ import {
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 
-export class AgentThinking extends Domain.Event(
-	"agent.thinking",
-	SessionEventFields["agent.thinking"],
-) {}
+export class AgentThinking extends Domain.Event("agent.thinking", {
+	thinking: Schema.String,
+}) {}
 
 export class AgentMessage extends Domain.Event(
 	"agent.message",

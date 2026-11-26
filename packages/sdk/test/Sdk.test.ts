@@ -177,7 +177,7 @@ const sampleSession = (overrides?: {
 	id: "sess_1",
 	type: "session" as const,
 	status: "idle" as const,
-	agent: { id: "agent_1", version: 1 },
+	agent: sampleAgent(),
 	environment_id: "env_1",
 	title: "Demo",
 	turn: 0,

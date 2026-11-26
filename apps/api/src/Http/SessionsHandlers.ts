@@ -2,6 +2,7 @@ import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import type { AgentVersionSnapshot } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
@@ -12,7 +13,11 @@ import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
-import { SessionId } from "@checkfu/domain/Session/Session.id"
+import {
+	SessionId,
+	sessionEventId,
+	submittedSessionEventId,
+} from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
@@ -47,6 +52,7 @@ import {
 	isPending,
 	orPending,
 	present,
+	randomId,
 	reject,
 	settled,
 	sha256Json,
@@ -119,15 +125,38 @@ const eventBatchFingerprint = (
 		),
 	)
 
-const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnapshot) => ({
-	...snapshot,
-	agent: { id: agent_id, version: agent_version },
+const pinnedAgent = ({
+	agent_id,
+	type,
+	version,
+	name,
+	model,
+	system,
+	description,
+}: AgentVersionSnapshot) => ({
+	id: agent_id,
+	type,
+	version,
+	name,
+	model,
+	system,
+	description,
 })
+
+const serializeSession = (
+	{ agent_id: _agentId, agent_version: _agentVersion, ...snapshot }: SessionSnapshot,
+	agent: AgentVersionSnapshot,
+) => ({ ...snapshot, agent: pinnedAgent(agent) })
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
 
 export interface SessionEventEntry {
-	readonly envelope: { readonly seq: number; readonly at: DateTime.Utc }
+	readonly envelope: {
+		readonly id: string
+		readonly commandId: string
+		readonly seq: number
+		readonly at: DateTime.Utc
+	}
 	readonly event: DomainSessionEvent
 }
 
@@ -139,10 +168,25 @@ const sessionEventEnvelope = <const T extends SessionEvent["type"]>(
 	entry: SessionEventEntry,
 	type: T,
 ) => ({
-	id: `evt_${entry.envelope.seq}`,
+	id: sessionEventId(entry.envelope.id, entry.envelope.seq),
 	seq: entry.envelope.seq,
 	type,
 	created_at: entry.envelope.at,
+	processed_at: entry.envelope.at,
+})
+
+const inputSessionEventEnvelope = <const T extends "user.message" | "user.interrupt">(
+	entry: SessionEventEntry,
+	type: T,
+	eventId: string | undefined,
+) => ({
+	...sessionEventEnvelope(entry, type),
+	id:
+		eventId ??
+		(entry.envelope.commandId.startsWith("evt:")
+			? submittedSessionEventId(entry.envelope.id, entry.envelope.commandId)
+			: sessionEventId(entry.envelope.id, entry.envelope.seq)),
+	processed_at: null,
 })
 
 export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent => {
@@ -150,11 +194,11 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 	switch (event._tag) {
 		case "user.message":
 			return {
-				...sessionEventEnvelope(entry, "user.message"),
+				...inputSessionEventEnvelope(entry, "user.message", event.event_id),
 				content: event.content.map((block) => ({ type: block.type, text: block.text })),
 			}
 		case "user.interrupt":
-			return sessionEventEnvelope(entry, "user.interrupt")
+			return inputSessionEventEnvelope(entry, "user.interrupt", event.event_id)
 		case "session.status_running":
 			return {
 				...sessionEventEnvelope(entry, "session.status_running"),
@@ -183,10 +227,7 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
 			}
 		case "agent.thinking":
-			return {
-				...sessionEventEnvelope(entry, "agent.thinking"),
-				thinking: event.thinking,
-			}
+			return sessionEventEnvelope(entry, "agent.thinking")
 		case "agent.message":
 			return {
 				...sessionEventEnvelope(entry, "agent.message"),
@@ -253,11 +294,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
 				const lookupKey = agentVersionLookupKey(agentId, version)
-				if (Option.isSome(yield* agentVersionsByNumber.get(lookupKey))) {
-					return true
+				const found = yield* agentVersionsByNumber.get(lookupKey)
+				if (Option.isSome(found) && found.value !== null) {
+					return found.value
 				}
-				const found = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
-				return found !== null
+				const pinned = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
+				return pinned === null
+					? yield* reject(503, `Agent ${agentId} version ${version} projection is not ready.`)
+					: pinned
 			})
 
 		const existing = (id: SessionId) =>
@@ -282,7 +326,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return projected
 			})
 
-		const pinnedVersionReady = (agentId: string, version: number) =>
+		const resolvePinnedAgent = (agentId: string, version: number) =>
 			Effect.gen(function* () {
 				const timeout = Duration.min(
 					Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
@@ -291,13 +335,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return yield* waitForPinnedAgentVersion(agentId, version, timeout)
 			})
 
-		const retrieve = (id: SessionId, ready: typeof pinnedVersionReady = pinnedVersionReady) =>
+		const retrieve = (id: SessionId, resolve: typeof resolvePinnedAgent = resolvePinnedAgent) =>
 			Effect.gen(function* () {
 				const snapshot = yield* existing(id)
-				if (!(yield* ready(snapshot.agent_id, snapshot.agent_version))) {
-					return yield* reject(503, `Session ${id} pinned agent version projection is not ready.`)
-				}
-				return serializeSession(snapshot)
+				const agent = yield* resolve(snapshot.agent_id, snapshot.agent_version)
+				return serializeSession(snapshot, agent)
 			})
 
 		return handlers
@@ -339,6 +381,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
+					const first = payload.initial_events?.[0]
+					const initialMessage =
+						first === undefined
+							? undefined
+							: yield* Schema.decodeEffect(MessageText)(
+									first.content.map(({ text }) => text).join("\n"),
+								).pipe(
+									Effect.catch(() =>
+										reject(
+											400,
+											`initial_events[0] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
+										),
+									),
+								)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
 						prefix: "sess",
@@ -348,6 +404,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
+							...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
 						},
 					})
 					const id = SessionId.make(identity.id)
@@ -360,6 +417,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
+								...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
 							}),
 							sendOptions,
 						)
@@ -375,9 +433,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(pinnedReady)) {
 						return pinnedReady
 					}
-					if (!pinnedReady) {
-						return { id, type: "session" as const, pending: true as const }
-					}
 					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
 					const result = yield* sessionViews
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
@@ -389,11 +444,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					return {
 						id,
 						type: "session" as const,
-						status: "idle" as const,
-						agent: { id: agentId, version: pinnedVersion },
+						status: initialMessage !== undefined ? ("running" as const) : ("idle" as const),
+						agent: pinnedAgent(pinnedReady),
 						environment_id: environmentId,
 						title,
-						turn: 0,
+						turn: initialMessage !== undefined ? 1 : 0,
 						usage: {
 							input_tokens: 0,
 							output_tokens: 0,
@@ -409,7 +464,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const pinned = yield* Cache.make({
 						capacity: LIST_PAGE_MAX,
 						lookup: (key: string) =>
-							pinnedVersionReady(
+							resolvePinnedAgent(
 								key.slice(key.indexOf(":") + 1),
 								Number(key.slice(0, key.indexOf(":"))),
 							),
@@ -432,7 +487,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(result)) {
 						return result
 					}
-					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
+					const snapshot = yield* present(result, 404, `Session ${id} not found.`)
+					const agent = yield* resolvePinnedAgent(snapshot.agent_id, snapshot.agent_version).pipe(
+						orPending(id, "session"),
+					)
+					return isPending(agent) ? agent : serializeSession(snapshot, agent)
 				}).pipe(handled),
 			)
 			.handle("getOutputs", ({ params }) =>
@@ -460,12 +519,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						| {
 								readonly type: "user.interrupt"
 								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
+								readonly commandId: string
 						  }
 						| {
 								readonly type: "user.message"
 								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
+								readonly commandId: string
 								readonly text: typeof MessageText.Type
 						  }
 					> = []
@@ -485,7 +544,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 											key: idempotencyKey,
 											index,
 										})
-									: undefined
+									: yield* randomId(random, "evt")
 						if (event.type === "user.interrupt") {
 							prepared.push({ type: "user.interrupt", eventId: event.id, commandId })
 							continue
@@ -520,25 +579,38 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 
 					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
-						const sendOptions =
-							item.commandId === undefined ? undefined : { commandId: item.commandId }
+						const sendOptions = { commandId: item.commandId }
+						const eventId = submittedSessionEventId(id, item.commandId)
 						const outcome =
 							item.type === "user.interrupt"
 								? yield* settled(
-										sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions).pipe(
-											Effect.flatMap((receipt) =>
-												receipt.events.some((event) => event._tag === "user.interrupt")
-													? Effect.succeed({
-															type: "user.interrupt" as const,
-															...(item.eventId === undefined ? {} : { id: item.eventId }),
-														})
-													: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+										sessions
+											.send(
+												new SendUserInterrupt({ session_id: id, event_id: eventId }),
+												sendOptions,
+											)
+											.pipe(
+												Effect.flatMap((receipt) => {
+													const committed = receipt.events.find(
+														(event) => event._tag === "user.interrupt",
+													)
+													if (committed?._tag !== "user.interrupt") {
+														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+													}
+													return Effect.succeed({
+														type: "user.interrupt" as const,
+														id: committed.event_id ?? eventId,
+														processed_at: null,
+													})
+												}),
 											),
-										),
 									)
 								: yield* settled(
 										sessions
-											.send(new SendUserMessage({ session_id: id, text: item.text }), sendOptions)
+											.send(
+												new SendUserMessage({ session_id: id, text: item.text, event_id: eventId }),
+												sendOptions,
+											)
 											.pipe(
 												Effect.flatMap((receipt) => {
 													const committed = receipt.events.find(
@@ -560,7 +632,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 													)
 													return Effect.succeed({
 														type: "user.message" as const,
-														...(item.eventId === undefined ? {} : { id: item.eventId }),
+														id: committed.event_id ?? eventId,
+														processed_at: null,
 														turn: receipt.reply.turn,
 														queued,
 														content: [{ type: "text" as const, text: item.text }],

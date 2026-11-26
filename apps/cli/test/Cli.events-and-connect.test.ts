@@ -364,9 +364,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(result.stderr).toContain(`Connected to ${sessionId}`)
 					expect(result.stderr).toContain(String.raw`[tool] read\x1b[2J`)
 					expect(result.stderr.indexOf("[tool] read")).toBeLessThan(
-						result.stderr.indexOf("[thinking] pondering"),
+						result.stderr.indexOf("[thinking]"),
 					)
-					expect(result.stderr).toContain("[thinking] pondering")
+					expect(result.stderr).toContain("[thinking]")
 					expect(result.stdout).toContain("Reply(1): first prompt")
 					expect(result.stdout).toContain("second prompt")
 					expect(result.stdout).not.toContain("\u001b")

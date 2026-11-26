@@ -368,8 +368,8 @@ const renderConnectEvent = (
 				break
 			}
 			case "agent.thinking": {
-				if (!rawStructuredMode && event.thinking.length > 0) {
-					yield* writeStderrLine(`[thinking] ${event.thinking}`)
+				if (!rawStructuredMode) {
+					yield* writeStderrLine("[thinking]")
 				}
 				break
 			}

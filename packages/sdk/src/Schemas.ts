@@ -233,9 +233,7 @@ export const SessionEventFields = {
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 		rejected: Schema.optionalKey(ToolRejection),
 	},
-	"agent.thinking": {
-		thinking: Schema.String,
-	},
+	"agent.thinking": {},
 	"agent.message": {
 		content: TextBlocks,
 		truncated: Schema.optionalKey(Schema.Literal(true)),
