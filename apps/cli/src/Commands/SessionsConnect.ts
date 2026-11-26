@@ -678,7 +678,7 @@ const resolveCursorBaselineFromPrefix = (
 	retain: SessionFoldRetention,
 ): Effect.Effect<{ readonly calls: SessionFold }, CliFailure> =>
 	Effect.gen(function* () {
-		let pageCursor = 0
+		let pageToken: string | undefined
 		let lastSeenSeq = 0
 		let calls = emptySessionFold(retain)
 		while (true) {
@@ -686,34 +686,25 @@ const resolveCursorBaselineFromPrefix = (
 				.listEvents({
 					params: { session_id: sessionId },
 					query: {
-						...(pageCursor > 0 ? { after: pageCursor } : {}),
+						...(pageToken === undefined ? {} : { page: pageToken }),
 						limit: 100,
 						order: "asc",
 					},
 				})
 				.pipe(Effect.mapError(formatClientError))
-			let reachedCursor = false
 			calls = foldSessionEvents(
 				calls,
 				page.data.filter((entry) => entry.seq <= after),
 			)
-			for (const entry of page.data) {
-				lastSeenSeq = Math.max(lastSeenSeq, entry.seq)
-				if (entry.seq > after) {
-					reachedCursor = true
-					break
-				}
-			}
+			lastSeenSeq = Math.max(lastSeenSeq, page.data.at(-1)?.seq ?? 0)
 			if (
-				reachedCursor ||
-				!page.has_more ||
-				page.next_cursor === null ||
-				page.next_cursor <= pageCursor ||
-				page.next_cursor >= after
+				page.next_page === null ||
+				Number(page.next_page) <= Number(pageToken ?? "0") ||
+				lastSeenSeq >= after
 			) {
 				break
 			}
-			pageCursor = page.next_cursor
+			pageToken = page.next_page
 		}
 		if (after > lastSeenSeq) {
 			return yield* usageError(
@@ -745,7 +736,7 @@ const resolveCursorBaseline = (
 		)
 	}
 	return Effect.gen(function* () {
-		let cursor = after + 1
+		let pageToken = String(after + 1)
 		let ended = false
 		let nearestTurn: number | undefined
 		const walked: Array<SessionStreamEvent> = []
@@ -758,7 +749,7 @@ const resolveCursorBaseline = (
 			const page = yield* client.api.sessions
 				.listEvents({
 					params: { session_id: sessionId },
-					query: { after: cursor, limit: 100, order: "desc" },
+					query: { page: pageToken, limit: 100, order: "desc" },
 				})
 				.pipe(Effect.mapError(formatClientError))
 			for (const entry of page.data) {
@@ -793,10 +784,10 @@ const resolveCursorBaseline = (
 			if (sawMissingTurn) {
 				break
 			}
-			if (!page.has_more || page.next_cursor === null || page.next_cursor >= cursor) {
+			if (page.next_page === null || Number(page.next_page) >= Number(pageToken)) {
 				return baseline()
 			}
-			cursor = page.next_cursor
+			pageToken = page.next_page
 		}
 
 		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after, retain)
@@ -1323,7 +1314,7 @@ export const sessionsConnectCommand = Command.make(
 									.listEvents({
 										params: { session_id: sessionId },
 										query: {
-											...(pause.seq === undefined ? {} : { after: pause.seq }),
+											...(pause.seq === undefined ? {} : { page: String(pause.seq) }),
 											limit: 100,
 											order: "asc",
 										},
@@ -1343,7 +1334,7 @@ export const sessionsConnectCommand = Command.make(
 							const stands =
 								pause.seq === undefined
 									? pause
-									: !later.success.has_more &&
+									: later.success.next_page === null &&
 										  since?.seq === pause.seq &&
 										  since.toolUseIds.length > 0
 										? since

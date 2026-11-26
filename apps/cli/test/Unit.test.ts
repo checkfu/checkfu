@@ -1357,8 +1357,7 @@ describe("Transform and formatOutput", () => {
 
 	it("normalizes output once before evaluating transform paths without recopying payloads per selected field", () => {
 		const listResponse = {
-			has_more: true,
-			next_cursor: 42,
+			next_page: "42",
 			data: [
 				{ id: "evt_1", type: "user.message", content: [{ type: "text", text: "one" }] },
 				{ id: "evt_2", type: "agent.message", content: [{ type: "text", text: "two" }] },
@@ -1383,18 +1382,18 @@ describe("Transform and formatOutput", () => {
 		const [formatted, formatCalls] = countEntriesCalls(() =>
 			formatOutput(listResponse, {
 				format: "json",
-				transform: Option.some("{has_more,next_cursor}"),
+				transform: Option.some("{next_page,first:data.0.id}"),
 				rawOutput: false,
 				isTerminal: false,
 			}),
 		)
-		expect(formatted).toBe('{"has_more":true,"next_cursor":42}')
+		expect(formatted).toBe('{"next_page":"42","first":"evt_1"}')
 		expect(formatCalls).toBe(expectedObjectCount)
 
 		const [evaluatedObj, evalObjCalls] = countEntriesCalls(() =>
-			evaluateTransform(listResponse, "{has_more,next_cursor}"),
+			evaluateTransform(listResponse, "{next_page,first:data.0.id}"),
 		)
-		expect(evaluatedObj).toEqual({ has_more: true, next_cursor: 42 })
+		expect(evaluatedObj).toEqual({ next_page: "42", first: "evt_1" })
 		expect(evalObjCalls).toBe(expectedObjectCount)
 
 		const [projected, projCalls] = countEntriesCalls(() =>

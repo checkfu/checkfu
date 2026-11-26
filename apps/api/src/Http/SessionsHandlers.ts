@@ -920,7 +920,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("listEvents", ({ params, query }) =>
 				Effect.gen(function* () {
 					yield* existing(params.session_id)
-					const after = query.after ?? (query.page === undefined ? undefined : Number(query.page))
+					const after = query.page === undefined ? undefined : Number(query.page)
 					const page = yield* sessionViews.list(Session.ref(params.session_id), {
 						...(after === undefined ? {} : { after }),
 						take: query.limit ?? 50,

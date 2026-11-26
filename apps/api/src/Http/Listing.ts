@@ -14,7 +14,6 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 export interface ListQuery {
-	readonly after?: string
 	readonly page?: string
 	readonly limit?: number
 	readonly order?: ListingOrder
@@ -22,14 +21,9 @@ export interface ListQuery {
 	readonly agent_id?: string
 }
 
-export const listPage = <Item, Cursor extends string | number>(
-	data: ReadonlyArray<Item>,
-	cursor: Cursor | null,
-) => ({
+export const listPage = <Item>(data: ReadonlyArray<Item>, cursor: string | number | null) => ({
 	data,
 	next_page: cursor === null ? null : String(cursor),
-	has_more: cursor !== null,
-	next_cursor: cursor,
 })
 
 export const LIST_PAGE_BYTES = 4_000_000
@@ -77,7 +71,7 @@ const listWith =
 			const include_archived = input.include_archived ?? false
 			const page = yield* pageOf(
 				{ kind, include_archived, agent_id: input.agent_id ?? null, order: input.order ?? "asc" },
-				{ take: input.limit ?? 50, after: input.after ?? input.page },
+				{ take: input.limit ?? 50, after: input.page },
 			)
 			const data: Array<A> = []
 			let bytes = 0
