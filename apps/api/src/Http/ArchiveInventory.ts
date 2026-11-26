@@ -1,6 +1,6 @@
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
-import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import type { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import { MAX_LIVE_AUTOMATIONS } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import { AutomationDependencyInUse } from "@checkfu/domain/Automation/GuardedArchives"
 import type { AutomationReference } from "@checkfu/domain/Automation/GuardedArchives"
@@ -10,12 +10,14 @@ import * as Predicate from "effect/Predicate"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { present, reject } from "./HttpHelpers.ts"
-import { makeLister } from "./Listing.ts"
+import type { makeLister } from "./Listing.ts"
 
-export const makeArchiveInventory = Effect.gen(function* () {
-	const views = yield* AutomationView
-	const list = yield* makeLister
-	const inventory = Effect.gen(function* () {
+export const withArchiveInventory = <A, E, R>(
+	list: Effect.Success<typeof makeLister>,
+	views: Effect.Success<typeof AutomationView>,
+	send: (inventory: ReadonlyArray<AutomationReference>) => Effect.Effect<A, E, R>,
+) =>
+	Effect.gen(function* () {
 		const page = yield* list("automation", { limit: MAX_LIVE_AUTOMATIONS }, (id) =>
 			Effect.gen(function* () {
 				const snapshot = yield* present(
@@ -42,19 +44,14 @@ export const makeArchiveInventory = Effect.gen(function* () {
 			agent_id,
 			environment_id,
 		}))
-	})
-	return <A, E, R>(
-		send: (inventory: ReadonlyArray<AutomationReference>) => Effect.Effect<A, E, R>,
-	) =>
-		inventory.pipe(
-			Effect.flatMap(send),
-			Effect.retry({
-				while: Predicate.isTagged("AutomationInventoryChanged"),
-				schedule: Schedule.spaced("200 millis"),
-				times: 4,
-			}),
-			Effect.catchIf(Schema.is(AutomationDependencyInUse), (error) =>
-				reject(409, `Automation ${error.automation_id} still references this resource.`),
-			),
-		)
-})
+	}).pipe(
+		Effect.flatMap(send),
+		Effect.retry({
+			while: Predicate.isTagged("AutomationInventoryChanged"),
+			schedule: Schedule.spaced("200 millis"),
+			times: 4,
+		}),
+		Effect.catchIf(Schema.is(AutomationDependencyInUse), (error) =>
+			reject(409, `Automation ${error.automation_id} still references this resource.`),
+		),
+	)

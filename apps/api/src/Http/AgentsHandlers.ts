@@ -2,7 +2,7 @@ import {
 	ArchiveAgentIfCurrent,
 	ArchiveAgentIfCurrentDecision,
 } from "@checkfu/domain/Automation/GuardedArchives"
-import { makeArchiveInventory } from "./ArchiveInventory.ts"
+import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import { normalizeAgentCreateBody, normalizeAgentModel } from "@checkfu/sdk/AgentInput"
 import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
@@ -142,7 +142,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				? (modelId: string) => resolveCatalogModel(modelId, customProviders) !== null
 				: providedIsSupportedModel
 		const list = yield* makeLister
-		const inventory = yield* makeArchiveInventory
+		const automationViews = yield* AutomationView
 		const guardedArchive = yield* ArchiveAgentIfCurrentDecision
 
 		const retrieve = (id: AgentId) =>
@@ -234,23 +234,22 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 			})
 
+		const archiveCommit = Effect.fnUntraced(function* (id: AgentId, version?: number) {
+			if (version === undefined) {
+				return yield* agents.send(new ArchiveAgent({ agent_id: id }))
+			}
+			const { withArchiveInventory } = yield* Effect.promise(() => import("./ArchiveInventory.ts"))
+			const receipt = yield* withArchiveInventory(list, automationViews, (inventory) =>
+				guardedArchive.send(
+					new ArchiveAgentIfCurrent({ agent_id: id, expected_version: version, inventory }),
+				),
+			)
+			return commitForStream(receipt.commits, `Agent/${id}`)
+		})
+
 		const archive = (id: AgentId, version?: number) =>
 			Effect.gen(function* () {
-				const commit =
-					version === undefined
-						? yield* agents.send(new ArchiveAgent({ agent_id: id }))
-						: commitForStream(
-								(yield* inventory((inventory) =>
-									guardedArchive.send(
-										new ArchiveAgentIfCurrent({
-											agent_id: id,
-											expected_version: version,
-											inventory,
-										}),
-									),
-								)).commits,
-								`Agent/${id}`,
-							)
+				const commit = yield* archiveCommit(id, version)
 				const result = yield* agentViews
 					.get(Agent.ref(id), commit === undefined ? {} : { atLeast: commit })
 					.pipe(orPending(id, "agent"))

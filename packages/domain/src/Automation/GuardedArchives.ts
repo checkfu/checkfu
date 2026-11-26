@@ -54,25 +54,27 @@ const referenceConflict = (
 	field: "agent_id" | "environment_id",
 	id: string,
 ) => {
-	const snapshots = new Map(inventory.map((entry) => [entry.id, entry]))
 	const live = automations.filter(
 		({ state }) => state.status === "active" || state.status === "paused",
 	)
 	// Admission reserves a slot atomically. Slot release can lag, so reserved is an upper
 	// bound. Equality proves the listing covers every live automation at this transaction.
-	if (snapshots.size !== inventory.length || live.length !== capacity.state.reserved) {
+	if (
+		live.length !== capacity.state.reserved ||
+		inventory.some(({ id }) => inventory.filter((entry) => entry.id === id).length !== 1) ||
+		live.some(
+			({ id, state }) =>
+				!inventory.some((entry) => entry.id === id && entry.revision === state.revision),
+		)
+	) {
 		return new AutomationInventoryChanged()
 	}
-	for (const automation of live) {
-		const view = snapshots.get(automation.id)
-		if (view === undefined || view.revision !== automation.state.revision) {
-			return new AutomationInventoryChanged()
-		}
-		if (view[field] === id) {
-			return new AutomationDependencyInUse({ automation_id: automation.id })
-		}
-	}
-	return undefined
+	const conflict = inventory.find(
+		(entry) => entry[field] === id && live.some((automation) => automation.id === entry.id),
+	)
+	return conflict === undefined
+		? undefined
+		: new AutomationDependencyInUse({ automation_id: conflict.id })
 }
 
 // Separate decision names make an older Durable Object refuse the command before writing.

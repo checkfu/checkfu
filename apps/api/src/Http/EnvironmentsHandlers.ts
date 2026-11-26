@@ -2,7 +2,7 @@ import {
 	ArchiveEnvironmentIfCurrent,
 	ArchiveEnvironmentIfCurrentDecision,
 } from "@checkfu/domain/Automation/GuardedArchives"
-import { makeArchiveInventory } from "./ArchiveInventory.ts"
+import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/Schemas"
 import { ArchiveEnvironment } from "@checkfu/domain/Environment/ArchiveEnvironment.command"
 import { CreateEnvironment } from "@checkfu/domain/Environment/CreateEnvironment.command"
@@ -44,7 +44,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
-		const inventory = yield* makeArchiveInventory
+		const automationViews = yield* AutomationView
 		const guardedArchive = yield* ArchiveEnvironmentIfCurrentDecision
 
 		const retrieve = (id: EnvironmentId) =>
@@ -71,23 +71,26 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 				return projected
 			})
 
+		const archiveCommit = Effect.fnUntraced(function* (id: EnvironmentId, version?: number) {
+			if (version === undefined) {
+				return yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
+			}
+			const { withArchiveInventory } = yield* Effect.promise(() => import("./ArchiveInventory.ts"))
+			const receipt = yield* withArchiveInventory(list, automationViews, (inventory) =>
+				guardedArchive.send(
+					new ArchiveEnvironmentIfCurrent({
+						environment_id: id,
+						expected_version: version,
+						inventory,
+					}),
+				),
+			)
+			return commitForStream(receipt.commits, `Environment/${id}`)
+		})
+
 		const archive = (id: EnvironmentId, version?: number) =>
 			Effect.gen(function* () {
-				const commit =
-					version === undefined
-						? yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
-						: commitForStream(
-								(yield* inventory((inventory) =>
-									guardedArchive.send(
-										new ArchiveEnvironmentIfCurrent({
-											environment_id: id,
-											expected_version: version,
-											inventory,
-										}),
-									),
-								)).commits,
-								`Environment/${id}`,
-							)
+				const commit = yield* archiveCommit(id, version)
 				const result = yield* environmentViews
 					.get(Environment.ref(id), commit === undefined ? {} : { atLeast: commit })
 					.pipe(orPending(id, "environment"))
