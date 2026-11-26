@@ -151,6 +151,24 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(page.data.length).toBe(5)
 					expect(page.has_more).toBe(true)
 					expect(page.next_cursor).toBe(page.data.at(-1)?.seq)
+					const filtered = yield* cli.run([
+						"sessions:events",
+						"list",
+						"--session-id",
+						sessionId,
+						"--type",
+						"user.message",
+						"--type",
+						"agent.message",
+					])
+					expect(filtered.exitCode).toBe(0)
+					const filteredPage = JSON.parse(filtered.stdout) as { data: Array<{ type: string }> }
+					expect(filteredPage.data.map((event) => event.type)).toEqual([
+						"user.message",
+						"agent.message",
+						"user.message",
+						"agent.message",
+					])
 
 					yield* cli.run(["sessions", "archive", "--session-id", sessionId])
 

@@ -1,4 +1,4 @@
-import type { TextBlock } from "@checkfu/sdk/Schemas"
+import type { SessionEventType, TextBlock } from "@checkfu/sdk/Schemas"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
@@ -234,6 +234,28 @@ const serializeSession = (
 ) => ({ ...snapshot, agent: pinnedAgent(agent) })
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
+
+const eventTypeFilters = {
+	"system.message": { _tag: "system.message" },
+	"user.message": { _tag: "user.message" },
+	"user.interrupt": { _tag: "user.interrupt" },
+	"user.tool_confirmation": { _tag: "user.tool_confirmation" },
+	"user.custom_tool_result": { _tag: "user.custom_tool_result" },
+	"session.status_running": { _tag: "session.status_running" },
+	"span.model_request_start": { _tag: "span.model_request_start" },
+	"agent.tool_use": { _tag: "agent.tool_use" },
+	"agent.tool_result": { _tag: "agent.tool_result" },
+	"agent.mcp_tool_use": { _tag: "agent.mcp_tool_use" },
+	"agent.mcp_tool_result": { _tag: "agent.mcp_tool_result" },
+	"agent.custom_tool_use": { _tag: "agent.custom_tool_use" },
+	"agent.thinking": { _tag: "agent.thinking" },
+	"agent.message": { _tag: "agent.message" },
+	"span.model_request_end": { _tag: "span.model_request_end" },
+	"session.status_idle": { _tag: "session.status_idle" },
+	"session.error": { _tag: "session.error" },
+	"session.status_terminated": { _tag: "session.status_terminated" },
+	"session.archived": { _tag: "session.archived" },
+} as const satisfies { readonly [Type in SessionEventType]: { readonly _tag: Type } }
 
 export interface SessionEventEntry {
 	readonly envelope: {
@@ -1009,6 +1031,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						...(after === undefined ? {} : { after }),
 						take: query.limit ?? 50,
 						order: query.order ?? "asc",
+						...(query.types === undefined || query.types.length === 0
+							? {}
+							: { where: { OR: query.types.map((type) => eventTypeFilters[type]) } }),
 					})
 					return listPage(
 						yield* Effect.forEach(page.entries, publishedEvent, { concurrency: 8 }),
