@@ -1,4 +1,4 @@
-import { ResourceId, TextBlock, ToolRejection } from "@checkfu/sdk/Schemas"
+import { McpServerName, ResourceId, TextBlock, ToolRejection } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 
@@ -45,6 +45,7 @@ export const ToolUse = Schema.Struct({
 	name: ResourceId,
 	input: ToolInput,
 	truncated: Schema.optionalKey(Schema.Literal(true)),
+	mcp_server_name: Schema.optionalKey(McpServerName),
 })
 export type ToolUse = typeof ToolUse.Type
 
@@ -55,6 +56,7 @@ export const ToolResult = Schema.Struct({
 	is_error: Schema.Boolean,
 	truncated: Schema.optionalKey(Schema.Literal(true)),
 	rejected: Schema.optionalKey(ToolRejection),
+	mcp: Schema.optionalKey(Schema.Literal(true)),
 })
 export type ToolResult = typeof ToolResult.Type
 
@@ -66,6 +68,7 @@ export const ToolCall = Schema.Struct({
 	name: ResourceId,
 	input: ToolInput,
 	input_truncated: Schema.optionalKey(Schema.Literal(true)),
+	mcp_server_name: Schema.optionalKey(McpServerName),
 	content: Schema.Array(TextBlock),
 	is_error: Schema.Boolean,
 	result_truncated: Schema.optionalKey(Schema.Literal(true)),

@@ -192,17 +192,24 @@ export const makePiDurableTestLayer = (
 		context: TranscriptContext,
 		signal?: AbortSignal,
 	) => Promise<AssistantMessage>,
-	envOverrides: Record<string, string> = {
-		CHECKFU_API_KEY: TEST_API_KEY,
-		OPENAI_API_KEY: "sk-openai-test",
-		ANTHROPIC_API_KEY: "sk-anthropic-test",
-	},
-	platform = Domain.InMemory,
-	registry?: () => Registry,
-	options: {
-		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
-		readonly env?: ExecutionEnv
+	{
+		env: envOverrides = {
+			CHECKFU_API_KEY: TEST_API_KEY,
+			OPENAI_API_KEY: "sk-openai-test",
+			ANTHROPIC_API_KEY: "sk-anthropic-test",
+		},
+		platform = Domain.InMemory,
+		registry,
+		executionEnv,
+		vaults = VaultsTestLive,
+		harnessSessions = (sessions) => sessions,
+	}: {
+		readonly env?: Record<string, string>
+		readonly platform?: typeof Domain.InMemory
+		readonly registry?: () => Registry
+		readonly executionEnv?: ExecutionEnv
 		readonly vaults?: typeof VaultsTestLive
+		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
 	} = {},
 ) => {
 	interface SessionObject {
@@ -230,7 +237,7 @@ export const makePiDurableTestLayer = (
 				checkCatalogProviderCredentials(provider, { env: envOverrides }, customProviders).ok,
 			{
 				...(storage === undefined ? {} : { storage }),
-				...(options.env === undefined ? {} : { env: options.env }),
+				...(executionEnv === undefined ? {} : { env: executionEnv }),
 				reset: Effect.andThen(
 					Effect.promise(async () => {
 						const serving = await objects.get(sessionId)
@@ -422,13 +429,12 @@ export const makePiDurableTestLayer = (
 	)
 
 	const artifactStore = makeArtifactStoreMemory()
-	const wrapSessions = options.harnessSessions ?? ((sessions) => sessions)
 	const HarnessLive = PiDurableHarnessLive.pipe(
 		Layer.provide(
 			Layer.effect(
 				Session,
 				Effect.gen(function* () {
-					return wrapSessions(yield* Session)
+					return harnessSessions(yield* Session)
 				}),
 			),
 		),
@@ -474,7 +480,7 @@ export const makePiDurableTestLayer = (
 		),
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
-		Layer.provideMerge(options.vaults ?? VaultsTestLive),
+		Layer.provideMerge(vaults),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
@@ -519,17 +525,20 @@ export const sendRequest = (
 		readonly method: string
 		readonly path: string
 		readonly body?: unknown
+		readonly rawBody?: string
 		readonly headers?: Record<string, string>
 	},
 ) =>
 	Effect.gen(function* () {
+		const body =
+			input.rawBody ?? (input.body === undefined ? undefined : JSON.stringify(input.body))
 		const init: RequestInit = {
 			method: input.method,
 			headers: {
-				...(input.body === undefined ? {} : { "content-type": "application/json" }),
+				...(body === undefined ? {} : { "content-type": "application/json" }),
 				...input.headers,
 			},
-			...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+			...(body === undefined ? {} : { body }),
 		}
 		const webRequest = new Request(`http://localhost${input.path}`, init)
 		const response = yield* fetchEffect.pipe(

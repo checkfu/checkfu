@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { NO_MCP_SERVERS } from "../Mcp/McpServers.ts"
 import { Agent } from "./Agent.aggregate.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
 import { AgentAlreadyExists, AgentCreated, CreateAgent } from "./CreateAgent.command.ts"
@@ -19,6 +20,7 @@ export class CreateAgentDecision extends Domain.Decision(CreateAgent, {
 					model: cmd.model,
 					system: cmd.system,
 					description: cmd.description,
+					mcp_servers: cmd.mcp_servers ?? NO_MCP_SERVERS,
 				}),
 			),
 		]
@@ -31,6 +33,9 @@ export class CreateAgentDecision extends Domain.Decision(CreateAgent, {
 				after.agent.version === 1,
 				after.agent.current_version_id === command.version_id,
 			].every((ok) => ok),
+		NewAgentKeepsItsDeclaredServers: ({ before, after, command }) =>
+			before.agent.status !== "" ||
+			after.agent.mcp_servers === (command.mcp_servers ?? NO_MCP_SERVERS),
 	},
 	reply: (states) => ({
 		version: states.agent.version,

@@ -316,7 +316,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		)
 		const { layer: unconfiguredLayer, closeAll: closeUnconfigured } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "ok", 1, 1),
-			{},
+			{ env: {} },
 		)
 
 		try {
@@ -506,7 +506,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 	it("fails closed with 503 when CHECKFU_API_KEY is set to an empty string", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "unused", 1, 1),
-			{ CHECKFU_API_KEY: "" },
+			{ env: { CHECKFU_API_KEY: "" } },
 		)
 		try {
 			await Effect.runPromise(

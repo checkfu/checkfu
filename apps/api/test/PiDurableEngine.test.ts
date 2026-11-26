@@ -89,7 +89,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 	it("supports OpenAI + Anthropic only and surfaces missing_api_key_error / unknown_model_error", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(
 			async (model) => makeAssistantReply(model, null, "unused", 1, 1),
-			{ CHECKFU_API_KEY: TEST_API_KEY },
+			{ env: { CHECKFU_API_KEY: TEST_API_KEY } },
 		)
 
 		try {
@@ -223,11 +223,13 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 				return makeAssistantReply(model, null, `reply from ${model.provider}/${model.id}`, 10, 5)
 			},
 			{
-				CHECKFU_API_KEY: TEST_API_KEY,
-				OPENROUTER_API_KEY: "sk-or-v1-test",
-				CLOUDFLARE_AI_API_KEY: "cf-key-test",
-				CLOUDFLARE_ACCOUNT_ID: "acct-test",
-				CLOUDFLARE_GATEWAY_ID: "gw-test",
+				env: {
+					CHECKFU_API_KEY: TEST_API_KEY,
+					OPENROUTER_API_KEY: "sk-or-v1-test",
+					CLOUDFLARE_AI_API_KEY: "cf-key-test",
+					CLOUDFLARE_ACCOUNT_ID: "acct-test",
+					CLOUDFLARE_GATEWAY_ID: "gw-test",
+				},
 			},
 		)
 		try {
@@ -343,10 +345,12 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			async (model) =>
 				makeAssistantReply(model, null, `custom reply: ${model.provider}/${model.id}`, 8, 4),
 			{
-				CHECKFU_API_KEY: TEST_API_KEY,
-				[CUSTOM_PROVIDERS_ENV]: manifest,
-				CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-key",
-				CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "xai-gw-secret",
+				env: {
+					CHECKFU_API_KEY: TEST_API_KEY,
+					[CUSTOM_PROVIDERS_ENV]: manifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-key",
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "xai-gw-secret",
+				},
 			},
 		)
 		try {
@@ -2686,6 +2690,155 @@ describe("turn engine", () => {
 			await backend.close()
 		}
 	})
+	it("publishes what a turn brings for MCP only once it is the admitted turn, and lists tools outside admission", async () => {
+		const prompts: Array<string> = []
+		let releaseSecond: () => void = () => undefined
+		const secondHeld = new Promise<void>((resolve) => {
+			releaseSecond = resolve
+		})
+		const inner = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				prompts.push(prompt)
+				if (prompt === "second") {
+					await secondHeld
+				}
+				return makeAssistantReply(model, null, `Echo: ${prompt}`, 1, 1)
+			}),
+		)
+		const published: Array<number> = []
+		const discovered: Array<number> = []
+		let locked = false
+		let listedUnderLock = false
+		const backend: PiDurableBackend = {
+			...inner,
+			withLock: (effect) =>
+				inner.withLock(
+					Effect.acquireUseRelease(
+						Effect.sync(() => {
+							locked = true
+						}),
+						() => effect,
+						() =>
+							Effect.sync(() => {
+								locked = false
+							}),
+					),
+				),
+			publishMcp: async (request) => {
+				published.push(request.turn)
+				return !discovered.includes(request.turn)
+			},
+			discoverMcp: async (request) => {
+				listedUnderLock ||= locked
+				discovered.push(request.turn)
+			},
+		}
+		const turn = (number: number, text: string, allowed: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+			mcp: {
+				servers: [],
+				networking: {
+					type: "limited",
+					allow_mcp_servers: false,
+					allow_package_managers: false,
+					allowed_hosts: [allowed],
+				},
+			},
+		})
+		try {
+			const second = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second", "new.example")))
+			while (prompts.length === 0) {
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 5)
+				})
+			}
+			expect(published).toEqual([2, 2])
+			expect(discovered).toEqual([2])
+			expect(listedUnderLock).toBe(false)
+
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turn(1, "late", "old.example"))),
+			).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+			const again = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second", "old.example")))
+			releaseSecond()
+			expect(await second).toMatchObject({ ok: true, reply: { text: "Echo: second" } })
+			expect(await again).toMatchObject({ ok: true, reply: { text: "Echo: second" } })
+			expect(published).toEqual([2, 2])
+			expect(discovered).toEqual([2])
+			expect(prompts).toEqual(["second"])
+		} finally {
+			releaseSecond()
+			await inner.close()
+		}
+	})
+
+	it("stops listing MCP tools when the turn is cancelled, and does not start the turn", async () => {
+		const cancelled = new Set<string>()
+		const inner = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "never", 1, 1)),
+		)
+		const harnessBackend = makePiHarnessBackend(
+			{ abort: async () => undefined } as unknown as Parameters<typeof makePiHarnessBackend>[0],
+			{
+				markCancelled: (operationId: string) => {
+					cancelled.add(operationId)
+				},
+				isCancelled: (operationId: string) => cancelled.has(operationId),
+			} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+			{ openai: Redacted.make("sk-test"), anthropic: null },
+			() => undefined,
+			() => Promise.resolve(true),
+		)
+		let listing: () => void = () => undefined
+		const started = new Promise<void>((resolve) => {
+			listing = resolve
+		})
+		let stopped = false
+		const backend: PiDurableBackend = {
+			...inner,
+			isCancelled: harnessBackend.isCancelled,
+			abort: harnessBackend.abort,
+			untilCancelled: harnessBackend.untilCancelled!,
+			publishMcp: () => Promise.resolve(true),
+			discoverMcp: (_request, signal) =>
+				new Promise<void>((resolve) => {
+					listing()
+					signal.addEventListener("abort", () => {
+						stopped = true
+						resolve()
+					})
+				}),
+		}
+		try {
+			const running = Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "cancel me",
+					mcp: { servers: [], networking: null },
+				}),
+			)
+			await started
+			await Effect.runPromise(backend.abort("turn:1"))
+			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+			expect(stopped).toBe(true)
+			expect(
+				await inner.storage.submissionByRequest(ROOT_CONVERSATION_ID, "turn:1", BACKGROUND_CONTEXT),
+			).toBeUndefined()
+		} finally {
+			await inner.close()
+		}
+	})
+
 	it("lets a reset session object neither read nor write the storage the next one owns", async () => {
 		const models = makeScriptedPiModels(async (model, context) =>
 			makeAssistantReply(model, null, `Echo ${extractLastUserText(context)}`, 1, 1),

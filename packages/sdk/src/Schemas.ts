@@ -89,6 +89,43 @@ export const AgentModel = Schema.Struct({
 })
 export type AgentModel = typeof AgentModel.Type
 
+export const MAX_MCP_SERVER_URL_LENGTH = 2048
+export const MAX_MCP_SERVERS = 20
+export const MAX_MCP_SERVER_NAME_LENGTH = 32
+
+export const McpServerUrl = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+)
+
+export const McpServerName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MCP_SERVER_NAME_LENGTH),
+	Schema.isPattern(/^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$/u, {
+		expected:
+			"letters, digits, hyphens and single underscores, not starting or ending with an underscore",
+	}),
+)
+export const McpServer = Schema.Struct({
+	type: Schema.Literal("url"),
+	name: McpServerName,
+	url: McpServerUrl,
+})
+export type McpServer = typeof McpServer.Type
+
+export const McpServers = Schema.Array(McpServer).check(Schema.isMaxLength(MAX_MCP_SERVERS))
+
+export const McpServerCredential = Schema.Struct({
+	mcp_server_name: McpServerName,
+	credential_id: ResourceId,
+	vault_id: Schema.optionalKey(ResourceId),
+})
+export type McpServerCredential = typeof McpServerCredential.Type
+
+export const McpServerCredentials = Schema.Array(McpServerCredential).check(
+	Schema.isMaxLength(MAX_MCP_SERVERS),
+)
+
 export const AgentSnapshot = Schema.Struct({
 	id: AgentId,
 	type: Schema.Literal("agent"),
@@ -98,6 +135,7 @@ export const AgentSnapshot = Schema.Struct({
 	model: AgentModel,
 	system: Schema.NullOr(Schema.String),
 	description: Schema.NullOr(Schema.String),
+	mcp_servers: McpServers,
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
@@ -233,6 +271,20 @@ export const SessionEventFields = {
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 		rejected: Schema.optionalKey(ToolRejection),
 	},
+	"agent.mcp_tool_use": {
+		tool_use_id: ResourceId,
+		mcp_server_name: McpServerName,
+		name: ResourceId,
+		input: Schema.JsonObject,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.mcp_tool_result": {
+		tool_use_id: ResourceId,
+		content: Schema.Array(TextBlock),
+		is_error: Schema.Boolean,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+		rejected: Schema.optionalKey(ToolRejection),
+	},
 	"agent.thinking": {
 		thinking: Schema.String,
 	},
@@ -268,6 +320,7 @@ export const SessionSnapshot = Schema.Struct({
 	title: Schema.NullOr(Schema.String),
 	turn: NonNegativeInt,
 	usage: ModelUsage,
+	mcp_server_credentials: McpServerCredentials,
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
@@ -458,7 +511,6 @@ export type ArtifactFile = typeof ArtifactFile.Type
 
 export const MAX_VAULT_DISPLAY_NAME_LENGTH = 255
 export const MAX_CREDENTIAL_DISPLAY_NAME_LENGTH = 255
-export const MAX_MCP_SERVER_URL_LENGTH = 2048
 export const MAX_CREDENTIAL_SECRET_LENGTH = 16_384
 export const MAX_VAULT_CREDENTIALS = 20
 
@@ -480,11 +532,6 @@ export const CredentialDisplayName = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxCodePoints(MAX_CREDENTIAL_DISPLAY_NAME_LENGTH),
 )
-export const McpServerUrl = Schema.String.check(
-	Schema.isMinLength(1),
-	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
-)
-
 export const StaticBearerAuth = Schema.Struct({
 	type: Schema.Literal("static_bearer"),
 	mcp_server_url: McpServerUrl,

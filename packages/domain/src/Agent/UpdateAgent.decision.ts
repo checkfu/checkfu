@@ -34,6 +34,8 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				: cmd.changes.description !== null
 		const description =
 			cmd.changes.description === undefined ? head.description : (cmd.changes.description ?? "")
+		const mcpServers =
+			cmd.changes.mcp_servers === undefined ? head.mcp_servers : cmd.changes.mcp_servers
 		if (
 			[
 				name === head.name,
@@ -42,6 +44,7 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				system === head.system,
 				hasDescription === head.has_description,
 				description === head.description,
+				mcpServers === head.mcp_servers,
 			].every((same) => same)
 		) {
 			return []
@@ -52,6 +55,7 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 			model: { id: modelId },
 			system: hasSystem ? system : null,
 			description: hasDescription ? description : null,
+			mcp_servers: mcpServers,
 		}
 		return [
 			agent.record(
@@ -78,6 +82,10 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				command.changes.description === undefined
 					? before.agent.description
 					: (command.changes.description ?? "")
+			const mcpServers =
+				command.changes.mcp_servers === undefined
+					? before.agent.mcp_servers
+					: command.changes.mcp_servers
 			const unchanged = [
 				name === before.agent.name,
 				modelId === before.agent.model_id,
@@ -85,6 +93,7 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				system === before.agent.system,
 				hasDescription === before.agent.has_description,
 				description === before.agent.description,
+				mcpServers === before.agent.mcp_servers,
 			].every((same) => same)
 			return [
 				before.agent.status === "active",
@@ -105,6 +114,7 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 						after.agent.system === system,
 						after.agent.has_description === hasDescription,
 						after.agent.description === description,
+						after.agent.mcp_servers === mcpServers,
 					].every((ok) => ok),
 				].some((ok) => ok),
 			].every((ok) => ok)
@@ -127,6 +137,10 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				command.changes.description === undefined
 					? before.agent.description
 					: (command.changes.description ?? "")
+			const mcpServers =
+				command.changes.mcp_servers === undefined
+					? before.agent.mcp_servers
+					: command.changes.mcp_servers
 			return [
 				before.agent.status !== "active",
 				name !== before.agent.name,
@@ -135,6 +149,7 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				system !== before.agent.system,
 				hasDescription !== before.agent.has_description,
 				description !== before.agent.description,
+				mcpServers !== before.agent.mcp_servers,
 				[
 					after.agent.status === "active",
 					after.agent.version === before.agent.version,

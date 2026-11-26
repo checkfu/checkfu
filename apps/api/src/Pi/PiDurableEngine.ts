@@ -1,4 +1,5 @@
 import { boundToolEvents } from "@checkfu/domain/Session/ToolEventBounds"
+import type { McpToolOf } from "@checkfu/domain/Session/ToolEventBounds"
 import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
@@ -50,6 +51,13 @@ export interface PiDurableBackend {
 	>
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
 	readonly reset: Effect.Effect<never>
+	readonly publishMcp?: (request: PiTurnRequest) => Promise<boolean>
+	readonly discoverMcp?: (request: PiTurnRequest, signal: AbortSignal) => Promise<void>
+	readonly untilCancelled?: <A>(
+		operationId: string,
+		work: (cancelled: AbortSignal) => Promise<A>,
+	) => Promise<A>
+	readonly mcpToolOf?: McpToolOf
 }
 
 const submissionOf = (pi: Harness, operationId: string) =>
@@ -149,6 +157,7 @@ export const readTurnToolEvents = async (
 	pi: Harness,
 	operationId: string,
 	turn: number,
+	mcpToolOf?: McpToolOf,
 ): Promise<Array<ToolEvent>> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input" || record.entry === undefined) {
@@ -162,7 +171,7 @@ export const readTurnToolEvents = async (
 	if (head === undefined) {
 		return []
 	}
-	const bounds = boundToolEvents(turn)
+	const bounds = boundToolEvents(turn, mcpToolOf)
 	const askedBy = new Map<string, TaskId | undefined>()
 	const visit = (entry: EntryRecord) => {
 		for (const message of entry.model ?? []) {
@@ -415,6 +424,7 @@ const admitPiTurnUnderWay = (
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
 		let finalizedPrevious: string | undefined
+		let discovered = false
 		while (true) {
 			const admitted = yield* backend.withLock(
 				Effect.promise(async () => {
@@ -451,6 +461,9 @@ const admitPiTurnUnderWay = (
 						await settleTurnUsage(pi, operationId)
 						return false
 					}
+					if ((await backend.publishMcp?.(request)) === true && !discovered) {
+						return "discover" as const
+					}
 					for (const unpublished of request.unpublishedOperationIds ?? []) {
 						await omitTurnEntries(pi, unpublished, restoredLimit)
 					}
@@ -461,6 +474,21 @@ const admitPiTurnUnderWay = (
 					return true
 				}),
 			)
+			if (admitted === "discover") {
+				const discover = backend.discoverMcp
+				const untilCancelled = backend.untilCancelled
+				if (discover !== undefined) {
+					yield* Effect.promise((interrupted) =>
+						untilCancelled === undefined
+							? discover(request, interrupted)
+							: untilCancelled(operationId, (cancelled) =>
+									discover(request, AbortSignal.any([interrupted, cancelled])),
+								),
+					)
+				}
+				discovered = true
+				continue
+			}
 			if (typeof admitted !== "object") {
 				return admitted
 			}
@@ -485,7 +513,9 @@ const resolveSettledPiTurn = (
 			const tool_events =
 				turn === undefined
 					? []
-					: yield* Effect.promise(() => readTurnToolEvents(pi, operationId, turn))
+					: yield* Effect.promise(() =>
+							readTurnToolEvents(pi, operationId, turn, backend.mcpToolOf),
+						)
 			const outcome = yield* settledOutcome(pi, operationId, settled, providerForLog)
 			return tool_events.length === 0 ? outcome : { ...outcome, tool_events }
 		}),

@@ -1,4 +1,5 @@
 import * as Verify from "@alchemy.run/domain/Verify"
+import { decodeMcpServerCredentials, decodeMcpServers } from "../src/Mcp/McpServers.ts"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
@@ -17,6 +18,7 @@ describe("Sessions Z3 formal verification", () => {
 					budget: 20_000,
 					faults: { redeliver: true, reorder: true, rerun: true },
 					walks: { count: 25 },
+					opaque: [decodeMcpServers, decodeMcpServerCredentials],
 					lock: "./Sessions.verify.lock.json",
 					require: { proved: PROVED },
 				})

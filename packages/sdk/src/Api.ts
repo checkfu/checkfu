@@ -1,4 +1,4 @@
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
@@ -53,8 +53,13 @@ import {
 	MAX_ARTIFACT_FILES,
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
+	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
+	McpServerCredentials,
+	McpServer,
+	McpServerName,
 	McpServerUrl,
+	McpServers,
 	NonEmptyString,
 	PositiveInt,
 	PublicationAddress,
@@ -328,6 +333,51 @@ export class ArtifactBlobLimit extends HttpApiMiddleware.Service<ArtifactBlobLim
 	{ error: ERRORS[413] },
 ) {}
 
+const MCP_SERVER_URL =
+	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
+
+export const canonicalMcpServerUrl = (input: string): string => {
+	const url = new URL(input)
+	url.hash = ""
+	return url.href
+}
+
+const McpServerUrlInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
+	Schema.makeFilter((input) => URL.canParse(input) || "a URL that can be parsed"),
+).pipe(
+	Schema.decodeTo(McpServerUrl, {
+		decode: SchemaGetter.transform(canonicalMcpServerUrl),
+		encode: SchemaGetter.passthrough(),
+	}),
+)
+
+const distinct = <A>(key: (item: A) => string | undefined, twice: (key: string) => string) =>
+	Schema.makeFilter<ReadonlyArray<A>>((items) => {
+		const seen = new Set<string>()
+		for (const item of items) {
+			const name = key(item)
+			if (name !== undefined) {
+				if (seen.has(name)) {
+					return twice(name)
+				}
+				seen.add(name)
+			}
+		}
+		return true
+	})
+
+const McpServersInput = Schema.Array(
+	Schema.Struct({ ...McpServer.fields, url: McpServerUrlInput }),
+).check(
+	distinct(
+		(server: McpServer) => server.name,
+		(name) => `Two MCP servers are named "${name}".`,
+	),
+	Schema.isMaxLength(MAX_MCP_SERVERS),
+)
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -340,6 +390,12 @@ export const CreateAgentBody = Schema.Struct({
 	),
 	description: Schema.optionalKey(
 		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
+	),
+	mcp_servers: Schema.optionalKey(
+		McpServersInput.annotate({
+			description:
+				"MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>.",
+		}),
 	),
 })
 export type CreateAgentBody = typeof CreateAgentBody.Type
@@ -361,6 +417,9 @@ export const UpdateAgentBody = Schema.Struct({
 		Schema.NullOr(AgentDescription).annotate({
 			description: "Updated agent description",
 		}),
+	),
+	mcp_servers: Schema.optionalKey(
+		McpServersInput.annotate({ description: "Replacement list of the agent's MCP servers" }),
 	),
 })
 export type UpdateAgentBody = typeof UpdateAgentBody.Type
@@ -423,6 +482,7 @@ export const CreateArtifactVersionBody = Schema.Struct({
 	}),
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
+const MAX_SESSION_VAULTS = 20
 
 const AgentReference = Schema.Union([
 	ResourceId,
@@ -436,6 +496,25 @@ const CreateSessionCommonFields = {
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
 		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
+	),
+	vault_ids: Schema.optionalKey(
+		Schema.Array(VaultId).check(Schema.isMaxLength(MAX_SESSION_VAULTS)).annotate({
+			description:
+				"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+		}),
+	),
+	mcp_server_credentials: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				mcp_server_name: McpServerName,
+				credential_id: CredentialId,
+			}),
+		)
+			.check(Schema.isMaxLength(MAX_MCP_SERVERS))
+			.annotate({
+				description:
+					"Explicit credentials for named servers. An explicit binding wins over vault matching.",
+			}),
 	),
 }
 
@@ -556,9 +635,10 @@ export const SendSessionEventsBody = Schema.Struct({
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 
-export const AgentResource = Schema.Struct(
-	Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
-)
+export const AgentResource = Schema.Struct({
+	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
+	mcp_servers: McpServers.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+})
 export type Agent = typeof AgentResource.Type
 
 export type Environment = EnvironmentSnapshot
@@ -580,26 +660,6 @@ export const UpdateVaultBody = Schema.Struct({
 	),
 })
 export type UpdateVaultBody = typeof UpdateVaultBody.Type
-
-const MCP_SERVER_URL =
-	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
-
-export const canonicalMcpServerUrl = (input: string): string => {
-	const url = new URL(input)
-	url.hash = ""
-	return url.href
-}
-
-const McpServerUrlInput = Schema.String.check(
-	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
-	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
-	Schema.makeFilter((input) => URL.canParse(input) || "a URL that can be parsed"),
-).pipe(
-	Schema.decodeTo(McpServerUrl, {
-		decode: SchemaGetter.transform(canonicalMcpServerUrl),
-		encode: SchemaGetter.passthrough(),
-	}),
-)
 
 export const CreateCredentialBody = Schema.Struct({
 	auth: Schema.Union([
@@ -665,6 +725,9 @@ export type CredentialDeleted = typeof CredentialDeleted.Type
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
+	mcp_server_credentials: McpServerCredentials.pipe(
+		Schema.withDecodingDefaultKey(Effect.succeed([])),
+	),
 })
 export type Session = typeof SessionResource.Type
 
@@ -951,6 +1014,16 @@ export const AgentToolResultSessionEvent = wireSessionEvent(
 ).annotate({
 	description: `Records what a call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
 })
+export const AgentMcpToolUseSessionEvent = wireSessionEvent(
+	"agent.mcp_tool_use",
+	SessionEventFields["agent.mcp_tool_use"],
+).annotate({ description: `Records an MCP call the model made. ${TOOL_CALL_RECORD}` })
+export const AgentMcpToolResultSessionEvent = wireSessionEvent(
+	"agent.mcp_tool_result",
+	SessionEventFields["agent.mcp_tool_result"],
+).annotate({
+	description: `Records what an MCP call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
+})
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
@@ -987,6 +1060,8 @@ export const SessionEvent = Schema.Union([
 	SpanModelRequestStartEvent,
 	AgentToolUseSessionEvent,
 	AgentToolResultSessionEvent,
+	AgentMcpToolUseSessionEvent,
+	AgentMcpToolResultSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,

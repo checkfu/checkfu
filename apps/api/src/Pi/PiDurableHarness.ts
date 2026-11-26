@@ -2,12 +2,16 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { bindMcpServers } from "@checkfu/domain/Mcp/McpServers"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import { recordToolEvents } from "@checkfu/domain/Session/RecordToolEvents"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -146,6 +150,8 @@ export const PiDurableHarnessLive = boundedHarness(
 		const executor = yield* PiTurnExecutor
 		const customProviders = yield* configuredApiCustomProviders
 		const sessions = yield* Session
+		const environments = yield* Environment
+		const sessionViews = yield* SessionView
 
 		const settled = (
 			args: { readonly session_id: SessionId; readonly turn: number },
@@ -209,6 +215,37 @@ export const PiDurableHarnessLive = boundedHarness(
 						})
 					}
 
+					const mcp =
+						version.mcp_servers.length === 0 ||
+						(yield* sessions.get(args.session_id))._tag === "Uninitialized"
+							? undefined
+							: {
+									servers: bindMcpServers(
+										version.mcp_servers,
+										(yield* sessionViews
+											.waitFor(
+												Session.ref(args.session_id),
+												{ id: args.session_id },
+												{ timeout: lookupTimeout },
+											)
+											.pipe(
+												Effect.orElseSucceed(() => null),
+												Effect.filterOrFail(
+													(view) => view !== null,
+													(): TurnFailed => ({
+														_tag: "TurnFailed",
+														error_type: "session_not_ready",
+														message: `Session ${args.session_id} is not ready yet.`,
+														terminal: false,
+													}),
+												),
+											)).mcp_server_credentials,
+									),
+									networking:
+										(yield* environments.get(EnvironmentId.make(args.environment_id))).config
+											?.networking ?? null,
+								}
+
 					const request: PiTurnRequest = {
 						operationId,
 						turn: args.turn,
@@ -216,6 +253,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						modelId: resolved.modelId,
 						system: version.system,
 						text: userText,
+						...(mcp === undefined ? {} : { mcp }),
 						...(args.last_reply_turn === undefined
 							? {}
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),

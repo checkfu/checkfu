@@ -26,6 +26,8 @@ const EVENT_TYPES: Record<SessionEventType, true> = {
 	"agent.message": true,
 	"agent.tool_use": true,
 	"agent.tool_result": true,
+	"agent.mcp_tool_use": true,
+	"agent.mcp_tool_result": true,
 	"span.model_request_end": true,
 	"session.status_idle": true,
 	"session.error": true,

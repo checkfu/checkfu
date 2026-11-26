@@ -1,14 +1,15 @@
 import * as Domain from "@alchemy.run/domain"
-import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { NonNegativeInt } from "./AgentTypes.ts"
+import { NO_MCP_SERVERS } from "../Mcp/McpServers.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
 import { AgentArchived, ArchiveAgent } from "./ArchiveAgent.command.ts"
 import { AgentCreated } from "./CreateAgent.command.ts"
 import { AgentUpdated } from "./UpdateAgent.command.ts"
 
-export const AgentState = Schema.Struct({
+const AgentStateV1 = Schema.Struct({
 	status: Schema.String,
 	version: NonNegativeInt,
 	current_version_id: Schema.String,
@@ -19,13 +20,28 @@ export const AgentState = Schema.Struct({
 	has_description: Schema.Boolean,
 	description: Schema.String,
 })
+
+export const AgentState = Schema.Struct({
+	...AgentStateV1.fields,
+	mcp_servers: Schema.String,
+})
 export type AgentState = typeof AgentState.Type
 
-export const AGENT_STATE_SCHEMA_VERSION = 1 as const
+export const AGENT_STATE_SCHEMA_VERSION = 2 as const
 
 export const AgentStateSnapshot = versionedSnapshot({
 	current: AGENT_STATE_SCHEMA_VERSION,
 	schema: AgentState,
+	previous: [
+		snapshotVersion({
+			version: 1,
+			schema: AgentStateV1,
+			migrate: (state) => ({
+				...state,
+				mcp_servers: state.status === "" ? "" : NO_MCP_SERVERS,
+			}),
+		}),
+	],
 })
 
 export class Agent extends Domain.Aggregate("Agent", {
@@ -41,6 +57,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 		system: "",
 		has_description: false,
 		description: "",
+		mcp_servers: "",
 	},
 	commands: [ArchiveAgent],
 	events: [AgentCreated, AgentUpdated],
@@ -130,6 +147,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 						system: e.system ?? "",
 						has_description: e.description !== null,
 						description: e.description ?? "",
+						mcp_servers: e.mcp_servers ?? NO_MCP_SERVERS,
 					}
 				: state,
 		"agent.updated": (state, e) =>
@@ -144,6 +162,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 						system: e.system ?? "",
 						has_description: e.description !== null,
 						description: e.description ?? "",
+						mcp_servers: e.mcp_servers ?? state.mcp_servers,
 					}
 				: state,
 		"agent.archived": (state) =>

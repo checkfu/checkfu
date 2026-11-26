@@ -12,6 +12,8 @@ import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import { credentialUsable } from "../src/Connection/CredentialCustody.ts"
+import { makeVaultMcp } from "../src/Connection/VaultMcp.ts"
+import type { VaultMcp } from "../src/Connection/VaultMcp.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	AUTH_HEADERS,
@@ -56,9 +58,6 @@ const world = (options: Parameters<typeof makeVaultsTestLayer>[0] = {}) => {
 	const transcript: Array<string> = []
 	const base = makePiDurableTestLayer(
 		async (model) => makeAssistantReply(model, null, "unused", 1, 1),
-		undefined,
-		undefined,
-		undefined,
 		{ vaults: vaults.layer },
 	)
 	const layer = base.layer.pipe(
@@ -789,6 +788,87 @@ describe("Vaults", () => {
 				expect((yield* call("DELETE", `/v1/vaults/${gone.id}`)).status).toBe(200)
 				expect(vaults.custodyOf(gone.id).usable(three.id)).toBe(false)
 				expect(vaults.secretOf(three.id)).toBeNull()
+			}),
+		)
+	})
+
+	it("sends no request with a secret once its archive, its delete or its vault's end has answered, with every policy stalled", async () => {
+		const { run, vaults } = world({ policies: "stalled" })
+		const authenticated: Array<string> = []
+		const upstream = (async (url: string, init: RequestInit) => {
+			if (new Headers(init.headers).has("authorization")) {
+				authenticated.push(url)
+			}
+			const message = JSON.parse(String(init.body)) as {
+				readonly id?: number
+				readonly method: string
+			}
+			if (message.id === undefined) {
+				return new Response(null, { status: 202 })
+			}
+			const answer =
+				message.method === "initialize"
+					? {
+							result: {
+								protocolVersion: "2025-11-25",
+								capabilities: { tools: {} },
+								serverInfo: { name: "upstream", version: "1" },
+							},
+						}
+					: message.method === "tools/call"
+						? { result: { content: [{ type: "text", text: "done" }] } }
+						: { error: { code: -32_601, message: "Method not found" } }
+			return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...answer }), {
+				headers: { "content-type": "application/json" },
+			})
+		}) as typeof fetch
+		const objects = new Map<string, VaultMcp>()
+		let sent = 0
+		const send = (vaultId: string, credentialId: string, url: string) =>
+			Effect.promise(async () => {
+				const vault = objects.get(vaultId) ?? makeVaultMcp(vaults.custodyOf(vaultId), upstream)
+				objects.set(vaultId, vault)
+				return (await vault.call(
+					credentialId,
+					"session",
+					url,
+					{ name: "act", description: "", inputSchema: { type: "object" } },
+					{},
+					`call-${(sent += 1)}`,
+				)) as { readonly ok: boolean; readonly message?: string }
+			})
+		const LINEAR = "https://mcp.linear.example/mcp"
+		await run(({ call }) =>
+			Effect.gen(function* () {
+				const vault = yield* createVault(call)
+				const archived = (yield* createCredential(call, vault.id)).body as CredentialBody
+				const deleted = (yield* createCredential(call, vault.id, LINEAR)).body as CredentialBody
+				const whole = yield* createVault(call, "Bob")
+				const inVault = (yield* createCredential(call, whole.id)).body as CredentialBody
+				const base = `/v1/vaults/${vault.id}/credentials`
+
+				expect((yield* send(vault.id, archived.id, GITHUB)).ok).toBe(true)
+				expect((yield* send(vault.id, deleted.id, LINEAR)).ok).toBe(true)
+				expect((yield* send(whole.id, inVault.id, GITHUB)).ok).toBe(true)
+				expect(new Set(authenticated)).toEqual(new Set([GITHUB, LINEAR]))
+				const before = authenticated.length
+
+				expect((yield* call("POST", `${base}/${archived.id}/archive`)).status).toBe(200)
+				expect(yield* send(vault.id, archived.id, GITHUB)).toMatchObject({
+					ok: false,
+					message: expect.stringContaining("archived or deleted"),
+				})
+				expect((yield* call("DELETE", `${base}/${deleted.id}`)).status).toBe(200)
+				expect(yield* send(vault.id, deleted.id, LINEAR)).toMatchObject({
+					ok: false,
+					message: expect.stringContaining("archived or deleted"),
+				})
+				expect((yield* call("POST", `/v1/vaults/${whole.id}/archive`)).status).toBe(200)
+				expect(yield* send(whole.id, inVault.id, GITHUB)).toMatchObject({
+					ok: false,
+					message: expect.stringContaining("archived or deleted"),
+				})
+				expect(authenticated.length).toBe(before)
 			}),
 		)
 	})

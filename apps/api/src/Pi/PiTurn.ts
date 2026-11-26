@@ -1,3 +1,5 @@
+import { EnvironmentNetworking } from "@checkfu/domain/Environment/EnvironmentTypes"
+import { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
@@ -16,6 +18,14 @@ export const turnOfOperation = (operationId: string): number | undefined => {
 	return Number.isSafeInteger(turn) && turn >= 0 && String(turn) === text ? turn : undefined
 }
 
+export const McpTurn = Schema.Struct({
+	servers: Schema.Array(McpServerBinding),
+	networking: Schema.NullOr(EnvironmentNetworking),
+})
+export type McpTurn = typeof McpTurn.Type
+
+export const MCP_TURN_KEY = "mcp-turn"
+
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
 	turn: Schema.Finite,
@@ -24,6 +34,7 @@ export const PiTurnRequest = Schema.Struct({
 	system: Schema.NullOr(Schema.String),
 	text: Schema.String,
 	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
+	mcp: Schema.optionalKey(McpTurn),
 })
 export type PiTurnRequest = typeof PiTurnRequest.Type
 

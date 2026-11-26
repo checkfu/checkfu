@@ -51,6 +51,10 @@ export interface TranscriptToolResult {
 	readonly rejected?: ToolRejection
 }
 
+export type McpToolOf = (
+	name: string,
+) => { readonly server: string; readonly tool: string } | undefined
+
 export interface ToolEventBounds {
 	readonly round: () => void
 	readonly use: (call: TranscriptToolUse) => void
@@ -68,7 +72,10 @@ const isJsonObject = (input: Schema.Json): input is Schema.JsonObject =>
 const asObject = (input: Schema.Json): Schema.JsonObject =>
 	isJsonObject(input) ? input : { value: input }
 
-export const boundToolEvents = (turn: number): ToolEventBounds => {
+export const boundToolEvents = (
+	turn: number,
+	mcpToolOf: McpToolOf = () => undefined,
+): ToolEventBounds => {
 	let budget = MAX_TURN_TOOL_TEXT_LENGTH
 	let published = 0
 	const pending = new Map<string, { readonly slot: number; readonly call: TranscriptToolUse }>()
@@ -125,13 +132,15 @@ export const boundToolEvents = (turn: number): ToolEventBounds => {
 				}
 			}
 			const tool_use_id = toolUseId(turn, result.task_id)
+			const mcp = mcpToolOf(call.name)
 			slots[slot] = [
 				{
 					type: "tool_use",
 					tool_use_id,
-					name: clampName(call.name),
+					name: clampName(mcp?.tool ?? call.name),
 					input: fits ? input : {},
 					...(fits && call.truncated !== true ? {} : { truncated: true as const }),
+					...(mcp === undefined ? {} : { mcp_server_name: mcp.server }),
 				},
 				{
 					type: "tool_result",
@@ -140,6 +149,7 @@ export const boundToolEvents = (turn: number): ToolEventBounds => {
 					is_error: result.is_error,
 					...(truncated ? { truncated: true as const } : {}),
 					...(result.rejected === undefined ? {} : { rejected: result.rejected }),
+					...(mcp === undefined ? {} : { mcp: true as const }),
 				},
 			]
 		},

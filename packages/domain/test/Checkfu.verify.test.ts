@@ -2,6 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
+import { decodeMcpServerCredentials, decodeMcpServers } from "../src/Mcp/McpServers.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
 import * as Verify from "@alchemy.run/domain/Verify"
@@ -152,12 +153,14 @@ const STANDING = {
 	"Automation.AnUpdateLeavesRunsAlone": "proved",
 	"AutomationCapacity.ReservedSlotsStayWithinTheLimit": "proved",
 	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
+	"CreateAgent.NewAgentKeepsItsDeclaredServers": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
 	"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
 	"AdmitSession.PinnedVersionWithinAgentHead": "proved",
 	"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"AdmitSession.AdmissionKeepsTheCredentialsItWasGiven": "proved",
 	"AdmitAutomation.OnlyActiveAgentAndEnvironmentAdmitAutomation": "proved",
 	"AdmitAutomation.PinnedVersionWithinAgentHead": "proved",
 	"AdmitAutomation.AdmissionTakesOneSlotWithinTheLimit": "proved",
@@ -269,7 +272,13 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				walks: { count: 400, length: 12 },
 
 				allow: { skipped: ["EnsureTurnStarted"] },
-				opaque: [sessionIdOfNextRun, isUsableSchedule, upcomingOccurrences],
+				opaque: [
+					sessionIdOfNextRun,
+					isUsableSchedule,
+					upcomingOccurrences,
+					decodeMcpServers,
+					decodeMcpServerCredentials,
+				],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),
@@ -536,6 +545,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							agent_version: 1,
 							environment_id: BoundedEnvironmentId.make(envRef.id),
 							title: "Pinned v1",
+							mcp_server_credentials: "[]",
 						}),
 					)
 					yield* recordStep("admitted-v1")
@@ -576,6 +586,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							agent_version: null,
 							environment_id: BoundedEnvironmentId.make(envRef.id),
 							title: "Head v2",
+							mcp_server_credentials: "[]",
 						}),
 					)
 					yield* recordStep("admitted-v2-alongside-v1")
