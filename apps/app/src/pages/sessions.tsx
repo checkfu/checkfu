@@ -6,13 +6,18 @@ import { Input, Textarea } from "@checkfu/ui/input"
 import { PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
-import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
+import {
+	useInfiniteQuery,
+	useQueryClient,
+	useSuspenseInfiniteQuery,
+	useSuspenseQuery,
+} from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
-import { checkfu } from "../api.ts"
+import { checkfu, errorMessage } from "../api.ts"
 import { choicesOf, OptionPicker } from "../option-picker.tsx"
 import {
 	agentChoices,
@@ -20,6 +25,7 @@ import {
 	present,
 	sessionQuery,
 	sessionsPage,
+	vaultChoices,
 } from "../queries.ts"
 import { selection } from "../selection.ts"
 import { sessionTitle } from "../session-title.ts"
@@ -27,6 +33,16 @@ import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { sendFailure } from "./tool-call.tsx"
 import type { SendAnswer } from "./tool-call.tsx"
+import {
+	bindingsOf,
+	hasFailedLookup,
+	hasGoneSelection,
+	placeError,
+	SessionBindings,
+	SessionCredentialFields,
+	useSessionChoices,
+} from "./session-bindings.tsx"
+import type { ExplicitCredentials } from "./session-bindings.tsx"
 import { Transcript } from "./transcript.tsx"
 import { useSessionEvents } from "./use-session-events.ts"
 
@@ -120,16 +136,36 @@ export function NewSessionPage(): React.JSX.Element {
 	const environmentId = environment.id
 	const ready = agentId !== "" && environmentId !== ""
 	const [title, setTitle] = useState("")
+	const [vaultIds, setVaultIds] = useState<ReadonlyArray<string>>([])
+	const [explicit, setExplicit] = useState<ExplicitCredentials>({})
+	const shown = agents.find((option) => option.id === agentId)
+	const servers = shown?.mcp_servers ?? []
+	const vaultQuery = useInfiniteQuery({ ...vaultChoices, enabled: servers.length > 0 })
+	const vaultList = {
+		items: vaultQuery.data?.pages.flatMap((page) => page.data) ?? [],
+		more: vaultQuery.hasNextPage ? () => void vaultQuery.fetchNextPage() : null,
+		loading: servers.length > 0 && vaultQuery.isPending,
+		error:
+			vaultQuery.error === null || vaultQuery.data !== undefined
+				? undefined
+				: errorMessage(vaultQuery.error),
+		retry: () => void vaultQuery.refetch(),
+	}
+	const choices = useSessionChoices(servers, vaultList.items, vaultIds, explicit)
+	const blocked = hasGoneSelection(choices.gone)
+	const unchecked = hasFailedLookup(choices.failed)
+	const canStart = ready && !blocked && !unchecked && !choices.checking
 	const startKey = useSubmissionKey()
 	const start = useAction(
 		async () => {
-			if (!ready) {
+			if (!canStart) {
 				return undefined
 			}
 			const body = {
-				agent: agentId,
+				agent: shown === undefined ? agentId : { id: shown.id, version: shown.version },
 				environment_id: environmentId,
 				title: title.trim() === "" ? null : title.trim(),
+				...bindingsOf(servers, vaultIds, explicit, choices.credentials),
 			}
 			const session = await checkfu.sessions.create(body, startKey.keyFor(body))
 			startKey.settle()
@@ -144,6 +180,7 @@ export function NewSessionPage(): React.JSX.Element {
 			},
 		},
 	)
+	const startError = placeError(start.error, servers)
 	return (
 		<>
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />
@@ -190,8 +227,34 @@ export function NewSessionPage(): React.JSX.Element {
 						<Field label="Title">
 							<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 						</Field>
-						{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
-						<Button type="submit" disabled={start.pending || !ready}>
+						<SessionCredentialFields
+							agent={agents.find((option) => option.id === agentId)}
+							vaultList={vaultList}
+							vaultIds={vaultIds}
+							onVaults={setVaultIds}
+							explicit={explicit}
+							onExplicit={setExplicit}
+							error={startError}
+						/>
+						{startError.server !== undefined || startError.message === undefined ? null : (
+							<Callout tone="error">{startError.message}</Callout>
+						)}
+						{blocked ? (
+							<Callout tone="error">
+								A vault or credential chosen above is no longer available. Remove or replace it to
+								start the session.
+							</Callout>
+						) : null}
+						{unchecked ? (
+							<Callout tone="error">
+								A vault or credential chosen above could not be checked. Retry it, or remove it, to
+								start the session.
+							</Callout>
+						) : null}
+						{choices.checking ? (
+							<p className="text-control text-muted-foreground">Checking your choices…</p>
+						) : null}
+						<Button type="submit" disabled={start.pending || !canStart}>
 							Start session
 						</Button>
 					</fieldset>
@@ -311,6 +374,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					</Callout>
 				),
 			)}
+			<SessionBindings session={session} />
 			{earlier === null ? null : (
 				<div className="space-y-2">
 					<Button
