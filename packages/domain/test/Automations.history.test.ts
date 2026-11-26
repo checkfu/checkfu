@@ -9,7 +9,7 @@ const createdBeforeDescriptions = {
 	_tag: "automation.created",
 	name: "Morning report",
 	agent_id: "agent_1",
-	agent_version: null,
+	agent_version: 1,
 	environment_id: "env_1",
 	text: "Write the morning report.",
 	schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
@@ -20,34 +20,26 @@ const stateBeforeRevisions = (status: string) => ({
 	state: { status, runs: 2, reported: 2, last_scheduled_at: 0, activation: 1 },
 })
 
-describe("automation history from before descriptions and revisions", () => {
-	it("reads an automation.created event without a description as having none", () => {
-		const event = Schema.decodeUnknownSync(AutomationCreated)(createdBeforeDescriptions)
-		expect(event.description).toBeNull()
-		expect(event.name).toBe("Morning report")
+describe("automation event and state decoding", () => {
+	it("requires the description and pinned version when decoding a creation", () => {
+		const decode = Schema.decodeUnknownSync(AutomationCreated)
+		expect(() => decode(createdBeforeDescriptions)).toThrow()
+		expect(() =>
+			decode({ ...createdBeforeDescriptions, description: null, agent_version: null }),
+		).toThrow()
+		expect(decode({ ...createdBeforeDescriptions, description: null }).agent_version).toBe(1)
 	})
 
-	it("reads run events recorded before runs named their agent as naming none", () => {
-		const started = Schema.decodeSync(AutomationRunStarted)({
-			_tag: "automation.run_started",
-			run: 1,
-			session_id: "sess_auto_1_1",
-			trigger: "manual",
-			scheduled_at: null,
-		})
-		const failed = Schema.decodeSync(AutomationRunFailed)({
+	it("requires the pinned agent when decoding a run outcome", () => {
+		const fields = { run: 1, trigger: "manual", scheduled_at: null }
+		const started = { ...fields, _tag: "automation.run_started", session_id: "sess_auto_1_1" }
+		const failed = {
+			...fields,
 			_tag: "automation.run_failed",
-			run: 2,
-			trigger: "schedule",
-			scheduled_at: 0,
 			error: { type: "agent_unavailable", message: "The agent is archived." },
-		})
-		expect([
-			started.agent_id,
-			started.agent_version,
-			failed.agent_id,
-			failed.agent_version,
-		]).toEqual([null, null, null, null])
+		}
+		expect(() => Schema.decodeUnknownSync(AutomationRunStarted)(started)).toThrow()
+		expect(() => Schema.decodeUnknownSync(AutomationRunFailed)(failed)).toThrow()
 	})
 
 	it("migrates stored state without a revision: a created automation is at its first configuration", () => {

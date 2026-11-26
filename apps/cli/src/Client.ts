@@ -1,5 +1,9 @@
 import { makeCheckfuHttpApiClientWith } from "@checkfu/sdk/Api"
-import type { CheckfuHttpApiClient, SessionEvent } from "@checkfu/sdk/Api"
+import type {
+	CheckfuHttpApiClient,
+	SessionEvent,
+	SessionStreamEvent as SessionStreamPayload,
+} from "@checkfu/sdk/Api"
 import { isAPIError, isApiErrorEnvelope } from "@checkfu/sdk/Errors"
 import type { CheckfuSdkError } from "@checkfu/sdk/Errors"
 import {
@@ -195,10 +199,16 @@ export interface CheckfuClient {
 	readonly streamApiSse: <Event>(
 		config: ApiSseStreamConfig<Event>,
 	) => Stream.Stream<Event, CliFailure>
-	readonly streamSessionEvents: (
-		sessionId: string,
-		options?: StreamSessionEventsOptions,
-	) => Stream.Stream<SessionEvent, CliFailure>
+	readonly streamSessionEvents: {
+		(
+			sessionId: string,
+			options?: StreamSessionEventsOptions & { readonly event_deltas?: undefined },
+		): Stream.Stream<SessionEvent, CliFailure>
+		(
+			sessionId: string,
+			options?: StreamSessionEventsOptions,
+		): Stream.Stream<SessionStreamPayload, CliFailure>
+	}
 	readonly generateIdempotencyKey: Effect.Effect<string>
 }
 
@@ -253,11 +263,22 @@ export const makeCheckfuClient = <R = never>(
 
 		const generateIdempotencyKey = sdkGenerateIdempotencyKey(random, "cli")
 
-		const streamSessionEvents = (
+		function streamSessionEvents(
+			sessionId: string,
+			options?: StreamSessionEventsOptions & { readonly event_deltas?: undefined },
+		): Stream.Stream<SessionEvent, CliFailure>
+		function streamSessionEvents(
 			sessionId: string,
 			options?: StreamSessionEventsOptions,
-		): Stream.Stream<SessionEvent, CliFailure> =>
-			sdkStreamSessionEvents(api, sessionId, options).pipe(Stream.mapError(mapSdkStreamError))
+		): Stream.Stream<SessionStreamPayload, CliFailure>
+		function streamSessionEvents(
+			sessionId: string,
+			options?: StreamSessionEventsOptions,
+		): Stream.Stream<SessionStreamPayload, CliFailure> {
+			return sdkStreamSessionEvents(api, sessionId, options).pipe(
+				Stream.mapError(mapSdkStreamError),
+			)
+		}
 
 		return {
 			baseUrl,

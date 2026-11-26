@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { createMachineEgress } from "../src/Workspace/MachineEgress.ts"
 import {
@@ -145,6 +146,48 @@ describe("Session resources", () => {
 						`/v1/sessions/${session.id}/resources/sesrsc_missing`,
 					)
 					expect(missing.status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("stores a repository token before the first turn can prepare the workspace", async () => {
+		const { layer, closeAll, beforeTokenStored, preparedWorkspaces, workspaceCalls } =
+			makePiDurableTestLayer(async (model) => makeAssistantReply(model, null, "ok", 1, 1))
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const base = yield* createAgentAndEnvironment(apiFetch)
+					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+					beforeTokenStored.push(async () => {
+						const preparing = await runPromise(
+							Effect.repeat(
+								Effect.sync(() => workspaceCalls.some((call) => call.startsWith("prepare "))),
+								{ until: (started) => started, times: 100, schedule: Schedule.spaced("10 millis") },
+							),
+						)
+						expect(preparing).toBe(true)
+						expect(preparedWorkspaces).toHaveLength(0)
+						return new Response(null)
+					})
+					const created = yield* request(apiFetch, "POST", "/v1/sessions", {
+						...base,
+						initial_events: [{ type: "user.message", content: [{ type: "text", text: "Start." }] }],
+						resources: [
+							{
+								type: "github_repository",
+								url: "https://github.com/acme/api",
+								authorization_token: TOKEN,
+							},
+						],
+					})
+					expect(created.status).toBe(201)
+					const { id } = yield* json<SessionBody>(created)
+					yield* waitForSession(apiFetch, id, (session) => session.status === "idle")
+					expect(preparedWorkspaces).toHaveLength(1)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

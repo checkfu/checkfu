@@ -1,3 +1,4 @@
+import { RecordInitialMessagesLive } from "../src/Session/RecordInitialMessages.policy.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import { ExpireArtifactReservationsLive } from "../src/Artifact/ExpireArtifactReservations.policy.ts"
 import { ReleaseArtifactBytesLive } from "../src/Artifact/ReleaseArtifactBytes.policy.ts"
@@ -123,6 +124,7 @@ const handlersOf =
 	({ missStartTurn = false, delayEnsure }: Handlers) =>
 	(platform: Platform): typeof CheckfuHandlersLive =>
 		Layer.mergeAll(
+			RecordInitialMessagesLive,
 			missStartTurn ? StartTurn.toLayer(Effect.succeed(() => Effect.void)) : StartTurnLive,
 			EnsureTurnStarted.toLayer(
 				Effect.map(

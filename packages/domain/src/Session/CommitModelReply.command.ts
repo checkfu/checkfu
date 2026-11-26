@@ -8,6 +8,7 @@ import {
 	MessageText,
 	ModelUsage,
 	NonEmptyString,
+	NonNegativeInt,
 	PositiveInt,
 	SessionEventFields,
 	StopReason,
@@ -17,14 +18,17 @@ import {
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 
+const PreviewOrigin = Schema.Struct({ turn: PositiveInt, started_at: NonNegativeInt })
+
 export class AgentThinking extends Domain.Event("agent.thinking", {
 	thinking: Schema.String,
+	preview_origin: Schema.optionalKey(PreviewOrigin),
 }) {}
 
-export class AgentMessage extends Domain.Event(
-	"agent.message",
-	SessionEventFields["agent.message"],
-) {}
+export class AgentMessage extends Domain.Event("agent.message", {
+	...SessionEventFields["agent.message"],
+	preview_origin: Schema.optionalKey(PreviewOrigin),
+}) {}
 
 export class SpanModelRequestEnd extends Domain.Event(
 	"span.model_request_end",
@@ -43,6 +47,7 @@ export class CommitModelReply extends Domain.Command("CommitModelReply", {
 		request_seq: PositiveInt,
 		model_request_start_id: NonEmptyString,
 		thinking: Schema.NullOr(ThinkingText),
+		response_started_at: Schema.optionalKey(NonNegativeInt),
 		text: MessageText,
 		truncated: Schema.optional(Schema.Literal(true)),
 		model_usage: ModelUsage,

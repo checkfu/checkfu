@@ -1,3 +1,4 @@
+import { SessionPreviewSource } from "./Http/SessionPreviewSource.ts"
 import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
@@ -172,7 +173,16 @@ const HarnessLive = PiDurableHarnessLive.pipe(
 	Layer.provide(CheckfuLive),
 )
 
+const PiPreviewSourceLive = Layer.effect(
+	SessionPreviewSource,
+	Effect.map(
+		Cloudflare.Workers.bindWorker(PiHarnessWorker),
+		(harness) => (id: string) => harness.watchPreviews(id),
+	),
+)
+
 const ApiWorkerLive = Layer.mergeAll(
+	PiPreviewSourceLive,
 	VaultsLive,
 	vaultListingQueriesFrom(VaultsLive),
 	CheckfuLive,

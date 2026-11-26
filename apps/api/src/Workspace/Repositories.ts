@@ -1,3 +1,6 @@
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as PubSub from "effect/PubSub"
 import type { RepositoryMount } from "./WorkspaceShapes.ts"
 import { localDevBaseUrl } from "../Pi/PiModels.ts"
 
@@ -8,6 +11,18 @@ export const GITHUB_BASE_URL_ENV = "CHECKFU_GITHUB_BASE_URL"
 export type { RepositoryMount, WorkspacePreparation } from "./WorkspaceShapes.ts"
 
 export const githubBaseUrl = localDevBaseUrl(GITHUB_BASE_URL_ENV)
+
+export const repositoryTokenGate = (hasToken: (id: string) => boolean) =>
+	Effect.map(PubSub.unbounded<string>(), (tokens) => ({
+		awaitToken: (id: string) =>
+			Effect.gen(function* () {
+				const stored = yield* PubSub.subscribe(tokens)
+				if (!hasToken(id)) {
+					yield* Effect.repeat(PubSub.take(stored), { until: (arrived) => arrived === id })
+				}
+			}).pipe(Effect.scoped, Effect.timeoutOption("30 seconds"), Effect.map(Option.isSome)),
+		stored: (id: string) => PubSub.publish(tokens, id),
+	}))
 
 type Mounted = Pick<RepositoryMount, "id" | "url">
 

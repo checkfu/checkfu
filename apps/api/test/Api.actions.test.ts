@@ -408,7 +408,7 @@ describe("tool calls that wait on an answer", () => {
 					{
 						id: expect.stringContaining(`sevt_${id}_input_`),
 						type: "user.tool_confirmation",
-						processed_at: null,
+						processed_at: expect.any(String),
 						tool_use_id: use.tool_use_id,
 						result: "allow",
 					},
@@ -813,13 +813,16 @@ describe("custom tools", () => {
 					{
 						id: expect.stringContaining(`sevt_${id}_input_`),
 						type: "user.custom_tool_result",
-						processed_at: null,
+						processed_at: expect.any(String),
 						custom_tool_use_id: use.tool_use_id,
 						content: [{ type: "text", text: "shipped" }],
 					},
 				])
 				const all = yield* until(call, id, ended, "turn did not end")
-				expect(find(all, "user.custom_tool_result").id).toBe(answered.body.data[0].id)
+				expect(find(all, "user.custom_tool_result")).toMatchObject({
+					id: answered.body.data[0].id,
+					processed_at: answered.body.data[0].processed_at,
+				})
 				expect(lastMessage(all)).toBe("saw ok:shipped")
 				expect(all.filter((e) => e.type === "agent.custom_tool_use")).toHaveLength(1)
 			}),

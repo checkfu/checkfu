@@ -31,6 +31,9 @@ import {
 	AgentToolUse,
 	AgentCustomToolUse,
 } from "@checkfu/domain/Session/RecordToolCall.command"
+import { SystemMessage } from "@checkfu/domain/Session/SendSystemMessage.command"
+import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
+import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.command"
 import { UserCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
@@ -47,7 +50,10 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
+import {
+	AdmitSession,
+	AdmitSessionWithMessages,
+} from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { SessionEvent } from "../src/Http/Api.ts"
 import {
@@ -64,6 +70,7 @@ import {
 	AUTH_HEADERS,
 	createIdleSession,
 	extractLastUserText,
+	extractSystemText,
 	makeApiTestClient,
 	makeAssistantReply,
 	makePiDurableTestLayer,
@@ -78,6 +85,89 @@ const testNotice = (message: string) =>
 	})
 
 describe("Session event batching, interrupts, and SSE streaming", () => {
+	it("records system guidance without starting a turn and uses it for later requests", async () => {
+		const threadInstructions: Array<string> = []
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) => {
+			threadInstructions.push(extractSystemText(context))
+			return makeAssistantReply(model, null, "ok", 1, 1)
+		})
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch, "You are an assistant.")
+					const path = `/v1/sessions/${session.id}/events`
+					const send = (type: "system.message" | "user.message", ...texts: ReadonlyArray<string>) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path,
+							headers: AUTH_HEADERS,
+							body: { events: [{ type, content: texts.map((text) => ({ type: "text", text })) }] },
+						})
+					const system = yield* send("system.message", "Stay brief.", "Be precise.")
+					expect(system.status).toBe(200)
+					const receipt = (yield* Effect.promise(() => system.json())) as {
+						data: ReadonlyArray<{ type: string; id: string; processed_at: string }>
+					}
+					expect(receipt.data[0]).toMatchObject({
+						type: "system.message",
+						content: [
+							{ type: "text", text: "Stay brief." },
+							{ type: "text", text: "Be precise." },
+						],
+						processed_at: expect.any(String),
+					})
+					expect(threadInstructions).toEqual([])
+					const stream = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `${path}/stream`,
+						headers: AUTH_HEADERS,
+					})
+					expect((yield* send("user.message", "First question")).status).toBe(200)
+					yield* Effect.promise(() =>
+						readSseUntil(stream, (event) => event.type === "session.status_idle"),
+					)
+					expect(threadInstructions[0]).toContain("You are an assistant.")
+					expect(threadInstructions[0]).toContain("Stay brief.\nBe precise.")
+					expect((yield* send("system.message", "Use metric units.")).status).toBe(200)
+					const next = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `${path}/stream`,
+						headers: AUTH_HEADERS,
+					})
+					expect((yield* send("user.message", "Second question")).status).toBe(200)
+					yield* Effect.promise(() =>
+						readSseUntil(next, (event) => event.type === "session.status_idle" && event.turn === 2),
+					)
+					expect(threadInstructions[1]).toContain("Stay brief.\nBe precise.\n\nUse metric units.")
+					const listed = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path,
+						headers: AUTH_HEADERS,
+					})
+					const history = (yield* Effect.promise(() => listed.json())) as {
+						data: ReadonlyArray<{ type: string }>
+					}
+					expect(history.data.find((event) => event.type === "system.message")).toMatchObject(
+						receipt.data[0]!,
+					)
+					const competing = yield* Effect.all(
+						[
+							send("system.message", "a".repeat(60_000)),
+							send("system.message", "b".repeat(60_000)),
+						],
+						{ concurrency: 2 },
+					)
+					expect(competing.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+						200, 400,
+					])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("reports the confirmed prefix of a batch without logging user message text when a later command fails unexpectedly", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
@@ -2659,7 +2749,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					seq: 18,
 					type: "user.tool_confirmation",
 					created_at: "2026-01-01T00:00:00.000Z",
-					processed_at: null,
+					processed_at: "2026-01-01T00:00:00.000Z",
 					tool_use_id: `sevt_${sessionId}_tool_tu_21`,
 					result: "deny",
 					deny_message: "No",
@@ -2676,7 +2766,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					seq: 19,
 					type: "user.custom_tool_result",
 					created_at: "2026-01-01T00:00:00.000Z",
-					processed_at: null,
+					processed_at: "2026-01-01T00:00:00.000Z",
 					custom_tool_use_id: `sevt_${sessionId}_tool_tu_20`,
 					content: [{ type: "text", text: "shipped" }],
 					is_error: true,
@@ -2693,10 +2783,24 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionArchived(),
+				event: new SystemMessage({
+					content: [{ type: "text", text: "Stay brief." }],
+					processed_at: at,
+				}),
 				expectedJson: {
 					id: `sevt_${sessionId}_21`,
 					seq: 21,
+					type: "system.message",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
+					content: [{ type: "text", text: "Stay brief." }],
+				},
+			},
+			{
+				event: new SessionArchived(),
+				expectedJson: {
+					id: `sevt_${sessionId}_22`,
+					seq: 22,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
@@ -2771,8 +2875,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(listText).toBe(
 						JSON.stringify({
 							data: samples.map((sample) => sample.expectedJson),
-							has_more: false,
-							next_cursor: null,
+							next_page: null,
 						}),
 					)
 
@@ -2821,11 +2924,15 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const encoded = encodeEvent(mapped)
 					const expectedId =
-						mapped.type === "agent.tool_use" ||
-						mapped.type === "agent.mcp_tool_use" ||
-						mapped.type === "agent.custom_tool_use"
-							? mapped.tool_use_id
-							: `sevt_sess_generated_${seq}`
+						Schema.is(AgentThinking)(generated) || Schema.is(AgentMessage)(generated)
+							? generated.preview_origin === undefined
+								? `sevt_sess_generated_${seq}`
+								: `sevt_sess_generated_${generated._tag}_${generated.preview_origin.turn}_${generated.preview_origin.started_at}`
+							: mapped.type === "agent.tool_use" ||
+								  mapped.type === "agent.mcp_tool_use" ||
+								  mapped.type === "agent.custom_tool_use"
+								? mapped.tool_use_id
+								: `sevt_sess_generated_${seq}`
 					expect(encoded).toMatchObject({
 						id: expectedId,
 						seq,
@@ -2870,34 +2977,89 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							},
 						})
 
-					const created = yield* create(["first"])
+					const messages = Array.from({ length: 50 }, (_, index) => `initial message ${index + 1}`)
+					expect((yield* create([...messages, "one too many"])).status).toBe(400)
+					expect((yield* create([...messages.slice(0, -1), ""])).status).toBe(400)
+					const created = yield* create(messages)
 					expect(created.status).toBe(201)
 					const session = (yield* Effect.promise(() => created.json())) as { id: string }
 					expect(session).toMatchObject({ status: "running", turn: 1 })
 
-					const replay = yield* create(["first"])
+					const replay = yield* create(messages)
 					expect(replay.status).toBe(201)
 					expect(yield* Effect.promise(() => replay.json())).toEqual(session)
-					const conflict = yield* create(["different"])
+					const conflict = yield* create([...messages.slice(0, -1), "different"])
 					expect(conflict.status).toBe(409)
 
 					const listed = yield* sendRequest(apiFetch, {
 						method: "GET",
-						path: `/v1/sessions/${session.id}/events`,
+						path: `/v1/sessions/${session.id}/events?limit=100`,
 						headers: AUTH_HEADERS,
 					})
 					const { data } = (yield* Effect.promise(() => listed.json())) as {
-						data: ReadonlyArray<{ type: string; content: ReadonlyArray<{ text: string }> }>
+						data: ReadonlyArray<{
+							id: string
+							type: string
+							content: ReadonlyArray<{ text: string }>
+						}>
 					}
-					expect(data.slice(0, 2).map(({ type }) => type)).toEqual([
-						"user.message",
-						"session.status_running",
-					])
+					expect(data.slice(0, messages.length).every(({ type }) => type === "user.message")).toBe(
+						true,
+					)
+					expect(data[messages.length]?.type).toBe("session.status_running")
+					const recorded = data.filter(({ type }) => type === "user.message")
+					expect(recorded.map(({ content }) => content[0]?.text)).toEqual(messages)
+					expect(new Set(recorded.map(({ id }) => id)).size).toBe(messages.length)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("recovers initial message recording from the committed admission plan", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const base = yield* createIdleSession(apiFetch)
+					const previous = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${base.id}`,
+						headers: AUTH_HEADERS,
+					})
+					const { agent } = (yield* Effect.promise(() => previous.json())) as {
+						agent: { id: string }
+					}
+					const decision = yield* AdmitSessionWithMessagesDecision
+					const session_id = SessionId.make("sess_initial_resume")
+					const messages = ["First", "Second", "Third"]
+					yield* decision.send(
+						new AdmitSessionWithMessages({
+							session_id,
+							agent_id: AgentId.make(agent.id),
+							agent_version: null,
+							environment_id: EnvironmentId.make(base.environment_id),
+							title: null,
+							mcp_server_credentials: "[]",
+							initial_messages: {
+								count: messages.length,
+								messages: encodeInitialMessages(messages),
+							},
+						}),
+					)
+					const views = yield* SessionView
+					const ref = Session.ref(session_id)
+					yield* views.waitFor(ref, { turn: 1 }, { timeout: "5 seconds" })
+					const history = yield* views.list(ref, { take: 20 })
 					expect(
-						data
-							.filter(({ type }) => type === "user.message")
-							.map(({ content }) => content[0]?.text),
-					).toEqual(["first"])
+						history.entries.flatMap(({ event }) =>
+							event._tag === "user.message" ? event.content.map(({ text }) => text) : [],
+						),
+					).toEqual(messages)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -3248,6 +3410,18 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						"keyed batch",
 						"explicit batch",
 					])
+					const filtered = yield* generatedClient.sessions.listEvents({
+						params: { session_id: eventsSessionId },
+						query: { types: ["user.message"], order: "desc", limit: 1 },
+					})
+					expect(filtered.data.map((event) => event.id)).toEqual([userMessages[1]?.id])
+					expect(filtered.next_page).toBeTypeOf("string")
+					const next = yield* generatedClient.sessions.listEvents({
+						params: { session_id: eventsSessionId },
+						query: { types: ["user.message"], order: "desc", limit: 1, page: filtered.next_page! },
+					})
+					expect(next.data.map((event) => event.id)).toEqual([userMessages[0]?.id])
+					expect(next.next_page).toBeNull()
 					expect(sentUserMessages).toContain("keyed batch")
 					expect(sentUserMessages).toContain("explicit batch")
 				}).pipe(Effect.scoped, Effect.provide(layer)),

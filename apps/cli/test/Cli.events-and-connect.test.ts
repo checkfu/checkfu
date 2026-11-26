@@ -145,12 +145,41 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(listed.exitCode).toBe(0)
 					const page = JSON.parse(listed.stdout) as {
 						data: Array<{ type: string; seq: number }>
-						has_more: boolean
-						next_cursor: number | null
+
+						next_page: string | null
 					}
 					expect(page.data.length).toBe(5)
-					expect(page.has_more).toBe(true)
-					expect(page.next_cursor).toBe(page.data.at(-1)?.seq)
+					expect(page.next_page).toBe(String(page.data.at(-1)?.seq))
+					const next = yield* cli.run([
+						"sessions:events",
+						"list",
+						"--session-id",
+						sessionId,
+						"--page",
+						page.next_page ?? "",
+						"--limit",
+						"1",
+					])
+					expect(next.exitCode).toBe(0)
+					expect(JSON.parse(next.stdout)).toMatchObject({ data: [{ seq: 6 }] })
+					const filtered = yield* cli.run([
+						"sessions:events",
+						"list",
+						"--session-id",
+						sessionId,
+						"--type",
+						"user.message",
+						"--type",
+						"agent.message",
+					])
+					expect(filtered.exitCode).toBe(0)
+					const filteredPage = JSON.parse(filtered.stdout) as { data: Array<{ type: string }> }
+					expect(filteredPage.data.map((event) => event.type)).toEqual([
+						"user.message",
+						"agent.message",
+						"user.message",
+						"agent.message",
+					])
 
 					yield* cli.run(["sessions", "archive", "--session-id", sessionId])
 
@@ -2151,7 +2180,7 @@ describe("CLI sessions:events and sessions connect", () => {
 										ascQueries.push(url.search)
 									} else if (
 										url.searchParams.get("order") === "desc" &&
-										url.searchParams.get("after") !== null
+										url.searchParams.get("page") !== null
 									) {
 										descBaselineQueries.push(url.search)
 									}
@@ -2165,7 +2194,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(resumed.stdout).not.toContain("T1:one")
 					expect(ascQueries).toHaveLength(0)
 					expect(descBaselineQueries).toHaveLength(1)
-					expect(descBaselineQueries[0]).toContain(`after=${headSeq + 1}`)
+					expect(descBaselineQueries[0]).toContain(`page=${headSeq + 1}`)
 				}),
 			),
 		)
@@ -2310,7 +2339,7 @@ describe("CLI sessions:events and sessions connect", () => {
 			}
 			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_subproc/events") {
 				res.writeHead(200, { "content-type": "application/json" })
-				res.end(JSON.stringify({ data: [], has_more: false, next_cursor: null }))
+				res.end(JSON.stringify({ data: [], next_page: null }))
 				return
 			}
 			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_subproc/events/stream") {
@@ -2688,6 +2717,7 @@ describe("CLI sessions:events and sessions connect", () => {
 													seq: errSeq,
 													type: "session.error",
 													created_at: "2026-11-22T00:00:00.000Z",
+													processed_at: "2026-11-22T00:00:00.000Z",
 													error: {
 														type: "upstream_overloaded",
 														message: "transient overload",
@@ -3041,7 +3071,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					"cache-control": "no-cache",
 				})
 				res.write(
-					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z","processed_at":"2026-11-22T00:00:00.000Z"}\n\n',
 				)
 				req.on("close", () => {
 					streamClosed = true
@@ -3165,7 +3195,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"cache-control": "no-cache",
 					})
 					res.write(
-						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z","processed_at":"2026-11-22T00:00:00.000Z"}\n\n',
 					)
 					openSseResponses.push(res)
 					return
@@ -3989,6 +4019,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 													seq: errSeq,
 													type: "session.error",
 													created_at: "2026-11-22T00:00:00.000Z",
+													processed_at: "2026-11-22T00:00:00.000Z",
 													error: {
 														type: "upstream_overloaded",
 														message: "temporary retryable error",
@@ -4210,7 +4241,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										url.pathname === `/v1/sessions/${busySessionId}/events`
 									) {
 										const order = url.searchParams.get("order")
-										const afterParam = url.searchParams.get("after")
+										const pageParam = url.searchParams.get("page")
 										if (order === "desc" && url.searchParams.get("limit") === "1") {
 											return new Response(
 												JSON.stringify({
@@ -4220,25 +4251,21 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 															seq: syntheticHead,
 															type: "user.message",
 															created_at: "2026-11-22T00:00:00.000Z",
+															processed_at: "2026-11-22T00:00:00.000Z",
 															content: [{ type: "text", text: "busy" }],
 														},
 													],
-													has_more: true,
-													next_cursor: syntheticHead,
+													next_page: String(syntheticHead),
 												}),
 												{ status: 200, headers: { "content-type": "application/json" } },
 											)
 										}
-										if (order === "desc" && afterParam === String(resumeAfter + 1)) {
+										if (order === "desc" && pageParam === String(resumeAfter + 1)) {
 											descBaselineQueries += 1
 										}
-										if (
-											order === "asc" &&
-											afterParam !== null &&
-											Number(afterParam) >= resumeAfter
-										) {
+										if (order === "asc" && pageParam !== null && Number(pageParam) >= resumeAfter) {
 											suffixPagesServed += 1
-											const cursor = Number(afterParam)
+											const cursor = Number(pageParam)
 											const nextSeq1 = cursor + 1
 											const nextSeq2 = cursor + 2
 											syntheticHead = Math.max(syntheticHead + 2, nextSeq2 + 1)
@@ -4250,6 +4277,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 															seq: nextSeq1,
 															type: "user.message",
 															created_at: "2026-11-22T00:00:00.000Z",
+															processed_at: "2026-11-22T00:00:00.000Z",
 															content: [{ type: "text", text: "live-1" }],
 														},
 														{
@@ -4257,18 +4285,18 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 															seq: nextSeq2,
 															type: "user.message",
 															created_at: "2026-11-22T00:00:00.000Z",
+															processed_at: "2026-11-22T00:00:00.000Z",
 															content: [{ type: "text", text: "live-2" }],
 														},
 													],
-													has_more: true,
-													next_cursor: nextSeq2,
+													next_page: String(nextSeq2),
 												}),
 												{ status: 200, headers: { "content-type": "application/json" } },
 											)
 										}
 										if (
 											order === "asc" &&
-											(afterParam === null || Number(afterParam) < resumeAfter)
+											(pageParam === null || Number(pageParam) < resumeAfter)
 										) {
 											prefixPagesServed += 1
 										}
