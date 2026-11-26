@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { isPendingResource } from "./Api.ts"
+import { PendingResource, isPendingResource } from "./Api.ts"
 import type {
 	Agent,
 	Artifact,
@@ -12,12 +12,7 @@ import type {
 	Automation,
 	Environment,
 	ListSessionEventsResponse,
-	PendingAgent,
-	PendingArtifact,
-	PendingArtifactVersion,
-	PendingAutomation,
-	PendingEnvironment,
-	PendingSession,
+	PendingResourceType,
 	Session,
 	SessionEvent,
 } from "./Api.ts"
@@ -25,8 +20,9 @@ import {
 	CheckfuClient,
 	INTERNAL_EFFECT_RUNTIME,
 	makeNormalizedCheckfuClientLayer,
+	waitForPendingResource,
 } from "./Client.ts"
-import type { CheckfuClientConfig } from "./Client.ts"
+import type { CheckfuClientConfig, PendingResolved, PendingResolvedResource } from "./Client.ts"
 import {
 	APIConnectionError,
 	APIConnectionTimeoutError,
@@ -48,7 +44,6 @@ import {
 	UnprocessableEntityError,
 	UnsupportedMediaTypeError,
 } from "./Errors.ts"
-import type { CheckfuSdkError } from "./Errors.ts"
 import { PromiseResources } from "./generated/Resources.ts"
 import {
 	APIPromise,
@@ -225,6 +220,10 @@ const resolveConstructorOptions = (
 	}
 }
 
+type Settled<K extends keyof PendingResolved> = IsoDateTimes<PendingResolved[K]>
+
+const isPendingReceipt = Schema.is(PendingResource)
+
 export class Checkfu extends PromiseResources {
 	static readonly CheckfuError = CheckfuError
 	static readonly APIError = APIError
@@ -304,55 +303,14 @@ export class Checkfu extends PromiseResources {
 		return new Checkfu(nextOptions)
 	}
 
-	waitForPending(
-		result: JsonAgent | PendingAgent,
-		options?: PromiseWaitForPendingOptions<JsonAgent>,
-	): Promise<JsonAgent>
-	waitForPending(
-		result: JsonEnvironment | PendingEnvironment,
-		options?: PromiseWaitForPendingOptions<JsonEnvironment>,
-	): Promise<JsonEnvironment>
-	waitForPending(
-		result: JsonSession | PendingSession,
-		options?: PromiseWaitForPendingOptions<JsonSession>,
-	): Promise<JsonSession>
-	waitForPending(
-		result: JsonAutomation | PendingAutomation,
-		options?: PromiseWaitForPendingOptions<JsonAutomation>,
-	): Promise<JsonAutomation>
-	waitForPending(
-		result: JsonArtifact | PendingArtifact,
-		options?: PromiseWaitForPendingOptions<JsonArtifact>,
-	): Promise<JsonArtifact>
-	waitForPending(
-		result: JsonArtifactVersion | PendingArtifactVersion,
-		options?: PromiseWaitForPendingOptions<JsonArtifactVersion>,
-	): Promise<JsonArtifactVersion>
+	waitForPending<R extends Settled<PendingResourceType> | IsoDateTimes<PendingResource>>(
+		result: R,
+		options?: PromiseWaitForPendingOptions<Settled<R["type"]>>,
+	): Promise<Settled<R["type"]>>
 	async waitForPending(
-		result:
-			| JsonAgent
-			| PendingAgent
-			| JsonEnvironment
-			| PendingEnvironment
-			| JsonSession
-			| PendingSession
-			| JsonAutomation
-			| PendingAutomation
-			| JsonArtifact
-			| PendingArtifact
-			| JsonArtifactVersion
-			| PendingArtifactVersion,
-		options?: PromiseWaitForPendingOptions<
-			| JsonAgent
-			| JsonEnvironment
-			| JsonSession
-			| JsonAutomation
-			| JsonArtifact
-			| JsonArtifactVersion
-		>,
-	): Promise<
-		JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonArtifact | JsonArtifactVersion
-	> {
+		result: Settled<keyof PendingResolved> | IsoDateTimes<PendingResource>,
+		options?: PromiseWaitForPendingOptions<Settled<keyof PendingResolved>>,
+	): Promise<Settled<keyof PendingResolved>> {
 		if (!isPendingResource(result)) {
 			return result
 		}
@@ -360,107 +318,26 @@ export class Checkfu extends PromiseResources {
 		if (isSignalAborted(signal)) {
 			throw new APIUserAbortError({ message: "Request was aborted." })
 		}
-		const requestOptions = toEffectRequestOptions(options?.requestOptions)
-		const baseEffectOpts = {
-			...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-			...(options?.initialDelay === undefined ? {} : { initialDelay: options.initialDelay }),
-			...(options?.maxDelay === undefined ? {} : { maxDelay: options.maxDelay }),
-			...(requestOptions === undefined ? {} : { requestOptions }),
+		if (!isPendingReceipt(result)) {
+			throw new CheckfuConfigError({
+				message: `waitForPending cannot wait for a pending ${String(result.type)}.`,
+			})
 		}
-		const effect: Effect.Effect<
-			| JsonAgent
-			| JsonEnvironment
-			| JsonSession
-			| JsonAutomation
-			| JsonArtifact
-			| JsonArtifactVersion,
-			CheckfuSdkError,
-			CheckfuClient
-		> = Effect.flatMap(
-			CheckfuClient,
-			(
-				client,
-			): Effect.Effect<
-				| JsonAgent
-				| JsonEnvironment
-				| JsonSession
-				| JsonAutomation
-				| JsonArtifact
-				| JsonArtifactVersion,
-				CheckfuSdkError
-			> => {
-				const until = options?.until
-				switch (result.type) {
-					case "agent":
-						return Effect.map(
-							client.waitForPending(result, {
-								...baseEffectOpts,
-								...(until === undefined
-									? {}
-									: { until: (resource: Agent) => until(toIsoJson(resource)) }),
-							}),
-							toIsoJson,
-						)
-					case "environment":
-						return Effect.map(
-							client.waitForPending(result, {
-								...baseEffectOpts,
-								...(until === undefined
-									? {}
-									: { until: (resource: Environment) => until(toIsoJson(resource)) }),
-							}),
-							toIsoJson,
-						)
-					case "session":
-						return Effect.map(
-							client.waitForPending(result, {
-								...baseEffectOpts,
-								...(until === undefined
-									? {}
-									: { until: (resource: Session) => until(toIsoJson(resource)) }),
-							}),
-							toIsoJson,
-						)
-					case "automation":
-						return Effect.map(
-							client.waitForPending(result, {
-								...baseEffectOpts,
-								...(until === undefined
-									? {}
-									: { until: (resource: Automation) => until(toIsoJson(resource)) }),
-							}),
-							toIsoJson,
-						)
-					case "artifact":
-						return Effect.map(
-							client.waitForPending(result, {
-								...baseEffectOpts,
-								...(until === undefined
-									? {}
-									: { until: (resource: Artifact) => until(toIsoJson(resource)) }),
-							}),
-							toIsoJson,
-						)
-					case "artifact_version":
-						return Effect.map(
-							client.waitForPending(result, {
-								...baseEffectOpts,
-								...(until === undefined
-									? {}
-									: { until: (resource: ArtifactVersion) => until(toIsoJson(resource)) }),
-							}),
-							toIsoJson,
-						)
-					default: {
-						const unknown: { readonly type: unknown } = result
-						return Effect.fail(
-							new CheckfuConfigError({
-								message: `waitForPending cannot wait for a pending ${String(unknown.type)}.`,
-							}),
-						)
-					}
-				}
-			},
+		const requestOptions = toEffectRequestOptions(options?.requestOptions)
+		const until = options?.until
+		const effect = Effect.flatMap(CheckfuClient, (client) =>
+			Effect.map(
+				waitForPendingResource(client, result, {
+					...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
+					...(options?.initialDelay === undefined ? {} : { initialDelay: options.initialDelay }),
+					...(options?.maxDelay === undefined ? {} : { maxDelay: options.maxDelay }),
+					...(requestOptions === undefined ? {} : { requestOptions }),
+					...(until === undefined
+						? {}
+						: { until: (resource: PendingResolvedResource) => until(toIsoJson(resource)) }),
+				}),
+				toIsoJson,
+			),
 		)
 		const exit = await this.#runtime.runPromiseExit(
 			effect,

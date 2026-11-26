@@ -34,10 +34,12 @@ import {
 	readSseUntil,
 	sendAndSettle,
 	sendRequest,
+	TestRuntimeContext,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Provider refusals and OpenAI Responses codec", () => {
 	it("preserves provider refusals without draining queued prompts and keeps the session alive after a provider error", async () => {
@@ -361,6 +363,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
+			Layer.provideMerge(VaultsTestLive),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1673,6 +1677,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
+				Layer.provideMerge(VaultsTestLive),
+				Layer.provideMerge(TestRuntimeContext),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

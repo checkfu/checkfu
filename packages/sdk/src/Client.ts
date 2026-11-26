@@ -14,13 +14,11 @@ import type {
 	Automation,
 	CheckfuHttpApiClient,
 	Environment,
-	PendingAgent,
-	PendingArtifact,
-	PendingArtifactVersion,
-	PendingAutomation,
-	PendingEnvironment,
-	PendingSession,
+	PendingResource,
+	PendingResourceType,
 	Session,
+	Vault,
+	VaultCredential,
 } from "./Api.ts"
 import { CheckfuConfigError } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
@@ -93,32 +91,77 @@ export interface CheckfuClientFetchOptions {
 	readonly fetch?: typeof globalThis.fetch | undefined
 }
 
+export type PendingOf<K extends PendingResourceType> = PendingResource & { readonly type: K }
+
 export interface WaitForPendingMethod {
-	(
-		result: Agent | PendingAgent,
-		options?: WaitForPendingOptions<Agent>,
-	): Effect.Effect<Agent, CheckfuSdkError>
-	(
-		result: Environment | PendingEnvironment,
-		options?: WaitForPendingOptions<Environment>,
-	): Effect.Effect<Environment, CheckfuSdkError>
-	(
-		result: Session | PendingSession,
-		options?: WaitForPendingOptions<Session>,
-	): Effect.Effect<Session, CheckfuSdkError>
-	(
-		result: Automation | PendingAutomation,
-		options?: WaitForPendingOptions<Automation>,
-	): Effect.Effect<Automation, CheckfuSdkError>
-	(
-		result: Artifact | PendingArtifact,
-		options?: WaitForPendingOptions<Artifact>,
-	): Effect.Effect<Artifact, CheckfuSdkError>
-	(
-		result: ArtifactVersion | PendingArtifactVersion,
-		options?: WaitForPendingOptions<ArtifactVersion>,
-	): Effect.Effect<ArtifactVersion, CheckfuSdkError>
+	<K extends PendingResourceType>(
+		result: PendingResolved[K] | PendingOf<K>,
+		options?: WaitForPendingOptions<PendingResolved[K]>,
+	): Effect.Effect<PendingResolved[K], CheckfuSdkError>
 }
+
+export interface PendingResolved {
+	readonly agent: Agent
+	readonly environment: Environment
+	readonly session: Session
+	readonly automation: Automation
+	readonly artifact: Artifact
+	readonly artifact_version: ArtifactVersion
+	readonly vault: Vault
+	readonly vault_credential: VaultCredential
+}
+
+export type PendingResolvedResource = PendingResolved[PendingResourceType]
+
+const retrievePending = (
+	client: CheckfuSdkClient,
+	pending: PendingResource,
+	options: RequestOptions | undefined,
+): Effect.Effect<PendingResolvedResource, CheckfuSdkError> => {
+	switch (pending.type) {
+		case "agent":
+			return client.agents.retrieve(pending.id, options)
+		case "environment":
+			return client.environments.retrieve(pending.id, options)
+		case "session":
+			return client.sessions.retrieve(pending.id, options)
+		case "automation":
+			return client.automations.retrieve(pending.id, options)
+		case "artifact":
+			return client.artifacts.retrieve(pending.id, options)
+		case "artifact_version":
+			return Number.isInteger(pending.version) && pending.version >= 1
+				? client.artifacts.versions.retrieve(pending.id, pending.version, options)
+				: Effect.fail(
+						new CheckfuConfigError({
+							message: `waitForPending for pending artifact_version "${pending.id}" needs the version it committed.`,
+						}),
+					)
+		case "vault":
+			return client.vaults.retrieve(pending.id, options)
+		case "vault_credential":
+			return client.vaults.credentials.retrieve(pending.vault_id, pending.id, options)
+		default: {
+			const unknown: { readonly type: unknown } = pending
+			return Effect.fail(
+				new CheckfuConfigError({
+					message: `waitForPending cannot wait for a pending ${String(unknown.type)}.`,
+				}),
+			)
+		}
+	}
+}
+
+export const waitForPendingResource = (
+	client: CheckfuSdkClient,
+	pending: PendingResource,
+	options?: WaitForPendingOptions<PendingResolvedResource>,
+): Effect.Effect<PendingResolvedResource, CheckfuSdkError> =>
+	pollPending(
+		pending,
+		(_id, requestOptions) => retrievePending(client, pending, requestOptions),
+		options,
+	)
 
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
 
@@ -151,114 +194,17 @@ export class CheckfuSdkClient extends EffectResources {
 		return this.#withOptionsImpl(overrides)
 	}
 
+	waitForPending<K extends PendingResourceType>(
+		result: PendingResolved[K] | PendingOf<K>,
+		options?: WaitForPendingOptions<PendingResolved[K]>,
+	): Effect.Effect<PendingResolved[K], CheckfuSdkError>
 	waitForPending(
-		result: Agent | PendingAgent,
-		options?: WaitForPendingOptions<Agent>,
-	): Effect.Effect<Agent, CheckfuSdkError>
-	waitForPending(
-		result: Environment | PendingEnvironment,
-		options?: WaitForPendingOptions<Environment>,
-	): Effect.Effect<Environment, CheckfuSdkError>
-	waitForPending(
-		result: Session | PendingSession,
-		options?: WaitForPendingOptions<Session>,
-	): Effect.Effect<Session, CheckfuSdkError>
-	waitForPending(
-		result: Automation | PendingAutomation,
-		options?: WaitForPendingOptions<Automation>,
-	): Effect.Effect<Automation, CheckfuSdkError>
-	waitForPending(
-		result: Artifact | PendingArtifact,
-		options?: WaitForPendingOptions<Artifact>,
-	): Effect.Effect<Artifact, CheckfuSdkError>
-	waitForPending(
-		result: ArtifactVersion | PendingArtifactVersion,
-		options?: WaitForPendingOptions<ArtifactVersion>,
-	): Effect.Effect<ArtifactVersion, CheckfuSdkError>
-	waitForPending(
-		result:
-			| Agent
-			| PendingAgent
-			| Environment
-			| PendingEnvironment
-			| Session
-			| PendingSession
-			| Automation
-			| PendingAutomation
-			| Artifact
-			| PendingArtifact
-			| ArtifactVersion
-			| PendingArtifactVersion,
-		options?: WaitForPendingOptions<
-			Agent | Environment | Session | Automation | Artifact | ArtifactVersion
-		>,
-	): Effect.Effect<
-		Agent | Environment | Session | Automation | Artifact | ArtifactVersion,
-		CheckfuSdkError
-	> {
-		if (!isPendingResource(result)) {
-			return Effect.succeed(result)
-		}
-		const until = options?.until
-		const baseOpts = {
-			...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-			...(options?.initialDelay === undefined ? {} : { initialDelay: options.initialDelay }),
-			...(options?.maxDelay === undefined ? {} : { maxDelay: options.maxDelay }),
-			...(options?.requestOptions === undefined ? {} : { requestOptions: options.requestOptions }),
-		}
-		switch (result.type) {
-			case "agent":
-				return pollPending(result, (id, opts) => this.agents.retrieve(id, opts), {
-					...baseOpts,
-					...(until === undefined ? {} : { until: (resource: Agent) => until(resource) }),
-				})
-			case "environment":
-				return pollPending(result, (id, opts) => this.environments.retrieve(id, opts), {
-					...baseOpts,
-					...(until === undefined ? {} : { until: (resource: Environment) => until(resource) }),
-				})
-			case "session":
-				return pollPending(result, (id, opts) => this.sessions.retrieve(id, opts), {
-					...baseOpts,
-					...(until === undefined ? {} : { until: (resource: Session) => until(resource) }),
-				})
-			case "automation":
-				return pollPending(result, (id, opts) => this.automations.retrieve(id, opts), {
-					...baseOpts,
-					...(until === undefined ? {} : { until: (resource: Automation) => until(resource) }),
-				})
-			case "artifact":
-				return pollPending(result, (id, opts) => this.artifacts.retrieve(id, opts), {
-					...baseOpts,
-					...(until === undefined ? {} : { until: (resource: Artifact) => until(resource) }),
-				})
-			case "artifact_version":
-				if (!Number.isInteger(result.version) || result.version < 1) {
-					return Effect.fail(
-						new CheckfuConfigError({
-							message: `waitForPending for pending artifact_version "${result.id}" needs the version it committed.`,
-						}),
-					)
-				}
-				return pollPending(
-					result,
-					(id, opts) => this.artifacts.versions.retrieve(id, result.version, opts),
-					{
-						...baseOpts,
-						...(until === undefined
-							? {}
-							: { until: (resource: ArtifactVersion) => until(resource) }),
-					},
-				)
-			default: {
-				const unknown: { readonly type: unknown } = result
-				return Effect.fail(
-					new CheckfuConfigError({
-						message: `waitForPending cannot wait for a pending ${String(unknown.type)}.`,
-					}),
-				)
-			}
-		}
+		result: PendingResolvedResource | PendingResource,
+		options?: WaitForPendingOptions<PendingResolvedResource>,
+	): Effect.Effect<PendingResolvedResource, CheckfuSdkError> {
+		return isPendingResource(result)
+			? waitForPendingResource(this, result, options)
+			: Effect.succeed(result)
 	}
 }
 

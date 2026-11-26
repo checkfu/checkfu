@@ -184,6 +184,10 @@ describe("PiProviderRuntime", () => {
 								listOutputs: () => Effect.succeed({ ok: true, files: [] }),
 								readOutputs: () => Effect.succeed([]),
 								discardWorkspace: () => Effect.void,
+								putSecret: () => Effect.die(new Error("plan only")),
+								secretUsable: () => Effect.succeed(false),
+								eraseSecret: () => Effect.void,
+								sealVault: () => Effect.void,
 							})
 						}).pipe(Effect.provide(providerLayer)),
 					)

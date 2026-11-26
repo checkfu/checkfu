@@ -207,6 +207,54 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "agents_listVersions",
+		title: "List agent versions",
+		description: "List the published versions of an agent, newest first.",
+		method: "GET",
+		path: "/v1/agents/{agent_id}/versions",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						agent_id: {
+							type: "string",
+							minLength: 1,
+							description: "Agent ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["agent_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						page: {
+							type: "string",
+							minLength: 1,
+							maxLength: 512,
+							description: "Opaque cursor returned by the previous page.",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "agents_updateAgent",
 		title: "Update an agent",
 		description:
@@ -2340,6 +2388,400 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					maxLength: 128,
 					description:
 						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_archiveCredential",
+		title: "Archive a credential",
+		description:
+			"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_archiveVault",
+		title: "Archive a vault",
+		description:
+			"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_createVault",
+		title: "Create a vault",
+		description: "Create a vault to hold credentials for agents to use",
+		method: "POST",
+		path: "/v1/vaults",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				body: {
+					type: "object",
+					properties: {
+						display_name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 255,
+							description: "Human-readable vault name",
+						},
+					},
+					required: ["display_name"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_deleteCredential",
+		title: "Delete a credential",
+		description:
+			"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		method: "DELETE",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_deleteVault",
+		title: "Delete a vault",
+		description:
+			"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		method: "DELETE",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_getCredential",
+		title: "Retrieve a credential",
+		description: "Retrieve a credential by ID. Its secret is never returned.",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_getVault",
+		title: "Retrieve a vault",
+		description: "Retrieve a vault by ID",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_listCredentials",
+		title: "List credentials",
+		description:
+			"List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true.",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}/credentials",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_listVaults",
+		title: "List vaults",
+		description:
+			"List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true.",
+		method: "GET",
+		path: "/v1/vaults",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_updateVault",
+		title: "Update a vault",
+		description: "Rename a vault",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						display_name: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 255,
+								},
+								{
+									type: "null",
+								},
+							],
+							description: "Updated vault name",
+						},
+					},
+					additionalProperties: false,
 				},
 			},
 			required: ["path", "body"],

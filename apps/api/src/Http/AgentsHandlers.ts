@@ -6,6 +6,7 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import type { AgentSnapshot } from "@checkfu/domain/Agent/AgentView.view"
 import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
 import { ArchiveAgent } from "@checkfu/domain/Agent/ArchiveAgent.command"
 import { CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
@@ -26,7 +27,7 @@ import { makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
-	createCommandId,
+	createIdentity,
 	handled,
 	idempotentId,
 	isPending,
@@ -53,6 +54,9 @@ const unsupportedModel = (model: AgentModel) =>
 	model.id.length > MAX_MODEL_ID_LENGTH
 		? reject(400, `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`)
 		: reject(400, `Unsupported model "${model.id}".`)
+
+const versionPage = (id: AgentId, version: number): string =>
+	`page_${encodeURIComponent(id)}:${version}`
 
 export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) =>
 	Effect.gen(function* () {
@@ -92,13 +96,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 				return projected
 			})
-		const retrieveVersion = (id: AgentId, version: number) =>
+		const readVersion = (head: AgentSnapshot, version: number) =>
 			Effect.gen(function* () {
-				const head = yield* retrieve(id)
-				const committed = yield* agents.get(id)
-				if (version > committed.version) {
-					return yield* reject(404, `Agent ${id} version ${version} not found.`)
-				}
+				const id = head.id
 				const key = agentVersionLookupKey(id, version)
 				const existing = Option.getOrNull(yield* agentVersionsByNumber.get(key))
 				const snapshot =
@@ -122,6 +122,16 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					description: snapshot.description,
 					updated_at: snapshot.created_at,
 				}
+			})
+
+		const retrieveVersion = (id: AgentId, version: number) =>
+			Effect.gen(function* () {
+				const head = yield* retrieve(id)
+				const committed = yield* agents.get(id)
+				if (version > committed.version) {
+					return yield* reject(404, `Agent ${id} version ${version} not found.`)
+				}
+				return yield* readVersion(head, version)
 			})
 
 		const supported = (model: AgentModel) =>
@@ -197,32 +207,24 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null
-					let id: AgentId
-					let versionId: AgentVersionId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						id = AgentId.make(
-							yield* idempotentId(digest, "agent", ["create", "agent", "id", idempotencyKey]),
-						)
-						versionId = AgentVersionId.make(
-							yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
-						)
-						if (!isSupportedModel(model.id) && (yield* agents.get(id)).status === "") {
-							return yield* unsupportedModel(model)
-						}
-						sendOptions = {
-							commandId: yield* createCommandId(digest, "agent", idempotencyKey, {
-								name: payload.name,
-								model,
-								system,
-								description,
-							}),
-						}
-					} else {
+					const identity = yield* createIdentity(digest, random, {
+						resource: "agent",
+						prefix: "agent",
+						key: idempotencyKey,
+						body: { name: payload.name, model, system, description },
+					})
+					const id = AgentId.make(identity.id)
+					const versionId = AgentVersionId.make(
+						idempotencyKey === undefined
+							? yield* randomId(random, "aver")
+							: yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
+					)
+					if (idempotencyKey === undefined) {
 						yield* supported(model)
-						id = AgentId.make(yield* randomId(random, "agent"))
-						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
+					} else if (!isSupportedModel(model.id) && (yield* agents.get(id)).status === "") {
+						return yield* unsupportedModel(model)
 					}
+					const sendOptions = identity.options
 					const receipt = yield* createAgent
 						.send(
 							new CreateAgent({
@@ -252,6 +254,34 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					? retrieve(params.agent_id)
 					: retrieveVersion(params.agent_id, query.version)
 				).pipe(handled),
+			)
+			.handle("listVersions", ({ params, query }) =>
+				Effect.gen(function* () {
+					const id = params.agent_id
+					const head = yield* retrieve(id)
+					const committed = yield* agents.get(id)
+					const start =
+						query.page === undefined
+							? committed.version
+							: Number(query.page.slice(query.page.lastIndexOf(":") + 1))
+					if (
+						query.page !== undefined &&
+						(!Number.isSafeInteger(start) ||
+							start < 1 ||
+							start > committed.version ||
+							versionPage(id, start) !== query.page)
+					) {
+						return yield* reject(400, "Invalid agent version page.")
+					}
+					const size = Math.min(start, query.limit ?? 50)
+					const data = yield* Effect.forEach(
+						Array.from({ length: size }, (_, index) => start - index),
+						(version) => readVersion(head, version),
+						{ concurrency: 8 },
+					)
+					const next = start - size
+					return { data, next_page: next > 0 ? versionPage(id, next) : null }
+				}).pipe(handled),
 			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {

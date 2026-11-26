@@ -485,11 +485,11 @@ const generateResourcesFile = (
 				out.indent(() => {
 					emitRawInvoke()
 					out(",")
-					if (op.apiEndpoint === "create") {
+					if (op.methodName === "create") {
 						out('{ kind: "create" },')
-					} else if (op.apiEndpoint === "archive") {
+					} else if (op.methodName === "archive") {
 						out('{ kind: "archive" },')
-					} else if (op.apiEndpoint === "update" && op.hasBody) {
+					} else if (op.methodName === "update" && op.hasBody) {
 						out(pendingUpdateReadiness, "(", bVar, ", ", JSON.stringify(op.operationId), "),")
 					} else {
 						out('{ kind: "requires-until", operation: ', JSON.stringify(op.operationId), " },")

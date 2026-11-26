@@ -113,6 +113,7 @@
         "@checkfu/api": "workspace:*",
         "@checkfu/domain": "workspace:*",
         "@effect/vitest": "catalog:",
+        "alchemy": "catalog:",
         "vitest": "catalog:",
       },
     },

@@ -307,7 +307,7 @@ const detectPagination = (
 	if (method.httpMethod.toUpperCase() !== "GET" || isSseMethod(method)) {
 		return undefined
 	}
-	const cursorField = queryParams.find((q) => q.wireName === "after")
+	const cursorField = queryParams.find((q) => q.wireName === "after" || q.wireName === "page")
 	if (cursorField === undefined) {
 		return undefined
 	}
@@ -319,15 +319,20 @@ const detectPagination = (
 	collectFieldsFromType(okResponse.json.type, responseFields)
 	const dataField = responseFields.get("data")
 	const hasMoreField = responseFields.get("has_more")
-	const nextCursorField = responseFields.get("next_cursor")
-	if (dataField === undefined || hasMoreField === undefined || nextCursorField === undefined) {
+	const nextCursorField = responseFields.get(
+		cursorField.wireName === "page" ? "next_page" : "next_cursor",
+	)
+	if (dataField === undefined || nextCursorField === undefined) {
 		return undefined
 	}
 	const unwrappedData = unwrapNullableType(dataField.type)
 	if (unwrappedData.kind !== "array") {
 		return undefined
 	}
-	if (!isBooleanScalar(hasMoreField.type)) {
+	if (
+		cursorField.wireName === "after" &&
+		(hasMoreField === undefined || !isBooleanScalar(hasMoreField.type))
+	) {
 		return undefined
 	}
 	const cursorType = isNumberScalar(nextCursorField.type) ? "number" : "string"

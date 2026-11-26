@@ -90,10 +90,12 @@ import {
 	sendAndSettle,
 	sendRequest,
 	TEST_API_KEY,
+	TestRuntimeContext,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Agent and environment lifecycle, versioning, and projection consistency", () => {
 	it("resolves arbitrary stored AgentVersionIds (not synthetic agentId:vN) and rejects missing/archived resources", async () => {
@@ -356,6 +358,27 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(missingVersion.status).toBe(404)
 
+					const versions = (page?: string) =>
+						sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/agents/${agentV1.id}/versions?limit=1${page === undefined ? "" : `&page=${encodeURIComponent(page)}`}`,
+							headers: AUTH_HEADERS,
+						})
+					const headPage = yield* versions()
+					expect(headPage.status).toBe(200)
+					const latest = (yield* Effect.promise(() => headPage.json())) as {
+						data: ReadonlyArray<{ version: number }>
+						next_page: string
+					}
+					expect(latest.data.map(({ version }) => version)).toEqual([2])
+					const earlierPage = yield* versions(latest.next_page)
+					expect(earlierPage.status).toBe(200)
+					expect(yield* Effect.promise(() => earlierPage.json())).toMatchObject({
+						data: [{ version: 1, system: "V1 prompt" }],
+						next_page: null,
+					})
+					expect((yield* versions("wrong-page")).status).toBe(400)
+
 					const envRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",
@@ -391,7 +414,12 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						id: string
 						agent: { id: string; version: number }
 					}
-					expect(pinnedSession.agent).toMatchObject({ type: "agent", id: agentV1.id, version: 1 })
+					expect(pinnedSession.agent).toMatchObject({
+						type: "agent",
+						id: agentV1.id,
+						version: 1,
+						system: "V1 prompt",
+					})
 
 					const reply = yield* provider.runTurn({
 						session_id: SessionId.make("sess_pinned_version"),
@@ -1550,6 +1578,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
+			Layer.provideMerge(VaultsTestLive),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1694,6 +1724,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						settleMargin: "5 seconds",
 					}),
 				),
+				Layer.provideMerge(VaultsTestLive),
+				Layer.provideMerge(TestRuntimeContext),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

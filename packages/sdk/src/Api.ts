@@ -34,6 +34,11 @@ import {
 	AutomationSchedule,
 	CronExpression,
 	AutomationSnapshot,
+	CredentialCustody,
+	CredentialDisplayName,
+	CredentialId,
+	CredentialSecret,
+	CredentialSnapshot,
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentId,
@@ -48,6 +53,8 @@ import {
 	MAX_ARTIFACT_FILES,
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
+	MAX_MCP_SERVER_URL_LENGTH,
+	McpServerUrl,
 	NonEmptyString,
 	PositiveInt,
 	PublicationAddress,
@@ -60,6 +67,10 @@ import {
 	SessionTitle,
 	Sha256Hex,
 	TextBlocks,
+	VaultCustody,
+	VaultDisplayName,
+	VaultId,
+	VaultSnapshot,
 } from "./Schemas.ts"
 import type { SessionEventType } from "./Schemas.ts"
 
@@ -571,6 +582,99 @@ export const EnvironmentDeleted = Schema.Struct({
 })
 export type EnvironmentDeleted = typeof EnvironmentDeleted.Type
 
+export const CreateVaultBody = Schema.Struct({
+	display_name: VaultDisplayName.annotate({ description: "Human-readable vault name" }),
+})
+export type CreateVaultBody = typeof CreateVaultBody.Type
+
+export const UpdateVaultBody = Schema.Struct({
+	display_name: Schema.optionalKey(
+		Schema.NullOr(VaultDisplayName).annotate({ description: "Updated vault name" }),
+	),
+})
+export type UpdateVaultBody = typeof UpdateVaultBody.Type
+
+const MCP_SERVER_URL =
+	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
+
+export const canonicalMcpServerUrl = (input: string): string => {
+	const url = new URL(input)
+	url.hash = ""
+	return url.href
+}
+
+const McpServerUrlInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
+	Schema.makeFilter((input) => URL.canParse(input) || "a URL that can be parsed"),
+).pipe(
+	Schema.decodeTo(McpServerUrl, {
+		decode: SchemaGetter.transform(canonicalMcpServerUrl),
+		encode: SchemaGetter.passthrough(),
+	}),
+)
+
+export const CreateCredentialBody = Schema.Struct({
+	auth: Schema.Union([
+		Schema.Struct({
+			type: Schema.Literal("static_bearer"),
+			token: CredentialSecret.annotate({
+				description: "Bearer token sent to the MCP server. Never returned.",
+			}),
+			mcp_server_url: McpServerUrlInput.annotate({
+				description: "URL of the MCP server this credential authenticates against",
+			}),
+		}),
+	]).annotate({ description: "What the credential authenticates against, and its secret" }),
+	display_name: Schema.optionalKey(
+		Schema.NullOr(CredentialDisplayName).annotate({
+			description: "Human-readable credential name",
+		}),
+	),
+})
+export type CreateCredentialBody = typeof CreateCredentialBody.Type
+
+export const UpdateCredentialBody = Schema.Struct({
+	auth: Schema.optionalKey(
+		Schema.Union([
+			Schema.Struct({
+				type: Schema.Literal("static_bearer"),
+				token: Schema.optionalKey(
+					Schema.NullOr(CredentialSecret).annotate({
+						description: "Replacement bearer token. Never returned.",
+					}),
+				),
+			}),
+		]).annotate({ description: "Replacement secret. The MCP server URL cannot change." }),
+	),
+	display_name: Schema.optionalKey(
+		Schema.NullOr(CredentialDisplayName).annotate({
+			description: "Updated credential name, or null to clear it",
+		}),
+	),
+})
+export type UpdateCredentialBody = typeof UpdateCredentialBody.Type
+
+export const VaultResource = VaultSnapshot.annotate({ identifier: "Vault" })
+export type Vault = typeof VaultResource.Type
+
+export const CredentialResource = CredentialSnapshot.annotate({ identifier: "VaultCredential" })
+export type VaultCredential = typeof CredentialResource.Type
+
+export const VaultDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("vault_deleted"),
+	custody: VaultCustody,
+})
+export type VaultDeleted = typeof VaultDeleted.Type
+
+export const CredentialDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("vault_credential_deleted"),
+	custody: CredentialCustody,
+})
+export type CredentialDeleted = typeof CredentialDeleted.Type
+
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
 	agent: Schema.Struct({
@@ -743,6 +847,8 @@ export type PendingResourceType =
 	| "automation"
 	| "artifact"
 	| "artifact_version"
+	| "vault"
+	| "vault_credential"
 
 const pendingResource = <const T extends PendingResourceType>(type: T) =>
 	Schema.Struct({
@@ -773,6 +879,17 @@ export const PendingArtifactVersion = Schema.Struct({
 }).pipe(HttpApiSchema.status(202))
 export type PendingArtifactVersion = typeof PendingArtifactVersion.Type
 
+export const PendingVault = pendingResource("vault")
+export type PendingVault = typeof PendingVault.Type
+
+export const PendingCredential = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("vault_credential"),
+	vault_id: VaultId,
+	pending: Schema.Literal(true),
+}).pipe(HttpApiSchema.status(202))
+export type PendingCredential = typeof PendingCredential.Type
+
 export const PendingResource = Schema.Union([
 	PendingAgent,
 	PendingEnvironment,
@@ -780,7 +897,10 @@ export const PendingResource = Schema.Union([
 	PendingAutomation,
 	PendingArtifact,
 	PendingArtifactVersion,
+	PendingVault,
+	PendingCredential,
 ])
+
 export type PendingResource = typeof PendingResource.Type
 
 export const isPendingResource = <T extends { readonly type: string }>(
@@ -930,6 +1050,16 @@ const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, c
 		next_cursor: Schema.NullOr(cursor),
 	})
 
+const AgentVersionPage = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(512),
+).annotate({ description: "Opaque cursor returned by the previous page." })
+
+export const ListAgentVersionsResponse = Schema.Struct({
+	data: Schema.Array(AgentResource),
+	next_page: Schema.NullOr(AgentVersionPage),
+})
+
 export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
@@ -941,6 +1071,12 @@ export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
 export const ListArtifactsResponse = listResponse(ArtifactSummaryResource, ResourceListCursor)
 export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
+
+export const ListVaultsResponse = listResponse(VaultResource, ResourceListCursor)
+export type ListVaultsResponse = typeof ListVaultsResponse.Type
+
+export const ListCredentialsResponse = listResponse(CredentialResource, ResourceListCursor)
+export type ListCredentialsResponse = typeof ListCredentialsResponse.Type
 
 export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
@@ -1047,6 +1183,11 @@ const automationParams = {
 }
 const artifactParams = { artifact_id: ArtifactId.annotate({ description: "Artifact ID" }) }
 const artifactVersionParams = { ...artifactParams, version: ArtifactVersionFromString }
+const vaultParams = { vault_id: VaultId.annotate({ description: "Vault ID" }) }
+const credentialParams = {
+	...vaultParams,
+	credential_id: CredentialId.annotate({ description: "Credential ID" }),
+}
 
 const IdempotencyHeaders = Schema.Struct({
 	"idempotency-key": Schema.optionalKey(
@@ -1157,6 +1298,26 @@ const Agents = HttpApiGroup.make("agents")
 				"x-checkfu-endpoint": { group: "agents", endpoint: "get" },
 				"x-checkfu-mcp": { name: "agents_getAgent" },
 				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listVersions", "/v1/agents/:agent_id/versions", {
+			params: agentParams,
+			query: {
+				page: Schema.optionalKey(AgentVersionPage),
+				limit: Schema.optionalKey(ListLimitFromString),
+			},
+			success: ListAgentVersionsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List agent versions")
+			.annotate(OpenApi.Description, "List the published versions of an agent, newest first.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents.versions",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "listVersions" },
+				"x-checkfu-mcp": { name: "agents_listVersions" },
+				"x-checkfu-cli": { intQueryParams: { limit: { min: 1, max: 100, metavar: "N" } } },
 			}),
 	)
 	.add(
@@ -2056,6 +2217,221 @@ const Artifacts = HttpApiGroup.make("artifacts")
 	.annotate(OpenApi.Description, "Manage artifacts")
 	.middleware(Authentication)
 
+const Vaults = HttpApiGroup.make("vaults")
+	.add(
+		HttpApiEndpoint.post("create", "/v1/vaults", {
+			headers: IdempotencyHeaders,
+			payload: CreateVaultBody,
+			success: [VaultResource.pipe(HttpApiSchema.status(201)), PendingVault],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a vault")
+			.annotate(OpenApi.Description, "Create a vault to hold credentials for agents to use")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "create" },
+				"x-checkfu-mcp": { name: "vaults_createVault", destructive: false },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/vaults", {
+			query: resourceListQuery,
+			success: ListVaultsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List vaults")
+			.annotate(
+				OpenApi.Description,
+				"List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "list" },
+				"x-checkfu-mcp": { name: "vaults_listVaults" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/vaults/:vault_id", {
+			params: vaultParams,
+			success: VaultResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a vault")
+			.annotate(OpenApi.Description, "Retrieve a vault by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "get" },
+				"x-checkfu-mcp": { name: "vaults_getVault" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("update", "/v1/vaults/:vault_id", {
+			params: vaultParams,
+			payload: UpdateVaultBody,
+			success: [VaultResource, PendingVault],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a vault")
+			.annotate(OpenApi.Description, "Rename a vault")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "update" },
+				"x-checkfu-mcp": { name: "vaults_updateVault" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/v1/vaults/:vault_id", {
+			params: vaultParams,
+			success: VaultDeleted,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a vault")
+			.annotate(
+				OpenApi.Description,
+				"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "vaults_deleteVault" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("archive", "/v1/vaults/:vault_id/archive", {
+			params: vaultParams,
+			success: [VaultResource, PendingVault],
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Archive a vault")
+			.annotate(
+				OpenApi.Description,
+				"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "archive" },
+				"x-checkfu-mcp": { name: "vaults_archiveVault" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("createCredential", "/v1/vaults/:vault_id/credentials", {
+			params: vaultParams,
+			headers: IdempotencyHeaders,
+			payload: CreateCredentialBody,
+			success: [CredentialResource.pipe(HttpApiSchema.status(201)), PendingCredential],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a credential")
+			.annotate(OpenApi.Description, "Store a credential in a vault. Its secret is never returned.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "createCredential" },
+				"x-checkfu-mcp": false,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listCredentials", "/v1/vaults/:vault_id/credentials", {
+			params: vaultParams,
+			query: resourceListQuery,
+			success: ListCredentialsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List credentials")
+			.annotate(
+				OpenApi.Description,
+				"List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "listCredentials" },
+				"x-checkfu-mcp": { name: "vaults_listCredentials" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
+			params: credentialParams,
+			success: CredentialResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a credential")
+			.annotate(OpenApi.Description, "Retrieve a credential by ID. Its secret is never returned.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "getCredential" },
+				"x-checkfu-mcp": { name: "vaults_getCredential" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("updateCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
+			params: credentialParams,
+			payload: UpdateCredentialBody,
+			success: [CredentialResource, PendingCredential],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a credential")
+			.annotate(OpenApi.Description, "Rename a credential or replace its secret")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "updateCredential" },
+				"x-checkfu-mcp": false,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("deleteCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
+			params: credentialParams,
+			success: CredentialDeleted,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a credential")
+			.annotate(
+				OpenApi.Description,
+				"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "deleteCredential" },
+				"x-checkfu-mcp": { name: "vaults_deleteCredential" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post(
+			"archiveCredential",
+			"/v1/vaults/:vault_id/credentials/:credential_id/archive",
+			{
+				params: credentialParams,
+				success: [CredentialResource, PendingCredential],
+				error: HandlerErrors,
+			},
+		)
+			.annotate(OpenApi.Summary, "Archive a credential")
+			.annotate(
+				OpenApi.Description,
+				"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "vaults.credentials",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "vaults", endpoint: "archiveCredential" },
+				"x-checkfu-mcp": { name: "vaults_archiveCredential" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage vaults and the credentials they hold")
+	.middleware(Authentication)
+
 export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
 	.add(Auth)
@@ -2064,11 +2440,12 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Sessions)
 	.add(Automations)
 	.add(Artifacts)
+	.add(Vaults)
 	.annotate(OpenApi.Title, "Checkfu API")
 	.annotate(OpenApi.Version, "0.0.1")
 	.annotate(
 		OpenApi.Description,
-		"Managed agents API for managing agents, environments, sessions, automations, and artifacts.",
+		"Managed agents API for managing agents, environments, sessions, automations, artifacts, and vaults.",
 	)
 	.annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
 	.middleware(RequestValidation)
