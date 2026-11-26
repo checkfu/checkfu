@@ -1824,11 +1824,12 @@ describe("PiSession real Durable Object under workerd", () => {
 		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
 			Object.entries({
 				"Write it on the machine.": [
-					{ kind: "tool_call", name: "bash", arguments: { command: "echo up" } },
 					{
 						kind: "tool_call",
-						name: "write",
-						arguments: { path: `${outputs}/report.md`, content: "# Late\n" },
+						name: "bash",
+						arguments: {
+							command: `mkdir -p ${outputs}; printf '# Late\\n' > ${outputs}/report.md`,
+						},
 					},
 				],
 			}),
@@ -2502,7 +2503,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(caughtUp.res.status).toBe(204)
 	}, 60_000)
 
-	it("starts a machine at the first command and moves the working directory into it, where only it survives a sleep", async () => {
+	it("starts a machine at the first command and keeps the workspace and outputs, but no other files, across sleep", async () => {
 		const dir = "/workspace/shell"
 		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
 			Object.entries({
@@ -2545,7 +2546,9 @@ describe("PiSession real Durable Object under workerd", () => {
 					{
 						kind: "tool_call",
 						name: "bash",
-						arguments: { command: "touch /tmp/outside ~/.outside && echo left" },
+						arguments: {
+							command: String.raw`touch /tmp/outside ~/.outside && mkdir -p /mnt/session/outputs && printf 'kept output\n' > /mnt/session/outputs/kept.txt && echo left`,
+						},
 					},
 				],
 				"Is it still there?": [
@@ -2553,7 +2556,8 @@ describe("PiSession real Durable Object under workerd", () => {
 						kind: "tool_call",
 						name: "bash",
 						arguments: {
-							command: "cat out.txt CHANGELOG.md; ls /tmp/outside ~/.outside 2>/dev/null | wc -l",
+							command:
+								"cat out.txt CHANGELOG.md /mnt/session/outputs/kept.txt; ls /tmp/outside ~/.outside 2>/dev/null | wc -l",
 							cwd: dir,
 						},
 					},
@@ -2613,7 +2617,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			return logged(line)
 		}
 		expect(await within(120_000, "Machine asleep")).toBe(true)
-		expect(await turn("Is it still there?")).toBe("Done: built\n## 2.0.0\n0")
+		expect(await turn("Is it still there?")).toBe("Done: built\n## 2.0.0\nkept output\n0")
 
 		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
 		expect(archived.status).toBe(200)

@@ -144,7 +144,8 @@ const makeStored = () => {
 						})),
 					)
 		},
-		lstat: () => Promise.resolve({ mode: 0o755, size: 0, mtime: 0 }),
+		lstat: () =>
+			Promise.resolve({ mode: 0o755, size: 0, mtime: 0, isDirectory: true, isSymbolicLink: false }),
 		readlink: () => Promise.resolve(""),
 		readFile: () =>
 			Promise.resolve(

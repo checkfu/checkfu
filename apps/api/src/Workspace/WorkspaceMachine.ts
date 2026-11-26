@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import { createTarPacker } from "modern-tar"
+import * as Predicate from "effect/Predicate"
 import { TIMED_OUT } from "../Sandbox/Sandboxes.ts"
 import type { Sandbox, Sandboxes } from "../Sandbox/Sandboxes.ts"
 import type { InSandbox } from "./SandboxMount.ts"
@@ -19,41 +19,75 @@ export interface StoredFiles {
 			readonly isSymbolicLink: boolean
 		}>
 	>
-	readonly lstat: (
-		path: string,
-	) => Promise<{ readonly mode: number; readonly size: number; readonly mtime: number }>
+	readonly lstat: (path: string) => Promise<{
+		readonly mode: number
+		readonly size: number
+		readonly mtime: number
+		readonly isDirectory: boolean
+		readonly isSymbolicLink: boolean
+	}>
 	readonly readlink: (path: string) => Promise<string>
 	readonly readFile: (path: string) => Promise<ReadableStream<Uint8Array>>
 }
 
-export async function* packDirectory(
+export async function* packDirectories(
 	files: StoredFiles,
-	directory: string,
+	directories: ReadonlyArray<string>,
 	root: string,
 ): AsyncGenerator<Uint8Array> {
+	const { createTarPacker } = await import("modern-tar")
 	const { readable, controller } = createTarPacker()
-	const add = async (path: string, prefix: string): Promise<void> => {
-		for (const entry of await files.readdir(path)) {
-			const at = `${path}/${entry.name}`
-			const name = `${prefix}${entry.name}`
-			const stat = await files.lstat(at)
-			const header = { name, mode: stat.mode & 0o7777, mtime: new Date(stat.mtime) }
-			if (entry.isSymbolicLink) {
-				const linkname = await files.readlink(at)
-				await controller.add({ ...header, type: "symlink", size: 0, linkname }).close()
-			} else if (entry.isDirectory) {
-				await controller.add({ ...header, type: "directory", size: 0 }).close()
-				await add(at, `${name}/`)
-			} else {
-				const body = await files.readFile(at)
-				await body.pipeTo(controller.add({ ...header, type: "file", size: stat.size }))
-			}
+	const entry = async (
+		at: string,
+		name: string,
+		directory: boolean,
+		link: boolean,
+	): Promise<void> => {
+		const stat = await files.lstat(at)
+		const header = { name, mode: stat.mode & 0o7777, mtime: new Date(stat.mtime) }
+		if (link) {
+			const linkname = await files.readlink(at)
+			await controller.add({ ...header, type: "symlink", size: 0, linkname }).close()
+		} else if (directory) {
+			await controller.add({ ...header, type: "directory", size: 0 }).close()
+			await add(at, `${name}/`)
+		} else {
+			const body = await files.readFile(at)
+			await body.pipeTo(controller.add({ ...header, type: "file", size: stat.size }))
 		}
 	}
-	const packed = add(
-		directory,
-		directory === root ? "" : `${directory.slice(root.length + 1)}/`,
-	).then(
+	const add = async (path: string, prefix: string): Promise<void> => {
+		for (const item of await files.readdir(path)) {
+			await entry(
+				`${path}/${item.name}`,
+				`${prefix}${item.name}`,
+				item.isDirectory,
+				item.isSymbolicLink,
+			)
+		}
+	}
+	const packed = (async () => {
+		for (const directory of directories) {
+			if (directory === root) {
+				await add(directory, "")
+				continue
+			}
+			const stat = await files.lstat(directory).catch((error: unknown) => {
+				if (Predicate.hasProperty(error, "code") && error.code === "ENOENT") {
+					return undefined
+				}
+				throw error
+			})
+			if (stat !== undefined) {
+				await entry(
+					directory,
+					directory.slice(root === "/" ? 1 : root.length + 1),
+					stat.isDirectory === true,
+					stat.isSymbolicLink === true,
+				)
+			}
+		}
+	})().then(
 		() => {
 			controller.finalize()
 		},
@@ -72,19 +106,32 @@ export async function* packDirectory(
 	await packed
 }
 
+export const packDirectory = (files: StoredFiles, directory: string, root: string) =>
+	packDirectories(files, [directory], root)
+
 const PART_BYTES = 4 * 1024 * 1024
 const UNPACK = `mkdir -p "$2" || exit 1
-cat "$1"/* | if [ "$3" = zstd ]; then zstd -dc; else cat; fi | tar -x -C "$2"
+cat "$1"/* | if [ "$3" = zstd ]; then zstd -dc; else cat; fi | tar -x -C "$2" \${4:+--skip-old-files}
 for code in "\${PIPESTATUS[@]}"; do [ "$code" -eq 0 ] || exit 1; done`
 const CALLS = "/tmp/checkfu-calls"
 const COMMAND_MARK = "CHECKFU_COMMAND=1"
 const SAVE = `marked() { for env in /proc/[0-9]*/environ; do pid=\${env#/proc/}; tr '\\0' '\\n' <"$env" 2>/dev/null | grep -qx ${COMMAND_MARK} && echo "\${pid%/environ}"; done; }
 for signal in STOP STOP KILL; do for pid in $(marked); do kill -"$signal" "$pid" 2>/dev/null; done; done
 sleep 0.2
-mkdir -p "$1" "$2" && tar -c -C "$1" . | zstd -q -1 | split -b "$3" -a 6 -d - "$2/"
+directory=$1; staging=$2; bytes=$3
+mkdir -p -- "$directory" "$staging" || exit 1
+root=$directory; paths=(.)
+if [ "$#" -gt 3 ]; then
+	root=/; paths=("\${directory#/}"); shift 3
+	for directory; do
+		[ -e "$directory" ] || [ -L "$directory" ] || mkdir -p -- "$directory" || exit 1
+		paths+=("\${directory#/}")
+	done
+fi
+tar -c -C "$root" -- "\${paths[@]}" | zstd -q -1 | split -b "$bytes" -a 6 -d - "$staging/"
 codes=("\${PIPESTATUS[@]}")
 [ "\${#codes[@]}" -eq 3 ] && [ "\${codes[0]}" -eq 0 ] && [ "\${codes[1]}" -eq 0 ] && [ "\${codes[2]}" -eq 0 ] || exit 1
-ls "$2" | wc -l`
+ls "$staging" | wc -l`
 const ARCHIVE_MS = 15 * 60 * 1000
 
 const unstaged = (sandbox: Sandbox, staging: string): Promise<void> =>
@@ -97,6 +144,7 @@ export const unpackInto = async (
 	sandbox: Sandbox,
 	directory: string,
 	archive: Archive,
+	keepExisting = false,
 ): Promise<void> => {
 	const staging = `/tmp/checkfu-unpack-${crypto.randomUUID()}`
 	try {
@@ -107,7 +155,16 @@ export const unpackInto = async (
 		}
 		const unpacked = await run(
 			sandbox.exec(
-				["bash", "-c", UNPACK, "bash", staging, directory, archive.compressed ? "zstd" : "plain"],
+				[
+					"bash",
+					"-c",
+					UNPACK,
+					"bash",
+					staging,
+					archive.rooted === true ? "/" : directory,
+					archive.compressed ? "zstd" : "plain",
+					...(keepExisting ? ["keep"] : []),
+				],
 				{ timeout: ARCHIVE_MS },
 			),
 		)
@@ -119,13 +176,20 @@ export const unpackInto = async (
 	}
 }
 
-export async function* archiveOf(sandbox: Sandbox, directory: string): AsyncGenerator<Uint8Array> {
+export async function* archiveOf(
+	sandbox: Sandbox,
+	directory: string,
+	extraDirectories: ReadonlyArray<string> = [],
+): AsyncGenerator<Uint8Array> {
 	const staging = `/tmp/checkfu-save-${crypto.randomUUID()}`
 	try {
 		const saved = await run(
-			sandbox.exec(["bash", "-c", SAVE, "bash", directory, staging, String(PART_BYTES)], {
-				timeout: ARCHIVE_MS,
-			}),
+			sandbox.exec(
+				["bash", "-c", SAVE, "bash", directory, staging, String(PART_BYTES), ...extraDirectories],
+				{
+					timeout: ARCHIVE_MS,
+				},
+			),
 		)
 		const parts = Number.parseInt(saved.stdout, 10)
 		if (saved.exitCode !== 0 || Number.isNaN(parts)) {
@@ -144,6 +208,7 @@ interface MachineRecord {
 	readonly incarnation?: string
 	readonly notice?: string
 	readonly starting?: true
+	readonly directories?: ReadonlyArray<string>
 }
 
 const REPLACED =
@@ -190,10 +255,13 @@ export const makeWorkspaceMachine = (options: {
 	readonly store: MachineStore
 	readonly disk: SavedDisk
 	readonly directory: string
+	readonly extraDirectories?: ReadonlyArray<string>
 	readonly stored: StoredFiles
 	readonly settled: () => Promise<void>
 	readonly touched: () => void
 }) => {
+	const extraDirectories = options.extraDirectories ?? []
+	const rooted = extraDirectories.length > 0
 	const record = (): MachineRecord | undefined => options.store.get<MachineRecord>(MACHINE)
 	let attached: Sandbox | undefined
 	const calls = new Set<Promise<unknown>>()
@@ -240,16 +308,56 @@ export const makeWorkspaceMachine = (options: {
 				if (saved === undefined) {
 					await options.settled()
 					await unpackInto(sandbox, options.directory, {
-						chunks: packDirectory(options.stored, options.directory, options.directory),
+						chunks: packDirectories(
+							options.stored,
+							[options.directory, ...extraDirectories],
+							rooted ? "/" : options.directory,
+						),
 						compressed: false,
+						...(rooted ? { rooted: true as const } : {}),
 					})
 				} else {
 					await unpackInto(sandbox, options.directory, saved)
+					if (rooted && saved.rooted !== true) {
+						await options.settled()
+						await unpackInto(
+							sandbox,
+							"/",
+							{
+								chunks: packDirectories(options.stored, extraDirectories, "/"),
+								compressed: false,
+								rooted: true,
+							},
+							true,
+						)
+					}
 				}
 			}
-			const notice = fresh && before?.incarnation !== undefined ? REPLACED : before?.notice
+			const added = fresh
+				? []
+				: extraDirectories.filter((path) => !before?.directories?.includes(path))
+			if (added.length > 0) {
+				await options.settled()
+				await unpackInto(
+					sandbox,
+					"/",
+					{
+						chunks: packDirectories(options.stored, added, "/"),
+						compressed: false,
+						rooted: true,
+					},
+					true,
+				)
+			}
+			const notice =
+				fresh && before?.incarnation !== undefined
+					? rooted
+						? "The session's machine was replaced. The workspace and outputs were restored from the last sleep, or from before the first command. Later changes, running processes and other files are gone. Check the files before continuing."
+						: REPLACED
+					: before?.notice
 			options.store.put(MACHINE, {
 				incarnation: sandbox.incarnation,
+				...(rooted ? { directories: extraDirectories } : {}),
 				...(notice === undefined ? {} : { notice }),
 			} satisfies MachineRecord)
 			return { sandbox, fresh }
@@ -275,8 +383,9 @@ export const makeWorkspaceMachine = (options: {
 		const { sandbox, fresh } = await settle()
 		if (!fresh) {
 			await options.disk.replace({
-				chunks: archiveOf(sandbox, options.directory),
+				chunks: archiveOf(sandbox, options.directory, extraDirectories),
 				compressed: true,
+				...(rooted ? { rooted: true as const } : {}),
 			})
 		}
 		await run(options.sandboxes.remove(options.key))
@@ -299,7 +408,8 @@ export const makeWorkspaceMachine = (options: {
 		const sandbox = await attach()
 		const now = record()
 		if (now?.notice !== undefined) {
-			options.store.put(MACHINE, { incarnation: now.incarnation })
+			const { notice: _notice, ...kept } = now
+			options.store.put(MACHINE, kept)
 			throw new Error(now.notice)
 		}
 		return sandbox
