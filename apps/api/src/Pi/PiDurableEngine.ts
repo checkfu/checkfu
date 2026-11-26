@@ -254,27 +254,31 @@ export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortG
 	defaultValue: () => "10 seconds",
 })
 
-const admissionAborts = new WeakMap<PiDurableBackend, Map<string, Set<AbortController>>>()
+const admissionAborts = new WeakMap<PiDurableBackend, Map<string, Set<Deferred.Deferred<void>>>>()
 
-const abortControllersOf = (backend: PiDurableBackend) => {
+const abortSignalsOf = (backend: PiDurableBackend) => {
 	const existing = admissionAborts.get(backend)
 	if (existing !== undefined) {
 		return existing
 	}
-	const created = new Map<string, Set<AbortController>>()
+	const created = new Map<string, Set<Deferred.Deferred<void>>>()
 	admissionAborts.set(backend, created)
 	return created
 }
 
-const notifyAdmissionAbort = (backend: PiDurableBackend, operationId: string): void => {
-	const active = admissionAborts.get(backend)?.get(operationId)
-	if (active === undefined) {
-		return
-	}
-	for (const controller of active) {
-		controller.abort()
-	}
-}
+const notifyAdmissionAbort = (
+	backend: PiDurableBackend,
+	operationId: string,
+): Effect.Effect<void> =>
+	Effect.suspend(() => {
+		const active = admissionAborts.get(backend)?.get(operationId)
+		if (active === undefined || active.size === 0) {
+			return Effect.void
+		}
+		return Effect.forEach([...active], (signal) => Deferred.succeed(signal, undefined), {
+			discard: true,
+		})
+	})
 
 export const abortPiDurableTurn = (
 	backend: PiDurableBackend,
@@ -287,7 +291,7 @@ export const abortPiDurableTurn = (
 				const aborting = yield* Effect.forkDetach(backend.abort(operationId), {
 					startImmediately: true,
 				})
-				notifyAdmissionAbort(backend, operationId)
+				yield* notifyAdmissionAbort(backend, operationId)
 				return yield* Fiber.join(aborting).pipe(
 					Effect.timeoutOrElse({ duration: grace, orElse: () => backend.reset }),
 				)
@@ -378,25 +382,23 @@ const admitPiTurnUnderWay = (
 					return false
 				}
 				const credentialOutcome = yield* Effect.acquireUseRelease(
-					Effect.sync(() => {
-						const controller = new AbortController()
-						const byOp = abortControllersOf(backend)
+					Effect.gen(function* () {
+						const cancelled = Deferred.makeUnsafe<void>()
+						const byOp = abortSignalsOf(backend)
 						const active = byOp.get(operationId) ?? new Set()
-						active.add(controller)
+						active.add(cancelled)
 						byOp.set(operationId, active)
 						if (backend.isCancelled(operationId)) {
-							controller.abort()
+							yield* Deferred.succeed(cancelled, undefined)
 						}
-						return controller
+						return cancelled
 					}),
-					(controller) =>
-						Effect.promise(async (): Promise<AdmitPiTurnResult | "aborted"> => {
-							if (controller.signal.aborted) {
-								return "aborted"
-							}
-							const runCheck = async (): Promise<AdmitPiTurnResult> => {
+					(cancelled) =>
+						Effect.raceFirst(
+							Deferred.await(cancelled).pipe(Effect.as("aborted" as const)),
+							Effect.promise(async (signal): Promise<AdmitPiTurnResult> => {
 								if (backend.checkCredentials !== undefined) {
-									const check = await backend.checkCredentials(request.provider, controller.signal)
+									const check = await backend.checkCredentials(request.provider, signal)
 									return check.ok ? true : { _tag: "missing_key", message: check.message }
 								}
 								if (await backend.hasApiKey(request.provider)) {
@@ -409,33 +411,13 @@ const admitPiTurnUnderWay = (
 											? undefined
 											: await backend.missingCredentialsMessage(request.provider),
 								}
-							}
-							return new Promise<AdmitPiTurnResult | "aborted">((resolve, reject) => {
-								const onAbort = () => {
-									resolve("aborted")
-								}
-								controller.signal.addEventListener("abort", onAbort, { once: true })
-								runCheck().then(
-									(outcome) => {
-										controller.signal.removeEventListener("abort", onAbort)
-										resolve(outcome)
-									},
-									(error: unknown) => {
-										controller.signal.removeEventListener("abort", onAbort)
-										if (controller.signal.aborted) {
-											resolve("aborted")
-										} else {
-											reject(error)
-										}
-									},
-								)
-							})
-						}),
-					(controller) =>
+							}),
+						),
+					(cancelled) =>
 						Effect.sync(() => {
 							const byOp = admissionAborts.get(backend)
 							const active = byOp?.get(operationId)
-							active?.delete(controller)
+							active?.delete(cancelled)
 							if (active?.size === 0) {
 								byOp?.delete(operationId)
 							}
