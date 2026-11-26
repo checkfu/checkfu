@@ -43,7 +43,11 @@ bun run test:bun
 bun run test:workerd
 ```
 
-The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. On a local machine, run the heavy proof groups separately to avoid solver contention:
+The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites.
+
+Main's active CI run finishes while newer pushes replace the pending run. This lets the proof jobs complete and save their content-based task results even when main advances frequently. The next run reuses results only for unchanged inputs. PR updates cancel their older run.
+
+On a local machine, run the heavy proof groups separately to avoid solver contention:
 
 ```sh
 CHECKFU_PROVE=1 bun run --cwd packages/domain test --exclude test/Checkfu.verify.test.ts

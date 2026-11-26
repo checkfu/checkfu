@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Let main's proofs finish and save reusable results while new commits arrive.
+  # A newer main push replaces the pending run; PR updates cancel the running one.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TURBO_CACHE_DIR: .turbo/cache
