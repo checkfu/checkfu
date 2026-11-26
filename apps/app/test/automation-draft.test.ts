@@ -90,12 +90,13 @@ describe("editing one schedule field", () => {
 })
 
 describe("waiting for an update to show", () => {
-	it("waits for the agent version too, not only the agent", () => {
+	it("checks that the requested agent version was pinned", () => {
 		const pinned = { ...automation, agent: { id: "agent_2", version: 1 } }
-		expect(showsChanges(pinned, { agent: "agent_2" })).toBe(false)
+		expect(showsChanges(pinned, { agent: "agent_2" })).toBe(true)
 		expect(
 			showsChanges({ ...pinned, agent: { id: "agent_2", version: null } }, { agent: "agent_2" }),
-		).toBe(true)
+		).toBe(false)
+		expect(showsChanges(pinned, { agent: { id: "agent_2", version: 2 } })).toBe(false)
 	})
 
 	it("accepts a read only once every submitted field is visible", () => {

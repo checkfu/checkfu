@@ -11154,7 +11154,7 @@
 												"additionalProperties": false
 											}
 										],
-										"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+										"description": "Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version."
 									},
 									"environment_id": {
 										"type": "string",
@@ -13112,7 +13112,7 @@
 												"additionalProperties": false
 											}
 										],
-										"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+										"description": "Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version."
 									},
 									"environment_id": {
 										"type": "string",
@@ -15455,7 +15455,7 @@
 																"type": "null"
 															}
 														],
-														"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent."
+														"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null for automations created without a pinned version). Null for runs recorded before runs named their agent."
 													},
 													"session_id": {
 														"anyOf": [
@@ -15985,7 +15985,7 @@
 													"type": "null"
 												}
 											],
-											"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent."
+											"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null for automations created without a pinned version). Null for runs recorded before runs named their agent."
 										},
 										"session_id": {
 											"anyOf": [

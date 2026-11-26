@@ -957,7 +957,7 @@ const automationsCreateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one (accepts value, JSON/YAML object, or @file)",
+				"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version. (accepts value, JSON/YAML object, or @file)",
 			),
 			FlagOptional,
 		),
@@ -1294,7 +1294,7 @@ const automationsUpdateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one (accepts value, JSON/YAML object, or @file)",
+				"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version. (accepts value, JSON/YAML object, or @file)",
 			),
 			FlagOptional,
 		),

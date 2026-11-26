@@ -67,7 +67,7 @@ export class AdmitAutomationDecision extends Domain.Decision(AdmitAutomation, {
 					name: cmd.name,
 					description: cmd.description,
 					agent_id: agent.id,
-					agent_version: cmd.agent_version,
+					agent_version: cmd.agent_version ?? agent.state.version,
 					environment_id: environment.id,
 					text: cmd.text,
 					schedule: cmd.schedule,

@@ -912,7 +912,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+								"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version.",
 						},
 						environment_id: {
 							type: "string",
@@ -1343,7 +1343,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+								"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version.",
 						},
 						environment_id: {
 							type: "string",

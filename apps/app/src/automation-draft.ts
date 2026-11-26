@@ -86,12 +86,11 @@ export const showsChanges = (automation: JsonAutomation, changes: UpdateAutomati
 		changes.name === undefined || automation.name === changes.name,
 		changes.description === undefined || automation.description === changes.description,
 		changes.agent === undefined ||
-			[
-				automation.agent.id ===
-					(typeof changes.agent === "string" ? changes.agent : changes.agent.id),
-				automation.agent.version ===
-					(typeof changes.agent === "string" ? null : (changes.agent.version ?? null)),
-			].every(Boolean),
+			(typeof changes.agent === "string"
+				? automation.agent.id === changes.agent && automation.agent.version !== null
+				: automation.agent.id === changes.agent.id &&
+					(changes.agent.version === undefined ||
+						automation.agent.version === changes.agent.version)),
 		changes.environment_id === undefined || automation.environment_id === changes.environment_id,
 		changes.initial_events === undefined ||
 			JSON.stringify(automation.initial_events) === JSON.stringify(changes.initial_events),

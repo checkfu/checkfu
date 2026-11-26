@@ -482,7 +482,7 @@ export const CreateAutomationBody = Schema.Struct({
 	),
 	agent: AgentReference.annotate({
 		description:
-			"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+			"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version.",
 	}),
 	environment_id: ResourceId.annotate({ description: "Environment ID each run's session uses" }),
 	initial_events: AutomationInitialEvents.annotate({
@@ -506,7 +506,7 @@ export const UpdateAutomationBody = Schema.Struct({
 	agent: Schema.optionalKey(
 		AgentReference.annotate({
 			description:
-				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+				"Pass an agent ID to pin its latest version, or an agent reference with an explicit version to pin that version.",
 		}),
 	),
 	environment_id: Schema.optionalKey(
@@ -698,7 +698,7 @@ export const AutomationRunResource = Schema.Struct({
 		Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
 	).annotate({
 		description:
-			"The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent.",
+			"The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null for automations created without a pinned version). Null for runs recorded before runs named their agent.",
 	}),
 	session_id: Schema.NullOr(Schema.String),
 	error: Schema.NullOr(AutomationRunError),
