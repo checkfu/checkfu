@@ -15,13 +15,13 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 		session: cmd.session_id,
 	}),
 	decide: ({ agent, environment, session }, cmd) => {
+		if (session.state._tag !== "Uninitialized") {
+			return new SessionAlreadyExists({ session_id: session.id })
+		}
 		const pinnedVersion = cmd.agent_version ?? agent.state.version
 		const refused = admissionRefusal(agent, environment, pinnedVersion)
 		if (refused !== undefined) {
 			return refused
-		}
-		if (session.state._tag !== "Uninitialized") {
-			return new SessionAlreadyExists({ session_id: session.id })
 		}
 		return [
 			session.record(

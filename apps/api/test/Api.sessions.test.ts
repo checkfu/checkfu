@@ -2610,10 +2610,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const encoded = encodeEvent(mapped)
 					expect(encoded).toMatchObject({
-						id:
-							generated !== undefined && "event_id" in generated && generated.event_id !== undefined
-								? generated.event_id
-								: `sevt_sess_generated_${seq}`,
+						id: `sevt_sess_generated_${seq}`,
 						seq,
 						type: eventSchema.tag,
 						created_at: "2026-01-01T00:00:00.000Z",

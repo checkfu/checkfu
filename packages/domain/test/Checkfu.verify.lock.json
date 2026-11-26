@@ -124,11 +124,11 @@
 			},
 			"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status === \"active\" &&\n\t\t\tbefore.environment.status === \"active\" &&\n\t\t\tbefore.session._tag === \"Uninitialized\" &&\n\t\t\t(command.initial_message === undefined\n\t\t\t\t? after.session._tag === \"Idle\" && after.session.turn === 0\n\t\t\t\t: after.session._tag === \"Running\" &&\n\t\t\t\t\tafter.session.turn === 1 &&\n\t\t\t\t\tafter.session.pending_user_messages === 0)"
+				"source": "({ before, after }) =>\n\t\t\tbefore.agent.status === \"active\" &&\n\t\t\tbefore.environment.status === \"active\" &&\n\t\t\tbefore.session._tag === \"Uninitialized\" &&\n\t\t\tafter.session._tag === \"Idle\" &&\n\t\t\tafter.session.turn === 0"
 			},
 			"AdmitSession.PinnedVersionWithinAgentHead": {
 				"kind": "transition",
-				"source": "({ before, command, events }) => {\n\t\t\tconst pinned = command.agent_version ?? before.agent.version\n\t\t\treturn (\n\t\t\t\tbefore.agent.version >= 1 &&\n\t\t\t\tpinned >= 1 &&\n\t\t\t\tpinned <= before.agent.version &&\n\t\t\t\tevents.some(\n\t\t\t\t\t(event) =>\n\t\t\t\t\t\tevent._tag === \"session.created\" &&\n\t\t\t\t\t\tevent.agent_id === command.agent_id &&\n\t\t\t\t\t\tevent.agent_version === pinned &&\n\t\t\t\t\t\tevent.environment_id === command.environment_id,\n\t\t\t\t)\n\t\t\t)\n\t\t}"
+				"source": "({ before, command, events }) => {\n\t\t\tconst pinned = command.agent_version ?? before.agent.version\n\t\t\treturn (\n\t\t\t\tbefore.agent.version >= 1 &&\n\t\t\t\tpinned >= 1 &&\n\t\t\t\tpinned <= before.agent.version &&\n\t\t\t\tevents.length === 1 &&\n\t\t\t\tevents.every(\n\t\t\t\t\t(event) =>\n\t\t\t\t\t\tevent.agent_id === command.agent_id &&\n\t\t\t\t\t\tevent.agent_version === pinned &&\n\t\t\t\t\t\tevent.environment_id === command.environment_id,\n\t\t\t\t)\n\t\t\t)\n\t\t}"
 			},
 			"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": {
 				"kind": "transition",
