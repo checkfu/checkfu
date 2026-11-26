@@ -9,6 +9,7 @@ import {
 	cachedTools,
 	mcpExtension,
 	mcpRegistry,
+	withinCatalog,
 } from "./PiMcp.ts"
 import type { McpDispatch, McpRegistry, McpServerTools } from "./PiMcp.ts"
 import type { McpCaller, McpPeer } from "./PiMcpCaller.ts"
@@ -236,13 +237,15 @@ export const makeSessionMcp = (options: {
 	}
 
 	const servers = () =>
-		current().servers.map((binding) => ({
-			binding,
-			tools: toolsOf(binding.name) ?? {
-				status: "unavailable" as const,
-				reason: unreachable.get(binding.name) ?? "it has not been reached yet",
-			},
-		}))
+		withinCatalog(
+			current().servers.map((binding) => ({
+				binding,
+				tools: toolsOf(binding.name) ?? {
+					status: "unavailable" as const,
+					reason: unreachable.get(binding.name) ?? "it has not been reached yet",
+				},
+			})),
+		)
 
 	let registry: McpRegistry = mcpRegistry(servers(), options.agentTools())
 

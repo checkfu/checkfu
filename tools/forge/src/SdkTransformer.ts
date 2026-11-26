@@ -267,8 +267,13 @@ const generateResourcesFile = (
 		const hasQueryOnly = !op.hasBody && op.queryParams.length > 0
 		const hasBodyOnly = op.hasBody && op.queryParams.length === 0
 		const hasBodyAndQuery = op.hasBody && op.queryParams.length > 0
+		const acceptsOptionsWithQuery =
+			hasQueryOnly && !op.hasRequiredQuery && !op.requiresIdempotencyKey
 
-		const emitSignatureArgs = (mode: "withResponse" | "default" | "impl"): void => {
+		const emitSignatureArgs = (
+			mode: "withResponse" | "default" | "impl",
+			inlineOptions = false,
+		): void => {
 			for (const pa of pathArgs) {
 				out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 			}
@@ -278,7 +283,8 @@ const generateResourcesFile = (
 				out("params", opt, ": ", EndpointBody, "<", g, ", ", e, ">", undef, ",")
 			} else if (hasQueryOnly) {
 				const opt = !op.hasRequiredQuery && mode !== "withResponse" ? "?" : ""
-				const undef = !op.hasRequiredQuery && mode === "withResponse" ? " | undefined" : ""
+				const undef =
+					!op.hasRequiredQuery && mode === "withResponse" && !inlineOptions ? " | undefined" : ""
 				out(
 					"params",
 					opt,
@@ -291,6 +297,16 @@ const generateResourcesFile = (
 					", ",
 					e,
 					">>",
+					...(acceptsOptionsWithQuery
+						? [
+								" & ",
+								inlineOptions
+									? WithResponseRequestOptions
+									: mode === "default"
+										? RequestOptions
+										: AnyRequestOptions,
+							]
+						: []),
 					undef,
 					",",
 				)
@@ -316,6 +332,9 @@ const generateResourcesFile = (
 					",",
 				)
 			}
+			if (inlineOptions) {
+				return
+			}
 			const keyed = op.requiresIdempotencyKey ? " & { readonly idempotencyKey: string }" : ""
 			if (mode === "withResponse") {
 				out("options: ", WithResponseRequestOptions, keyed, ",")
@@ -327,23 +346,29 @@ const generateResourcesFile = (
 		}
 
 		out("/** ", docText, " */")
-		out(op.methodName, "(")
-		out.indent(() => emitSignatureArgs("withResponse"))
-		out(
-			"): ",
-			EffectType,
-			"<",
-			WithResponse,
-			"<",
-			EndpointSuccess,
-			"<",
-			g,
-			", ",
-			e,
-			">>, ",
-			CheckfuSdkError,
-			">",
-		)
+		const emitWithResponseSignature = (inlineOptions: boolean): void => {
+			out(op.methodName, "(")
+			out.indent(() => emitSignatureArgs("withResponse", inlineOptions))
+			out(
+				"): ",
+				EffectType,
+				"<",
+				WithResponse,
+				"<",
+				EndpointSuccess,
+				"<",
+				g,
+				", ",
+				e,
+				">>, ",
+				CheckfuSdkError,
+				">",
+			)
+		}
+		emitWithResponseSignature(false)
+		if (acceptsOptionsWithQuery) {
+			emitWithResponseSignature(true)
+		}
 		out(op.methodName, "(")
 		out.indent(() => emitSignatureArgs("default"))
 		out("): ", EffectType, "<", EndpointSuccess, "<", g, ", ", e, ">, ", CheckfuSdkError, ">")
@@ -371,6 +396,9 @@ const generateResourcesFile = (
 			"> {",
 		)
 		out.indent(() => {
+			if (acceptsOptionsWithQuery) {
+				out("options ??= params")
+			}
 			const emitRawInvoke = (): void => {
 				const safetyExpr =
 					op.retrySafety === "idempotency-key-gated"
@@ -394,30 +422,41 @@ const generateResourcesFile = (
 						}
 						if (op.queryParams.length > 0) {
 							const qVar = hasBodyAndQuery ? "query" : "params"
-							out("query: {")
-							out.indent(() => {
-								for (const qp of op.queryParams) {
-									const keyJson = JSON.stringify(qp.wireName)
-									if (qp.required) {
-										out(keyJson, ": ", qVar, "[", keyJson, "],")
-										continue
+							const singleQuery = op.queryParams[0]
+							if (
+								op.queryParams.length === 1 &&
+								singleQuery !== undefined &&
+								!singleQuery.required
+							) {
+								const key = JSON.stringify(singleQuery.wireName)
+								const field = `${qVar}?.[${key}]`
+								out("query: ", field, " === undefined ? {} : { ", key, ": ", field, " },")
+							} else {
+								out("query: {")
+								out.indent(() => {
+									for (const qp of op.queryParams) {
+										const keyJson = JSON.stringify(qp.wireName)
+										if (qp.required) {
+											out(keyJson, ": ", qVar, "[", keyJson, "],")
+											continue
+										}
+										out(
+											"...(",
+											qVar,
+											"?.[",
+											keyJson,
+											"] === undefined ? {} : { ",
+											keyJson,
+											": ",
+											qVar,
+											"[",
+											keyJson,
+											"] }),",
+										)
 									}
-									out(
-										"...(",
-										qVar,
-										"?.[",
-										keyJson,
-										"] === undefined ? {} : { ",
-										keyJson,
-										": ",
-										qVar,
-										"[",
-										keyJson,
-										"] }),",
-									)
-								}
-							})
-							out("},")
+								})
+								out("},")
+							}
 						}
 						if (op.requiresIdempotencyKey) {
 							out('headers: { "idempotency-key": key },')
@@ -749,6 +788,8 @@ const generateResourcesFile = (
 		const hasQueryOnly = !op.hasBody && op.queryParams.length > 0
 		const hasBodyOnly = op.hasBody && op.queryParams.length === 0
 		const hasBodyAndQuery = op.hasBody && op.queryParams.length > 0
+		const acceptsOptionsWithQuery =
+			hasQueryOnly && !op.hasRequiredQuery && !op.requiresIdempotencyKey
 
 		out("/** ", docText, " */")
 		out(op.methodName, "(")
@@ -770,7 +811,9 @@ const generateResourcesFile = (
 					g,
 					", ",
 					e,
-					">>,",
+					">>",
+					...(acceptsOptionsWithQuery ? [" & ", PromiseRequestOptions] : []),
+					",",
 				)
 			} else if (hasBodyAndQuery) {
 				out("body", op.bodyRequired ? "" : "?", ": ", EndpointBody, "<", g, ", ", e, ">,")
@@ -796,7 +839,13 @@ const generateResourcesFile = (
 		})
 		out("): ", APIPromise, "<", EndpointJsonSuccess, "<", g, ", ", e, ">> {")
 		out.indent(() => {
-			out("return ", executeUnaryPromise, "(this.#runtime, options, (effectRuntime, effectOpts) =>")
+			out(
+				"return ",
+				executeUnaryPromise,
+				"(this.#runtime, ",
+				acceptsOptionsWithQuery ? "options ?? params" : "options",
+				", (effectRuntime, effectOpts) =>",
+			)
 			out.indent(() => {
 				out("new ", effectClsName, "(effectRuntime).", op.methodName, "(")
 				out.indent(() => {

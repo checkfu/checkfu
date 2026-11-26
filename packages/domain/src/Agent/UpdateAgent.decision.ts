@@ -16,7 +16,7 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 			return new AgentArchivedError({ agent_id: agent.id })
 		}
 		const head = agent.state
-		if (cmd.expected_version !== head.version) {
+		if (cmd.expected_version !== undefined && cmd.expected_version !== head.version) {
 			return new AgentVersionConflict({
 				agent_id: agent.id,
 				expected_version: cmd.expected_version,

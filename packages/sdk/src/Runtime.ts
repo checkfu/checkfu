@@ -176,6 +176,14 @@ export interface CursorPageEnvelope<Item, Cursor extends string | number = numbe
 	readonly next_cursor: Cursor | null
 }
 
+export type PageEnvelope<Item, Cursor extends string | number> =
+	| CursorPageEnvelope<Item, Cursor>
+	| { readonly data: ReadonlyArray<Item>; readonly next_page: Cursor | null }
+
+export const nextPageOf = <Item, Cursor extends string | number>(
+	page: PageEnvelope<Item, Cursor>,
+): Cursor | null => ("next_page" in page ? page.next_page : page.has_more ? page.next_cursor : null)
+
 export interface RequestOptions {
 	readonly headers?: HeaderMap | undefined
 	readonly timeout?: Duration.Input | null | undefined
@@ -505,7 +513,7 @@ export function unwrapResponse<A>(
 export const executePaginatedPagesEffect = <
 	Item,
 	Cursor extends string | number = number,
-	Page extends CursorPageEnvelope<Item, Cursor> = CursorPageEnvelope<Item, Cursor>,
+	Page extends PageEnvelope<Item, Cursor> = PageEnvelope<Item, Cursor>,
 >(
 	fetchPage: (after: Cursor | undefined) => Effect.Effect<Page, CheckfuSdkError>,
 	initialAfter: Cursor | undefined,
@@ -531,11 +539,11 @@ export const executePaginatedPagesEffect = <
 				}
 				return fetchPage(cursor.after).pipe(
 					Effect.flatMap((page): Effect.Effect<readonly [Page, PageCursor], CheckfuSdkError> => {
-						if (!page.has_more || page.next_cursor === null) {
+						const nextAfter = nextPageOf(page)
+						if (nextAfter === null) {
 							const next: PageCursor = { after: undefined, done: true }
 							return Effect.succeed([page, next] as const)
 						}
-						const nextAfter = page.next_cursor
 						const repeated = seenCursors.has(nextAfter)
 						const regressed =
 							typeof cursor.after === "number" &&
@@ -560,7 +568,7 @@ export const executePaginatedPagesEffect = <
 export const executePaginatedStreamEffect = <
 	Item,
 	Cursor extends string | number = number,
-	Page extends CursorPageEnvelope<Item, Cursor> = CursorPageEnvelope<Item, Cursor>,
+	Page extends PageEnvelope<Item, Cursor> = PageEnvelope<Item, Cursor>,
 >(
 	fetchPage: (after: Cursor | undefined) => Effect.Effect<Page, CheckfuSdkError>,
 	initialAfter: Cursor | undefined,

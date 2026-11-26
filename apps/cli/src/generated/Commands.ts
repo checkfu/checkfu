@@ -153,7 +153,9 @@ const agentsCreateCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(agentsCreateCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Create an agent (accepts flags and/or JSON/YAML on stdin)"),
+	CommandWithDescription(
+		"Create a reusable agent configuration with a model and an optional system prompt. (accepts flags and/or JSON/YAML on stdin)",
+	),
 	CommandWithExamples([
 		{
 			command: 'checkfu agents create --name "Assistant" --model gpt-6.2-sol',
@@ -253,6 +255,15 @@ const agentsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 			kind: "string",
 			required: true,
 		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+		},
 	],
 }
 
@@ -260,6 +271,11 @@ const agentsRetrieveCommand = CommandMake(
 	"retrieve",
 	{
 		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
+		version: FlagInt("current-version").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Agent version. Omit to retrieve the latest version."),
+			FlagOptional,
+		),
 	},
 	(flags) => invokeGeneratedOperation(agentsRetrieveCommandSpec, flags),
 ).pipe(CommandWithDescription("Retrieve an agent by ID"))
@@ -343,7 +359,7 @@ const agentsUpdateCommand = CommandMake(
 		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
 		version: FlagInt("current-version").pipe(
 			FlagWithMetavar("INT"),
-			FlagWithDescription("Current agent version for optimistic concurrency"),
+			FlagWithDescription("Apply the update only if the agent is still at this version"),
 			FlagOptional,
 		),
 		name: FlagString("name").pipe(FlagWithDescription("Updated agent name"), FlagOptional),
@@ -380,9 +396,61 @@ const agentsUpdateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(agentsUpdateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Update an agent (creates a new agent version; accepts flags and/or JSON/YAML on stdin)",
+		"Update an agent's configuration. Changes create a new version for future sessions. (accepts flags and/or JSON/YAML on stdin)",
 	),
 )
+
+const agentsVersionsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "agents:versions list",
+	apiGroup: "agents",
+	apiEndpoint: "listVersions",
+	hasBody: false,
+	flags: [
+		{
+			propName: "agentId",
+			flagName: "agent-id",
+			wireName: "agent_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+	],
+}
+
+const agentsVersionsListCommand = CommandMake(
+	"list",
+	{
+		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque cursor returned by the previous page."),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(agentsVersionsListCommandSpec, flags),
+).pipe(CommandWithDescription("List the published versions of an agent, newest first."))
 
 const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts create",
@@ -1015,7 +1083,7 @@ const automationsCreateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one (accepts value, JSON/YAML object, or @file)",
+				'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
 		),
@@ -1026,7 +1094,9 @@ const automationsCreateCommand = CommandMake(
 		),
 		initialEvents: FlagString("initial-event").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("The user message each run starts with, as JSON, YAML, or @file"),
+			FlagWithDescription(
+				"The initial user.message event sent to each session, as JSON, YAML, or @file",
+			),
 			FlagBetween(0, 1),
 		),
 		schedule: FlagString("schedule").pipe(
@@ -1047,7 +1117,7 @@ const automationsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(automationsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create an automation that opens a new session with its message every time its schedule fires (accepts flags and/or JSON/YAML on stdin)",
+		"Create an automation that runs an agent on a cron schedule. Each run starts a new session in the configured environment and sends the initial events. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{
@@ -1172,7 +1242,7 @@ const automationsPauseCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(automationsPauseCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Stop an automation's schedule until it is unpaused; it can still be run on request",
+		"Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue.",
 	),
 )
 
@@ -1232,7 +1302,7 @@ const automationsRunCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(automationsRunCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+		"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
 	),
 )
 
@@ -1352,7 +1422,7 @@ const automationsUpdateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one (accepts value, JSON/YAML object, or @file)",
+				'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
 		),
@@ -1490,7 +1560,7 @@ const automationsRunsRetrieveCommand = CommandMake(
 		),
 		run: FlagString("run").pipe(
 			FlagWithMetavar("ID"),
-			FlagWithDescription("Run number: a whole number from 1, written in decimal"),
+			FlagWithDescription("Run number as a positive integer"),
 		),
 	},
 	(flags) => invokeGeneratedOperation(automationsRunsRetrieveCommandSpec, flags),
@@ -1594,7 +1664,9 @@ const environmentsCreateCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(environmentsCreateCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Create an environment (accepts flags and/or JSON/YAML on stdin)"),
+	CommandWithDescription(
+		"Create an environment that configures the cloud sandbox where sessions run. (accepts flags and/or JSON/YAML on stdin)",
+	),
 	CommandWithExamples([
 		{
 			command:
@@ -1807,7 +1879,11 @@ const environmentsUpdateCommand = CommandMake(
 		),
 	},
 	(flags) => invokeGeneratedOperation(environmentsUpdateCommandSpec, flags),
-).pipe(CommandWithDescription("Update an environment (accepts flags and/or JSON/YAML on stdin)"))
+).pipe(
+	CommandWithDescription(
+		"Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts. (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
 
 const sessionsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "sessions archive",
@@ -1849,22 +1925,6 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "agent",
 			location: "body",
 			kind: "text-or-object",
-			required: false,
-		},
-		{
-			propName: "agentId",
-			flagName: "agent-id",
-			wireName: "agent_id",
-			location: "body",
-			kind: "string",
-			required: false,
-		},
-		{
-			propName: "agentVersion",
-			flagName: "agent-version",
-			wireName: "agent_version",
-			location: "body",
-			kind: "int",
 			required: false,
 		},
 		{
@@ -1916,18 +1976,8 @@ const sessionsCreateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				"Agent ID string or agent reference object ({id, version}) (accepts value, JSON/YAML object, or @file)",
+				'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
-			FlagOptional,
-		),
-		agentId: FlagString("agent-id").pipe(
-			FlagWithMetavar("ID"),
-			FlagWithDescription("Agent ID (alternative to agent)"),
-			FlagOptional,
-		),
-		agentVersion: FlagInt("agent-version").pipe(
-			FlagWithMetavar("INT"),
-			FlagWithDescription("Optional pinned agent version"),
 			FlagOptional,
 		),
 		environmentId: FlagString("environment-id").pipe(
@@ -1958,11 +2008,13 @@ const sessionsCreateCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(sessionsCreateCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Create a session (accepts flags and/or JSON/YAML on stdin)"),
+	CommandWithDescription(
+		"Create an agent instance in an environment. Send a user.message event to start work. (accepts flags and/or JSON/YAML on stdin)",
+	),
 	CommandWithExamples([
 		{
 			command: "checkfu sessions create --agent agent_123 --environment-id env_456",
-			description: "Create a session with flags",
+			description: "Create a session using the latest agent version",
 		},
 	]),
 )
@@ -2150,7 +2202,11 @@ const sessionsEventsListCommand = CommandMake(
 		),
 	},
 	(flags) => invokeGeneratedOperation(sessionsEventsListCommandSpec, flags),
-).pipe(CommandWithDescription("List historical events for a session"))
+).pipe(
+	CommandWithDescription(
+		"List persisted events for a session. Use the returned cursor to continue through its history.",
+	),
+)
 
 const sessionsEventsSendCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "sessions:events send",
@@ -2207,7 +2263,9 @@ const sessionsEventsSendCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(sessionsEventsSendCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Send user events to a session (accepts flags and/or JSON/YAML on stdin)"),
+	CommandWithDescription(
+		"Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn. (accepts flags and/or JSON/YAML on stdin)",
+	),
 	CommandWithExamples([
 		{
 			command:
@@ -2263,7 +2321,9 @@ const sessionsEventsStreamCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedStream(sessionsEventsStreamCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Stream live session events over Server-Sent Events"),
+	CommandWithDescription(
+		"Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number.",
+	),
 	CommandWithExamples([
 		{
 			command: "checkfu sessions:events stream --session-id sess_123",
@@ -2884,6 +2944,7 @@ const vaultsCredentialsUpdateCommand = CommandMake(
 
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const AgentsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -2896,6 +2957,7 @@ export const buildGeneratedResourceCommands = <
 	const VaultsCredentialsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
+	readonly "agents:versions"?: AgentsVersionsExtras
 	readonly artifacts?: ArtifactsExtras
 	readonly "artifacts:versions"?: ArtifactsVersionsExtras
 	readonly automations?: AutomationsExtras
@@ -2917,6 +2979,13 @@ export const buildGeneratedResourceCommands = <
 				agentsRetrieveCommand,
 				agentsUpdateCommand,
 				...(extras?.["agents"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("agents:versions").pipe(
+			CommandWithDescription("Manage agents:versions"),
+			CommandWithSubcommands([
+				agentsVersionsListCommand,
+				...(extras?.["agents:versions"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("artifacts").pipe(

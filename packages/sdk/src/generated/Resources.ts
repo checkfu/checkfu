@@ -80,7 +80,7 @@ export interface CheckfuOperations {
 	>
 	readonly "agents.retrieve": OperationShape<
 		EndpointParams<"agents", "get">,
-		EndpointQuery<"agents", "get">,
+		RelaxOptionalProps<EndpointQuery<"agents", "get">>,
 		EndpointBody<"agents", "get">,
 		EndpointSuccess<"agents", "get">,
 		EndpointJsonSuccess<"agents", "get">,
@@ -93,6 +93,12 @@ export interface CheckfuOperations {
 		EndpointSuccess<"agents", "update">,
 		EndpointJsonSuccess<"agents", "update">,
 		EndpointJsonBody<"agents", "update">
+	>
+	readonly "agents.versions.list": OperationShape<
+		EndpointParams<"agents", "listVersions">,
+		RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		EndpointBody<"agents", "listVersions">,
+		EndpointSuccess<"agents", "listVersions">
 	>
 	readonly "artifacts.create": OperationShape<
 		EndpointParams<"artifacts", "create">,
@@ -465,11 +471,115 @@ export interface CheckfuOperations {
 export type CheckfuOperationId = keyof CheckfuOperations
 export type Op<K extends CheckfuOperationId> = CheckfuOperations[K]
 
-export class EffectAgentsResource {
+export class EffectAgentsVersionsResource {
 	readonly #runtime: EffectSdkRuntime
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.#runtime = runtime
+	}
+
+	/** List the published versions of an agent, newest first. */
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions)
+			| undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError>
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError>
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError>
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"agents", "listVersions">
+		| WithResponse<EndpointSuccess<"agents", "listVersions">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("agents", "listVersions", { agent_id: agentId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.agents.versions.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.agents.listVersions({
+								params: pathParams,
+								query: {
+									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List the published versions of an agent, newest first. */
+	listPages(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					agentId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { page: cursor }),
+					},
+					options,
+				),
+			params?.["page"],
+			"asc",
+		)
+	}
+
+	/** Auto-paginate items for List the published versions of an agent, newest first. */
+	listStream(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					agentId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { page: cursor }),
+					},
+					options,
+				),
+			params?.["page"],
+			"asc",
+		)
+	}
+}
+
+export class EffectAgentsResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly versions: EffectAgentsVersionsResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.versions = new EffectAgentsVersionsResource(runtime)
 	}
 
 	/** Archive an agent */
@@ -506,7 +616,7 @@ export class EffectAgentsResource {
 		)
 	}
 
-	/** Create an agent */
+	/** Create a reusable agent configuration with a model and an optional system prompt. */
 	create(
 		params: EndpointBody<"agents", "create">,
 		options: WithResponseRequestOptions,
@@ -546,20 +656,24 @@ export class EffectAgentsResource {
 
 	/** List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"agents", "list">> | undefined,
+		params: (RelaxOptionalProps<EndpointQuery<"agents", "list">> & AnyRequestOptions) | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"agents", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"agents", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"agents", "list"> | WithResponse<EndpointSuccess<"agents", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.agents.list", "idempotent", options, () =>
 				this.#runtime.raw.agents.list({
@@ -619,24 +733,33 @@ export class EffectAgentsResource {
 	/** Retrieve an agent by ID */
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
+		params: (RelaxOptionalProps<EndpointQuery<"agents", "get">> & AnyRequestOptions) | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"agents", "get">>, CheckfuSdkError>
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "get">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "get">>, CheckfuSdkError>
+	retrieve(
+		agentId: PathParam<"agents", "get", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"agents", "get">, CheckfuSdkError>
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"agents", "get"> | WithResponse<EndpointSuccess<"agents", "get">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("agents", "get", { agent_id: agentId }), (pathParams) =>
 				executeWithRetries(this.#runtime, "checkfu.agents.retrieve", "idempotent", options, () =>
 					this.#runtime.raw.agents.get({
 						params: pathParams,
+						query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
 						responseMode: "decoded-and-response",
 					}),
 				),
@@ -645,7 +768,7 @@ export class EffectAgentsResource {
 		)
 	}
 
-	/** Update an agent (creates a new agent version) */
+	/** Update an agent's configuration. Changes create a new version for future sessions. */
 	update(
 		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
@@ -948,20 +1071,26 @@ export class EffectArtifactsResource {
 
 	/** List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"artifacts", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"artifacts", "list"> | WithResponse<EndpointSuccess<"artifacts", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.artifacts.list", "idempotent", options, () =>
 				this.#runtime.raw.artifacts.list({
@@ -1145,23 +1274,31 @@ export class EffectAutomationsRunsResource {
 	/** List the runs of an automation that have started or failed, oldest first by default */
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
-		params: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError>
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		params: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError>
+	list(
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError>
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"automations", "listRuns">
 		| WithResponse<EndpointSuccess<"automations", "listRuns">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "listRuns", { automation_id: automationId }),
@@ -1319,7 +1456,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Create an automation that opens a new session with its message every time its schedule fires */
+	/** Create an automation that runs an agent on a cron schedule. Each run starts a new session in the configured environment and sends the initial events. */
 	create(
 		params: EndpointBody<"automations", "create">,
 		options: WithResponseRequestOptions & { readonly idempotencyKey: string },
@@ -1360,20 +1497,26 @@ export class EffectAutomationsResource {
 
 	/** List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"automations", "list">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"automations", "list"> | WithResponse<EndpointSuccess<"automations", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.automations.list", "idempotent", options, () =>
 				this.#runtime.raw.automations.list({
@@ -1431,7 +1574,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Stop an automation's schedule until it is unpaused; it can still be run on request */
+	/** Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue. */
 	pause(
 		automationId: PathParam<"automations", "pause", "automation_id">,
 		options: WithResponseRequestOptions,
@@ -1506,7 +1649,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to */
+	/** Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails. */
 	run(
 		automationId: PathParam<"automations", "run", "automation_id">,
 		options: WithResponseRequestOptions,
@@ -1674,7 +1817,7 @@ export class EffectEnvironmentsResource {
 		)
 	}
 
-	/** Create an environment */
+	/** Create an environment that configures the cloud sandbox where sessions run. */
 	create(
 		params: EndpointBody<"environments", "create">,
 		options: WithResponseRequestOptions,
@@ -1752,20 +1895,26 @@ export class EffectEnvironmentsResource {
 
 	/** List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"environments", "list">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"environments", "list">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"environments", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"environments", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"environments", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"environments", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"environments", "list"> | WithResponse<EndpointSuccess<"environments", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.environments.list", "idempotent", options, () =>
 				this.#runtime.raw.environments.list({
@@ -1858,7 +2007,7 @@ export class EffectEnvironmentsResource {
 		)
 	}
 
-	/** Update an environment */
+	/** Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts. */
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
@@ -1910,26 +2059,34 @@ export class EffectSessionsEventsResource {
 		this.#runtime = runtime
 	}
 
-	/** List historical events for a session */
+	/** List persisted events for a session. Use the returned cursor to continue through its history. */
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
-		params: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
+		params: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError>
+	list(
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"sessions", "listEvents">, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"sessions", "listEvents">
 		| WithResponse<EndpointSuccess<"sessions", "listEvents">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "listEvents", { session_id: sessionId }),
@@ -1955,7 +2112,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List historical events for a session */
+	/** Auto-paginate pages for List persisted events for a session. Use the returned cursor to continue through its history. */
 	listPages(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -1976,7 +2133,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Auto-paginate items for List historical events for a session */
+	/** Auto-paginate items for List persisted events for a session. Use the returned cursor to continue through its history. */
 	listStream(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -1997,7 +2154,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Send user events to a session */
+	/** Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn. */
 	send(
 		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
@@ -2041,7 +2198,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Stream live session events over Server-Sent Events */
+	/** Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number. */
 	stream(
 		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
 		params?: { readonly after?: number | undefined },
@@ -2153,7 +2310,7 @@ export class EffectSessionsResource {
 		)
 	}
 
-	/** Create a session */
+	/** Create an agent instance in an environment. Send a user.message event to start work. */
 	create(
 		params: EndpointBody<"sessions", "create">,
 		options: WithResponseRequestOptions,
@@ -2193,20 +2350,24 @@ export class EffectSessionsResource {
 
 	/** List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"sessions", "list">> | undefined,
+		params: (RelaxOptionalProps<EndpointQuery<"sessions", "list">> & AnyRequestOptions) | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"sessions", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"sessions", "list"> | WithResponse<EndpointSuccess<"sessions", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.sessions.list", "idempotent", options, () =>
 				this.#runtime.raw.sessions.list({
@@ -2450,23 +2611,31 @@ export class EffectVaultsCredentialsResource {
 	/** List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true. */
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
+		params: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
+	list(
+		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"vaults", "listCredentials">, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"vaults", "listCredentials">
 		| WithResponse<EndpointSuccess<"vaults", "listCredentials">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "listCredentials", { vault_id: vaultId }),
@@ -2746,20 +2915,24 @@ export class EffectVaultsResource {
 
 	/** List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"vaults", "list">> | undefined,
+		params: (RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions) | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"vaults", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"vaults", "list"> | WithResponse<EndpointSuccess<"vaults", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.vaults.list", "idempotent", options, () =>
 				this.#runtime.raw.vaults.list({
@@ -2905,11 +3078,47 @@ export class EffectResources {
 	}
 }
 
-export class AgentsResource {
+export class AgentsVersionsResource {
 	readonly #runtime: PromiseSdkRuntime
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.#runtime = runtime
+	}
+
+	/** List the published versions of an agent, newest first. */
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "listVersions">>, string>,
+		ItemOf<EndpointJsonSuccess<"agents", "listVersions">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["page"],
+			"asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectAgentsVersionsResource(effectRuntime).list(
+					agentId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { page: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+}
+
+export class AgentsResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly versions: AgentsVersionsResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.versions = new AgentsVersionsResource(runtime)
 	}
 
 	/** Archive an agent */
@@ -2925,7 +3134,7 @@ export class AgentsResource {
 		)
 	}
 
-	/** Create an agent */
+	/** Create a reusable agent configuration with a model and an optional system prompt. */
 	create(
 		params: EndpointBody<"agents", "create">,
 		options?: PromiseRequestOptions,
@@ -2962,17 +3171,18 @@ export class AgentsResource {
 	/** Retrieve an agent by ID */
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & PromiseRequestOptions,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"agents", "get">> {
-		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
-			new EffectAgentsResource(effectRuntime).retrieve(agentId, {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectAgentsResource(effectRuntime).retrieve(agentId, params, {
 				...effectOpts,
 				withResponse: true,
 			}),
 		)
 	}
 
-	/** Update an agent (creates a new agent version) */
+	/** Update an agent's configuration. Changes create a new version for future sessions. */
 	update(
 		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
@@ -3223,7 +3433,7 @@ export class AutomationsResource {
 		)
 	}
 
-	/** Create an automation that opens a new session with its message every time its schedule fires */
+	/** Create an automation that runs an agent on a cron schedule. Each run starts a new session in the configured environment and sends the initial events. */
 	create(
 		params: EndpointBody<"automations", "create">,
 		options: PromiseRequestOptions & { readonly idempotencyKey: string },
@@ -3261,7 +3471,7 @@ export class AutomationsResource {
 		)
 	}
 
-	/** Stop an automation's schedule until it is unpaused; it can still be run on request */
+	/** Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue. */
 	pause(
 		automationId: PathParam<"automations", "pause", "automation_id">,
 		options?: PromiseRequestOptions,
@@ -3287,7 +3497,7 @@ export class AutomationsResource {
 		)
 	}
 
-	/** Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to */
+	/** Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails. */
 	run(
 		automationId: PathParam<"automations", "run", "automation_id">,
 		options?: PromiseRequestOptions,
@@ -3348,7 +3558,7 @@ export class EnvironmentsResource {
 		)
 	}
 
-	/** Create an environment */
+	/** Create an environment that configures the cloud sandbox where sessions run. */
 	create(
 		params: EndpointBody<"environments", "create">,
 		options?: PromiseRequestOptions,
@@ -3411,7 +3621,7 @@ export class EnvironmentsResource {
 		)
 	}
 
-	/** Update an environment */
+	/** Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts. */
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
@@ -3433,7 +3643,7 @@ export class SessionsEventsResource {
 		this.#runtime = runtime
 	}
 
-	/** List historical events for a session */
+	/** List persisted events for a session. Use the returned cursor to continue through its history. */
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -3459,7 +3669,7 @@ export class SessionsEventsResource {
 		)
 	}
 
-	/** Send user events to a session */
+	/** Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn. */
 	send(
 		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
@@ -3473,7 +3683,7 @@ export class SessionsEventsResource {
 		)
 	}
 
-	/** Stream live session events over Server-Sent Events */
+	/** Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number. */
 	stream(
 		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
 		params?: { readonly after?: number | undefined },
@@ -3530,7 +3740,7 @@ export class SessionsResource {
 		)
 	}
 
-	/** Create a session */
+	/** Create an agent instance in an environment. Send a user.message event to start work. */
 	create(
 		params: EndpointBody<"sessions", "create">,
 		options?: PromiseRequestOptions,

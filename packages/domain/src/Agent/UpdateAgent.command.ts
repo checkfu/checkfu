@@ -38,7 +38,7 @@ export class AgentVersionConflict extends Domain.Rejection(
 export class UpdateAgent extends Domain.Command("UpdateAgent", {
 	input: {
 		agent_id: AgentId,
-		expected_version: PositiveInt,
+		expected_version: Schema.optionalKey(PositiveInt),
 		next_version_id: AgentVersionId,
 		changes: Schema.Struct({
 			name: Schema.optionalKey(AgentName),

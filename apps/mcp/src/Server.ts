@@ -28,8 +28,9 @@ import type { GeneratedToolDescriptor } from "./GeneratedRuntime.ts"
 export const MCP_PATH = "/mcp"
 
 const INSTRUCTIONS = [
-	"Checkfu runs managed agents. Each tool is one Checkfu API operation and returns its JSON response.",
-	"Create an agent and an environment, start a session that pairs them, then send user events to the session and list its events to read the agent's replies.",
+	"Create an agent and an environment, then create a session that references both.",
+	"Send a user.message event to start or resume work and list session events to read the agent's responses.",
+	"Use an automation to run an agent on a cron schedule. Each tool calls a Checkfu API operation and returns its JSON response.",
 ].join(" ")
 
 const toTool = (descriptor: GeneratedToolDescriptor) =>
