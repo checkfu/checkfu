@@ -98,6 +98,7 @@ const REPOSITORY = {
 const STANDING = {
 	"Agent.StatusIsKnown": "proved",
 	"Agent.CreatedExactlyWhenVersioned": "proved",
+	"Agent.ConfigurationIsStableWithinAVersion": "proved",
 	"Agent.CreatedAgentNeverReturnsToUninitialized": "proved",
 	"Agent.ArchivedAgentStaysArchived": "proved",
 	"Agent.VersionGrowsByOneOrNotAtAll": "proved",
