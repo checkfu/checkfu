@@ -336,8 +336,25 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						method: "POST",
 						path: `/v1/agents/${agentV1.id}`,
 						headers: AUTH_HEADERS,
-						body: { version: 1, system: "V2 prompt" },
+						body: { system: "V2 prompt" },
 					})
+					const original = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/agents/${agentV1.id}?version=1`,
+						headers: AUTH_HEADERS,
+					})
+					expect(original.status).toBe(200)
+					expect(yield* Effect.promise(() => original.json())).toMatchObject({
+						id: agentV1.id,
+						version: 1,
+						system: "V1 prompt",
+					})
+					const missingVersion = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/agents/${agentV1.id}?version=99`,
+						headers: AUTH_HEADERS,
+					})
+					expect(missingVersion.status).toBe(404)
 
 					const envRes = yield* sendRequest(apiFetch, {
 						method: "POST",

@@ -92,6 +92,38 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 				return projected
 			})
+		const retrieveVersion = (id: AgentId, version: number) =>
+			Effect.gen(function* () {
+				const head = yield* retrieve(id)
+				const committed = yield* agents.get(id)
+				if (version > committed.version) {
+					return yield* reject(404, `Agent ${id} version ${version} not found.`)
+				}
+				const key = agentVersionLookupKey(id, version)
+				const existing = Option.getOrNull(yield* agentVersionsByNumber.get(key))
+				const snapshot =
+					existing ??
+					(yield* agentVersionsByNumber.waitFor(
+						key,
+						{ version },
+						{
+							timeout: yield* AgentVersionWaitTimeout,
+						},
+					))
+				if (snapshot === null) {
+					return yield* reject(503, `Agent ${id} version ${version} projection is not ready.`)
+				}
+				return {
+					...head,
+					version,
+					name: snapshot.name,
+					model: snapshot.model,
+					system: snapshot.system,
+					description: snapshot.description,
+					updated_at: snapshot.created_at,
+				}
+			})
+
 		const supported = (model: AgentModel) =>
 			model.id.length <= MAX_MODEL_ID_LENGTH && isSupportedModel(model.id)
 				? Effect.void
@@ -215,7 +247,12 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("list", ({ query }) =>
 				list("agent", query, (id) => retrieve(AgentId.make(id))).pipe(handled),
 			)
-			.handle("get", ({ params }) => retrieve(params.agent_id).pipe(handled))
+			.handle("get", ({ params, query }) =>
+				(query.version === undefined
+					? retrieve(params.agent_id)
+					: retrieveVersion(params.agent_id, query.version)
+				).pipe(handled),
+			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
@@ -227,7 +264,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,
-							expected_version: version,
+							...(version === undefined ? {} : { expected_version: version }),
 							next_version_id: AgentVersionId.make(yield* randomId(random, "aver")),
 							changes: model === undefined ? fields : { ...fields, model },
 						}),

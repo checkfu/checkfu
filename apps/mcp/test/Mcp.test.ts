@@ -446,7 +446,7 @@ describe("Checkfu MCP server", () => {
 					environments_updateEnvironment: { ...environment, body: { version: 1, config } },
 					sessions_archiveSession: session,
 					sessions_createSession: {
-						body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
+						body: { agent: { type: "agent", id: "agent_1", version: 1 }, environment_id: "env_1" },
 					},
 					sessions_getOutputs: session,
 					sessions_getSession: session,

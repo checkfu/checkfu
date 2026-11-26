@@ -38,7 +38,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "agents_createAgent",
 		title: "Create an agent",
-		description: "Create an agent",
+		description:
+			"Create a reusable agent configuration with a model and an optional system prompt.",
 		method: "POST",
 		path: "/v1/agents",
 		readOnly: false,
@@ -142,6 +143,18 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					required: ["agent_id"],
 					additionalProperties: false,
 				},
+				query: {
+					type: "object",
+					properties: {
+						version: {
+							type: "string",
+							pattern: "^[1-9]\\d{0,14}$",
+							description: "Agent version. Omit to retrieve the latest version.",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
 			},
 			required: ["path"],
 			additionalProperties: false,
@@ -196,7 +209,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "agents_updateAgent",
 		title: "Update an agent",
-		description: "Update an agent (creates a new agent version)",
+		description:
+			"Update an agent's configuration. Changes create a new version for future sessions.",
 		method: "POST",
 		path: "/v1/agents/{agent_id}",
 		readOnly: false,
@@ -225,7 +239,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							type: "integer",
 							minimum: 1,
 							maximum: 9007199254740991,
-							description: "Current agent version for optimistic concurrency",
+							description: "Apply the update only if the agent is still at this version",
 						},
 						name: {
 							type: "string",
@@ -278,7 +292,6 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Updated agent description",
 						},
 					},
-					required: ["version"],
 					additionalProperties: false,
 				},
 			},
@@ -856,7 +869,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_createAutomation",
 		title: "Create an automation",
 		description:
-			"Create an automation that opens a new session with its message every time its schedule fires",
+			"Create an automation that runs an agent on a cron schedule. Each run starts a new session in the configured environment and sends the initial events.",
 		method: "POST",
 		path: "/v1/automations",
 		readOnly: false,
@@ -896,6 +909,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								{
 									type: "object",
 									properties: {
+										type: {
+											type: "string",
+											enum: ["agent"],
+										},
 										id: {
 											type: "string",
 											minLength: 1,
@@ -912,7 +929,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -954,7 +971,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							minItems: 1,
 							maxItems: 1,
-							description: "The one user message each run's session starts with",
+							description:
+								"Initial events sent when each run creates a session. Supply one text user.message event.",
 						},
 						schedule: {
 							type: "object",
@@ -1054,7 +1072,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							type: "integer",
 							minimum: 1,
 							maximum: 999999999999999,
-							description: "Run number: a whole number from 1, written in decimal",
+							description: "Run number as a positive integer",
 						},
 					},
 					required: ["automation_id", "run"],
@@ -1176,7 +1194,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_pauseAutomation",
 		title: "Pause an automation",
 		description:
-			"Stop an automation's schedule until it is unpaused; it can still be run on request",
+			"Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue.",
 		method: "POST",
 		path: "/v1/automations/{automation_id}/pause",
 		readOnly: false,
@@ -1208,7 +1226,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_runAutomation",
 		title: "Run an automation now",
 		description:
-			"Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+			"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
 		method: "POST",
 		path: "/v1/automations/{automation_id}/run",
 		readOnly: false,
@@ -1327,6 +1345,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								{
 									type: "object",
 									properties: {
+										type: {
+											type: "string",
+											enum: ["agent"],
+										},
 										id: {
 											type: "string",
 											minLength: 1,
@@ -1343,7 +1365,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -1385,7 +1407,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							minItems: 1,
 							maxItems: 1,
-							description: "The one user message later runs' sessions start with",
+							description: "Initial events for future runs. Supply one text user.message event.",
 						},
 						schedule: {
 							type: "object",
@@ -1450,7 +1472,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "environments_createEnvironment",
 		title: "Create an environment",
-		description: "Create an environment",
+		description: "Create an environment that configures the cloud sandbox where sessions run.",
 		method: "POST",
 		path: "/v1/environments",
 		readOnly: false,
@@ -1810,7 +1832,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "sessions_createSession",
 		title: "Create a session",
-		description: "Create a session",
+		description:
+			"Create an agent instance in an environment. Send a user.message event to start work.",
 		method: "POST",
 		path: "/v1/sessions",
 		readOnly: false,
@@ -1834,6 +1857,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										{
 											type: "object",
 											properties: {
+												type: {
+													type: "string",
+													enum: ["agent"],
+												},
 												id: {
 													type: "string",
 													minLength: 1,
@@ -1849,7 +1876,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											additionalProperties: false,
 										},
 									],
-									description: "Agent ID string or agent reference object ({id, version})",
+									description:
+										'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 								},
 								agent_id: {
 									type: "string",
@@ -1898,6 +1926,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										{
 											type: "object",
 											properties: {
+												type: {
+													type: "string",
+													enum: ["agent"],
+												},
 												id: {
 													type: "string",
 													minLength: 1,
@@ -1913,7 +1945,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											additionalProperties: false,
 										},
 									],
-									description: "Agent ID string or agent reference object ({id, version})",
+									description:
+										'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 								},
 								agent_id: {
 									type: "string",
@@ -2030,7 +2063,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "sessions_listEvents",
 		title: "List session events",
-		description: "List historical events for a session",
+		description:
+			"List persisted events for a session. Use the returned cursor to continue through its history.",
 		method: "GET",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: true,
@@ -2136,7 +2170,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "sessions_sendSessionEvents",
 		title: "Send session events",
-		description: "Send user events to a session",
+		description:
+			"Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn.",
 		method: "POST",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: false,
@@ -2223,6 +2258,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							minItems: 1,
 							maxItems: 8,
+							description:
+								"Events to send to the session. Send user.message to give the agent work or user.interrupt to stop the current turn.",
 						},
 					},
 					required: ["events"],

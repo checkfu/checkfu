@@ -211,7 +211,9 @@ describe("Cloudflare Forge pipeline", () => {
 			paths: Record<string, Record<string, Record<string, Json>>>
 		}
 		const agentsPost = spec.paths["/v1/agents"]?.["post"]
-		expect(agentsPost?.["description"]).toBe("Create an agent")
+		expect(agentsPost?.["description"]).toBe(
+			"Create a reusable agent configuration with a model and an optional system prompt.",
+		)
 		const agentProps = (
 			(agentsPost?.["requestBody"] as Record<string, Record<string, Record<string, Json>>>)?.[
 				"content"

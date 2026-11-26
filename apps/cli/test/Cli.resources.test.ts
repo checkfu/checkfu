@@ -482,7 +482,7 @@ describe("CLI help, errors, and resource commands", () => {
 							"sessions",
 							"create",
 							"--agent",
-							`{"id":"${agentId}","version":1}`,
+							`{"type":"agent","id":"${agentId}","version":1}`,
 							"--environment-id",
 							envId,
 							"--title",

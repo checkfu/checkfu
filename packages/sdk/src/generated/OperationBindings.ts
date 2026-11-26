@@ -90,7 +90,7 @@ export const SDK_OPERATION_BINDINGS = [
 		httpMethod: "GET",
 		path: "/v1/agents/{agent_id}",
 		pathParams: ["agent_id"],
-		queryParams: [],
+		queryParams: ["version"],
 		requiredQueryParams: [],
 		kind: "unary",
 		retrySafety: "idempotent",

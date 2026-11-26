@@ -34,7 +34,7 @@ export const diagnoseSessionCreateNotFound = (
 			const decodedAgent = Schema.decodeOption(AgentId)(rawAgentId)
 			if (Option.isSome(decodedAgent)) {
 				const agentCheck = yield* Effect.result(
-					client.api.agents.get({ params: { agent_id: decodedAgent.value } }),
+					client.api.agents.get({ params: { agent_id: decodedAgent.value }, query: {} }),
 				).pipe(Effect.catchDefect(() => Effect.undefined))
 				if (
 					agentCheck !== undefined &&

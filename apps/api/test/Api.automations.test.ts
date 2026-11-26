@@ -221,7 +221,7 @@ describe("Automations API", () => {
 
 				const pinned = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
 					name: "Pinned",
-					agent: { id: agentId, version: 1 },
+					agent: { type: "agent", id: agentId, version: 1 },
 					environment_id: environmentId,
 					initial_events: message("Go."),
 					schedule: { type: "cron", expression: "30 6 1 * *", timezone: "UTC" },
