@@ -3,7 +3,7 @@ import { AgentToolsText, McpServerBinding } from "@checkfu/domain/Mcp/McpServers
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
-import { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
+import { OutputBytes, OutputRead, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { HeldSecret, PutMode, PutOutcome } from "../Connection/SecretCustody.ts"
 import { SkillReading } from "../Skills/SkillReader.ts"
 import { RepositoryMount, TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
@@ -106,7 +106,7 @@ export const PiHarnessCalls = {
 		result: Schema.NullOr(OutputsListing),
 	},
 	readOutputs: {
-		args: Schema.Tuple([Schema.String, Schema.Int, Schema.Array(Schema.String)]),
+		args: Schema.Tuple([Schema.String, Schema.Int, Schema.Array(OutputRead)]),
 		result: Schema.NullOr(Schema.Array(OutputBytes)),
 	},
 	pauseUsage: {

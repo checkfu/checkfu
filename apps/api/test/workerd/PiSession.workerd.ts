@@ -2071,6 +2071,22 @@ describe("PiSession real Durable Object under workerd", () => {
 						},
 					},
 				],
+				"Leave an invalid name.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command: String.raw`printf 'invalid' > '${outputs}/back\slash.txt'; printf 'draft' > '${outputs}/draft.md'`,
+						},
+					},
+				],
+				"Remove the invalid name.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: String.raw`rm -- '${outputs}/back\slash.txt'` },
+					},
+				],
 			}),
 		)
 		fakeOpenAI.setHandler(
@@ -2103,6 +2119,34 @@ describe("PiSession real Durable Object under workerd", () => {
 		}
 		expect(current.status).toBe(200)
 		expect(current.body.files.map(({ path }) => path)).toEqual(["report.md"])
+		const first = current.body
+		const since = workerLogs.length
+		await turn("Leave an invalid name.", 3)
+		const refusedName = () => {
+			const recent = stripAnsi(workerLogs.slice(since).join(""))
+			return (
+				recent.includes("File path") &&
+				recent.includes("slash.txt") &&
+				recent.includes("is not allowed.")
+			)
+		}
+		const refusalDeadline = Date.now() + 30_000
+		while (!refusedName() && Date.now() < refusalDeadline) {
+			await sleep(100)
+		}
+		expect(refusedName()).toBe(true)
+		expect((await published()).body).toEqual(first)
+
+		await turn("Remove the invalid name.", 4)
+		const recoveryDeadline = Date.now() + 30_000
+		current = await published()
+		while (current.body.version === 1 && Date.now() < recoveryDeadline) {
+			await sleep(100)
+			current = await published()
+		}
+		expect(current.body.version).toBe(2)
+		expect(current.body.files.map(({ path }) => path)).toEqual(["draft.md", "report.md"])
+
 		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
 		expect(archived.status).toBe(200)
 	}, 300_000)
@@ -2228,6 +2272,53 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(systemText).toContain("at most 64 files, 1 MiB each and 4 MiB in total")
 		expect(systemText).toContain(
 			"An empty directory publishes nothing either, so the last version stays.",
+		)
+	}, 180_000)
+
+	it("publishes exact capture limits from storage without starting a machine", async () => {
+		const chunkSize = 256 * 1024
+		const fileSize = 4 * chunkSize
+		const names = ["a", "b", "c", "d"]
+		const scripts = names.flatMap((name) => {
+			const path = JSON.stringify(`/mnt/session/outputs/${name}.txt`)
+			const chunk = `${JSON.stringify(name)}.repeat(${chunkSize})`
+			const append = (last: string) =>
+				`await tools.edit({ path: ${path}, edits: [{ oldText: "!", newText: ${chunk} + ${JSON.stringify(last)} }] });`
+			return [
+				`await tools.write({ path: ${path}, content: ${chunk}.slice(1) + "!" }); ${append("!")}`,
+				`${append("!")} ${append(name)}`,
+			]
+		})
+		fakeOpenAI.setHandler((request) => {
+			const code = scripts[request.toolOutputs.length]
+			return code === undefined
+				? { kind: "reply", text: "Done." }
+				: { kind: "tool_call", name: "codemode", arguments: { code } }
+		})
+		const session = await createSession()
+		await replyAfterTurn(session.id, "Write four reports.", 1)
+		const results = (await listAllEvents(session.id)).filter(
+			(event) => event.type === "agent.tool_result",
+		)
+		expect(
+			results.map((result) => result.is_error),
+			JSON.stringify(results).slice(0, 2000),
+		).toEqual(scripts.map(() => false))
+		const published = () =>
+			apiJson<{
+				readonly id: string
+				readonly version: number
+				readonly files: ReadonlyArray<{ readonly path: string; readonly size: number }>
+			}>(`/v1/sessions/${session.id}/outputs`)
+		const deadline = Date.now() + 30_000
+		let artifact = await published()
+		while (artifact.status !== 200 && Date.now() < deadline) {
+			await sleep(100)
+			artifact = await published()
+		}
+		expect(artifact.status).toBe(200)
+		expect(artifact.body.files.map(({ path, size }) => [path, size])).toEqual(
+			names.map((name) => [`${name}.txt`, fileSize]),
 		)
 	}, 180_000)
 

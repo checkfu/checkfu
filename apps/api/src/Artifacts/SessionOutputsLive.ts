@@ -65,7 +65,7 @@ export const makeSessionOutputsPublisher = Effect.gen(function* () {
 				const read = yield* executor.readOutputs(
 					sessionId,
 					turn,
-					asked.map((file) => file.path),
+					asked.map(({ path, size }) => ({ path, size })),
 				)
 				if (read === null) {
 					return yield* new OutputsSuperseded()
@@ -75,6 +75,7 @@ export const makeSessionOutputsPublisher = Effect.gen(function* () {
 					const bytes = byPath.get(file.path)
 					if (
 						bytes === undefined ||
+						bytes.byteLength !== file.size ||
 						(yield* digest.digestHex(Digest.sha256, bytes)) !== file.sha256
 					) {
 						return yield* new OutputChanged({ path: file.path })

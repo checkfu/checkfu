@@ -1,8 +1,12 @@
+import { MAX_ARTIFACT_PATH_LENGTH } from "@checkfu/sdk/Limits"
+import * as Schema from "effect/Schema"
+import { OutputEntry } from "./SessionOutputs.ts"
+import type { OutputFiles } from "./SessionOutputs.ts"
 import type { PassthroughDirent, PassthroughMount, PassthroughStat } from "@cloudflare/computer"
 import type * as Effect from "effect/Effect"
 import type { Sandbox, SandboxError } from "../Sandbox/Sandboxes.ts"
 
-type FsCode = "EEXIST" | "EIO" | "EISDIR" | "ENOENT" | "ENOTDIR"
+type FsCode = "EAGAIN" | "EEXIST" | "EIO" | "EISDIR" | "ENOENT" | "ENOTDIR"
 
 const failure = (code: FsCode, message: string): Error =>
 	Object.assign(new Error(message), { code })
@@ -51,7 +55,7 @@ const byteLength = (text: string): number => new TextEncoder().encode(text).byte
 const bytesOf = async (body: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
 	new Uint8Array(await new Response(body).arrayBuffer())
 
-const fromBase64 = (text: string): Uint8Array =>
+const fromBase64 = (text: string): Uint8Array<ArrayBuffer> =>
 	Uint8Array.from(atob(text), (character) => character.charCodeAt(0))
 
 const atRoot = (rel: string, script: string): string =>
@@ -230,5 +234,154 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 				}
 			})
 		},
+	}
+}
+
+const OUTPUT_CHANGED = 47
+const decodeOutputs = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(OutputEntry)))
+
+// The machine uses Linux. openat2 resolves the whole path underneath the held directory,
+// even while another process changes names. Open only regular, singly linked files for reading.
+const CAPTURE_OUTPUT = `
+import base64, ctypes, errno, json, os, stat, sys
+
+class OpenHow(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint64) for name in ("flags", "mode", "resolve")]
+
+libc = ctypes.CDLL(None, use_errno=True)
+sys_openat2 = 437  # Linux x86-64 and arm64
+no_symlinks = 0x04
+beneath = 0x08
+no_xdev = 0x01
+dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+
+def under(parent, path, flags, resolve):
+    how = OpenHow(flags, 0, resolve)
+    fd = libc.syscall(sys_openat2, parent, os.fsencode(path), ctypes.byref(how), ctypes.sizeof(how))
+    if fd < 0:
+        number = ctypes.get_errno()
+        raise OSError(number, os.strerror(number))
+    return fd
+
+def directory_state(metadata):
+    return metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns, metadata.st_ctime_ns
+
+def list_outputs(root, limit, max_path):
+    entries = []
+    def walk(directory, prefix, expected):
+        before = directory_state(os.fstat(directory))
+        if expected is not None and before != directory_state(expected):
+            sys.exit(${OUTPUT_CHANGED})
+        with os.scandir(directory) as children:
+            for child in children:
+                path = prefix + child.name
+                metadata = child.stat(follow_symlinks=False)
+                if stat.S_ISDIR(metadata.st_mode):
+                    kind = "dir"
+                elif stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
+                    kind = "file"
+                else:
+                    kind = "other"
+                entries.append({"path": path, "type": kind})
+                if len(entries) >= limit:
+                    return
+                if kind == "dir" and len(path) <= max_path:
+                    nested = under(root, path, dir_flags, beneath | no_symlinks | no_xdev)
+                    try:
+                        walk(nested, path + "/", metadata)
+                    finally:
+                        os.close(nested)
+                    if len(entries) >= limit:
+                        return
+        if directory_state(os.fstat(directory)) != before:
+            sys.exit(${OUTPUT_CHANGED})
+    walk(root, "", None)
+    print(json.dumps(entries, ensure_ascii=True))
+
+def read_output(root, path, limit):
+    handle = under(root, path, os.O_PATH | os.O_CLOEXEC, beneath | no_symlinks | no_xdev)
+    try:
+        before = os.fstat(handle)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            sys.exit(${WRONG_KIND})
+        fd = os.open("/proc/self/fd/" + str(handle), os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            content = bytearray()
+            while len(content) < limit:
+                chunk = os.read(fd, limit - len(content))
+                if not chunk:
+                    break
+                content.extend(chunk)
+            after = os.fstat(fd)
+            if (len(content) != min(before.st_size, limit)
+                or before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+                or before.st_ctime_ns != after.st_ctime_ns
+                or after.st_nlink != 1):
+                sys.exit(${OUTPUT_CHANGED})
+            sys.stdout.buffer.write(base64.b64encode(content))
+        finally:
+            os.close(fd)
+    finally:
+        os.close(handle)
+
+if os.uname().machine not in ("x86_64", "aarch64"):
+    raise RuntimeError("Output capture requires Linux x86-64 or arm64.")
+mode, path, limit, arg = sys.argv[1:]
+base = os.open("/", dir_flags)
+try:
+    root = under(base, path.lstrip("/"), dir_flags, beneath | no_symlinks)
+except FileNotFoundError:
+    sys.exit(${MISSING})
+except OSError as error:
+    if error.errno in (errno.ENOTDIR, errno.ELOOP):
+        sys.exit(${WRONG_KIND})
+    raise
+finally:
+    os.close(base)
+try:
+    if mode == "list":
+        list_outputs(root, int(limit), int(arg))
+    else:
+        read_output(root, arg, int(limit))
+except OSError as error:
+    if error.errno in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EXDEV, errno.EAGAIN):
+        sys.exit(${OUTPUT_CHANGED})
+    raise
+finally:
+    os.close(root)
+`
+
+export const makeSandboxOutputFiles = (root: string, inSandbox: InSandbox): OutputFiles => {
+	const capture = async (mode: "list" | "read", limit: number, argument: string) => {
+		const { exitCode, stdout, stderr } = await inSandbox((sandbox) =>
+			sandbox.exec([
+				"/usr/bin/python3",
+				"-I",
+				"-c",
+				CAPTURE_OUTPUT,
+				mode,
+				root,
+				String(limit),
+				argument,
+			]),
+		)
+		switch (exitCode) {
+			case 0:
+				return stdout
+			case MISSING:
+				throw failure("ENOENT", "Output directory is missing.")
+			case WRONG_KIND:
+				throw failure("ENOTDIR", "The output path must use regular files and directories.")
+			case OUTPUT_CHANGED:
+				throw failure("EAGAIN", "The output directory changed during capture.")
+			default:
+				throw failure("EIO", stderr.trim() || `Output capture failed with exit code ${exitCode}.`)
+		}
+	}
+	return {
+		list: async (limit) =>
+			decodeOutputs(await capture("list", limit, String(MAX_ARTIFACT_PATH_LENGTH))),
+		read: async (path, limit) => fromBase64(await capture("read", limit, path)),
 	}
 }

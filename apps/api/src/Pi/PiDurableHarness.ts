@@ -50,7 +50,7 @@ import {
 } from "./PiCatalog.ts"
 import { turnOperationId } from "./PiTurn.ts"
 import type { PiActionAnswer, PiParkedCall, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
-import type { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
+import type { OutputBytes, OutputRead, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { PACKAGE_REGISTRY_HOSTS } from "../Workspace/MachineEgress.ts"
 import type {
 	RepositoryMount,
@@ -121,7 +121,7 @@ export interface WorkspaceExecutorService {
 	readonly readOutputs: (
 		sessionId: string,
 		turn: number,
-		paths: ReadonlyArray<string>,
+		files: ReadonlyArray<OutputRead>,
 	) => Effect.Effect<ReadonlyArray<OutputBytes> | null, HarnessCallFailed>
 	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
 }

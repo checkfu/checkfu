@@ -521,10 +521,10 @@ describe("A session's outputs", () => {
 
 					const full = "x".repeat(MAX_OUTPUT_FILE_BYTES)
 					expect(yield* after(() => void files.set(`${OUTPUTS}/part-1.txt`, `${full}x`))).toEqual([
-						1, 0,
+						1, 1,
 					])
 					expect(warnings.at(-1)).toBe(
-						'Outputs not published File "part-1.txt" is 1048577 bytes; the limit is 1048576.',
+						'Outputs not published File "part-1.txt" exceeds the limit of 1048576 bytes.',
 					)
 					expect(yield* after(() => void files.set(`${OUTPUTS}/part-1.txt`, full))).toEqual([2, 64])
 
@@ -536,7 +536,12 @@ describe("A session's outputs", () => {
 						}),
 					).toEqual([3, 64])
 					expect(outputReads.at(-1)).toEqual({ sessionId: session.id, paths: ["part-10.txt"] })
-					expect(yield* after(() => void files.set(`${OUTPUTS}/part-5.txt`, "x"))).toEqual([3, 0])
+					const [unchangedVersion, boundedReads] = yield* after(
+						() => void files.set(`${OUTPUTS}/part-5.txt`, "x"),
+					)
+					expect(unchangedVersion).toBe(3)
+					expect(boundedReads).toBeGreaterThan(0)
+					expect(boundedReads).toBeLessThanOrEqual(MAX_OUTPUT_FILES)
 					expect(warnings.at(-1)).toBe(
 						`Outputs not published Files total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`,
 					)

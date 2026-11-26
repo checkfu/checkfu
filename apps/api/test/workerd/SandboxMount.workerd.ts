@@ -9,7 +9,12 @@ import type { Sandbox } from "../../src/Sandbox/Sandboxes.ts"
 import { cloneCommand } from "../../src/Workspace/Repositories.ts"
 import type { RepositoryMount } from "../../src/Workspace/WorkspaceShapes.ts"
 import { WRITE_FILE } from "../../src/Sandbox/WriteFile.ts"
-import { makeSandboxMount } from "../../src/Workspace/SandboxMount.ts"
+import { makeSandboxMount, makeSandboxOutputFiles } from "../../src/Workspace/SandboxMount.ts"
+import {
+	MAX_OUTPUT_FILE_BYTES,
+	MAX_OUTPUT_TOTAL_BYTES,
+	makeSessionOutputs,
+} from "../../src/Workspace/SessionOutputs.ts"
 import type { InSandbox } from "../../src/Workspace/SandboxMount.ts"
 import {
 	archiveOf,
@@ -469,6 +474,40 @@ describe("a session's machine, in a container of its image", () => {
 			await sh(`rm -rf -- ${directory} ${outputs}`)
 		}
 	}, 120_000)
+
+	it("captures exact publication limits from the machine's output directory", async () => {
+		const root = "/mnt/session/outputs/bounded-capture"
+		const outputs = makeSessionOutputs(makeSandboxOutputFiles(root, inContainer))
+		const full = patterned(MAX_OUTPUT_FILE_BYTES)
+		try {
+			await sh(`mkdir -p -- ${root}/reports`)
+			for (const name of ["a", "b", "c", "d"]) {
+				await Effect.runPromise(sandbox.writeFile(`${root}/reports/${name}.txt`, full))
+			}
+			const listing = await outputs.list()
+			expect(listing.ok && listing.files.reduce((sum, { size }) => sum + size, 0)).toBe(
+				MAX_OUTPUT_TOTAL_BYTES,
+			)
+			if (!listing.ok) {
+				throw new Error(listing.reason)
+			}
+			const read = await outputs.read(listing.files)
+			expect(read.map(({ bytes }) => sha256(bytes))).toEqual(Array(4).fill(sha256(full)))
+
+			await Effect.runPromise(sandbox.writeFile(`${root}/extra.txt`, "one more file"))
+			expect(await outputs.list()).toEqual({
+				ok: false,
+				reason: `Files total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`,
+			})
+			await sh(`rm -- ${root}/extra.txt; ln -s reports/a.txt ${root}/alias.txt`)
+			expect(await outputs.list()).toEqual({
+				ok: false,
+				reason: 'Output "alias.txt" must be a regular file or directory.',
+			})
+		} finally {
+			await sh(`rm -rf -- ${root}`)
+		}
+	}, 45_000)
 
 	it("reads and lists what is in the machine", async () => {
 		const mount = makeSandboxMount("/workspace", inContainer)

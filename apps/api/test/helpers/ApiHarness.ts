@@ -60,7 +60,7 @@ import {
 	harnessCall,
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
-import { makeSessionOutputs } from "../../src/Workspace/SessionOutputs.ts"
+import { makeSessionOutputs, SESSION_OUTPUTS_PATH } from "../../src/Workspace/SessionOutputs.ts"
 import { makeSessionOutputsPublisher } from "../../src/Artifacts/SessionOutputsLive.ts"
 import {
 	SessionOutputs,
@@ -461,7 +461,8 @@ export const makePiDurableTestLayer = (
 				: Promise.resolve(encoder.encode(content))
 		}
 		return makeSessionOutputs({
-			list: (directory, limit) => {
+			list: (limit) => {
+				const directory = SESSION_OUTPUTS_PATH
 				if (files.has(directory)) {
 					outputWalks.push({ limit, found: 0 })
 					return Promise.reject(
@@ -486,16 +487,16 @@ export const makePiDurableTestLayer = (
 				const entries = [...found]
 					.toSorted(([a], [b]) => (a < b ? -1 : 1))
 					.slice(0, limit)
-					.map(([path, type]) => ({ path, type }))
+					.map(([path, type]) => ({ path: path.slice(directory.length + 1), type }))
 				outputWalks.push({ limit, found: entries.length })
 				return Promise.resolve(entries)
 			},
-			size: (file) => bytesOf(file).then((bytes) => bytes.byteLength),
-			read: (file) => {
+			read: (path, limit) => {
+				const file = `${SESSION_OUTPUTS_PATH}/${path}`
 				onRead?.(file)
 				return failingOutputReads.has(file)
 					? Promise.reject(Object.assign(new Error(`cannot read ${file}`), { code: "EIO" }))
-					: bytesOf(file)
+					: bytesOf(file).then((bytes) => bytes.subarray(0, limit))
 			},
 		})
 	}
@@ -742,12 +743,12 @@ export const makePiDurableTestLayer = (
 							: sessionOutputs(sessionId, (file) => outputListReads.push(file)).list(),
 					catch: (cause) => new HarnessCallFailed({ cause }),
 				}),
-			readOutputs: (sessionId, turn, paths) =>
+			readOutputs: (sessionId, turn, files) =>
 				Effect.tryPromise({
 					try: async () => {
-						outputReads.push({ sessionId, paths })
+						outputReads.push({ sessionId, paths: files.map(({ path }) => path) })
 						await beforeOutputsRead?.(sessionId)
-						return superseded(sessionId, turn) ? null : sessionOutputs(sessionId).read(paths)
+						return superseded(sessionId, turn) ? null : sessionOutputs(sessionId).read(files)
 					},
 					catch: (cause) => new HarnessCallFailed({ cause }),
 				}),

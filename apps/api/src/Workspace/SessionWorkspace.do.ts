@@ -21,12 +21,16 @@ import { ApiWorker } from "../Api.ts"
 import { ARTIFACT_MOUNT_ROOT, SKILL_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
 import { makeArtifactMount } from "./ArtifactMount.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
-import { makeSandboxMount } from "./SandboxMount.ts"
+import { makeSandboxMount, makeSandboxOutputFiles } from "./SandboxMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
 import type { PendingReceipts } from "./SessionMemory.ts"
-import { makeSessionOutputs, SESSION_OUTPUTS_PATH } from "./SessionOutputs.ts"
-import type { OutputBytes, OutputsListing } from "./SessionOutputs.ts"
+import {
+	makeSessionOutputs,
+	makeStoredOutputFiles,
+	SESSION_OUTPUTS_PATH,
+} from "./SessionOutputs.ts"
+import type { OutputBytes, OutputRead, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { FencedTurn, TurnToken } from "./WorkspaceFence.ts"
 import { makeSavedDisk } from "./SavedDisk.ts"
@@ -74,6 +78,7 @@ const failed = (text: string): WorkspaceToolResult => ({
 interface Files {
 	readonly fs: Workspace["fs"]
 	readonly tools: ReturnType<typeof createPiTools>
+	readonly outputs: ReturnType<typeof makeSessionOutputs>
 }
 
 const writeFileIn = async (
@@ -84,13 +89,6 @@ const writeFileIn = async (
 	await fs.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true })
 	await fs.writeFile(path, content)
 }
-
-const outputsIn = (fs: Workspace["fs"]) =>
-	makeSessionOutputs({
-		list: (directory, limit) => fs.find(directory, undefined, { limit }),
-		size: async (file) => (await fs.stat(file)).size,
-		read: async (file) => new Uint8Array(await new Response(await fs.readFile(file)).arrayBuffer()),
-	})
 
 const messageOf = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error)
@@ -111,7 +109,7 @@ export interface SessionWorkspaceShape {
 	readonly listOutputs: (turn: number) => Effect.Effect<OutputsListing | null>
 	readonly readOutputs: (
 		turn: number,
-		paths: ReadonlyArray<string>,
+		files: ReadonlyArray<OutputRead>,
 	) => Effect.Effect<ReadonlyArray<OutputBytes> | null>
 	readonly writeScriptOutput: (
 		path: string,
@@ -192,11 +190,16 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						import("@cloudflare/computer"),
 						import("@cloudflare/computer/tools/pi-ai"),
 					])
-					const { fs } = new Workspace({ storage, mounts: mounts(PASSTHROUGH_WALK_LIMIT) })
+					const local = new Workspace({ storage, mounts: mounts(PASSTHROUGH_WALK_LIMIT) })
+					const { fs } = local
 					let overMachine: Files | undefined
 					return {
 						fs,
-						local: { fs, tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } }) },
+						local: {
+							fs,
+							tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } }),
+							outputs: makeSessionOutputs(makeStoredOutputFiles(local)),
+						},
 						shared: (): Files => {
 							if (overMachine === undefined) {
 								const over = new Workspace({
@@ -213,6 +216,9 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								overMachine = {
 									fs: over.fs,
 									tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs: over.fs } }),
+									outputs: makeSessionOutputs(
+										makeSandboxOutputFiles(SESSION_OUTPUTS_PATH, machine.inMachine),
+									),
 								}
 							}
 							return overMachine
@@ -494,19 +500,17 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						Effect.promise(async () =>
 							storage.kv.get(DISCARDED) === true
 								? { ok: true, files: [] }
-								: ((await fence.run({ turn }, () => onActive((on) => outputsIn(on.fs).list()))) ??
-									null),
+								: ((await fence.run({ turn }, () => onActive((on) => on.outputs.list()))) ?? null),
 						),
 					readOutputs: (
 						turn: number,
-						paths: ReadonlyArray<string>,
+						files: ReadonlyArray<OutputRead>,
 					): Effect.Effect<ReadonlyArray<OutputBytes> | null> =>
 						Effect.promise(async () =>
 							storage.kv.get(DISCARDED) === true
 								? []
-								: ((await fence.run({ turn }, () =>
-										onActive((on) => outputsIn(on.fs).read(paths)),
-									)) ?? null),
+								: ((await fence.run({ turn }, () => onActive((on) => on.outputs.read(files)))) ??
+									null),
 						),
 					stopCall: (callId: string) =>
 						Effect.promise(async () => {

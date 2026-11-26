@@ -82,8 +82,8 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId, turn))).pipe(
 					Effect.withSpan("PiHarness.listOutputs"),
 				),
-			readOutputs: (sessionId, turn, paths) =>
-				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, paths))).pipe(
+			readOutputs: (sessionId, turn, files) =>
+				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, files))).pipe(
 					Effect.withSpan("PiHarness.readOutputs"),
 				),
 			pauseUsage: (conversation, operationId, pause) =>
