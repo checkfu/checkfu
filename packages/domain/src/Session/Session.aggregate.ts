@@ -36,6 +36,8 @@ import {
 	RecordToolCall,
 	RecordToolResult,
 } from "./RecordToolCall.command.ts"
+import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
+import { RecordInitialMessage } from "./RecordInitialMessage.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -48,6 +50,7 @@ import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import {
+	MAX_SESSION_INITIAL_EVENTS,
 	NO_TOOL_USE_IDS,
 	NonEmptyString,
 	NonNegativeInt,
@@ -64,7 +67,10 @@ import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/Versioned
 export const SESSION_STATE_SCHEMA_VERSION = 2 as const
 
 const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
-const Idle = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
+const Idle = Schema.TaggedStruct("Idle", {
+	turn: NonNegativeInt,
+	initial_messages_remaining: Schema.optionalKey(NonNegativeInt),
+})
 const Terminated = Schema.TaggedStruct("Terminated", { archived: Schema.Boolean })
 const RunningV1 = Schema.TaggedStruct("Running", {
 	turn: PositiveInt,
@@ -73,19 +79,16 @@ const RunningV1 = Schema.TaggedStruct("Running", {
 	pending_user_messages: NonNegativeInt,
 })
 
-export const SessionState = Schema.Union([
-	Uninitialized,
-	Idle,
-	Schema.TaggedStruct("Running", {
-		...RunningV1.fields,
-		awaiting_calls: NonNegativeInt,
-		awaiting_ids: ToolUseIdsText,
-		paused: Schema.Boolean,
-		asked_calls: NonNegativeInt,
-		interrupted: Schema.Boolean,
-	}),
-	Terminated,
-])
+const Running = Schema.TaggedStruct("Running", {
+	...RunningV1.fields,
+	awaiting_calls: NonNegativeInt,
+	awaiting_ids: ToolUseIdsText,
+	paused: Schema.Boolean,
+	asked_calls: NonNegativeInt,
+	interrupted: Schema.Boolean,
+})
+
+export const SessionState = Schema.Union([Uninitialized, Idle, Running, Terminated])
 export type SessionState = typeof SessionState.Type
 
 export const SessionStateSnapshot = versionedSnapshot({
@@ -210,6 +213,7 @@ export class Session extends Domain.Aggregate("Session", {
 	commands: [
 		CreateSession,
 		SendUserMessage,
+		RecordInitialMessage,
 		SendUserInterrupt,
 		RecordModelRequestStart,
 		RecordToolCall,
@@ -227,6 +231,12 @@ export class Session extends Domain.Aggregate("Session", {
 	invariants: {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
 		IdleTurnIsNonNegative: (s) => s._tag !== "Idle" || s.turn >= 0,
+		InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn: (s) =>
+			s._tag !== "Idle" ||
+			s.initial_messages_remaining === undefined ||
+			(s.turn === 0 &&
+				s.initial_messages_remaining >= 0 &&
+				s.initial_messages_remaining <= MAX_SESSION_INITIAL_EVENTS),
 		ModelRequestsStartedNonNegative: (s) => s._tag !== "Running" || s.model_requests_started >= 0,
 		PendingUserMessagesWithinBounds: (s) =>
 			s._tag !== "Running" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8),
@@ -239,6 +249,14 @@ export class Session extends Domain.Aggregate("Session", {
 		AnInterruptedTurnIsNotPaused: (s) => s._tag !== "Running" || !s.interrupted || !s.paused,
 	},
 	transitions: {
+		OnlyTheNextInitialMessageCanAdvanceAdmission: ({ before, command, events }) =>
+			command._tag !== "RecordInitialMessage" ||
+			events.length === 0 ||
+			(before._tag === "Idle" && before.initial_messages_remaining === command.remaining),
+		OnlyTheLastInitialMessageStartsTheTurn: ({ before, command, events }) =>
+			command._tag !== "RecordInitialMessage" ||
+			!events.some((e) => e._tag === "session.status_running") ||
+			(before._tag === "Idle" && before.initial_messages_remaining === 1),
 		TerminatedSessionStaysTerminated: ({ before, after }) =>
 			before._tag !== "Terminated" || after._tag === "Terminated",
 		ArchivedSessionStaysArchived: ({ before, after }) =>
@@ -426,10 +444,24 @@ export class Session extends Domain.Aggregate("Session", {
 						}),
 					],
 
+		RecordInitialMessage: (state, cmd) => {
+			if (state._tag !== "Idle" || state.initial_messages_remaining !== cmd.remaining) {
+				return []
+			}
+			const message = new UserMessage({
+				initial: true,
+				content: [{ type: "text", text: cmd.text }],
+			})
+			return cmd.remaining === 1 ? [message, new SessionStatusRunning({ turn: 1 })] : [message]
+		},
+
 		SendUserMessage: (state, cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
 			if (active._tag !== "Idle" && active._tag !== "Running") {
 				return active
+			}
+			if (active._tag === "Idle" && (active.initial_messages_remaining ?? 0) > 0) {
+				return new InitialMessagesPending({ session_id: ctx.id })
 			}
 			if (active._tag === "Running" && active.paused) {
 				return new SessionAwaitingAction({ session_id: ctx.id })
@@ -726,15 +758,29 @@ export class Session extends Domain.Aggregate("Session", {
 				: [new IdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })],
 	},
 	evolve: {
-		"session.created": () => ({ _tag: "Idle" as const, turn: 0 }),
-		"user.message": (state) =>
-			state._tag === "Running"
+		"session.created": (_, e) => ({
+			_tag: "Idle" as const,
+			turn: 0,
+			...(e.initial_messages === undefined
+				? {}
+				: { initial_messages_remaining: e.initial_messages.count }),
+		}),
+		"user.message": (state, e) => {
+			if (
+				state._tag === "Idle" &&
+				e.initial === true &&
+				(state.initial_messages_remaining ?? 0) > 0
+			) {
+				return { ...state, initial_messages_remaining: (state.initial_messages_remaining ?? 0) - 1 }
+			}
+			return state._tag === "Running"
 				? {
 						...state,
 						pending_user_messages:
 							state.pending_user_messages < 8 ? state.pending_user_messages + 1 : 8,
 					}
-				: state,
+				: state
+		},
 		"user.interrupt": (state) =>
 			state._tag === "Running" ? { ...state, interrupted: true } : state,
 		"user.tool_confirmation": (state, e) =>

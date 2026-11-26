@@ -60,6 +60,7 @@ import {
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
+	MAX_SESSION_INITIAL_EVENTS,
 	CancelledEventIds,
 	RequiresActionStopReason,
 	StopReason,
@@ -598,8 +599,8 @@ export const CreateSessionBody = Schema.Struct({
 	agent: SessionAgentReference,
 	initial_events: Schema.optionalKey(
 		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
-			.check(Schema.isMaxLength(1))
-			.annotate({ description: "A text user message to send when the session is created." }),
+			.check(Schema.isMaxLength(MAX_SESSION_INITIAL_EVENTS))
+			.annotate({ description: "User messages to send in order when the session is created." }),
 	),
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
@@ -1697,7 +1698,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "Create a session")
 			.annotate(
 				OpenApi.Description,
-				"Create an agent instance in an environment. Send a user.message event to start work.",
+				"Create an agent instance in an environment. Include initial user messages to start work immediately.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions",
@@ -1709,7 +1710,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					repeatArrayField: {
 						field: "initial_events",
 						flag: "initial-event",
-						description: "Initial user message as JSON, YAML, or @file",
+						description: "Initial user message as JSON, YAML, or @file (repeatable, up to 50)",
 					},
 					examples: [
 						{

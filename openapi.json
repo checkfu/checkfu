@@ -8851,7 +8851,7 @@
 						}
 					}
 				},
-				"description": "Create an agent instance in an environment. Send a user.message event to start work.",
+				"description": "Create an agent instance in an environment. Include initial user messages to start work immediately.",
 				"summary": "Create a session",
 				"requestBody": {
 					"content": {
@@ -8921,8 +8921,8 @@
 											"required": ["type", "content"],
 											"additionalProperties": false
 										},
-										"maxItems": 1,
-										"description": "A text user message to send when the session is created."
+										"maxItems": 50,
+										"description": "User messages to send in order when the session is created."
 									},
 									"environment_id": {
 										"type": "string",
@@ -8996,7 +8996,7 @@
 					"repeatArrayField": {
 						"field": "initial_events",
 						"flag": "initial-event",
-						"description": "Initial user message as JSON, YAML, or @file"
+						"description": "Initial user message as JSON, YAML, or @file (repeatable, up to 50)"
 					},
 					"examples": [
 						{

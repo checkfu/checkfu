@@ -88,7 +88,7 @@
 			},
 			"Sessions.TurnInputMatchesSession": {
 				"kind": "model invariant",
-				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Session.every((s) => {\n\t\t\t\t\tconst view = m.TurnInput.find((v) => v.id === s.id)\n\t\t\t\t\tconst sessionView = m.SessionView.find((v) => v.id === s.id)\n\t\t\t\t\tif (s.state._tag === \"Uninitialized\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined || sessionView === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\tconst common = [\n\t\t\t\t\t\tview.state.agent_id === sessionView.state.agent_id,\n\t\t\t\t\t\tview.state.agent_version === sessionView.state.agent_version,\n\t\t\t\t\t\tview.state.environment_id === sessionView.state.environment_id,\n\t\t\t\t\t\tview.state.turn === sessionView.state.turn,\n\t\t\t\t\t]\n\t\t\t\t\tif (s.state._tag === \"Idle\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...common,\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\tview.state.input.length === 0,\n\t\t\t\t\t\t\tview.state.unsent.length <= 8,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Running\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...common,\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\tview.state.input.length >= 1,\n\t\t\t\t\t\t\tview.state.unsent.length === s.state.pending_user_messages,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\treturn [...common, view.state.input.length === 0, view.state.unsent.length === 0].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t)\n\t\t\t\t}),\n\t\t\t\tm.TurnInput.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Session.every((s) => {\n\t\t\t\t\tconst view = m.TurnInput.find((v) => v.id === s.id)\n\t\t\t\t\tconst sessionView = m.SessionView.find((v) => v.id === s.id)\n\t\t\t\t\tif (s.state._tag === \"Uninitialized\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined || sessionView === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\tconst common = [\n\t\t\t\t\t\tview.state.agent_id === sessionView.state.agent_id,\n\t\t\t\t\t\tview.state.agent_version === sessionView.state.agent_version,\n\t\t\t\t\t\tview.state.environment_id === sessionView.state.environment_id,\n\t\t\t\t\t\tview.state.turn === sessionView.state.turn,\n\t\t\t\t\t]\n\t\t\t\t\tif (s.state._tag === \"Idle\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...common,\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\tview.state.input.length === 0,\n\t\t\t\t\t\t\ts.state.initial_messages_remaining === undefined\n\t\t\t\t\t\t\t\t\t? view.state.unsent.length <= 8\n\t\t\t\t\t\t\t\t\t: view.state.unsent.length + s.state.initial_messages_remaining <=\n\t\t\t\t\t\t\t\t\t\tMAX_SESSION_INITIAL_EVENTS,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Running\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...common,\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\tview.state.input.length >= 1,\n\t\t\t\t\t\t\tview.state.unsent.length === s.state.pending_user_messages,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\treturn [...common, view.state.input.length === 0, view.state.unsent.length === 0].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t)\n\t\t\t\t}),\n\t\t\t\tm.TurnInput.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
 			},
 			"Session.IdleSessionStartsTheNextTurn": {
 				"kind": "transition",
@@ -217,6 +217,18 @@
 			"Session.AStopNamesTheUnansweredCalls": {
 				"kind": "transition",
 				"source": "({ before, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\t(event._tag !== \"session.status_idle\" && event._tag !== \"session.status_terminated\") ||\n\t\t\t\t\tevent.event_ids === (before._tag === \"Running\" ? before.awaiting_ids : NO_TOOL_USE_IDS),\n\t\t\t)"
+			},
+			"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Idle\" ||\n\t\t\ts.initial_messages_remaining === undefined ||\n\t\t\t(s.turn === 0 &&\n\t\t\t\ts.initial_messages_remaining >= 0 &&\n\t\t\t\ts.initial_messages_remaining <= MAX_SESSION_INITIAL_EVENTS)"
+			},
+			"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === command.remaining)"
+			},
+			"Session.OnlyTheLastInitialMessageStartsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\t!events.some((e) => e._tag === \"session.status_running\") ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === 1)"
 			}
 		}
 	}

@@ -31,6 +31,8 @@ import {
 	AgentToolUse,
 	AgentCustomToolUse,
 } from "@checkfu/domain/Session/RecordToolCall.command"
+import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
+import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.command"
 import { UserCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
@@ -47,7 +49,10 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
+import {
+	AdmitSession,
+	AdmitSessionWithMessages,
+} from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { SessionEvent } from "../src/Http/Api.ts"
 import {
@@ -2837,34 +2842,89 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							},
 						})
 
-					const created = yield* create(["first"])
+					const messages = Array.from({ length: 50 }, (_, index) => `initial message ${index + 1}`)
+					expect((yield* create([...messages, "one too many"])).status).toBe(400)
+					expect((yield* create([...messages.slice(0, -1), ""])).status).toBe(400)
+					const created = yield* create(messages)
 					expect(created.status).toBe(201)
 					const session = (yield* Effect.promise(() => created.json())) as { id: string }
 					expect(session).toMatchObject({ status: "running", turn: 1 })
 
-					const replay = yield* create(["first"])
+					const replay = yield* create(messages)
 					expect(replay.status).toBe(201)
 					expect(yield* Effect.promise(() => replay.json())).toEqual(session)
-					const conflict = yield* create(["different"])
+					const conflict = yield* create([...messages.slice(0, -1), "different"])
 					expect(conflict.status).toBe(409)
 
 					const listed = yield* sendRequest(apiFetch, {
 						method: "GET",
-						path: `/v1/sessions/${session.id}/events`,
+						path: `/v1/sessions/${session.id}/events?limit=100`,
 						headers: AUTH_HEADERS,
 					})
 					const { data } = (yield* Effect.promise(() => listed.json())) as {
-						data: ReadonlyArray<{ type: string; content: ReadonlyArray<{ text: string }> }>
+						data: ReadonlyArray<{
+							id: string
+							type: string
+							content: ReadonlyArray<{ text: string }>
+						}>
 					}
-					expect(data.slice(0, 2).map(({ type }) => type)).toEqual([
-						"user.message",
-						"session.status_running",
-					])
+					expect(data.slice(0, messages.length).every(({ type }) => type === "user.message")).toBe(
+						true,
+					)
+					expect(data[messages.length]?.type).toBe("session.status_running")
+					const recorded = data.filter(({ type }) => type === "user.message")
+					expect(recorded.map(({ content }) => content[0]?.text)).toEqual(messages)
+					expect(new Set(recorded.map(({ id }) => id)).size).toBe(messages.length)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("recovers initial message recording from the committed admission plan", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const base = yield* createIdleSession(apiFetch)
+					const previous = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${base.id}`,
+						headers: AUTH_HEADERS,
+					})
+					const { agent } = (yield* Effect.promise(() => previous.json())) as {
+						agent: { id: string }
+					}
+					const decision = yield* AdmitSessionWithMessagesDecision
+					const session_id = SessionId.make("sess_initial_resume")
+					const messages = ["First", "Second", "Third"]
+					yield* decision.send(
+						new AdmitSessionWithMessages({
+							session_id,
+							agent_id: AgentId.make(agent.id),
+							agent_version: null,
+							environment_id: EnvironmentId.make(base.environment_id),
+							title: null,
+							mcp_server_credentials: "[]",
+							initial_messages: {
+								count: messages.length,
+								messages: encodeInitialMessages(messages),
+							},
+						}),
+					)
+					const views = yield* SessionView
+					const ref = Session.ref(session_id)
+					yield* views.waitFor(ref, { turn: 1 }, { timeout: "5 seconds" })
+					const history = yield* views.list(ref, { take: 20 })
 					expect(
-						data
-							.filter(({ type }) => type === "user.message")
-							.map(({ content }) => content[0]?.text),
-					).toEqual(["first"])
+						history.entries.flatMap(({ event }) =>
+							event._tag === "user.message" ? event.content.map(({ text }) => text) : [],
+						),
+					).toEqual(messages)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
