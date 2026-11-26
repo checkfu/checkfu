@@ -6,8 +6,20 @@ import { exportDeterministicOpenApiJson } from "../src/OpenApiExport.ts"
 
 type Operation = Record<string, Json>
 
-const withOperation = (path: string, method: string, operation: Operation): string => {
-	const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
+const emptyOpenApi = JSON.stringify({
+	openapi: "3.1.0",
+	info: { title: "Checkfu", version: "1.0.0" },
+	paths: {},
+	components: { schemas: {} },
+})
+
+const withOperation = (
+	path: string,
+	method: string,
+	operation: Operation,
+	document = emptyOpenApi,
+): string => {
+	const spec = JSON.parse(document) as {
 		paths: Record<string, Record<string, Json>>
 	}
 	spec.paths[path] = { ...spec.paths[path], [method]: operation }
@@ -167,10 +179,15 @@ describe("MCP tool projection", () => {
 	it("refuses duplicate names, invalid names, and success responses that are not a JSON object", () => {
 		expect(() =>
 			project(
-				withOperation("/v1/agents", "get", {
-					...searchAgents,
-					"x-checkfu-mcp": { name: "agents_getAgent" },
-				}),
+				withOperation(
+					"/v1/agents",
+					"get",
+					{
+						...searchAgents,
+						"x-checkfu-mcp": { name: "agents_getAgent" },
+					},
+					exportDeterministicOpenApiJson(),
+				),
 			),
 		).toThrow(/Duplicate MCP tool name "agents_getAgent"/)
 
@@ -421,16 +438,21 @@ describe("MCP tool projection", () => {
 	})
 
 	it("inlines referenced component schemas as $defs", () => {
-		const openApiJson = withOperation("/v1/agents/search", "post", {
-			...searchAgents,
-			"x-checkfu-mcp": { name: "agents_searchAgents" },
-			requestBody: {
-				required: true,
-				content: {
-					"application/json": { schema: { $ref: "#/components/schemas/SessionEvent" } },
+		const openApiJson = withOperation(
+			"/v1/agents/search",
+			"post",
+			{
+				...searchAgents,
+				"x-checkfu-mcp": { name: "agents_searchAgents" },
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": { schema: { $ref: "#/components/schemas/SessionEvent" } },
+					},
 				},
 			},
-		})
+			exportDeterministicOpenApiJson(),
+		)
 		const tool = project(openApiJson).find((candidate) => candidate.name === "agents_searchAgents")
 		expect(tool?.inputSchema).toMatchObject({
 			properties: { body: { $ref: "#/$defs/SessionEvent" } },
@@ -442,12 +464,7 @@ describe("MCP tool projection", () => {
 
 	it("leaves a secret out of a tool's arguments, wherever in the body it is, and refuses a required one", () => {
 		const withSearchOperation = (operation: Operation) =>
-			JSON.stringify({
-				openapi: "3.1.0",
-				info: { title: "Checkfu", version: "1.0.0" },
-				paths: { "/v1/agents/search": { post: operation } },
-				components: { schemas: {} },
-			})
+			withOperation("/v1/agents/search", "post", operation)
 		const secret = { type: "string", format: "password" }
 		const body = (schema: Json) => ({
 			...searchAgents,
