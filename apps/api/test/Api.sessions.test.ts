@@ -150,6 +150,16 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(history.data.find((event) => event.type === "system.message")).toMatchObject(
 						receipt.data[0]!,
 					)
+					const competing = yield* Effect.all(
+						[
+							send("system.message", "a".repeat(60_000)),
+							send("system.message", "b".repeat(60_000)),
+						],
+						{ concurrency: 2 },
+					)
+					expect(competing.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+						200, 400,
+					])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
