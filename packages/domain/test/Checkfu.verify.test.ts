@@ -315,7 +315,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 400, length: 12 },
 
-				allow: { skipped: ["RecordInitialMessages", "EnsureTurnStarted"] },
+				allow: { skipped: ["EnsureTurnStarted"] },
 				opaque: [
 					sessionIdOfNextRun,
 					isUsableSchedule,
@@ -334,10 +334,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
-		expect(report.explored.skipped.map((skipped) => skipped.policy).toSorted()).toEqual([
-			"EnsureTurnStarted",
-			"RecordInitialMessages",
-		])
+		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",
