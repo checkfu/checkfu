@@ -7,6 +7,7 @@ export {
 	ErrorMessage,
 	EvaluatedPermission,
 	IdleStopReason,
+	MAX_AGENT_SYSTEM_LENGTH,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_DENY_MESSAGE_LENGTH,
 	ErrorType,

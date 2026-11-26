@@ -331,6 +331,7 @@ export const ToolRejection = Schema.Literals(["unavailable", "invalid_arguments"
 export type ToolRejection = typeof ToolRejection.Type
 
 export const SessionEventFields = {
+	"system.message": { content: TextBlocks },
 	"user.message": {
 		content: TextBlocks,
 	},

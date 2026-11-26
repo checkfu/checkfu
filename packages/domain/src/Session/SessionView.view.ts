@@ -1,3 +1,4 @@
+import { SystemMessage } from "./SendSystemMessage.command.ts"
 import * as Domain from "@alchemy.run/domain"
 import { SessionSnapshot } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
@@ -27,12 +28,13 @@ import { Session } from "./Session.aggregate.ts"
 export { SessionSnapshot }
 
 export class SessionView extends Domain.View("SessionView", {
-	version: 4,
+	version: 5,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(SessionSnapshot),
 	initial: null,
 	events: [
+		SystemMessage,
 		UserMessage,
 		UserInterrupt,
 		UserToolConfirmation,
@@ -74,6 +76,8 @@ export class SessionView extends Domain.View("SessionView", {
 						updated_at: ctx.at,
 						archived_at: null,
 					},
+		"system.message": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
 		"user.message": (state, _e, ctx) => (state === null ? null : { ...state, updated_at: ctx.at }),
 		"user.interrupt": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },

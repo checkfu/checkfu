@@ -19,6 +19,7 @@ const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000] as const
 
 const EVENT_TYPES: Record<SessionEventType, true> = {
 	"user.message": true,
+	"system.message": true,
 	"user.interrupt": true,
 	"session.status_running": true,
 	"span.model_request_start": true,

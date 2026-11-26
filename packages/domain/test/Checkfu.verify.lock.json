@@ -541,6 +541,10 @@
 			"OpenAutomationSession.FirstTurnAdmissionKeepsGivenCredentials": {
 				"kind": "transition",
 				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" &&\n\t\t\t\t\tevent.mcp_server_credentials === command.mcp_server_credentials,\n\t\t\t)"
+			},
+			"Session.SystemContextIsBounded": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t(s._tag !== \"Idle\" && s._tag !== \"Running\") ||\n\t\t\ts.system_context_length === undefined ||\n\t\t\ts.system_context_length <= MAX_AGENT_SYSTEM_LENGTH,\n\t\tModelRequestsStartedNonNegative: (s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
 			}
 		}
 	}

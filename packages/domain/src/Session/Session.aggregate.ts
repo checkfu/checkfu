@@ -36,6 +36,7 @@ import {
 	RecordToolCall,
 	RecordToolResult,
 } from "./RecordToolCall.command.ts"
+import { SendSystemMessage, SystemContextFull, SystemMessage } from "./SendSystemMessage.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -48,6 +49,7 @@ import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import {
+	MAX_AGENT_SYSTEM_LENGTH,
 	NO_TOOL_USE_IDS,
 	NonEmptyString,
 	NonNegativeInt,
@@ -61,10 +63,12 @@ import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
-export const SESSION_STATE_SCHEMA_VERSION = 2 as const
+export const SESSION_STATE_SCHEMA_VERSION = 3 as const
 
 const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
-const Idle = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
+const IdleV2 = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
+const systemContext = { system_context_length: Schema.optionalKey(NonNegativeInt) }
+const Idle = Schema.TaggedStruct("Idle", { ...IdleV2.fields, ...systemContext })
 const Terminated = Schema.TaggedStruct("Terminated", { archived: Schema.Boolean })
 const RunningV1 = Schema.TaggedStruct("Running", {
 	turn: PositiveInt,
@@ -73,19 +77,17 @@ const RunningV1 = Schema.TaggedStruct("Running", {
 	pending_user_messages: NonNegativeInt,
 })
 
-export const SessionState = Schema.Union([
-	Uninitialized,
-	Idle,
-	Schema.TaggedStruct("Running", {
-		...RunningV1.fields,
-		awaiting_calls: NonNegativeInt,
-		awaiting_ids: ToolUseIdsText,
-		paused: Schema.Boolean,
-		asked_calls: NonNegativeInt,
-		interrupted: Schema.Boolean,
-	}),
-	Terminated,
-])
+const RunningV2 = Schema.TaggedStruct("Running", {
+	...RunningV1.fields,
+	awaiting_calls: NonNegativeInt,
+	awaiting_ids: ToolUseIdsText,
+	paused: Schema.Boolean,
+	asked_calls: NonNegativeInt,
+	interrupted: Schema.Boolean,
+})
+
+const Running = Schema.TaggedStruct("Running", { ...RunningV2.fields, ...systemContext })
+export const SessionState = Schema.Union([Uninitialized, Idle, Running, Terminated])
 export type SessionState = typeof SessionState.Type
 
 export const SessionStateSnapshot = versionedSnapshot({
@@ -93,8 +95,13 @@ export const SessionStateSnapshot = versionedSnapshot({
 	schema: SessionState,
 	previous: [
 		snapshotVersion({
+			version: 2,
+			schema: Schema.Union([Uninitialized, IdleV2, RunningV2, Terminated]),
+			migrate: (state) => state,
+		}),
+		snapshotVersion({
 			version: 1,
-			schema: Schema.Union([Uninitialized, Idle, RunningV1, Terminated]),
+			schema: Schema.Union([Uninitialized, IdleV2, RunningV1, Terminated]),
 			migrate: (state) =>
 				state._tag === "Running"
 					? {
@@ -210,6 +217,7 @@ export class Session extends Domain.Aggregate("Session", {
 	commands: [
 		CreateSession,
 		SendUserMessage,
+		SendSystemMessage,
 		SendUserInterrupt,
 		RecordModelRequestStart,
 		RecordToolCall,
@@ -227,6 +235,10 @@ export class Session extends Domain.Aggregate("Session", {
 	invariants: {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
 		IdleTurnIsNonNegative: (s) => s._tag !== "Idle" || s.turn >= 0,
+		SystemContextIsBounded: (s) =>
+			(s._tag !== "Idle" && s._tag !== "Running") ||
+			s.system_context_length === undefined ||
+			s.system_context_length <= MAX_AGENT_SYSTEM_LENGTH,
 		ModelRequestsStartedNonNegative: (s) => s._tag !== "Running" || s.model_requests_started >= 0,
 		PendingUserMessagesWithinBounds: (s) =>
 			s._tag !== "Running" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8),
@@ -425,6 +437,22 @@ export class Session extends Domain.Aggregate("Session", {
 							title: cmd.title,
 						}),
 					],
+
+		SendSystemMessage: (state, cmd, ctx) => {
+			const active = requireActive(state, ctx.id)
+			if (active._tag !== "Idle" && active._tag !== "Running") {
+				return active
+			}
+			if (active._tag === "Running" && active.paused) {
+				return new SessionAwaitingAction({ session_id: ctx.id })
+			}
+			if ((active.system_context_length ?? 0) + cmd.text.length + 2 > MAX_AGENT_SYSTEM_LENGTH) {
+				return new SystemContextFull({ session_id: ctx.id })
+			}
+			return [
+				new SystemMessage({ content: [{ type: "text", text: cmd.text }], processed_at: ctx.now }),
+			]
+		},
 
 		SendUserMessage: (state, cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
@@ -735,6 +763,14 @@ export class Session extends Domain.Aggregate("Session", {
 							state.pending_user_messages < 8 ? state.pending_user_messages + 1 : 8,
 					}
 				: state,
+		"system.message": (state, event) =>
+			state._tag === "Idle" || state._tag === "Running"
+				? {
+						...state,
+						system_context_length:
+							(state.system_context_length ?? 0) + (event.content[0]?.text.length ?? 0) + 2,
+					}
+				: state,
 		"user.interrupt": (state) =>
 			state._tag === "Running" ? { ...state, interrupted: true } : state,
 		"user.tool_confirmation": (state, e) =>
@@ -767,6 +803,9 @@ export class Session extends Domain.Aggregate("Session", {
 						open_model_request_id: null,
 						model_requests_started: 0,
 						pending_user_messages: 0,
+						...(state.system_context_length === undefined
+							? {}
+							: { system_context_length: state.system_context_length }),
 						awaiting_calls: 0,
 						awaiting_ids: NO_TOOL_USE_IDS,
 						paused: false,
@@ -814,7 +853,13 @@ export class Session extends Domain.Aggregate("Session", {
 				: state,
 		"session.status_idle": (state, e) =>
 			state._tag === "Running" && e.stop_reason.type !== "requires_action"
-				? { _tag: "Idle" as const, turn: e.turn }
+				? {
+						_tag: "Idle" as const,
+						turn: e.turn,
+						...(state.system_context_length === undefined
+							? {}
+							: { system_context_length: state.system_context_length }),
+					}
 				: state,
 		"session.error": (state) => state,
 		"turn.abandoned": (state) => state,

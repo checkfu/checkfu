@@ -31,6 +31,7 @@ import {
 	AgentToolUse,
 	AgentCustomToolUse,
 } from "@checkfu/domain/Session/RecordToolCall.command"
+import { SystemMessage } from "@checkfu/domain/Session/SendSystemMessage.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.command"
 import { UserCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
@@ -64,6 +65,7 @@ import {
 	AUTH_HEADERS,
 	createIdleSession,
 	extractLastUserText,
+	extractSystemText,
 	makeApiTestClient,
 	makeAssistantReply,
 	makePiDurableTestLayer,
@@ -77,6 +79,74 @@ const testNotice = (message: string) =>
 	})
 
 describe("Session event batching, interrupts, and SSE streaming", () => {
+	it("records system guidance without starting a turn and uses it for later requests", async () => {
+		const threadInstructions: Array<string> = []
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) => {
+			threadInstructions.push(extractSystemText(context))
+			return makeAssistantReply(model, null, "ok", 1, 1)
+		})
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch, "You are an assistant.")
+					const path = `/v1/sessions/${session.id}/events`
+					const send = (type: "system.message" | "user.message", text: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path,
+							headers: AUTH_HEADERS,
+							body: { events: [{ type, content: [{ type: "text", text }] }] },
+						})
+					const system = yield* send("system.message", "Stay brief.")
+					expect(system.status).toBe(200)
+					const receipt = (yield* Effect.promise(() => system.json())) as {
+						data: ReadonlyArray<{ type: string; id: string; processed_at: string }>
+					}
+					expect(receipt.data[0]).toMatchObject({
+						type: "system.message",
+						processed_at: expect.any(String),
+					})
+					expect(threadInstructions).toEqual([])
+					const stream = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `${path}/stream`,
+						headers: AUTH_HEADERS,
+					})
+					expect((yield* send("user.message", "First question")).status).toBe(200)
+					yield* Effect.promise(() =>
+						readSseUntil(stream, (event) => event.type === "session.status_idle"),
+					)
+					expect(threadInstructions[0]).toContain("You are an assistant.\n\nStay brief.")
+					expect((yield* send("system.message", "Use metric units.")).status).toBe(200)
+					const next = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `${path}/stream`,
+						headers: AUTH_HEADERS,
+					})
+					expect((yield* send("user.message", "Second question")).status).toBe(200)
+					yield* Effect.promise(() =>
+						readSseUntil(next, (event) => event.type === "session.status_idle" && event.turn === 2),
+					)
+					expect(threadInstructions[1]).toContain("Stay brief.\n\nUse metric units.")
+					const listed = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path,
+						headers: AUTH_HEADERS,
+					})
+					const history = (yield* Effect.promise(() => listed.json())) as {
+						data: ReadonlyArray<{ type: string }>
+					}
+					expect(history.data.find((event) => event.type === "system.message")).toMatchObject(
+						receipt.data[0]!,
+					)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("reports the confirmed prefix of a batch without logging user message text when a later command fails unexpectedly", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
@@ -2623,10 +2693,24 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionArchived(),
+				event: new SystemMessage({
+					content: [{ type: "text", text: "Stay brief." }],
+					processed_at: at,
+				}),
 				expectedJson: {
 					id: `sevt_${sessionId}_21`,
 					seq: 21,
+					type: "system.message",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
+					content: [{ type: "text", text: "Stay brief." }],
+				},
+			},
+			{
+				event: new SessionArchived(),
+				expectedJson: {
+					id: `sevt_${sessionId}_22`,
+					seq: 22,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",

@@ -24,6 +24,8 @@ function Bubble({
 
 const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 	switch (event.type) {
+		case "system.message":
+			return <p className="text-control text-muted-foreground">{text(event.content)}</p>
 		case "user.message":
 			return (
 				<Bubble from="You" className="rounded-lg bg-muted/60 px-4 py-3">

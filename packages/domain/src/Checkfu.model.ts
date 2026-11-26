@@ -390,6 +390,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"DeleteEnvironment",
 		"AdmitSession",
 		"SendUserMessage",
+		"SendSystemMessage",
 		"SendUserInterrupt",
 		"ConfirmTool",
 		"ReturnCustomToolResult",

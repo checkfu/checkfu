@@ -61,6 +61,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			environment_id: ResourceId,
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
+			system_context: Schema.optionalKey(Schema.String),
 			last_reply_turn: Schema.optionalKey(NonNegativeInt),
 			segment: Schema.optionalKey(PositiveInt),
 		},
@@ -160,6 +161,7 @@ export const boundedHarness = <R = never>(
 				readonly environment_id: string
 				readonly turn: number
 				readonly input: ReadonlyArray<string>
+				readonly system_context?: string
 				readonly last_reply_turn?: number
 				readonly segment?: number
 			}) => Effect.Effect<

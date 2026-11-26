@@ -1,6 +1,7 @@
 export const STANDING = {
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"Session.SystemContextIsBounded": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
 	"Session.OpenModelRequestRequiresStartedCount": "proved",
