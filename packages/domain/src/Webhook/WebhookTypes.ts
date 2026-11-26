@@ -58,23 +58,10 @@ export const decodeWebhookEventTypes = (encoded: string): ReadonlyArray<string> 
 	return out
 }
 
-const previousSubscriptionNames = new Map([
-	["session.status_run_started", "session.status_running"],
-	["session.status_idled", "session.status_idle"],
-	["automation_run.started", "automation.fired"],
-	["automation_run.succeeded", "automation.run_started"],
-	["automation_run.failed", "automation.run_failed"],
-])
-
 export const matchesWebhookSubscription = (
 	eventTypes: string | ReadonlyArray<string>,
 	eventType: string,
 ): boolean => {
 	const list = typeof eventTypes === "string" ? decodeWebhookEventTypes(eventTypes) : eventTypes
-	const previousName = previousSubscriptionNames.get(eventType)
-	return (
-		list.includes("*") ||
-		list.includes(eventType) ||
-		(previousName !== undefined && list.includes(previousName))
-	)
+	return list.includes("*") || list.includes(eventType)
 }
