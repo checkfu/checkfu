@@ -17,6 +17,7 @@
 		"./Transport": "./src/Transport.ts",
 		"./Runtime": "./src/Runtime.ts",
 		"./PromiseRuntime": "./src/PromiseRuntime.ts",
+		"./fetch": "./src/Fetch.ts",
 		"./generated/*": "./src/generated/*.ts",
 		"./*": "./src/*.ts"
 	},

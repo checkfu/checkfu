@@ -44,9 +44,14 @@ describe("detail pages", () => {
 	it("stop showing cached data once the server confirms the resource is gone", () => {
 		const cached = { name: "env" }
 		expect(present({ data: cached, error: null })).toBe(cached)
-		expect(present({ data: cached, error: new ApiError(503, "busy") })).toBe(cached)
+		expect(present({ data: cached, error: new ApiError(503, "overloaded_error", "busy") })).toBe(
+			cached,
+		)
 		expect(() =>
-			present({ data: cached, error: new ApiError(404, "Environment not found.") }),
+			present({
+				data: cached,
+				error: new ApiError(404, "not_found_error", "Environment not found."),
+			}),
 		).toThrow("Environment not found.")
 	})
 })

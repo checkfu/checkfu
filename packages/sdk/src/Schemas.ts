@@ -24,15 +24,9 @@ export const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
-export const SINGLE_PATH_SEGMENT_MESSAGE =
-	'must be a single non-empty path segment (not "." or "..")'
+import { SINGLE_PATH_SEGMENT_MESSAGE } from "./PathSegment.ts"
 
-export const isSinglePathSegment = (value: string): boolean =>
-	value.length > 0 &&
-	value !== "." &&
-	value !== ".." &&
-	!value.includes("/") &&
-	!value.includes("\\")
+export { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./PathSegment.ts"
 
 export const SinglePathSegmentCheck = Schema.isPattern(/^(?!\.\.?$)[^/\\]+$/, {
 	message: SINGLE_PATH_SEGMENT_MESSAGE,
