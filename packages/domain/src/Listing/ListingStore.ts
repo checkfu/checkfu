@@ -11,6 +11,8 @@ export const ListingKind = Schema.Literals([
 	"session",
 	"automation",
 	"artifact",
+	"vault",
+	"vault_credential",
 ])
 export type ListingKind = typeof ListingKind.Type
 

@@ -55,6 +55,7 @@ import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
+import { VaultsTestLive } from "./VaultsHarness.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -201,6 +202,7 @@ export const makePiDurableTestLayer = (
 	options: {
 		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
 		readonly env?: ExecutionEnv
+		readonly vaults?: typeof VaultsTestLive
 	} = {},
 ) => {
 	interface SessionObject {
@@ -472,6 +474,7 @@ export const makePiDurableTestLayer = (
 		),
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
+		Layer.provideMerge(options.vaults ?? VaultsTestLive),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),

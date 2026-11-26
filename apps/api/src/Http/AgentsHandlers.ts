@@ -26,7 +26,7 @@ import { makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
-	createCommandId,
+	createIdentity,
 	handled,
 	idempotentId,
 	isPending,
@@ -197,32 +197,24 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null
-					let id: AgentId
-					let versionId: AgentVersionId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						id = AgentId.make(
-							yield* idempotentId(digest, "agent", ["create", "agent", "id", idempotencyKey]),
-						)
-						versionId = AgentVersionId.make(
-							yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
-						)
-						if (!isSupportedModel(model.id) && (yield* agents.get(id)).status === "") {
-							return yield* unsupportedModel(model)
-						}
-						sendOptions = {
-							commandId: yield* createCommandId(digest, "agent", idempotencyKey, {
-								name: payload.name,
-								model,
-								system,
-								description,
-							}),
-						}
-					} else {
+					const identity = yield* createIdentity(digest, random, {
+						resource: "agent",
+						prefix: "agent",
+						key: idempotencyKey,
+						body: { name: payload.name, model, system, description },
+					})
+					const id = AgentId.make(identity.id)
+					const versionId = AgentVersionId.make(
+						idempotencyKey === undefined
+							? yield* randomId(random, "aver")
+							: yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
+					)
+					if (idempotencyKey === undefined) {
 						yield* supported(model)
-						id = AgentId.make(yield* randomId(random, "agent"))
-						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
+					} else if (!isSupportedModel(model.id) && (yield* agents.get(id)).status === "") {
+						return yield* unsupportedModel(model)
 					}
+					const sendOptions = identity.options
 					const receipt = yield* createAgent
 						.send(
 							new CreateAgent({

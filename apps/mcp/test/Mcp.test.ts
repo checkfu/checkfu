@@ -203,6 +203,16 @@ describe("Checkfu MCP server", () => {
 				"sessions_listEvents",
 				"sessions_listSessions",
 				"sessions_sendSessionEvents",
+				"vaults_archiveCredential",
+				"vaults_archiveVault",
+				"vaults_createVault",
+				"vaults_deleteCredential",
+				"vaults_deleteVault",
+				"vaults_getCredential",
+				"vaults_getVault",
+				"vaults_listCredentials",
+				"vaults_listVaults",
+				"vaults_updateVault",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
 				GENERATED_TOOLS.map((tool) => tool.inputSchema),
@@ -257,9 +267,28 @@ describe("Checkfu MCP server", () => {
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
+				vaults_archiveCredential: "writes, destructive, repeatable",
+				vaults_archiveVault: "writes, destructive, repeatable",
+				vaults_createVault: "writes, additive, not repeatable",
+				vaults_deleteCredential: "writes, destructive, repeatable",
+				vaults_deleteVault: "writes, destructive, repeatable",
+				vaults_getCredential: "read-only, additive, repeatable",
+				vaults_getVault: "read-only, additive, repeatable",
+				vaults_listCredentials: "read-only, additive, repeatable",
+				vaults_listVaults: "read-only, additive, repeatable",
+				vaults_updateVault: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
 	)
+
+	it("offers no tool that takes a credential's secret", () => {
+		const names = GENERATED_TOOLS.map((tool) => tool.name)
+		expect(names).not.toContain("vaults_createCredential")
+		expect(names).not.toContain("vaults_updateCredential")
+		expect(
+			GENERATED_TOOLS.filter((tool) => JSON.stringify(tool.inputSchema).includes('"token"')),
+		).toEqual([])
+	})
 
 	it.live("runs a conversation end to end through tools", () =>
 		Effect.gen(function* () {
@@ -401,6 +430,8 @@ describe("Checkfu MCP server", () => {
 				const artifact = { path: { artifact_id: "art_1" } }
 				const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
 				const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
+				const vault = { path: { vault_id: "vault_1" } }
+				const credential = { path: { vault_id: "vault_1", credential_id: "cred_1" } }
 				const calls = {
 					agents_archiveAgent: agent,
 					agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
@@ -458,6 +489,16 @@ describe("Checkfu MCP server", () => {
 							events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
 						},
 					},
+					vaults_archiveCredential: credential,
+					vaults_archiveVault: vault,
+					vaults_createVault: { body: { display_name: "Team" } },
+					vaults_deleteCredential: credential,
+					vaults_deleteVault: vault,
+					vaults_getCredential: credential,
+					vaults_getVault: vault,
+					vaults_listCredentials: vault,
+					vaults_listVaults: { query: { limit: "5", include_archived: "true" } },
+					vaults_updateVault: { ...vault, body: { display_name: "Team" } },
 				} satisfies Record<string, Argument>
 				expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
 
@@ -536,6 +577,7 @@ describe("Checkfu MCP server", () => {
 			"environments_createEnvironment",
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
+			"vaults_createVault",
 		])
 		for (const [name, schema] of keyed) {
 			const accepts = Schema.is(

@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "../Compatibility.ts"
+import { Connection } from "../Connection/Connection.do.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { piHarnessAiBindingProps } from "./PiModels.ts"
@@ -25,6 +26,7 @@ export default PiHarnessWorker.make(
 		const where = yield* placement
 		const piSession = placedStub(yield* PiSession, where)
 		const workspace = placedStub(yield* SessionWorkspace, where)
+		const connection = placedStub(yield* Connection, where)
 		return PiHarnessWorker.of({
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
@@ -35,6 +37,13 @@ export default PiHarnessWorker.make(
 			readOutputs: (sessionId, turn, paths) =>
 				Effect.orDie(workspace(sessionId).readOutputs(turn, paths)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
+			putSecret: (vaultId, credentialId, secret, target, mode) =>
+				Effect.orDie(connection(vaultId).putSecret(credentialId, secret, target, mode)),
+			secretUsable: (vaultId, credentialId) =>
+				Effect.orDie(connection(vaultId).usable(credentialId)),
+			eraseSecret: (vaultId, credentialId) =>
+				Effect.orDie(connection(vaultId).eraseSecret(credentialId)),
+			sealVault: (vaultId) => Effect.orDie(connection(vaultId).seal()),
 		})
 	}).pipe(
 		Effect.provide([

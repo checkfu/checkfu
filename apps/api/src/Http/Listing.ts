@@ -1,9 +1,14 @@
 import * as Model from "@alchemy.run/domain/Model"
+import type * as Query from "@alchemy.run/domain/Query"
 import { ListingEntry, listingCursor } from "@checkfu/domain/Listing/ListingStore"
-import type { ListingKind, ListingOrder } from "@checkfu/domain/Listing/ListingStore"
+import type { ListingFilter, ListingKind, ListingOrder } from "@checkfu/domain/Listing/ListingStore"
 import { ListResources } from "@checkfu/domain/Listing/ListResources.query"
+import { ListCredentials } from "@checkfu/domain/Vault/ListCredentials.query"
+import { ListVaults } from "@checkfu/domain/Vault/ListVaults.query"
 import { ERRORS } from "@checkfu/sdk/Api"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -31,24 +36,38 @@ const decodePage = Schema.decodeUnknownEffect(
 	Schema.Struct({ entries: Schema.Array(ListingEntry), cursor: Schema.NullOr(Schema.String) }),
 )
 
-export const makeLister = Effect.gen(function* () {
-	const query = (yield* Model.Internals).queries.get(ListResources.queryName)
-	if (query === undefined) {
-		return yield* Effect.die(new Error("ListResources is not hosted by the model."))
-	}
-	return <A extends object, E, R>(
+type PageOf<RP> = (
+	filter: ListingFilter,
+	page: Query.PageRequest,
+) => Effect.Effect<
+	{ readonly entries: ReadonlyArray<ListingEntry>; readonly cursor: string | null },
+	never,
+	RP
+>
+
+type OwnedBy = (resource: unknown, parent: string) => boolean
+
+const ownedByAgent: OwnedBy = (resource, parent) =>
+	Predicate.hasProperty(resource, "agent") &&
+	Predicate.hasProperty(resource.agent, "id") &&
+	resource.agent.id === parent
+
+const ownedByVault: OwnedBy = (resource, parent) =>
+	Predicate.hasProperty(resource, "vault_id") && resource.vault_id === parent
+
+const listWith =
+	<RP>(pageOf: PageOf<RP>, ownedBy: OwnedBy = ownedByAgent) =>
+	<A extends object, E, R>(
 		kind: ListingKind,
 		input: ListQuery,
 		retrieve: (id: string) => Effect.Effect<A, E, R>,
 	) =>
 		Effect.gen(function* () {
 			const include_archived = input.include_archived ?? false
-			const page = yield* Effect.orDie(
-				query.run(
-					{ kind, include_archived, agent_id: input.agent_id ?? null, order: input.order ?? "asc" },
-					{ take: input.limit ?? 50, ...(input.after === undefined ? {} : { after: input.after }) },
-				),
-			).pipe(Effect.flatMap(decodePage), Effect.orDie)
+			const page = yield* pageOf(
+				{ kind, include_archived, agent_id: input.agent_id ?? null, order: input.order ?? "asc" },
+				{ take: input.limit ?? 50, after: input.after },
+			)
 			const data: Array<A> = []
 			let bytes = 0
 			let handled: ListingEntry | undefined
@@ -66,13 +85,10 @@ export const makeLister = Effect.gen(function* () {
 						const resource = yield* outcome
 						const archived =
 							resource !== null && "archived_at" in resource && resource.archived_at !== null
-						const agentMatches =
+						const owned =
 							resource !== null &&
-							(input.agent_id === undefined ||
-								("agent" in resource &&
-									Predicate.hasProperty(resource.agent, "id") &&
-									resource.agent.id === input.agent_id))
-						if (resource !== null && agentMatches && (include_archived || !archived)) {
+							(input.agent_id === undefined || ownedBy(resource, input.agent_id))
+						if (resource !== null && owned && (include_archived || !archived)) {
 							const size = utf8.encode(JSON.stringify(resource)).length
 							const next = pageBytesWith(bytes, data.length, size)
 							if (data.length > 0 && next > LIST_PAGE_BYTES) {
@@ -91,4 +107,59 @@ export const makeLister = Effect.gen(function* () {
 				? { data, has_more: true, next_cursor: listingCursor(handled) }
 				: { data, has_more: page.cursor !== null, next_cursor: page.cursor }
 		})
+
+export const makeLister = Effect.gen(function* () {
+	const query = (yield* Model.Internals).queries.get(ListResources.queryName)
+	if (query === undefined) {
+		return yield* Effect.die(new Error("ListResources is not hosted by the model."))
+	}
+	return listWith(({ kind, include_archived, agent_id, order }, { take, after }) =>
+		Effect.orDie(
+			query.run(
+				{ kind, include_archived, agent_id, order },
+				{ take, ...(after === undefined ? {} : { after }) },
+			),
+		).pipe(Effect.flatMap(decodePage), Effect.orDie),
+	)
+})
+
+export class VaultListingQueries extends Context.Service<
+	VaultListingQueries,
+	{ readonly vaults: Query.Host; readonly credentials: Query.Host }
+>()("@checkfu/api/VaultListingQueries") {}
+
+export const vaultListingQueriesFrom = <E, R>(vaults: Layer.Layer<Model.Internals, E, R>) =>
+	Layer.effect(
+		VaultListingQueries,
+		Effect.flatMap(Model.Internals, (internals) => {
+			const listVaults = internals.queries.get(ListVaults.queryName)
+			const listCredentials = internals.queries.get(ListCredentials.queryName)
+			return listVaults === undefined || listCredentials === undefined
+				? Effect.die(new Error("The Vaults model does not host its listing queries."))
+				: Effect.succeed({ vaults: listVaults, credentials: listCredentials })
+		}),
+	).pipe(Layer.provide(vaults))
+
+const paged = ({ take, after }: Query.PageRequest) => ({
+	take,
+	...(after === undefined ? {} : { after }),
+})
+
+export const makeVaultListers = Effect.gen(function* () {
+	const queries = yield* VaultListingQueries
+	return {
+		vaults: listWith(({ include_archived, order }, page) =>
+			Effect.orDie(queries.vaults.run({ include_archived, order }, paged(page))).pipe(
+				Effect.flatMap(decodePage),
+				Effect.orDie,
+			),
+		),
+		credentials: listWith(
+			({ include_archived, order, agent_id }, page) =>
+				Effect.orDie(
+					queries.credentials.run({ vault_id: agent_id, include_archived, order }, paged(page)),
+				).pipe(Effect.flatMap(decodePage), Effect.orDie),
+			ownedByVault,
+		),
+	}
 })

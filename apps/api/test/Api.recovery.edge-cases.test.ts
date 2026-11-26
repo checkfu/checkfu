@@ -41,6 +41,7 @@ import {
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("interrupted turns and turn recovery", () => {
 	it("keeps a prompt interrupted mid-stream out of the conversation", async () => {
@@ -229,6 +230,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -382,6 +384,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -570,6 +573,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -671,6 +675,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provideMerge(Layer.succeed(HarnessTurnTimeout, "1 second")),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(TestRuntimeContext),

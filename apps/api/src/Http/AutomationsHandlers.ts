@@ -25,6 +25,7 @@ import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/Se
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
+import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -38,9 +39,8 @@ import { makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
-	createCommandId,
+	createIdentity,
 	handled,
-	idempotentId,
 	isPending,
 	orPending,
 	reject,
@@ -156,6 +156,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const automationRuns = yield* AutomationRunView
 		const list = yield* makeLister
 		const digest = yield* Digest.Digest
+		const random = yield* SecureRandom.SecureRandom
 
 		const committed = (id: AutomationId) =>
 			Effect.gen(function* () {
@@ -231,12 +232,15 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						text: yield* textOf(payload.initial_events),
 						schedule: payload.schedule,
 					}
-					const commandId = yield* createCommandId(digest, "automation", idempotencyKey, command)
-					const id = AutomationId.make(
-						yield* idempotentId(digest, "auto", ["create", "automation", "id", idempotencyKey]),
-					)
+					const identity = yield* createIdentity(digest, random, {
+						resource: "automation",
+						prefix: "auto",
+						key: idempotencyKey,
+						body: command,
+					})
+					const id = AutomationId.make(identity.id)
 					const receipt = yield* admission
-						.send(new AdmitAutomation({ automation_id: id, ...command }), { commandId })
+						.send(new AdmitAutomation({ automation_id: id, ...command }), identity.options)
 						.pipe(
 							Effect.catchTag("AutomationAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
 						)
