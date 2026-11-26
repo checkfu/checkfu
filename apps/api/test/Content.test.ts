@@ -5,6 +5,7 @@ import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Base64Url from "effect/encoding/Base64Url"
+import * as Headers from "effect/http/Headers"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
@@ -25,6 +26,7 @@ import {
 	verifyLink,
 } from "../src/Content/ArtifactLink.ts"
 import { TEST_CONTENT_ORIGIN, TEST_LINK_SECRET } from "../src/Content/ArtifactLinks.ts"
+import type { ContentAccessTarget, ContentRequest } from "../src/Content/ContentHandler.ts"
 import { CONTENT_HEADERS, contentRequestOf, serveContent } from "../src/Content/ContentHandler.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { DEFAULT_STORAGE_SCOPE } from "../src/Placement.ts"
@@ -70,6 +72,15 @@ const withContent = <A>(
 		readonly openIn: (scope: string, url: string) => Effect.Effect<Response>
 		readonly openLagging: (lag: ViewLag, url: string) => Effect.Effect<Response>
 		readonly openUrl: (url: string) => Effect.Effect<Response>
+		readonly makeAuthorized: (
+			authorize: (
+				target: ContentAccessTarget,
+				request: ContentRequest,
+			) => Effect.Effect<HttpServerResponse.HttpServerResponse | null>,
+		) => {
+			readonly send: (url: string, headers?: Record<string, string>) => Effect.Effect<Response>
+			readonly manifestReads: () => number
+		}
 		readonly sign: (claims: ArtifactLinkClaims) => Effect.Effect<string>
 		readonly setNow: (millis: number) => void
 		readonly store: ReturnType<typeof makePiDurableTestLayer>["artifactStore"]
@@ -134,12 +145,45 @@ const withContent = <A>(
 					Effect.map(serve(webRequest(url, method, ifNoneMatch)), HttpServerResponse.toWeb),
 				openIn: (scope, url) =>
 					Effect.map(serveWith(scope)(webRequest(url)), HttpServerResponse.toWeb),
-				openUrl: (url) => Effect.map(serve({ method: "GET", url }), HttpServerResponse.toWeb),
+				openUrl: (url) =>
+					Effect.map(
+						serve({ method: "GET", url, headers: Headers.empty }),
+						HttpServerResponse.toWeb,
+					),
 				openLagging: (lag, url) =>
 					Effect.map(
 						serveWith(DEFAULT_STORAGE_SCOPE, lagging[lag])(webRequest(url)),
 						HttpServerResponse.toWeb,
 					),
+				makeAuthorized: (authorize) => {
+					let reads = 0
+					const guarded = serveContent({
+						mac,
+						digest,
+						key,
+						store: {
+							...store,
+							getManifest: (artifactId, hash) =>
+								Effect.suspend(() => {
+									reads += 1
+									return store.getManifest(artifactId, hash)
+								}),
+						},
+						resolveArtifactVersion,
+						resolvePublication,
+						scope: DEFAULT_STORAGE_SCOPE,
+						nowMillis: Effect.map(Clock.currentTimeMillis, (millis) => now ?? millis),
+						authorize,
+					})
+					return {
+						send: (url, headers = {}) =>
+							Effect.map(
+								guarded(contentRequestOf(HttpServerRequest.fromWeb(new Request(url, { headers })))),
+								HttpServerResponse.toWeb,
+							),
+						manifestReads: () => reads,
+					}
+				},
 				sign: (claims) => signLink(mac, key, claims),
 				setNow: (millis) => {
 					now = millis
@@ -633,7 +677,7 @@ describe("Artifact viewing links", () => {
 				expect(request).toEqual({
 					method: "HEAD",
 					url: "https://x.example/a/token/docs/a%20b.md?tab=2",
-					ifNoneMatch: '"tag"',
+					headers: { "if-none-match": '"tag"' },
 				})
 				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "home" }])
 				const link = yield* createLink(api, id)
@@ -742,6 +786,66 @@ describe("Artifact viewing links", () => {
 				expect(yield* status({ expires_in: 1.5 })).toBe(400)
 				expect(yield* status({ expires_in: MAX_LINK_TTL_SECONDS })).toBe(201)
 				expect(yield* status({}, 2)).toBe(404)
+			}),
+		))
+
+	it("runs an optional authorize hook before reading artifact storage for signed links and publications", () =>
+		withContent(({ api, makeAuthorized }) =>
+			Effect.gen(function* () {
+				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "secret-page" }])
+				const link = yield* createLink(api, id)
+				const pubRes = yield* api("POST", `/v1/artifacts/${id}/publication`, {})
+				expect(pubRes.status).toBe(200)
+				const published = yield* json<{
+					readonly publication: { readonly address: string; readonly url: string }
+				}>(pubRes)
+				const pubUrl = published.publication.url
+				const pubAddress = published.publication.address
+				expect(pubAddress.length).toBeGreaterThan(0)
+
+				const seen: Array<{
+					readonly target: ContentAccessTarget
+					readonly auth: string | undefined
+				}> = []
+				const { send, manifestReads } = makeAuthorized((target, req) => {
+					seen.push({ target, auth: req.headers.authorization })
+					return req.headers.authorization === "Bearer allow"
+						? Effect.succeed(null)
+						: Effect.succeed(HttpServerResponse.text("Forbidden.", { status: 403 }))
+				})
+
+				const deniedLink = yield* send(link.url)
+				expect(deniedLink.status).toBe(403)
+				expect(manifestReads()).toBe(0)
+
+				const deniedPub = yield* send(pubUrl)
+				expect(deniedPub.status).toBe(403)
+				expect(manifestReads()).toBe(0)
+
+				const allowedLink = yield* send(link.url, { Authorization: "Bearer allow" })
+				expect(allowedLink.status).toBe(200)
+				expect(yield* text(allowedLink)).toBe("secret-page")
+
+				const allowedPub = yield* send(pubUrl, { authorization: "Bearer allow" })
+				expect(allowedPub.status).toBe(200)
+				expect(yield* text(allowedPub)).toBe("secret-page")
+				expect(manifestReads()).toBe(2)
+
+				expect(seen).toEqual([
+					{ target: { kind: "artifact_link", artifactId: id, version: 1 }, auth: undefined },
+					{
+						target: { kind: "publication", address: pubAddress, artifactId: id },
+						auth: undefined,
+					},
+					{
+						target: { kind: "artifact_link", artifactId: id, version: 1 },
+						auth: "Bearer allow",
+					},
+					{
+						target: { kind: "publication", address: pubAddress, artifactId: id },
+						auth: "Bearer allow",
+					},
+				])
 			}),
 		))
 })

@@ -110,13 +110,25 @@ const LISTING_TYPE = "text/html; charset=utf-8"
 export interface ContentRequest {
 	readonly method: string
 	readonly url: string
-	readonly ifNoneMatch?: string | undefined
+	readonly headers: HttpServerRequest.HttpServerRequest["headers"]
 }
+
+export type ContentAccessTarget =
+	| {
+			readonly kind: "publication"
+			readonly address: string
+			readonly artifactId: string
+	  }
+	| {
+			readonly kind: "artifact_link"
+			readonly artifactId: string
+			readonly version: number
+	  }
 
 export const contentRequestOf = (request: HttpServerRequest.HttpServerRequest): ContentRequest => ({
 	method: request.method,
 	url: request.originalUrl,
-	ifNoneMatch: request.headers["if-none-match"],
+	headers: request.headers,
 })
 
 export const serveContent = (options: {
@@ -134,6 +146,10 @@ export const serveContent = (options: {
 	readonly scope: string
 	readonly publishDomain?: string | undefined
 	readonly nowMillis: Effect.Effect<number>
+	readonly authorize?: (
+		target: ContentAccessTarget,
+		request: ContentRequest,
+	) => Effect.Effect<HttpServerResponse.HttpServerResponse | null>
 }) => {
 	const {
 		mac,
@@ -145,6 +161,7 @@ export const serveContent = (options: {
 		scope,
 		publishDomain,
 		nowMillis,
+		authorize,
 	} = options
 
 	const target = (prefix: string, name: string) =>
@@ -154,14 +171,32 @@ export const serveContent = (options: {
 					return null
 				}
 				const found = yield* resolvePublication(name)
-				return found === null ? null : { artifactId: found.artifact_id, manifest: found.manifest }
+				return found === null
+					? null
+					: {
+							access: {
+								kind: "publication" as const,
+								address: name,
+								artifactId: found.artifact_id,
+							},
+							manifest: found.manifest,
+						}
 			}
 			const claims = yield* verifyLink(mac, key, name, yield* nowMillis)
 			if (claims === null || claims.scope !== scope) {
 				return null
 			}
 			const manifest = yield* resolveArtifactVersion(claims.artifactId, claims.version)
-			return manifest === null ? null : { artifactId: claims.artifactId, manifest }
+			return manifest === null
+				? null
+				: {
+						access: {
+							kind: "artifact_link" as const,
+							artifactId: claims.artifactId,
+							version: claims.version,
+						},
+						manifest,
+					}
 		})
 
 	return (request: ContentRequest): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
@@ -204,7 +239,14 @@ export const serveContent = (options: {
 			if (found === null || requested === null) {
 				return notFound
 			}
-			const manifest = yield* store.getManifest(found.artifactId, found.manifest)
+			if (authorize !== undefined) {
+				const denied = yield* authorize(found.access, request)
+				if (denied !== null) {
+					return denied
+				}
+			}
+			const { artifactId } = found.access
+			const manifest = yield* store.getManifest(artifactId, found.manifest)
 			if (manifest === null) {
 				return notFound
 			}
@@ -244,11 +286,11 @@ export const serveContent = (options: {
 				"cache-control": FILE_CACHE_CONTROL,
 				etag: `"${file.sha256}-${typeDigest.slice(0, 16)}"`,
 			}
-			if (matchesETag(request.ifNoneMatch, fileHeaders.etag)) {
+			if (matchesETag(request.headers["if-none-match"], fileHeaders.etag)) {
 				return HttpServerResponse.empty({ status: 304, headers: fileHeaders })
 			}
 			if (request.method === "HEAD") {
-				return (yield* store.hasBlob(found.artifactId, file.sha256))
+				return (yield* store.hasBlob(artifactId, file.sha256))
 					? HttpServerResponse.empty({
 							status: 200,
 							headers: {
@@ -259,7 +301,7 @@ export const serveContent = (options: {
 						})
 					: notFound
 			}
-			const body = yield* store.blobStream(found.artifactId, file.sha256)
+			const body = yield* store.blobStream(artifactId, file.sha256)
 			if (body === null) {
 				return notFound
 			}
