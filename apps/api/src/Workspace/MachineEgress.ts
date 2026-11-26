@@ -24,7 +24,7 @@ export interface MachineNetwork {
 }
 
 export const isAllowedHost = (allowed: ReadonlyArray<string> | null, host: string): boolean =>
-	allowed === null || allowed.includes(host)
+	allowed === null || allowed.some((entry) => entry.toLowerCase() === host.toLowerCase())
 
 export const createMachineEgress =
 	(network: MachineNetwork) =>
