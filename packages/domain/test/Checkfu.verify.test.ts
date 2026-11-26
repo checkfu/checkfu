@@ -201,6 +201,7 @@ const STANDING = {
 	"OpenAutomationSession.OnlyActiveAgentAndEnvironmentOpenAnAutomationSession": "proved",
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
+	"OpenAutomationSession.FirstTurnAdmissionKeepsGivenCredentials": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
 	"UpdateAutomation.AnUpdateNeedsTheCurrentRevisionOfALiveAutomation": "proved",
 	"UpdateAutomation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": "proved",

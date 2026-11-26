@@ -209,8 +209,10 @@ describe("Session credentials", () => {
 				const named = yield* create({
 					vault_ids: [first.vault, second.vault],
 					mcp_server_credentials: pair(second.credential),
+					initial_events: [{ type: "user.message", content: [{ type: "text", text: "Start" }] }],
 				})
 				expect(named.status).toBe(201)
+				expect(named.body).toMatchObject({ status: "running", turn: 1 })
 				expect(named.body.mcp_server_credentials).toEqual(placed(second))
 				const read = yield* call("GET", `/v1/sessions/${named.body.id}`)
 				expect(read.body.mcp_server_credentials).toEqual(placed(second))

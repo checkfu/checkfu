@@ -22,6 +22,7 @@ import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIRe
 import { startFakeMcpServer } from "./FakeMcpServer.ts"
 import { startScriptedMcpServer } from "./ScriptedMcpServer.ts"
 import { toolUseOf } from "@checkfu/domain/Session/ToolEventBounds"
+import { toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
@@ -2410,7 +2411,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			])
 			expect(mcpUses.map((e) => e.input)).toEqual([{ text: "too-early" }, { text: "direct" }])
 			for (const use of mcpUses) {
-				expect(toolUseOf(use.tool_use_id ?? "")).toBeDefined()
+				expect(toolUseOf(toolUseIdFromEvent(first.session.id, use.tool_use_id ?? ""))).toBeDefined()
 			}
 			const mcpResults = events.filter((e) => e.type === "agent.mcp_tool_result")
 			expect(

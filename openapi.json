@@ -588,6 +588,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -1525,6 +1527,8 @@
 													"model",
 													"system",
 													"description",
+													"mcp_servers",
+													"tools",
 													"created_at",
 													"updated_at",
 													"archived_at"
@@ -2147,6 +2151,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -2736,6 +2742,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -3660,6 +3668,8 @@
 													"model",
 													"system",
 													"description",
+													"mcp_servers",
+													"tools",
 													"created_at",
 													"updated_at",
 													"archived_at"
@@ -4270,6 +4280,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -8188,16 +8200,186 @@
 											"type": "object",
 											"properties": {
 												"id": {
-													"type": "string"
+													"type": "string",
+													"minLength": 1
+												},
+												"type": {
+													"type": "string",
+													"enum": ["agent"]
 												},
 												"version": {
 													"type": "integer",
 													"minimum": 1,
 													"maximum": 9007199254740991
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1
+												},
+												"model": {
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["id"],
+													"additionalProperties": false
+												},
+												"system": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"description": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"mcp_servers": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["url"]
+															},
+															"name": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 32,
+																"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+															},
+															"url": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 2048
+															}
+														},
+														"required": ["type", "name", "url"],
+														"additionalProperties": false
+													},
+													"maxItems": 20
+												},
+												"tools": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["mcp_toolset"]
+																	},
+																	"mcp_server_name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 32,
+																		"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																	},
+																	"default_config": {
+																		"type": "object",
+																		"properties": {
+																			"permission_policy": {
+																				"type": "object",
+																				"properties": {
+																					"type": {
+																						"type": "string",
+																						"enum": ["always_allow", "always_ask"]
+																					}
+																				},
+																				"required": ["type"],
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false,
+																		"description": "Applies to tools without their own configuration. MCP tools require confirmation by default."
+																	},
+																	"configs": {
+																		"type": "array",
+																		"items": {
+																			"type": "object",
+																			"properties": {
+																				"name": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 128
+																				},
+																				"permission_policy": {
+																					"type": "object",
+																					"properties": {
+																						"type": {
+																							"type": "string",
+																							"enum": ["always_allow", "always_ask"]
+																						}
+																					},
+																					"required": ["type"],
+																					"additionalProperties": false
+																				}
+																			},
+																			"required": ["name"],
+																			"additionalProperties": false
+																		},
+																		"maxItems": 128
+																	}
+																},
+																"required": ["type", "mcp_server_name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["custom"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"pattern": "^[A-Za-z0-9_-]{1,64}$"
+																	},
+																	"description": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 4096
+																	},
+																	"input_schema": {
+																		"type": "object"
+																	}
+																},
+																"required": ["type", "name", "description", "input_schema"],
+																"additionalProperties": false
+															}
+														]
+													},
+													"maxItems": 84
 												}
 											},
-											"required": ["id", "version"],
-											"additionalProperties": false
+											"required": [
+												"id",
+												"type",
+												"version",
+												"name",
+												"model",
+												"system",
+												"description",
+												"mcp_servers",
+												"tools"
+											],
+											"additionalProperties": false,
+											"description": "The pinned agent configuration used by the session."
 										}
 									},
 									"required": [
@@ -8208,6 +8390,7 @@
 										"title",
 										"turn",
 										"usage",
+										"mcp_server_credentials",
 										"created_at",
 										"updated_at",
 										"archived_at",
@@ -8715,6 +8898,40 @@
 										],
 										"description": "Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
+									"initial_events": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["user.message"]
+												},
+												"content": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["text"]
+															},
+															"text": {
+																"type": "string"
+															}
+														},
+														"required": ["type", "text"],
+														"additionalProperties": false
+													},
+													"minItems": 1
+												}
+											},
+											"required": ["type", "content"],
+											"additionalProperties": false
+										},
+										"maxItems": 1,
+										"description": "A text user message to send when the session is created."
+									},
 									"environment_id": {
 										"type": "string",
 										"minLength": 1,
@@ -8784,6 +9001,11 @@
 				},
 				"x-checkfu-cli": {
 					"textOrObjectFields": ["agent"],
+					"repeatArrayField": {
+						"field": "initial_events",
+						"flag": "initial-event",
+						"description": "Initial user message as JSON, YAML, or @file"
+					},
 					"examples": [
 						{
 							"command": "checkfu sessions create --agent agent_123 --environment-id env_456",
@@ -8964,16 +9186,186 @@
 														"type": "object",
 														"properties": {
 															"id": {
-																"type": "string"
+																"type": "string",
+																"minLength": 1
+															},
+															"type": {
+																"type": "string",
+																"enum": ["agent"]
 															},
 															"version": {
 																"type": "integer",
 																"minimum": 1,
 																"maximum": 9007199254740991
+															},
+															"name": {
+																"type": "string",
+																"minLength": 1
+															},
+															"model": {
+																"type": "object",
+																"properties": {
+																	"id": {
+																		"type": "string",
+																		"minLength": 1
+																	}
+																},
+																"required": ["id"],
+																"additionalProperties": false
+															},
+															"system": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"description": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"mcp_servers": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"properties": {
+																		"type": {
+																			"type": "string",
+																			"enum": ["url"]
+																		},
+																		"name": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 32,
+																			"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																		},
+																		"url": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 2048
+																		}
+																	},
+																	"required": ["type", "name", "url"],
+																	"additionalProperties": false
+																},
+																"maxItems": 20
+															},
+															"tools": {
+																"type": "array",
+																"items": {
+																	"anyOf": [
+																		{
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["mcp_toolset"]
+																				},
+																				"mcp_server_name": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 32,
+																					"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																				},
+																				"default_config": {
+																					"type": "object",
+																					"properties": {
+																						"permission_policy": {
+																							"type": "object",
+																							"properties": {
+																								"type": {
+																									"type": "string",
+																									"enum": ["always_allow", "always_ask"]
+																								}
+																							},
+																							"required": ["type"],
+																							"additionalProperties": false
+																						}
+																					},
+																					"additionalProperties": false,
+																					"description": "Applies to tools without their own configuration. MCP tools require confirmation by default."
+																				},
+																				"configs": {
+																					"type": "array",
+																					"items": {
+																						"type": "object",
+																						"properties": {
+																							"name": {
+																								"type": "string",
+																								"minLength": 1,
+																								"maxLength": 128
+																							},
+																							"permission_policy": {
+																								"type": "object",
+																								"properties": {
+																									"type": {
+																										"type": "string",
+																										"enum": ["always_allow", "always_ask"]
+																									}
+																								},
+																								"required": ["type"],
+																								"additionalProperties": false
+																							}
+																						},
+																						"required": ["name"],
+																						"additionalProperties": false
+																					},
+																					"maxItems": 128
+																				}
+																			},
+																			"required": ["type", "mcp_server_name"],
+																			"additionalProperties": false
+																		},
+																		{
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["custom"]
+																				},
+																				"name": {
+																					"type": "string",
+																					"pattern": "^[A-Za-z0-9_-]{1,64}$"
+																				},
+																				"description": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 4096
+																				},
+																				"input_schema": {
+																					"type": "object"
+																				}
+																			},
+																			"required": ["type", "name", "description", "input_schema"],
+																			"additionalProperties": false
+																		}
+																	]
+																},
+																"maxItems": 84
 															}
 														},
-														"required": ["id", "version"],
-														"additionalProperties": false
+														"required": [
+															"id",
+															"type",
+															"version",
+															"name",
+															"model",
+															"system",
+															"description",
+															"mcp_servers",
+															"tools"
+														],
+														"additionalProperties": false,
+														"description": "The pinned agent configuration used by the session."
 													}
 												},
 												"required": [
@@ -8984,6 +9376,7 @@
 													"title",
 													"turn",
 													"usage",
+													"mcp_server_credentials",
 													"created_at",
 													"updated_at",
 													"archived_at",
@@ -9501,16 +9894,186 @@
 											"type": "object",
 											"properties": {
 												"id": {
-													"type": "string"
+													"type": "string",
+													"minLength": 1
+												},
+												"type": {
+													"type": "string",
+													"enum": ["agent"]
 												},
 												"version": {
 													"type": "integer",
 													"minimum": 1,
 													"maximum": 9007199254740991
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1
+												},
+												"model": {
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["id"],
+													"additionalProperties": false
+												},
+												"system": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"description": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"mcp_servers": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["url"]
+															},
+															"name": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 32,
+																"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+															},
+															"url": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 2048
+															}
+														},
+														"required": ["type", "name", "url"],
+														"additionalProperties": false
+													},
+													"maxItems": 20
+												},
+												"tools": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["mcp_toolset"]
+																	},
+																	"mcp_server_name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 32,
+																		"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																	},
+																	"default_config": {
+																		"type": "object",
+																		"properties": {
+																			"permission_policy": {
+																				"type": "object",
+																				"properties": {
+																					"type": {
+																						"type": "string",
+																						"enum": ["always_allow", "always_ask"]
+																					}
+																				},
+																				"required": ["type"],
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false,
+																		"description": "Applies to tools without their own configuration. MCP tools require confirmation by default."
+																	},
+																	"configs": {
+																		"type": "array",
+																		"items": {
+																			"type": "object",
+																			"properties": {
+																				"name": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 128
+																				},
+																				"permission_policy": {
+																					"type": "object",
+																					"properties": {
+																						"type": {
+																							"type": "string",
+																							"enum": ["always_allow", "always_ask"]
+																						}
+																					},
+																					"required": ["type"],
+																					"additionalProperties": false
+																				}
+																			},
+																			"required": ["name"],
+																			"additionalProperties": false
+																		},
+																		"maxItems": 128
+																	}
+																},
+																"required": ["type", "mcp_server_name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["custom"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"pattern": "^[A-Za-z0-9_-]{1,64}$"
+																	},
+																	"description": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 4096
+																	},
+																	"input_schema": {
+																		"type": "object"
+																	}
+																},
+																"required": ["type", "name", "description", "input_schema"],
+																"additionalProperties": false
+															}
+														]
+													},
+													"maxItems": 84
 												}
 											},
-											"required": ["id", "version"],
-											"additionalProperties": false
+											"required": [
+												"id",
+												"type",
+												"version",
+												"name",
+												"model",
+												"system",
+												"description",
+												"mcp_servers",
+												"tools"
+											],
+											"additionalProperties": false,
+											"description": "The pinned agent configuration used by the session."
 										}
 									},
 									"required": [
@@ -9521,6 +10084,7 @@
 										"title",
 										"turn",
 										"usage",
+										"mcp_server_credentials",
 										"created_at",
 										"updated_at",
 										"archived_at",
@@ -10009,16 +10573,186 @@
 											"type": "object",
 											"properties": {
 												"id": {
-													"type": "string"
+													"type": "string",
+													"minLength": 1
+												},
+												"type": {
+													"type": "string",
+													"enum": ["agent"]
 												},
 												"version": {
 													"type": "integer",
 													"minimum": 1,
 													"maximum": 9007199254740991
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1
+												},
+												"model": {
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["id"],
+													"additionalProperties": false
+												},
+												"system": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"description": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"mcp_servers": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["url"]
+															},
+															"name": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 32,
+																"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+															},
+															"url": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 2048
+															}
+														},
+														"required": ["type", "name", "url"],
+														"additionalProperties": false
+													},
+													"maxItems": 20
+												},
+												"tools": {
+													"type": "array",
+													"items": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["mcp_toolset"]
+																	},
+																	"mcp_server_name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 32,
+																		"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																	},
+																	"default_config": {
+																		"type": "object",
+																		"properties": {
+																			"permission_policy": {
+																				"type": "object",
+																				"properties": {
+																					"type": {
+																						"type": "string",
+																						"enum": ["always_allow", "always_ask"]
+																					}
+																				},
+																				"required": ["type"],
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false,
+																		"description": "Applies to tools without their own configuration. MCP tools require confirmation by default."
+																	},
+																	"configs": {
+																		"type": "array",
+																		"items": {
+																			"type": "object",
+																			"properties": {
+																				"name": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 128
+																				},
+																				"permission_policy": {
+																					"type": "object",
+																					"properties": {
+																						"type": {
+																							"type": "string",
+																							"enum": ["always_allow", "always_ask"]
+																						}
+																					},
+																					"required": ["type"],
+																					"additionalProperties": false
+																				}
+																			},
+																			"required": ["name"],
+																			"additionalProperties": false
+																		},
+																		"maxItems": 128
+																	}
+																},
+																"required": ["type", "mcp_server_name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["custom"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"pattern": "^[A-Za-z0-9_-]{1,64}$"
+																	},
+																	"description": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 4096
+																	},
+																	"input_schema": {
+																		"type": "object"
+																	}
+																},
+																"required": ["type", "name", "description", "input_schema"],
+																"additionalProperties": false
+															}
+														]
+													},
+													"maxItems": 84
 												}
 											},
-											"required": ["id", "version"],
-											"additionalProperties": false
+											"required": [
+												"id",
+												"type",
+												"version",
+												"name",
+												"model",
+												"system",
+												"description",
+												"mcp_servers",
+												"tools"
+											],
+											"additionalProperties": false,
+											"description": "The pinned agent configuration used by the session."
 										}
 									},
 									"required": [
@@ -10029,6 +10763,7 @@
 										"title",
 										"turn",
 										"usage",
+										"mcp_server_credentials",
 										"created_at",
 										"updated_at",
 										"archived_at",
@@ -10987,7 +11722,7 @@
 														"tool_use_id": {
 															"type": "string",
 															"minLength": 1,
-															"maxLength": 256,
+															"maxLength": 523,
 															"description": "The agent.mcp_tool_use event that waits for this answer"
 														},
 														"result": {
@@ -11019,7 +11754,7 @@
 														"custom_tool_use_id": {
 															"type": "string",
 															"minLength": 1,
-															"maxLength": 256,
+															"maxLength": 523,
 															"description": "The agent.custom_tool_use event this result answers"
 														},
 														"content": {
@@ -30710,6 +31445,16 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"content": {
 								"type": "array",
 								"items": {
@@ -30750,6 +31495,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -30774,10 +31529,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"result": {
 								"type": "string",
@@ -30809,10 +31574,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"custom_tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"content": {
 								"type": "array",
@@ -30856,13 +31631,23 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"turn": {
 								"type": "integer",
 								"minimum": 1,
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "turn"],
 						"additionalProperties": false,
 						"description": "The agent is processing a turn."
 					},
@@ -30883,6 +31668,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"model_request_start_id": {
 								"type": "string",
@@ -30911,10 +31706,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"name": {
 								"type": "string",
@@ -30952,10 +31757,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"content": {
 								"type": "array",
@@ -31008,10 +31823,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"mcp_server_name": {
 								"type": "string",
@@ -31068,10 +31893,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"content": {
 								"type": "array",
@@ -31124,10 +31959,20 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"name": {
 								"type": "string",
@@ -31159,13 +32004,20 @@
 							"created_at": {
 								"type": "string"
 							},
-							"thinking": {
-								"type": "string"
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "thinking"],
+						"required": ["id", "seq", "type", "created_at"],
 						"additionalProperties": false,
-						"description": "The agent's thinking text when the model returns it."
+						"description": "The agent is thinking."
 					},
 					{
 						"type": "object",
@@ -31184,6 +32036,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"content": {
 								"type": "array",
@@ -31229,6 +32091,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"model_request_start_id": {
 								"type": "string",
@@ -31292,6 +32164,16 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"stop_reason": {
 								"anyOf": [
 									{
@@ -31323,7 +32205,7 @@
 												"items": {
 													"type": "string"
 												},
-												"description": "The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use."
+												"description": "The IDs of the tool call events waiting for an answer. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use."
 											}
 										},
 										"required": ["type", "event_ids"],
@@ -31341,10 +32223,10 @@
 								"items": {
 									"type": "string"
 								},
-								"description": "The tool calls that still waited for an answer when the turn ended, by tool_use_id. The end of the turn cancelled them: they can no longer be answered."
+								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "stop_reason"],
+						"required": ["id", "seq", "type", "created_at", "stop_reason", "turn"],
 						"additionalProperties": false,
 						"description": "The agent stopped processing a turn. See stop_reason for why it stopped."
 					},
@@ -31365,6 +32247,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"error": {
 								"type": "object",
@@ -31413,12 +32305,22 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"cancelled_event_ids": {
 								"type": "array",
 								"items": {
 									"type": "string"
 								},
-								"description": "The tool calls that still waited for an answer when the turn ended, by tool_use_id. The end of the turn cancelled them: they can no longer be answered."
+								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -31441,6 +32343,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -31458,10 +32370,17 @@
 								"enum": ["user.message"]
 							},
 							"id": {
-								"type": "string",
-								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-								"minLength": 1,
-								"maxLength": 128
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"turn": {
 								"type": "integer",
@@ -31490,7 +32409,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["type", "turn", "queued", "content"],
+						"required": ["type", "id", "turn", "queued", "content"],
 						"additionalProperties": false
 					},
 					{
@@ -31501,13 +32420,20 @@
 								"enum": ["user.interrupt"]
 							},
 							"id": {
-								"type": "string",
-								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-								"minLength": 1,
-								"maxLength": 128
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
-						"required": ["type"],
+						"required": ["type", "id"],
 						"additionalProperties": false
 					},
 					{
@@ -31518,22 +32444,33 @@
 								"enum": ["user.tool_confirmation"]
 							},
 							"id": {
-								"type": "string",
-								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-								"minLength": 1,
-								"maxLength": 128
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"result": {
 								"type": "string",
 								"enum": ["allow", "deny"]
+							},
+							"deny_message": {
+								"type": "string",
+								"maxLength": 4096
 							}
 						},
-						"required": ["type", "tool_use_id", "result"],
+						"required": ["type", "id", "tool_use_id", "result"],
 						"additionalProperties": false
 					},
 					{
@@ -31544,18 +32481,46 @@
 								"enum": ["user.custom_tool_result"]
 							},
 							"id": {
-								"type": "string",
-								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-								"minLength": 1,
-								"maxLength": 128
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"custom_tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1
+							},
+							"is_error": {
+								"type": "boolean"
 							}
 						},
-						"required": ["type", "custom_tool_use_id"],
+						"required": ["type", "id", "custom_tool_use_id"],
 						"additionalProperties": false
 					}
 				]

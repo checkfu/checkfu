@@ -4,6 +4,7 @@ import { AgentArchivedError } from "../Agent/AgentArchived.rejection.ts"
 import { AgentNotFound } from "../Agent/AgentNotFound.rejection.ts"
 import { EnvironmentArchivedError } from "../Environment/EnvironmentArchived.rejection.ts"
 import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejection.ts"
+import { McpServerCredentialsText } from "../Mcp/McpServers.ts"
 import {
 	AgentVersionNotFound,
 	BoundedAgentId,
@@ -22,6 +23,7 @@ export class OpenAutomationSession extends Domain.Command("OpenAutomationSession
 		environment_id: BoundedEnvironmentId,
 		title: Schema.NullOr(SessionTitle),
 		text: MessageText,
+		mcp_server_credentials: Schema.optionalKey(McpServerCredentialsText),
 	},
 	events: [SessionCreated, UserMessage, SessionStatusRunning],
 	rejects: [

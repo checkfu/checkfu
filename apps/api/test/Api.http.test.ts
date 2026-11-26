@@ -138,7 +138,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						environment_id: string
 					}
 					expect(session.id).toMatch(/^sess_/)
-					expect(session.agent).toEqual({ id: agentV1.id, version: 2 })
+					expect(session.agent).toMatchObject({ type: "agent", id: agentV1.id, version: 2 })
 
 					const streamRes = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -885,21 +885,27 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 		expect([...byType.keys()].toSorted()).toEqual(expectedTags.toSorted())
 
-		expect(Object.keys(byType.get("user.message")?.properties ?? {}).toSorted()).toEqual([
-			"content",
-			"created_at",
-			"id",
-			"seq",
-			"type",
-		])
-		expect(Object.keys(byType.get("agent.message")?.properties ?? {}).toSorted()).toEqual([
-			"content",
-			"created_at",
-			"id",
-			"seq",
-			"truncated",
-			"type",
-		])
+		const envelope = ["created_at", "id", "processed_at", "seq", "type"]
+		for (const [type, fields] of Object.entries({
+			"user.message": ["content"],
+			"user.interrupt": [],
+			"user.tool_confirmation": ["tool_use_id", "result", "deny_message"],
+			"user.custom_tool_result": ["custom_tool_use_id", "content", "is_error"],
+			"agent.custom_tool_use": ["tool_use_id", "name", "input"],
+			"agent.message": ["content", "truncated"],
+			"agent.thinking": [],
+			"span.model_request_start": ["model_request_start_id"],
+			"span.model_request_end": ["is_error", "model_request_start_id", "model_usage"],
+			"session.status_running": ["turn"],
+			"session.status_idle": ["cancelled_event_ids", "stop_reason", "turn"],
+			"session.error": ["error"],
+			"session.status_terminated": ["cancelled_event_ids"],
+			"session.archived": [],
+		})) {
+			expect(Object.keys(byType.get(type)?.properties ?? {}).toSorted()).toEqual(
+				[...envelope, ...fields].toSorted(),
+			)
+		}
 		expect(byType.get("agent.message")?.required?.toSorted()).toEqual([
 			"content",
 			"created_at",
@@ -907,59 +913,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			"seq",
 			"type",
 		])
-		expect(
-			Object.keys(byType.get("span.model_request_start")?.properties ?? {}).toSorted(),
-		).toEqual(["created_at", "id", "model_request_start_id", "seq", "type"])
-		expect(Object.keys(byType.get("span.model_request_end")?.properties ?? {}).toSorted()).toEqual([
-			"created_at",
-			"id",
-			"is_error",
-			"model_request_start_id",
-			"model_usage",
-			"seq",
-			"type",
-		])
-		expect(Object.keys(byType.get("agent.thinking")?.properties ?? {}).toSorted()).toEqual([
-			"created_at",
-			"id",
-			"seq",
-			"thinking",
-			"type",
-		])
-		expect(Object.keys(byType.get("session.status_running")?.properties ?? {}).toSorted()).toEqual([
-			"created_at",
-			"id",
-			"seq",
-			"turn",
-			"type",
-		])
-		expect(Object.keys(byType.get("session.status_idle")?.properties ?? {}).toSorted()).toEqual([
-			"cancelled_event_ids",
-			"created_at",
-			"id",
-			"seq",
-			"stop_reason",
-			"turn",
-			"type",
-		])
-		expect(Object.keys(byType.get("session.error")?.properties ?? {}).toSorted()).toEqual([
-			"created_at",
-			"error",
-			"id",
-			"seq",
-			"type",
-		])
-		expect(
-			Object.keys(byType.get("session.status_terminated")?.properties ?? {}).toSorted(),
-		).toEqual(["cancelled_event_ids", "created_at", "id", "seq", "type"])
-		for (const emptyTag of ["user.interrupt", "session.archived"]) {
-			expect(Object.keys(byType.get(emptyTag)?.properties ?? {}).toSorted()).toEqual([
-				"created_at",
-				"id",
-				"seq",
-				"type",
-			])
-		}
 	})
 
 	it("maps every error envelope to its numeric HTTP status and rejects empty request IDs", () => {

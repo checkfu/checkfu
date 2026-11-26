@@ -2,6 +2,7 @@ import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import type { RecordToolCall } from "@checkfu/domain/Session/RecordToolCall.command"
 import { toolCallCommandId } from "@checkfu/domain/Session/RecordToolEvents"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import { toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_TOOL_RESULT_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
@@ -211,9 +212,11 @@ describe("Tool calls on the session log", () => {
 					])
 					const firstId = String(turn[0]?.["tool_use_id"])
 					const secondId = String(turn[2]?.["tool_use_id"])
-					expect(toolUseOf(firstId)?.turn).toBe(1)
-					expect(toolUseOf(secondId)?.turn).toBe(1)
-					expect(toolUseOf(firstId)?.task_id).not.toBe(toolUseOf(secondId)?.task_id)
+					expect(toolUseOf(toolUseIdFromEvent(session.id, firstId))?.turn).toBe(1)
+					expect(toolUseOf(toolUseIdFromEvent(session.id, secondId))?.turn).toBe(1)
+					expect(toolUseOf(toolUseIdFromEvent(session.id, firstId))?.task_id).not.toBe(
+						toolUseOf(toolUseIdFromEvent(session.id, secondId))?.task_id,
+					)
 					expect(turn[0]).toMatchObject({ name: "lookup", input: { key: "alpha" } })
 					expect(turn[1]).toMatchObject({
 						tool_use_id: firstId,
@@ -368,7 +371,9 @@ describe("Tool calls on the session log", () => {
 					const idsOf = (type: string) =>
 						events.filter((event) => event["type"] === type).map((event) => event["tool_use_id"])
 					const uses = idsOf("agent.tool_use")
-					expect(uses.map((id) => toolUseOf(String(id))?.turn)).toEqual([1, 2])
+					expect(
+						uses.map((id) => toolUseOf(toolUseIdFromEvent(session.id, String(id)))?.turn),
+					).toEqual([1, 2])
 					expect(new Set(uses).size).toBe(2)
 					expect(idsOf("agent.tool_result")).toEqual(uses)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
