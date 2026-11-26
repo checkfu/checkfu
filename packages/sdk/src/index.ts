@@ -14,6 +14,7 @@ export type {
 	EventsPage,
 	JsonAgent,
 	JsonArtifact,
+	JsonArtifactSummary,
 	JsonArtifactVersion,
 	JsonAutomation,
 	JsonEnvironment,

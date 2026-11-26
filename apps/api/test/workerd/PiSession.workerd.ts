@@ -1332,7 +1332,7 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		const file = (version: number, path: string) =>
 			apiJson<{ readonly encoding: string; readonly content: string }>(
-				`/v1/artifacts/${id}/versions/${version}/file?path=${encodeURIComponent(path)}`,
+				`/v1/artifacts/${id}/versions/${version}/file?file=${encodeURIComponent(path)}`,
 			)
 		expect((await file(1, "index.html")).body).toMatchObject({
 			encoding: "utf8",

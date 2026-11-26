@@ -8,6 +8,18 @@ import * as Schema from "effect/Schema"
 import { buildSurfaceCatalog, isJsonArray } from "./SurfaceCatalog.ts"
 import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
+const PLAIN_KEYS: ReadonlySet<string> = new Set(["type", "pattern", "description"])
+
+const POSITIVE_DECIMAL = /^\^\[1-9\]\\d\{0,(\d{1,2})\}\$$/u
+
+const positiveDecimal = (pattern: Json | undefined) => {
+	const more = typeof pattern === "string" ? POSITIVE_DECIMAL.exec(pattern)?.[1] : undefined
+	if (more === undefined || Number(more) > 14) {
+		return undefined
+	}
+	return { minimum: 1, maximum: 10 ** (Number(more) + 1) - 1 }
+}
+
 type JsonRecord = Readonly<Record<string, Json>>
 
 interface McpTool {
@@ -216,6 +228,20 @@ const projectOperation = (
 			pathParameters.map((parameter) => {
 				const own = parameter.schema["pattern"]
 				const clauses = parameter.schema["allOf"]
+				const integer = Object.keys(parameter.schema).every((key) => PLAIN_KEYS.has(key))
+					? positiveDecimal(own)
+					: undefined
+				if (integer !== undefined) {
+					const description = parameter.schema["description"]
+					return {
+						...parameter,
+						schema: {
+							type: "integer",
+							...integer,
+							...(description === undefined ? {} : { description }),
+						},
+					}
+				}
 				return {
 					...parameter,
 					schema: {

@@ -387,14 +387,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
 						},
 						version: {
-							type: "string",
-							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999,
 							description: "Artifact version number",
-							allOf: [
-								{
-									pattern: "^[1-9]\\d{0,8}$",
-								},
-							],
 						},
 					},
 					required: ["artifact_id", "version"],
@@ -455,41 +451,76 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						files: {
 							type: "array",
 							items: {
-								type: "object",
-								properties: {
-									path: {
-										type: "string",
-										minLength: 1,
-										maxLength: 512,
-										pattern:
-											"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
-										description:
-											"Relative path inside the artifact, for example index.html or assets/app.js",
+								anyOf: [
+									{
+										type: "object",
+										properties: {
+											path: {
+												type: "string",
+												minLength: 1,
+												maxLength: 512,
+												pattern:
+													"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+												description:
+													"Relative path inside the artifact, for example index.html or assets/app.js",
+											},
+											content: {
+												type: "string",
+												description: "File content: text, or base64 when encoding is base64",
+											},
+											encoding: {
+												type: "string",
+												enum: ["utf8", "base64"],
+												description: "How content is encoded (default utf8)",
+											},
+											content_type: {
+												type: "string",
+												minLength: 3,
+												maxLength: 128,
+												pattern:
+													"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+												description: "Media type; inferred from the path extension when omitted",
+											},
+										},
+										required: ["path", "content"],
+										additionalProperties: false,
 									},
-									content: {
-										type: "string",
-										description: "File content: text, or base64 when encoding is base64",
+									{
+										type: "object",
+										properties: {
+											path: {
+												type: "string",
+												minLength: 1,
+												maxLength: 512,
+												pattern:
+													"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+												description:
+													"Relative path inside the artifact, for example index.html or assets/app.js",
+											},
+											sha256: {
+												type: "string",
+												pattern: "^[0-9a-f]{64}$",
+												description:
+													"sha256 of a file in the version being replaced, to keep its bytes without sending them again",
+											},
+											content_type: {
+												type: "string",
+												minLength: 3,
+												maxLength: 128,
+												pattern:
+													"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+												description: "Media type; inferred from the path extension when omitted",
+											},
+										},
+										required: ["path", "sha256"],
+										additionalProperties: false,
 									},
-									encoding: {
-										type: "string",
-										enum: ["utf8", "base64"],
-										description: "How content is encoded (default utf8)",
-									},
-									content_type: {
-										type: "string",
-										minLength: 3,
-										maxLength: 128,
-										pattern:
-											"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
-										description: "Media type; inferred from the path extension when omitted",
-									},
-								},
-								required: ["path", "content"],
-								additionalProperties: false,
+								],
 							},
 							minItems: 1,
 							maxItems: 64,
-							description: "Every file of the version; a new version replaces the whole set",
+							description:
+								"Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again",
 						},
 					},
 					required: ["version", "files"],
@@ -583,14 +614,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
 						},
 						version: {
-							type: "string",
-							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999,
 							description: "Artifact version number",
-							allOf: [
-								{
-									pattern: "^[1-9]\\d{0,8}$",
-								},
-							],
 						},
 					},
 					required: ["artifact_id", "version"],
@@ -599,16 +626,16 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						path: {
+						file: {
 							type: "string",
 							minLength: 1,
 							maxLength: 512,
 							pattern:
 								"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
-							description: "Path of the file inside the version",
+							description: "Path of the file inside the version, for example index.html",
 						},
 					},
-					required: ["path"],
+					required: ["file"],
 					additionalProperties: false,
 				},
 			},
@@ -638,14 +665,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
 						},
 						version: {
-							type: "string",
-							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999,
 							description: "Artifact version number",
-							allOf: [
-								{
-									pattern: "^[1-9]\\d{0,8}$",
-								},
-							],
 						},
 					},
 					required: ["artifact_id", "version"],
@@ -660,7 +683,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_listArtifacts",
 		title: "List artifacts",
 		description:
-			"List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+			"List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear.",
 		method: "GET",
 		path: "/v1/artifacts",
 		readOnly: true,
@@ -1026,14 +1049,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
 						},
 						run: {
-							type: "string",
-							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999999999,
 							description: "Run number: a whole number from 1, written in decimal",
-							allOf: [
-								{
-									pattern: "^[1-9]\\d{0,14}$",
-								},
-							],
 						},
 					},
 					required: ["automation_id", "run"],

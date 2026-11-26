@@ -1033,7 +1033,7 @@ describe("CLI help, errors, and resource commands", () => {
 		)
 	})
 
-	it("refuses artifacts:versions file without --path before sending a request", async () => {
+	it("refuses artifacts:versions file without --file before sending a request", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -1050,7 +1050,7 @@ describe("CLI help, errors, and resource commands", () => {
 					)
 					expect(missing.exitCode).toBe(1)
 					expect(missing.stdout).toBe("")
-					expect(missing.stderr).toContain("--path")
+					expect(missing.stderr).toContain("--file")
 					expect(requests).toBe(0)
 				}),
 			),

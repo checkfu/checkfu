@@ -363,7 +363,7 @@ describe("Cloudflare Forge pipeline", () => {
 			),
 		)
 		expect(fileCommand).toContain(
-			'"flagName":"path","wireName":"path","location":"query","kind":"string","required":true',
+			'"flagName":"file","wireName":"file","location":"query","kind":"string","required":true',
 		)
 		expect(fileCommand).not.toContain("FlagOptional")
 	})

@@ -7,6 +7,7 @@ import { isPendingResource } from "./Api.ts"
 import type {
 	Agent,
 	Artifact,
+	ArtifactSummary,
 	ArtifactVersion,
 	Automation,
 	Environment,
@@ -91,6 +92,7 @@ export type JsonEnvironment = IsoDateTimes<Environment>
 export type JsonSession = IsoDateTimes<Session>
 export type JsonAutomation = IsoDateTimes<Automation>
 export type JsonArtifact = IsoDateTimes<Artifact>
+export type JsonArtifactSummary = IsoDateTimes<ArtifactSummary>
 export type JsonArtifactVersion = IsoDateTimes<ArtifactVersion>
 export type JsonSessionEvent = IsoDateTimes<SessionEvent>
 export type JsonListSessionEventsResponse = IsoDateTimes<ListSessionEventsResponse>

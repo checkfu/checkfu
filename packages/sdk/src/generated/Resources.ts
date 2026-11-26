@@ -594,7 +594,7 @@ export class EffectArtifactsVersionsResource {
 							this.#runtime.raw.artifacts.getFile({
 								params: pathParams,
 								query: {
-									path: params["path"],
+									file: params["file"],
 								},
 								responseMode: "decoded-and-response",
 							}),
@@ -767,7 +767,7 @@ export class EffectArtifactsResource {
 		)
 	}
 
-	/** List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	/** List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	list(
 		params: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> | undefined,
 		options: WithResponseRequestOptions,
@@ -798,7 +798,7 @@ export class EffectArtifactsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	/** Auto-paginate pages for List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
 		options?: RequestOptions,
@@ -817,7 +817,7 @@ export class EffectArtifactsResource {
 		)
 	}
 
-	/** Auto-paginate items for List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	/** Auto-paginate items for List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
 		options?: RequestOptions,
@@ -2274,7 +2274,7 @@ export class ArtifactsResource {
 		)
 	}
 
-	/** List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	/** List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
 		options?: PromiseRequestOptions,

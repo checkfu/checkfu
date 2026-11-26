@@ -439,7 +439,7 @@ describe("Artifacts API", () => {
 				expect(first.files).toEqual(artifact.files)
 
 				const text = yield* json<FileBody>(
-					yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?path=index.html`),
+					yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=index.html`),
 				)
 				expect(text).toMatchObject({
 					type: "artifact_file",
@@ -450,13 +450,13 @@ describe("Artifacts API", () => {
 				const binary = yield* json<FileBody>(
 					yield* call(
 						"GET",
-						`/v1/artifacts/${artifact.id}/versions/1/file?path=${encodeURIComponent("assets/logo.png")}`,
+						`/v1/artifacts/${artifact.id}/versions/1/file?file=${encodeURIComponent("assets/logo.png")}`,
 					),
 				)
 				expect(binary.encoding).toBe("base64")
 				expect(binary.content).toBe(Base64.encode(PNG_BYTES))
 				const second = yield* json<FileBody>(
-					yield* call("GET", `/v1/artifacts/${artifact.id}/versions/2/file?path=index.html`),
+					yield* call("GET", `/v1/artifacts/${artifact.id}/versions/2/file?file=index.html`),
 				)
 				expect(second.content).toBe("<h1>v2</h1>")
 			}),
@@ -478,7 +478,7 @@ describe("Artifacts API", () => {
 				expect((yield* call("GET", `/v1/artifacts/${artifact.id}/versions/2`)).status).toBe(404)
 				expect((yield* call("GET", `/v1/artifacts/${artifact.id}/versions/0`)).status).toBe(400)
 				expect(
-					(yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?path=b.txt`)).status,
+					(yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=b.txt`)).status,
 				).toBe(404)
 				const stale = yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
 					version: 2,
@@ -740,7 +740,7 @@ describe("Artifacts API", () => {
 					}),
 				)
 				const file = yield* json<FileBody>(
-					yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?path=bom.txt`),
+					yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=bom.txt`),
 				)
 				expect(file).toMatchObject({ encoding: "utf8", size: 5, content })
 			}),
@@ -905,7 +905,7 @@ describe("Artifacts API", () => {
 					200,
 				)
 				expect(
-					(yield* callViewless("GET", `/v1/artifacts/${artifact.id}/versions/2/file?path=c.txt`))
+					(yield* callViewless("GET", `/v1/artifacts/${artifact.id}/versions/2/file?file=c.txt`))
 						.status,
 				).toBe(200)
 				const link = yield* callViewless(
@@ -1166,7 +1166,7 @@ describe("Artifacts API", () => {
 				expect((yield* call("GET", `/v1/artifacts/${artifact.id}`)).status).toBe(404)
 				expect((yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1`)).status).toBe(404)
 				expect(
-					(yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?path=a.txt`)).status,
+					(yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=a.txt`)).status,
 				).toBe(404)
 
 				const again = yield* call("DELETE", `/v1/artifacts/${artifact.id}`)
@@ -1241,7 +1241,7 @@ describe("Artifacts API", () => {
 				const artifact = yield* json<ArtifactBody>(retried)
 				expect(artifact.version).toBe(1)
 				expect(
-					(yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?path=a.txt`)).status,
+					(yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=a.txt`)).status,
 				).toBe(200)
 			}),
 		))
@@ -1273,7 +1273,7 @@ describe("Artifacts API", () => {
 				expect(winner?.status).toBe(201)
 				expect(loser.status).toBe(409)
 				const read = (version: number, path: string) =>
-					call("GET", `/v1/artifacts/${id}/versions/${version}/file?path=${path}`)
+					call("GET", `/v1/artifacts/${id}/versions/${version}/file?file=${path}`)
 				expect((yield* json<FileBody>(yield* read(1, "one.txt"))).content).toBe("one")
 				expect((yield* json<FileBody>(yield* read(2, "shared.txt"))).content).toBe("shared")
 				expect((yield* json<FileBody>(yield* read(2, "b.txt"))).content).toBe("winner")
@@ -1305,7 +1305,7 @@ describe("Artifacts API", () => {
 				expect((yield* json<ArtifactBody>(yield* call("GET", `/v1/artifacts/${id}`))).version).toBe(
 					1,
 				)
-				const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
+				const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?file=a.txt`)
 				expect((yield* json<FileBody>(file)).content).toBe("a")
 			}),
 		))
@@ -1329,7 +1329,7 @@ describe("Artifacts API", () => {
 				expect(retried.status).toBe(201)
 				const { id } = yield* json<ArtifactBody>(retried)
 				for (const file of body.files) {
-					const read = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=${file.path}`)
+					const read = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?file=${file.path}`)
 					expect((yield* json<FileBody>(read)).content).toBe(file.content)
 				}
 			}),
@@ -1359,6 +1359,148 @@ describe("Artifacts API", () => {
 			}),
 		))
 
+	it("keeps a file of the replaced version by its sha256, without sending or storing it again", () =>
+		withApi(({ call, store }) =>
+			Effect.gen(function* () {
+				const created = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "Site",
+						files: [
+							{ path: "index.html", content: "<h1>home</h1>" },
+							{ path: "app.js", content: "start()" },
+						],
+					}),
+				)
+				const sha = (path: string) => created.files.find((file) => file.path === path)?.sha256 ?? ""
+				const key = artifactBlobKey(SCOPE, created.id, sha("app.js"))
+				const body = {
+					version: 1,
+					files: [
+						{ path: "index.html", content: "<h1>fixed</h1>" },
+						{ path: "app.js", sha256: sha("app.js") },
+						{ path: "old/index.html", sha256: sha("index.html") },
+					],
+				}
+				const added = yield* call("POST", `/v1/artifacts/${created.id}/versions`, body)
+				expect(added.status).toBe(201)
+				const version = yield* json<VersionBody>(added)
+				expect(version.files.map((file) => [file.path, file.content_type])).toEqual([
+					["app.js", "text/javascript"],
+					["index.html", "text/html"],
+					["old/index.html", "text/html"],
+				])
+				expect(version.total_bytes).toBe(
+					"<h1>fixed</h1>".length + "start()".length + "<h1>home</h1>".length,
+				)
+				expect(store.putCount(key)).toBe(1)
+				const read = (path: string) =>
+					Effect.flatMap(
+						call("GET", `/v1/artifacts/${created.id}/versions/2/file?file=${path}`),
+						json<FileBody>,
+					)
+				expect((yield* read("app.js")).content).toBe("start()")
+				expect((yield* read("old/index.html")).content).toBe("<h1>home</h1>")
+
+				const resent = yield* call("POST", `/v1/artifacts/${created.id}/versions`, body)
+				expect(resent.status).toBe(201)
+				expect((yield* json<VersionBody>(resent)).version).toBe(2)
+
+				const missing = yield* call("POST", `/v1/artifacts/${created.id}/versions`, {
+					version: 2,
+					files: [{ path: "gone.txt", sha256: "0".repeat(64) }],
+				})
+				expect(missing.status).toBe(400)
+				expect((yield* json<ErrorBody>(missing)).error.message).toContain("does not hold")
+				const onCreate = yield* call("POST", "/v1/artifacts", {
+					name: "New",
+					files: [{ path: "a.txt", sha256: sha("app.js") }],
+				})
+				expect(onCreate.status).toBe(400)
+			}),
+		))
+
+	it("answers a resent version that kept files with the committed version, without reading a view", () =>
+		withApi(({ call, callViewless, viewReads }) =>
+			Effect.gen(function* () {
+				const created = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "Site",
+						files: [
+							{ path: "index.html", content: "<h1>home</h1>" },
+							{ path: "app.js", content: "start()" },
+						],
+					}),
+				)
+				const kept = created.files.find((file) => file.path === "app.js")?.sha256 ?? ""
+				const body = {
+					version: 1,
+					files: [
+						{ path: "index.html", content: "<h1>fixed</h1>" },
+						{ path: "app.js", sha256: kept },
+					],
+				}
+				const path = `/v1/artifacts/${created.id}/versions`
+				expect((yield* call("POST", path, body)).status).toBe(201)
+				const resent = yield* callViewless("POST", path, body)
+				expect(resent.status).toBe(201)
+				const replayed = yield* json<VersionBody>(resent)
+				expect(replayed.version).toBe(2)
+				const changed = yield* callViewless("POST", path, {
+					...body,
+					files: [{ path: "app.js", sha256: kept }],
+				})
+				expect(changed.status).toBe(409)
+				const introduced = replayed.files.find((file) => file.path === "index.html")?.sha256
+				const impossible = yield* callViewless("POST", path, {
+					version: 1,
+					files: [
+						{ path: "index.html", sha256: introduced ?? "" },
+						{ path: "app.js", sha256: kept },
+					],
+				})
+				expect(impossible.status).toBe(409)
+				expect(viewReads()).toBe(0)
+			}),
+		))
+
+	it("lists each artifact's size and publication without its files or a storage read", () =>
+		withApi(({ call, store }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "Listed",
+						files: [
+							{ path: "a.txt", content: "aa" },
+							{ path: "b.txt", content: "bbb" },
+						],
+					}),
+				)
+				yield* call("POST", `/v1/artifacts/${id}/versions`, {
+					version: 1,
+					files: [{ path: "c.txt", content: "c" }],
+				})
+				let reads = 0
+				store.setBeforeGet(
+					Effect.sync(() => {
+						reads += 1
+					}),
+				)
+				const page = yield* json<{
+					readonly data: ReadonlyArray<Omit<ArtifactBody, "files"> & { readonly files?: never }>
+				}>(yield* call("GET", "/v1/artifacts"))
+				store.setBeforeGet(Effect.void)
+				const listed = page.data.find((artifact) => artifact.id === id)
+				expect(listed).toMatchObject({
+					version: 2,
+					file_count: 1,
+					total_bytes: 1,
+					publication: null,
+				})
+				expect(listed).not.toHaveProperty("files")
+				expect(reads).toBe(0)
+			}),
+		))
+
 	it("keeps the files of a version that never committed until the artifact is deleted", () =>
 		withApi(({ call, store, service, build }) =>
 			Effect.gen(function* () {
@@ -1380,7 +1522,7 @@ describe("Artifacts API", () => {
 					),
 				)
 				expect(store.objects.size).toBe(before + 2)
-				const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
+				const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?file=a.txt`)
 				expect((yield* json<FileBody>(file)).content).toBe("a")
 				expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
 				expect(store.objects.size).toBe(0)
@@ -1401,7 +1543,7 @@ describe("Artifacts API", () => {
 					files: [{ path: "b.txt", content: "kept" }],
 				})
 				expect(lost.status).toBe(500)
-				const file = yield* call("GET", `/v1/artifacts/${id}/versions/2/file?path=b.txt`)
+				const file = yield* call("GET", `/v1/artifacts/${id}/versions/2/file?file=b.txt`)
 				expect(file.status).toBe(200)
 				expect((yield* json<FileBody>(file)).content).toBe("kept")
 			}),
@@ -1552,7 +1694,7 @@ describe("Artifacts API", () => {
 					expect((yield* callSteeredSend("/v1/artifacts", { name: "A", files })).status).toBe(500)
 					const [id] = artifactIdsIn(store)
 					yield* expire(id ?? "", (yield* reservationsOf(id ?? "")).made)
-					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
+					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?file=b.txt`)
 					expect((yield* json<FileBody>(file)).content).toBe("b")
 					expect(store.objects.size).toBe(3)
 				}),
@@ -1579,7 +1721,7 @@ describe("Artifacts API", () => {
 					const retried = yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)
 					expect(retried.status).toBe(201)
 					expect(yield* statusForKey("stalled-then-retried")).toBe("active")
-					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
+					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?file=a.txt`)
 					expect((yield* json<FileBody>(file)).content).toBe("a")
 				}),
 			))
@@ -1599,7 +1741,7 @@ describe("Artifacts API", () => {
 					)
 					yield* expire(id ?? "", first)
 					yield* Effect.sleep("50 millis")
-					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
+					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?file=b.txt`)
 					expect((yield* json<FileBody>(file)).content).toBe("b")
 				}),
 			))

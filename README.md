@@ -129,7 +129,7 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 | **Environment** | `/v1/environments` | Network policy (`unrestricted`, or `limited` host/MCP/package allowlists). |
 | **Session** | `/v1/sessions` | Conversation, `/workspace` filesystem, and shell bound to an agent, environment, mounts, and credentials. |
 | **Memory store** | `/v1/memory_stores` | Cross-session UTF-8 files with SHA-256 preconditions, mounted at `/mnt/memory/<name>`. |
-| **Artifact** | `/v1/artifacts` | Versioned R2 file sets; mountable, linkable via signed URLs, or publishable as sandboxed sites. |
+| **Artifact** | `/v1/artifacts` | Versioned R2 file sets; a new version can keep files of the one it replaces by sha256. Mountable, linkable via signed URLs, or publishable as sandboxed sites. |
 | **Vault** | `/v1/vaults` | Per-secret Durable Object credentials (`static_bearer`, auto-refreshed `mcp_oauth`, `api_key`). |
 | **Automation** | `/v1/automations` | Cron (with IANA timezone) or manual session triggers with run history. |
 

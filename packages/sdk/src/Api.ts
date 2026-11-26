@@ -23,6 +23,7 @@ import {
 	AgentSystem,
 	ArtifactFile,
 	ArtifactFilesInput,
+	ArtifactVersionFilesInput,
 	ArtifactId,
 	ArtifactName,
 	ArtifactPath,
@@ -392,7 +393,10 @@ export const CreateArtifactVersionBody = Schema.Struct({
 	version: PositiveInt.annotate({
 		description: "Current artifact version for optimistic concurrency",
 	}),
-	files: ArtifactFilesField,
+	files: ArtifactVersionFilesInput.annotate({
+		description:
+			"Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again",
+	}),
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
 
@@ -621,6 +625,11 @@ export const ArtifactResource = Schema.Struct({
 	updated_at: Schema.DateTimeUtc,
 })
 export type Artifact = typeof ArtifactResource.Type
+
+export const ArtifactSummaryResource = ArtifactResource.mapFields(
+	({ files: _files, ...fields }) => fields,
+)
+export type ArtifactSummary = typeof ArtifactSummaryResource.Type
 
 export const PublishArtifactBody = Schema.Struct({
 	version: Schema.optionalKey(
@@ -870,7 +879,7 @@ export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
-export const ListArtifactsResponse = listResponse(ArtifactResource, ResourceListCursor)
+export const ListArtifactsResponse = listResponse(ArtifactSummaryResource, ResourceListCursor)
 export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
 
 export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
@@ -1690,7 +1699,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 			.annotate(OpenApi.Summary, "List artifacts")
 			.annotate(
 				OpenApi.Description,
-				"List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+				"List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts",
@@ -1754,7 +1763,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 						field: "files",
 						flag: "file",
 						description:
-							"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+							"File as JSON, YAML, or @file with path and content (optional encoding and content_type), or path and the sha256 of a file to keep from the version being replaced (repeatable)",
 					},
 				},
 			})
@@ -1779,7 +1788,9 @@ const Artifacts = HttpApiGroup.make("artifacts")
 		HttpApiEndpoint.get("getFile", "/v1/artifacts/:artifact_id/versions/:version/file", {
 			params: artifactVersionParams,
 			query: {
-				path: ArtifactPath.annotate({ description: "Path of the file inside the version" }),
+				file: ArtifactPath.annotate({
+					description: "Path of the file inside the version, for example index.html",
+				}),
 			},
 			success: ArtifactFileResource,
 			error: HandlerErrors,
