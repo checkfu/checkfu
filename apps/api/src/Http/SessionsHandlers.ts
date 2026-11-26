@@ -11,7 +11,10 @@ import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomation
 import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
+import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
+import { recordInitialMessages } from "@checkfu/domain/Session/RecordInitialMessages.policy"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
+import { SendSystemMessage } from "@checkfu/domain/Session/SendSystemMessage.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -50,7 +53,11 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
-import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
+import {
+	AdmitSession,
+	AdmitSessionWithMessages,
+} from "@checkfu/domain/Session/AdmitSession.command"
+import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
@@ -146,7 +153,7 @@ const sessionEventCommandId = (
 
 type PreparedEvent =
 	| { readonly type: "user.interrupt" }
-	| { readonly type: "user.message"; readonly text: string }
+	| { readonly type: "user.message" | "system.message"; readonly text: string }
 	| {
 			readonly type: "user.tool_confirmation"
 			readonly tool_use_id: string
@@ -170,6 +177,7 @@ const eventFields = (item: PreparedEvent) => {
 		case "user.interrupt":
 			return {}
 		case "user.message":
+		case "system.message":
 			return { text: item.text }
 		case "user.tool_confirmation":
 			return { tool_use_id: item.tool_use_id, result: item.result, deny_message: item.deny_message }
@@ -246,7 +254,7 @@ export const serializeSessionEvent = (
 ): SessionEvent => {
 	const { id, commandId, seq, at } = envelope
 	const { _tag: type, ...fields } = event
-	const input = type.startsWith("user.")
+	const input = type.startsWith("user.") || type === "system.message"
 	const preview =
 		event._tag === "agent.message" || event._tag === "agent.thinking"
 			? event.preview_origin
@@ -332,6 +340,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const admitWithMessages = yield* AdmitSessionWithMessagesDecision
 		const startSession = yield* OpenAutomationSessionDecision
 		const confirmTool = yield* ConfirmToolDecision
 		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
@@ -555,20 +564,23 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
-					const first = payload.initial_events?.[0]
-					const initialMessage =
-						first === undefined
-							? undefined
-							: yield* Schema.decodeEffect(MessageText)(
-									first.content.map(({ text }) => text).join("\n"),
-								).pipe(
-									Effect.catch(() =>
-										reject(
-											400,
-											`initial_events[0] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
-										),
+					const messages = yield* Effect.forEach(
+						payload.initial_events ?? [],
+						({ content }, index) =>
+							Schema.decodeEffect(MessageText)(content.map(({ text }) => text).join("\n")).pipe(
+								Effect.catch(() =>
+									reject(
+										400,
+										`initial_events[${index}] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
 									),
-								)
+								),
+							),
+					)
+					const [initialMessage, ...queuedMessages] = messages
+					const initialPlan =
+						queuedMessages.length === 0
+							? undefined
+							: { count: messages.length, messages: encodeInitialMessages(messages) }
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
 						prefix: "sess",
@@ -579,6 +591,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							environment_id: environmentId,
 							title,
 							...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
+							...(queuedMessages.length === 0 ? {} : { queued_messages: queuedMessages }),
 							vault_ids: payload.vault_ids,
 							mcp_server_credentials: payload.mcp_server_credentials,
 						},
@@ -598,16 +611,23 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						title,
 					}
 					const receipt =
-						initialMessage === undefined
-							? yield* admitSession
-									.send(new AdmitSession(admission), sendOptions)
-									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
-							: yield* startSession
+						initialPlan !== undefined
+							? yield* admitWithMessages
 									.send(
-										new OpenAutomationSession({ ...admission, text: initialMessage }),
+										new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
 										sendOptions,
 									)
 									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+							: initialMessage === undefined
+								? yield* admitSession
+										.send(new AdmitSession(admission), sendOptions)
+										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+								: yield* startSession
+										.send(
+											new OpenAutomationSession({ ...admission, text: initialMessage }),
+											sendOptions,
+										)
+										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
 					const created = receipt.events.find((event) => event._tag === "session.created")
 					if (created?._tag !== "session.created") {
 						return yield* reject(500, "Failed to load created session.")
@@ -621,7 +641,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(pinnedReady)) {
 						return pinnedReady
 					}
-					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
+					const finished =
+						initialPlan === undefined
+							? undefined
+							: (yield* recordInitialMessages(sessions, id, initialPlan.messages)).at(-1)
+					const sessionCommit = commitForStream(
+						finished?.commits ?? receipt.commits,
+						`Session/${id}`,
+					)
 					const result = yield* sessionViews
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
 						.pipe(orPending(id, "session"))
@@ -766,7 +793,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								),
 							),
 						)
-						prepared.push({ type: "user.message", eventId: event.id, commandId, text })
+						prepared.push({ type: event.type, eventId: event.id, commandId, text })
 					}
 
 					if (idempotencyKey !== undefined) {
@@ -809,110 +836,137 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										}
 									})
 						const outcome =
-							item.type === "user.tool_confirmation"
+							item.type === "system.message"
 								? yield* settled(
 										claimed.pipe(
 											Effect.andThen(
-												confirmTool.send(
-													new ConfirmTool({
-														session_id: id,
-														confirmation_id: toolConfirmationId(id, item.tool_use_id),
-														tool_use_id: item.tool_use_id,
-														result: item.result,
-														deny_message: item.deny_message,
-													}),
+												sessions.send(
+													new SendSystemMessage({ session_id: id, text: item.text }),
 													sendOptions,
 												),
 											),
-											Effect.map((receipt) => ({
-												type: "user.tool_confirmation" as const,
-												id: eventId,
-												processed_at:
-													receipt.events.find((event) => event._tag === "user.tool_confirmation")
-														?.processed_at ?? null,
-												tool_use_id: toolUseEventId(id, item.tool_use_id),
-												result: item.result,
-												...(item.deny_message === "" ? {} : { deny_message: item.deny_message }),
-											})),
+											Effect.flatMap((receipt) => {
+												const recorded = receipt.events.find(
+													(event) => event._tag === "system.message",
+												)
+												return recorded === undefined
+													? reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+													: Effect.succeed({
+															type: "system.message" as const,
+															id: eventId,
+															content: recorded.content,
+															processed_at: recorded.processed_at,
+														})
+											}),
 										),
 									)
-								: item.type === "user.custom_tool_result"
+								: item.type === "user.tool_confirmation"
 									? yield* settled(
 											claimed.pipe(
 												Effect.andThen(
-													returnCustomToolResult.send(
-														new ReturnCustomToolResult({
+													confirmTool.send(
+														new ConfirmTool({
 															session_id: id,
-															confirmation_id: toolConfirmationId(id, item.custom_tool_use_id),
-															custom_tool_use_id: item.custom_tool_use_id,
-															text: item.text,
-															is_error: item.is_error,
+															confirmation_id: toolConfirmationId(id, item.tool_use_id),
+															tool_use_id: item.tool_use_id,
+															result: item.result,
+															deny_message: item.deny_message,
 														}),
 														sendOptions,
 													),
 												),
 												Effect.map((receipt) => ({
-													type: "user.custom_tool_result" as const,
+													type: "user.tool_confirmation" as const,
 													id: eventId,
 													processed_at:
-														receipt.events.find((event) => event._tag === "user.custom_tool_result")
+														receipt.events.find((event) => event._tag === "user.tool_confirmation")
 															?.processed_at ?? null,
-													custom_tool_use_id: toolUseEventId(id, item.custom_tool_use_id),
-													content: [{ type: "text" as const, text: item.text }],
-													...(item.is_error ? { is_error: true } : {}),
+													tool_use_id: toolUseEventId(id, item.tool_use_id),
+													result: item.result,
+													...(item.deny_message === "" ? {} : { deny_message: item.deny_message }),
 												})),
 											),
 										)
-									: item.type === "user.interrupt"
+									: item.type === "user.custom_tool_result"
 										? yield* settled(
-												sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions).pipe(
-													Effect.flatMap((receipt) =>
-														receipt.events.some((event) => event._tag === "user.interrupt")
-															? Effect.succeed({
-																	type: "user.interrupt" as const,
-																	id: eventId,
-																	processed_at: null,
-																})
-															: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+												claimed.pipe(
+													Effect.andThen(
+														returnCustomToolResult.send(
+															new ReturnCustomToolResult({
+																session_id: id,
+																confirmation_id: toolConfirmationId(id, item.custom_tool_use_id),
+																custom_tool_use_id: item.custom_tool_use_id,
+																text: item.text,
+																is_error: item.is_error,
+															}),
+															sendOptions,
+														),
 													),
+													Effect.map((receipt) => ({
+														type: "user.custom_tool_result" as const,
+														id: eventId,
+														processed_at:
+															receipt.events.find(
+																(event) => event._tag === "user.custom_tool_result",
+															)?.processed_at ?? null,
+														custom_tool_use_id: toolUseEventId(id, item.custom_tool_use_id),
+														content: [{ type: "text" as const, text: item.text }],
+														...(item.is_error ? { is_error: true } : {}),
+													})),
 												),
 											)
-										: yield* settled(
-												sessions
-													.send(
-														new SendUserMessage({ session_id: id, text: item.text }),
-														sendOptions,
-													)
-													.pipe(
-														Effect.flatMap((receipt) => {
-															const committed = receipt.events.find(
-																(event) => event._tag === "user.message",
-															)
-															if (
-																committed?._tag !== "user.message" ||
-																committed.content[0]?.text !== item.text
-															) {
-																return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-															}
-															if (receipt.reply === undefined) {
-																return Effect.die(
-																	new Error("SendUserMessage receipt is missing reply."),
+										: item.type === "user.interrupt"
+											? yield* settled(
+													sessions
+														.send(new SendUserInterrupt({ session_id: id }), sendOptions)
+														.pipe(
+															Effect.flatMap((receipt) =>
+																receipt.events.some((event) => event._tag === "user.interrupt")
+																	? Effect.succeed({
+																			type: "user.interrupt" as const,
+																			id: eventId,
+																			processed_at: null,
+																		})
+																	: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+															),
+														),
+												)
+											: yield* settled(
+													sessions
+														.send(
+															new SendUserMessage({ session_id: id, text: item.text }),
+															sendOptions,
+														)
+														.pipe(
+															Effect.flatMap((receipt) => {
+																const committed = receipt.events.find(
+																	(event) => event._tag === "user.message",
 																)
-															}
-															const queued = !receipt.events.some(
-																(event) => event._tag === "session.status_running",
-															)
-															return Effect.succeed({
-																type: "user.message" as const,
-																id: eventId,
-																processed_at: null,
-																turn: receipt.reply.turn,
-																queued,
-																content: [{ type: "text" as const, text: item.text }],
-															})
-														}),
-													),
-											)
+																if (
+																	committed?._tag !== "user.message" ||
+																	committed.content[0]?.text !== item.text
+																) {
+																	return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+																}
+																if (receipt.reply === undefined) {
+																	return Effect.die(
+																		new Error("SendUserMessage receipt is missing reply."),
+																	)
+																}
+																const queued = !receipt.events.some(
+																	(event) => event._tag === "session.status_running",
+																)
+																return Effect.succeed({
+																	type: "user.message" as const,
+																	id: eventId,
+																	processed_at: null,
+																	turn: receipt.reply.turn,
+																	queued,
+																	content: [{ type: "text" as const, text: item.text }],
+																})
+															}),
+														),
+												)
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure
 							const mapped = toApiError(error, yield* currentRequestId)

@@ -1,9 +1,13 @@
 export const STANDING = {
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"Session.SystemContextIsBounded": "proved",
+	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
 	"Session.OpenModelRequestRequiresStartedCount": "proved",
+	"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": "proved",
+	"Session.OnlyTheLastInitialMessageStartsTheTurn": "proved",
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",

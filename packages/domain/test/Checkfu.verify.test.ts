@@ -97,9 +97,13 @@ const STANDING = {
 	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"Session.SystemContextIsBounded": "proved",
+	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
 	"Session.OpenModelRequestRequiresStartedCount": "proved",
+	"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": "proved",
+	"Session.OnlyTheLastInitialMessageStartsTheTurn": "proved",
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
@@ -190,6 +194,11 @@ const STANDING = {
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
+	"AdmitSessionWithMessages.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
+	"AdmitSessionWithMessages.PinnedVersionWithinAgentHead": "proved",
+	"AdmitSessionWithMessages.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"AdmitSessionWithMessages.AdmissionKeepsTheCredentialsItWasGiven": "proved",
+	"AdmitSessionWithMessages.AdmissionKeepsTheInitialPlan": "proved",
 	"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
 	"AdmitSession.PinnedVersionWithinAgentHead": "proved",
 	"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
@@ -266,6 +275,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"DeleteEnvironment",
 			"AdmitSession",
 			"SendUserMessage",
+			"SendSystemMessage",
 			"SendUserInterrupt",
 			"ConfirmTool",
 			"ReturnCustomToolResult",
@@ -307,7 +317,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 400, length: 12 },
 
-				allow: { skipped: ["EnsureTurnStarted"] },
+				allow: { skipped: ["RecordInitialMessages", "EnsureTurnStarted"] },
 				opaque: [
 					sessionIdOfNextRun,
 					isUsableSchedule,
@@ -326,12 +336,20 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
-		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
+		expect(report.explored.skipped.map((skipped) => skipped.policy).toSorted()).toEqual([
+			"EnsureTurnStarted",
+			"RecordInitialMessages",
+		])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",
 				name: "Listing",
 				reason: "is not declared in a file the model's file imports",
+			},
+			{
+				kind: "view",
+				name: "SessionTurnCompletion",
+				reason: "no rule reads it and no policy reacts to it",
 			},
 			{ kind: "query", name: "ListResources", reason: "what a query answers is not checked" },
 		])

@@ -2007,7 +2007,7 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "repeat-structured",
 			required: false,
 			min: 0,
-			max: 1,
+			max: 50,
 		},
 		{
 			propName: "agentVersion",
@@ -2077,8 +2077,8 @@ const sessionsCreateCommand = CommandMake(
 		),
 		initialEvents: FlagString("initial-event").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("Initial user message as JSON, YAML, or @file"),
-			FlagBetween(0, 1),
+			FlagWithDescription("Initial user message as JSON, YAML, or @file (repeatable, up to 50)"),
+			FlagBetween(0, 50),
 		),
 		agentVersion: FlagInt("agent-version").pipe(
 			FlagWithMetavar("INT"),
@@ -2114,7 +2114,7 @@ const sessionsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create an agent instance in an environment. Send a user.message event to start work. (accepts flags and/or JSON/YAML on stdin)",
+		"Create an agent instance in an environment. Include initial user messages to start work immediately. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{

@@ -8884,7 +8884,7 @@
 						}
 					}
 				},
-				"description": "Create an agent instance in an environment. Send a user.message event to start work.",
+				"description": "Create an agent instance in an environment. Include initial user messages to start work immediately.",
 				"summary": "Create a session",
 				"requestBody": {
 					"content": {
@@ -8962,8 +8962,8 @@
 													"required": ["type", "content"],
 													"additionalProperties": false
 												},
-												"maxItems": 1,
-												"description": "A text user message to send when the session is created."
+												"maxItems": 50,
+												"description": "User messages to send in order when the session is created."
 											},
 											"agent_version": {
 												"type": "integer",
@@ -9095,8 +9095,8 @@
 													"required": ["type", "content"],
 													"additionalProperties": false
 												},
-												"maxItems": 1,
-												"description": "A text user message to send when the session is created."
+												"maxItems": 50,
+												"description": "User messages to send in order when the session is created."
 											},
 											"agent_version": {
 												"type": "integer",
@@ -9178,7 +9178,7 @@
 					"repeatArrayField": {
 						"field": "initial_events",
 						"flag": "initial-event",
-						"description": "Initial user message as JSON, YAML, or @file"
+						"description": "Initial user message as JSON, YAML, or @file (repeatable, up to 50)"
 					},
 					"examples": [
 						{
@@ -11889,6 +11889,42 @@
 														}
 													},
 													"required": ["type"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+															"minLength": 1,
+															"maxLength": 128
+														},
+														"type": {
+															"type": "string",
+															"enum": ["system.message"]
+														},
+														"content": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["text"]
+																	},
+																	"text": {
+																		"type": "string"
+																	}
+																},
+																"required": ["type", "text"],
+																"additionalProperties": false
+															},
+															"minItems": 1,
+															"maxItems": 1000
+														}
+													},
+													"required": ["type", "content"],
 													"additionalProperties": false
 												},
 												{
@@ -31836,6 +31872,57 @@
 							},
 							"type": {
 								"type": "string",
+								"enum": ["system.message"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "content"],
+						"additionalProperties": false,
+						"description": "Privileged context appended to the session's system instructions."
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
 								"enum": ["user.message"]
 							},
 							"created_at": {
@@ -32758,6 +32845,41 @@
 			},
 			"SendSessionEventReceipt": {
 				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"type": {
+								"type": "string",
+								"enum": ["system.message"]
+							},
+							"id": {
+								"type": "string"
+							},
+							"processed_at": {
+								"type": "string"
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1
+							}
+						},
+						"required": ["type", "id", "processed_at", "content"],
+						"additionalProperties": false
+					},
 					{
 						"type": "object",
 						"properties": {

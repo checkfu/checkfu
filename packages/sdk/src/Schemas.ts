@@ -15,6 +15,7 @@ export const MAX_TIMEZONE_LENGTH = 64
 
 export const MAX_IDENTIFIER_LENGTH = 256
 export const MAX_TITLE_LENGTH = 1024
+export const MAX_SESSION_INITIAL_EVENTS = 50
 export const MAX_MESSAGE_TEXT_LENGTH = 16_384
 export const MAX_THINKING_TEXT_LENGTH = 16_384
 export const MAX_ERROR_TYPE_LENGTH = 128
@@ -331,6 +332,7 @@ export const ToolRejection = Schema.Literals(["unavailable", "invalid_arguments"
 export type ToolRejection = typeof ToolRejection.Type
 
 export const SessionEventFields = {
+	"system.message": { content: TextBlocks },
 	"user.message": {
 		content: TextBlocks,
 	},

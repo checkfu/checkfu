@@ -35,6 +35,11 @@ import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
 import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
+import {
+	RecordInitialMessages,
+	RecordInitialMessagesLive,
+} from "./Session/RecordInitialMessages.policy.ts"
+import { AdmitSessionWithMessagesDecision } from "./Session/AdmitSessionWithMessages.decision.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
 import {
 	PublishSessionOutputs,
@@ -67,6 +72,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		CreateAgentDecision,
 		UpdateAgentDecision,
 		AdmitSessionDecision,
+		AdmitSessionWithMessagesDecision,
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
 		UpdateAutomationDecision,
@@ -86,6 +92,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ArtifactVersionView,
 	],
 	policies: [
+		RecordInitialMessages,
 		StartTurn,
 		EnsureTurnStarted,
 		EnsureTurnStopped,
@@ -392,6 +399,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"DeleteEnvironment",
 		"AdmitSession",
 		"SendUserMessage",
+		"SendSystemMessage",
 		"SendUserInterrupt",
 		"ConfirmTool",
 		"ReturnCustomToolResult",
@@ -424,6 +432,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 }) {}
 
 export const CheckfuHandlersLive = Layer.mergeAll(
+	RecordInitialMessagesLive,
 	StartTurnLive,
 	EnsureTurnStartedLive,
 	EnsureTurnStoppedLive,

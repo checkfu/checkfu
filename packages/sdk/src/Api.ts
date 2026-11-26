@@ -64,6 +64,7 @@ import {
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
+	MAX_SESSION_INITIAL_EVENTS,
 	CancelledEventIds,
 	RequiresActionStopReason,
 	StopReason,
@@ -600,8 +601,8 @@ const AutomationAgentReference = AgentReference.annotate({
 const CreateSessionCommonFields = {
 	initial_events: Schema.optionalKey(
 		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
-			.check(Schema.isMaxLength(1))
-			.annotate({ description: "A text user message to send when the session is created." }),
+			.check(Schema.isMaxLength(MAX_SESSION_INITIAL_EVENTS))
+			.annotate({ description: "User messages to send in order when the session is created." }),
 	),
 	agent_version: Schema.optionalKey(
 		PositiveInt.annotate({ description: "Optional pinned agent version" }),
@@ -734,6 +735,11 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.interrupt"),
+			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("system.message"),
+				content: TextBlocks.check(Schema.isMaxLength(1000)),
 			}),
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
@@ -1132,7 +1138,15 @@ export const UserCustomToolResultEventReceipt = Schema.Struct({
 })
 export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
 
+export const SystemMessageEventReceipt = Schema.Struct({
+	type: Schema.Literal("system.message"),
+	id: Schema.String,
+	processed_at: Schema.DateTimeUtc,
+	content: TextBlocks,
+})
+
 export const SendSessionEventReceipt = Schema.Union([
+	SystemMessageEventReceipt,
 	UserMessageEventReceipt,
 	UserInterruptEventReceipt,
 	UserToolConfirmationEventReceipt,
@@ -1157,6 +1171,11 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 		...fields,
 	})
+
+export const SystemMessageSessionEvent = wireSessionEvent(
+	"system.message",
+	SessionEventFields["system.message"],
+).annotate({ description: "Privileged context appended to the session's system instructions." })
 
 export const UserMessageSessionEvent = wireSessionEvent(
 	"user.message",
@@ -1245,6 +1264,7 @@ export const SessionArchivedEvent = wireSessionEvent(
 )
 
 export const SessionEvent = Schema.Union([
+	SystemMessageSessionEvent,
 	UserMessageSessionEvent,
 	UserInterruptSessionEvent,
 	UserToolConfirmationSessionEvent,
@@ -1766,7 +1786,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "Create a session")
 			.annotate(
 				OpenApi.Description,
-				"Create an agent instance in an environment. Send a user.message event to start work.",
+				"Create an agent instance in an environment. Include initial user messages to start work immediately.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions",
@@ -1778,7 +1798,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					repeatArrayField: {
 						field: "initial_events",
 						flag: "initial-event",
-						description: "Initial user message as JSON, YAML, or @file",
+						description: "Initial user message as JSON, YAML, or @file (repeatable, up to 50)",
 					},
 					examples: [
 						{

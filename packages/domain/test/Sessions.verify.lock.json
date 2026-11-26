@@ -10,6 +10,10 @@
 				"kind": "invariant",
 				"source": "(s) => s._tag !== \"Idle\" || s.turn >= 0"
 			},
+			"Session.SystemContextIsBounded": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t(s._tag !== \"Idle\" && s._tag !== \"Running\") ||\n\t\t\ts.system_context_length === undefined ||\n\t\t\ts.system_context_length <= MAX_AGENT_SYSTEM_LENGTH"
+			},
 			"Session.ModelRequestsStartedNonNegative": {
 				"kind": "invariant",
 				"source": "(s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
@@ -217,6 +221,18 @@
 			"Session.AStopNamesTheUnansweredCalls": {
 				"kind": "transition",
 				"source": "({ before, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\t(event._tag !== \"session.status_idle\" && event._tag !== \"session.status_terminated\") ||\n\t\t\t\t\tevent.event_ids === (before._tag === \"Running\" ? before.awaiting_ids : NO_TOOL_USE_IDS),\n\t\t\t)"
+			},
+			"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Idle\" ||\n\t\t\ts.initial_messages_remaining === undefined ||\n\t\t\t(s.turn === 0 &&\n\t\t\t\ts.initial_messages_remaining >= 0 &&\n\t\t\t\ts.initial_messages_remaining <= MAX_SESSION_INITIAL_EVENTS)"
+			},
+			"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === command.remaining)"
+			},
+			"Session.OnlyTheLastInitialMessageStartsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\t!events.some((e) => e._tag === \"session.status_running\") ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === 1)"
 			}
 		}
 	}

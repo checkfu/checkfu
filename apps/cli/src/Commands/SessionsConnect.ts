@@ -365,10 +365,13 @@ const renderConnectEvent = (
 		let eventTurn: number | undefined
 
 		switch (event.type) {
+			case "system.message":
 			case "user.message": {
 				const text = event.content.map((block) => block.text).join("\n")
 				if (!rawStructuredMode && text.length > 0) {
-					yield* writeStdoutLine(`[user] ${escapeTerminalControlCharacters(text)}`)
+					yield* writeStdoutLine(
+						`[${event.type === "system.message" ? "system" : "user"}] ${escapeTerminalControlCharacters(text)}`,
+					)
 				}
 				break
 			}

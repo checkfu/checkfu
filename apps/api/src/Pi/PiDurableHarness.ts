@@ -390,7 +390,10 @@ export const PiDurableHarnessLive = boundedHarness(
 						turn: args.turn,
 						provider: resolved.provider,
 						modelId: resolved.modelId,
-						system: version.system,
+						system:
+							args.system_context === undefined
+								? version.system
+								: [version.system, args.system_context].filter(Boolean).join("\n\n"),
 						text: userText,
 						...(mcp === undefined ? {} : { mcp }),
 						...(tools === undefined ? {} : { tools }),
