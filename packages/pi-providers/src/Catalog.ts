@@ -52,6 +52,7 @@ export {
 	DEFAULT_OPENAI_BASE_URL,
 	DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENROUTER_BASE_URL,
+	DEFAULT_PROVIDER_MODELS,
 	allProviders,
 	checkProviderCredentials,
 	defineProvider,
@@ -68,6 +69,7 @@ export type {
 	BuiltinProviderId,
 	CloudflareGatewayAuthInputs,
 	CloudflareGatewayAuthMode,
+	DefaultProviderModel,
 } from "./Providers.ts"
 export {
 	DEFAULT_MIN_CONTEXT_WINDOW,
