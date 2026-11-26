@@ -1220,7 +1220,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											maximum: 9007199254740991,
 										},
 									},
-									required: ["id"],
+									required: ["type", "id"],
 									additionalProperties: false,
 								},
 							],
@@ -1656,7 +1656,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											maximum: 9007199254740991,
 										},
 									},
-									required: ["id"],
+									required: ["type", "id"],
 									additionalProperties: false,
 								},
 							],
@@ -2139,212 +2139,94 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 			type: "object",
 			properties: {
 				body: {
-					anyOf: [
-						{
-							type: "object",
-							properties: {
-								agent: {
-									anyOf: [
-										{
+					type: "object",
+					properties: {
+						agent: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 256,
+								},
+								{
+									type: "object",
+									properties: {
+										type: {
+											type: "string",
+											enum: ["agent"],
+										},
+										id: {
 											type: "string",
 											minLength: 1,
 											maxLength: 256,
 										},
-										{
-											type: "object",
-											properties: {
-												type: {
-													type: "string",
-													enum: ["agent"],
-												},
-												id: {
-													type: "string",
-													minLength: 1,
-													maxLength: 256,
-												},
-												version: {
-													type: "integer",
-													minimum: 1,
-													maximum: 9007199254740991,
-												},
-											},
-											required: ["id"],
-											additionalProperties: false,
+										version: {
+											type: "integer",
+											minimum: 1,
+											maximum: 9007199254740991,
 										},
-									],
-									description:
-										'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
+									},
+									required: ["type", "id"],
+									additionalProperties: false,
 								},
-								agent_id: {
+							],
+							description:
+								'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
+						},
+						environment_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Environment ID for the session",
+						},
+						title: {
+							anyOf: [
+								{
 									type: "string",
-									minLength: 1,
-									maxLength: 256,
-									description: "Agent ID (alternative to agent)",
+									maxLength: 1024,
 								},
-								agent_version: {
-									type: "integer",
-									minimum: 1,
-									maximum: 9007199254740991,
-									description: "Optional pinned agent version",
+								{
+									type: "null",
 								},
-								environment_id: {
-									type: "string",
-									minLength: 1,
-									maxLength: 256,
-									description: "Environment ID for the session",
-								},
-								title: {
-									anyOf: [
-										{
-											type: "string",
-											maxLength: 1024,
-										},
-										{
-											type: "null",
-										},
-									],
-									description: "Optional session title",
-								},
-								vault_ids: {
-									type: "array",
-									items: {
+							],
+							description: "Optional session title",
+						},
+						vault_ids: {
+							type: "array",
+							items: {
+								type: "string",
+								minLength: 1,
+							},
+							maxItems: 20,
+							description:
+								"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+						},
+						mcp_server_credentials: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									mcp_server_name: {
+										type: "string",
+										minLength: 1,
+										maxLength: 32,
+										pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+									},
+									credential_id: {
 										type: "string",
 										minLength: 1,
 									},
-									maxItems: 20,
-									description:
-										"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
 								},
-								mcp_server_credentials: {
-									type: "array",
-									items: {
-										type: "object",
-										properties: {
-											mcp_server_name: {
-												type: "string",
-												minLength: 1,
-												maxLength: 32,
-												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
-											},
-											credential_id: {
-												type: "string",
-												minLength: 1,
-											},
-										},
-										required: ["mcp_server_name", "credential_id"],
-										additionalProperties: false,
-									},
-									maxItems: 20,
-									description:
-										"Explicit credentials for named servers. An explicit binding wins over vault matching.",
-								},
+								required: ["mcp_server_name", "credential_id"],
+								additionalProperties: false,
 							},
-							required: ["agent", "environment_id"],
-							additionalProperties: false,
+							maxItems: 20,
+							description:
+								"Explicit credentials for named servers. An explicit binding wins over vault matching.",
 						},
-						{
-							type: "object",
-							properties: {
-								agent: {
-									anyOf: [
-										{
-											type: "string",
-											minLength: 1,
-											maxLength: 256,
-										},
-										{
-											type: "object",
-											properties: {
-												type: {
-													type: "string",
-													enum: ["agent"],
-												},
-												id: {
-													type: "string",
-													minLength: 1,
-													maxLength: 256,
-												},
-												version: {
-													type: "integer",
-													minimum: 1,
-													maximum: 9007199254740991,
-												},
-											},
-											required: ["id"],
-											additionalProperties: false,
-										},
-									],
-									description:
-										'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
-								},
-								agent_id: {
-									type: "string",
-									minLength: 1,
-									maxLength: 256,
-									description: "Agent ID (alternative to agent)",
-								},
-								agent_version: {
-									type: "integer",
-									minimum: 1,
-									maximum: 9007199254740991,
-									description: "Optional pinned agent version",
-								},
-								environment_id: {
-									type: "string",
-									minLength: 1,
-									maxLength: 256,
-									description: "Environment ID for the session",
-								},
-								title: {
-									anyOf: [
-										{
-											type: "string",
-											maxLength: 1024,
-										},
-										{
-											type: "null",
-										},
-									],
-									description: "Optional session title",
-								},
-								vault_ids: {
-									type: "array",
-									items: {
-										type: "string",
-										minLength: 1,
-									},
-									maxItems: 20,
-									description:
-										"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
-								},
-								mcp_server_credentials: {
-									type: "array",
-									items: {
-										type: "object",
-										properties: {
-											mcp_server_name: {
-												type: "string",
-												minLength: 1,
-												maxLength: 32,
-												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
-											},
-											credential_id: {
-												type: "string",
-												minLength: 1,
-											},
-										},
-										required: ["mcp_server_name", "credential_id"],
-										additionalProperties: false,
-									},
-									maxItems: 20,
-									description:
-										"Explicit credentials for named servers. An explicit binding wins over vault matching.",
-								},
-							},
-							required: ["agent_id", "environment_id"],
-							additionalProperties: false,
-						},
-					],
+					},
+					required: ["agent", "environment_id"],
+					additionalProperties: false,
 				},
 				idempotency_key: {
 					type: "string",

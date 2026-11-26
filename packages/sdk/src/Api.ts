@@ -580,7 +580,7 @@ const MAX_SESSION_VAULTS = 20
 const AgentReference = Schema.Union([
 	ResourceId,
 	Schema.Struct({
-		type: Schema.optionalKey(Schema.Literal("agent")),
+		type: Schema.Literal("agent"),
 		id: ResourceId,
 		version: Schema.optionalKey(PositiveInt),
 	}),
@@ -596,10 +596,8 @@ const AutomationAgentReference = AgentReference.annotate({
 		'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
 })
 
-const CreateSessionCommonFields = {
-	agent_version: Schema.optionalKey(
-		PositiveInt.annotate({ description: "Optional pinned agent version" }),
-	),
+export const CreateSessionBody = Schema.Struct({
+	agent: SessionAgentReference,
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
 		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
@@ -623,22 +621,7 @@ const CreateSessionCommonFields = {
 					"Explicit credentials for named servers. An explicit binding wins over vault matching.",
 			}),
 	),
-}
-
-export const CreateSessionBody = Schema.Union([
-	Schema.Struct({
-		agent: SessionAgentReference,
-		agent_id: Schema.optionalKey(
-			ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
-		),
-		...CreateSessionCommonFields,
-	}),
-	Schema.Struct({
-		agent: Schema.optionalKey(SessionAgentReference),
-		agent_id: ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
-		...CreateSessionCommonFields,
-	}),
-])
+})
 export type CreateSessionBody = typeof CreateSessionBody.Type
 
 const AutomationInitialEvent = Schema.Struct({

@@ -1924,22 +1924,6 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
-			propName: "agentId",
-			flagName: "agent-id",
-			wireName: "agent_id",
-			location: "body",
-			kind: "string",
-			required: false,
-		},
-		{
-			propName: "agentVersion",
-			flagName: "agent-version",
-			wireName: "agent_version",
-			location: "body",
-			kind: "int",
-			required: false,
-		},
-		{
 			propName: "environmentId",
 			flagName: "environment-id",
 			wireName: "environment_id",
@@ -1990,16 +1974,6 @@ const sessionsCreateCommand = CommandMake(
 			FlagWithDescription(
 				'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
-			FlagOptional,
-		),
-		agentId: FlagString("agent-id").pipe(
-			FlagWithMetavar("ID"),
-			FlagWithDescription("Agent ID (alternative to agent)"),
-			FlagOptional,
-		),
-		agentVersion: FlagInt("agent-version").pipe(
-			FlagWithMetavar("INT"),
-			FlagWithDescription("Optional pinned agent version"),
 			FlagOptional,
 		),
 		environmentId: FlagString("environment-id").pipe(

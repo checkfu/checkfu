@@ -302,12 +302,11 @@ describe("Session credentials", () => {
 					const env = yield* environment(call)
 					const held = yield* credentialIn(call)
 					const docs = [{ type: "url", name: "docs", url: DOCS }]
-					const create = (agent: string, extra: { readonly agent_version?: number } = {}) =>
+					const create = (agent: string, version?: number) =>
 						call("POST", "/v1/sessions", {
-							agent,
+							agent: version === undefined ? agent : { type: "agent", id: agent, version },
 							environment_id: env.id,
 							vault_ids: [held.vault],
-							...extra,
 						})
 
 					expect((yield* create("agent_missing")).status).toBe(404)
@@ -315,11 +314,11 @@ describe("Session credentials", () => {
 					const bare = yield* agentWith(call, [])
 					const gained = call("POST", `/v1/agents/${bare.id}`, { version: 1, mcp_servers: docs })
 					beforeAdmission = gained
-					const early = yield* create(bare.id, { agent_version: 2 })
+					const early = yield* create(bare.id, 2)
 					expect(early.status).toBe(404)
 					expect(admitted).toEqual([])
 					expect((yield* gained).status).toBe(200)
-					const later = yield* create(bare.id, { agent_version: 2 })
+					const later = yield* create(bare.id, 2)
 					expect(later.body.mcp_server_credentials).toEqual([
 						{ mcp_server_name: "docs", credential_id: held.credential, vault_id: held.vault },
 					])
