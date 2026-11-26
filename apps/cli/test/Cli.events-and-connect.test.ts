@@ -3049,7 +3049,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					"cache-control": "no-cache",
 				})
 				res.write(
-					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z","processed_at":"2026-11-22T00:00:00.000Z"}\n\n',
 				)
 				req.on("close", () => {
 					streamClosed = true
@@ -3170,7 +3170,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"cache-control": "no-cache",
 					})
 					res.write(
-						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z","processed_at":"2026-11-22T00:00:00.000Z"}\n\n',
 					)
 					openSseResponses.push(res)
 					return
