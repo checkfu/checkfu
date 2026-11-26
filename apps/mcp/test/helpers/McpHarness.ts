@@ -4,8 +4,10 @@ import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutput
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
+import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
@@ -43,12 +45,16 @@ export const makeTestServer = Effect.gen(function* () {
 			discardWorkspace: () => Effect.void,
 		}),
 	)
+	const listingStore = ListingStore.memory
+	const webhooksTest = makeWebhooksTestSupport(listingStore)
 	const ApiLayer = Layer.mergeAll(
+		webhooksTest.layer,
 		Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
-				Layer.provide(ListingStore.memory),
+				Layer.provide(listingStore),
+				Layer.provide(WebhookEventsNoop),
 				Layer.provide(HarnessLive),
 			),
 		),

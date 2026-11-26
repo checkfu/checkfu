@@ -105,6 +105,9 @@ describe("MCP tool projection", () => {
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
 			"sessions_archiveSession",
+			"webhooks_deleteWebhook",
+			"webhooks_pauseWebhook",
+			"webhooks_resumeWebhook",
 		])
 		expect(tools.filter((tool) => tool.readOnly && !tool.idempotent)).toEqual([])
 
@@ -118,6 +121,9 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",
+			"webhooks_createWebhook",
+			"webhooks_redeliver",
+			"webhooks_testWebhook",
 		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])
 	})

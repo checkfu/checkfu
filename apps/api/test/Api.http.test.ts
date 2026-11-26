@@ -700,6 +700,15 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/sessions/{session_id}/events",
 						"/v1/sessions/{session_id}/events/stream",
 						"/v1/sessions/{session_id}/outputs",
+						"/v1/webhooks",
+						"/v1/webhooks/{webhook_id}",
+						"/v1/webhooks/{webhook_id}/deliveries",
+						"/v1/webhooks/{webhook_id}/deliveries/{delivery_id}",
+						"/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
+						"/v1/webhooks/{webhook_id}/pause",
+						"/v1/webhooks/{webhook_id}/resume",
+						"/v1/webhooks/{webhook_id}/rotate-secret",
+						"/v1/webhooks/{webhook_id}/test",
 					])
 					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(

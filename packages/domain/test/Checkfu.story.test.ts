@@ -59,6 +59,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 import {
 	AdmitSession,
 	AgentVersionNotFound,
@@ -68,8 +69,7 @@ import {
 
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
-		Layer.provide(ArtifactBytesKept),
-		Layer.provide(SessionOutputsUnpublished),
+		Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
@@ -98,8 +98,7 @@ describe("Checkfu unified hosted model stories", () => {
 			Layer.build(
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
-						Layer.provide(ArtifactBytesKept),
-						Layer.provide(SessionOutputsUnpublished),
+						Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 						Layer.provide([HarnessStubLayer, ListingStore.memory]),
 					),
 				),

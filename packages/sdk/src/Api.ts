@@ -57,6 +57,16 @@ import {
 	SessionTitle,
 	Sha256Hex,
 	TextBlocks,
+	MAX_WEBHOOK_EVENT_TYPES,
+	WebhookDeliveryId,
+	WebhookDeliveryOutcome,
+	WebhookDeliveryStatus,
+	WebhookDescription,
+	WebhookEndpointStatus,
+	WebhookEventId,
+	WebhookEventSubscription,
+	WebhookId,
+	WebhookUrl,
 } from "./Schemas.ts"
 import type { SessionEventType } from "./Schemas.ts"
 
@@ -689,6 +699,110 @@ export const ArtifactDeleted = Schema.Struct({
 })
 export type ArtifactDeleted = typeof ArtifactDeleted.Type
 
+export const WebhookEventSubscriptions = Schema.Array(WebhookEventSubscription)
+	.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_WEBHOOK_EVENT_TYPES))
+	.annotate({
+		description: 'Subscribed event types (or ["*"] to subscribe to all events)',
+	})
+
+export const CreateWebhookBody = Schema.Struct({
+	url: WebhookUrl.annotate({
+		description: "Public HTTPS destination URL that receives signed webhook POST requests",
+	}),
+	description: Schema.optionalKey(
+		WebhookDescription.annotate({
+			description: "Optional human-readable description for this webhook endpoint",
+		}),
+	),
+	event_types: WebhookEventSubscriptions,
+})
+export type CreateWebhookBody = typeof CreateWebhookBody.Type
+
+export const UpdateWebhookBody = Schema.Struct({
+	url: Schema.optionalKey(
+		WebhookUrl.annotate({
+			description: "New public HTTPS destination URL",
+		}),
+	),
+	description: Schema.optionalKey(
+		WebhookDescription.annotate({
+			description: "Updated description for this webhook endpoint",
+		}),
+	),
+	event_types: Schema.optionalKey(WebhookEventSubscriptions),
+	reactivate: Schema.optionalKey(
+		Schema.Boolean.annotate({
+			description: "Set to true to reactivate a paused or auto-disabled endpoint",
+		}),
+	),
+})
+export type UpdateWebhookBody = typeof UpdateWebhookBody.Type
+
+const WebhookCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
+export const WebhookResource = Schema.Struct({
+	id: WebhookId,
+	type: Schema.Literal("webhook"),
+	status: WebhookEndpointStatus,
+	url: Schema.String,
+	description: Schema.String,
+	event_types: Schema.Array(Schema.String),
+	definition_revision: PositiveInt,
+	secret_revision: PositiveInt,
+	previous_secret_expires_at: Schema.NullOr(Schema.DateTimeUtc).annotate({
+		description: "When the previous signing secret stops being sent after a rotation, or null",
+	}),
+	consecutive_failures: WebhookCount,
+	last_failure_at: Schema.NullOr(Schema.DateTimeUtc),
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type Webhook = typeof WebhookResource.Type
+
+export const WebhookCreatedResource = WebhookResource.mapFields((fields) => ({
+	...fields,
+	signing_secret: NonEmptyString.annotate({
+		description:
+			"Standard Webhooks signing secret (whsec_...). Shown once when the endpoint is created.",
+	}),
+}))
+export type WebhookCreated = typeof WebhookCreatedResource.Type
+
+export const WebhookSecretRotatedResource = WebhookResource.mapFields((fields) => ({
+	...fields,
+	signing_secret: NonEmptyString.annotate({
+		description:
+			"New Standard Webhooks signing secret (whsec_...). Shown once; the previous secret stays active for 24 hours.",
+	}),
+}))
+export type WebhookSecretRotated = typeof WebhookSecretRotatedResource.Type
+
+export const WebhookDeletedResource = Schema.Struct({
+	id: WebhookId,
+	type: Schema.Literal("webhook_deleted"),
+})
+export type WebhookDeleted = typeof WebhookDeletedResource.Type
+
+export const WebhookDeliveryResource = Schema.Struct({
+	id: WebhookDeliveryId,
+	type: Schema.Literal("webhook_delivery"),
+	webhook_id: WebhookId,
+	event_id: WebhookEventId,
+	event_type: Schema.String,
+	status: WebhookDeliveryStatus,
+	attempt_count: WebhookCount,
+	max_attempts: PositiveInt,
+	next_attempt_at: Schema.NullOr(Schema.DateTimeUtc),
+	last_attempt_at: Schema.NullOr(Schema.DateTimeUtc),
+	last_http_status: Schema.NullOr(Schema.Int),
+	last_outcome: Schema.NullOr(WebhookDeliveryOutcome),
+	last_error: Schema.NullOr(Schema.String),
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	completed_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type WebhookDelivery = typeof WebhookDeliveryResource.Type
+
 export const ArtifactVersionFromString = Schema.String.check(Schema.isPattern(/^[1-9]\d{0,8}$/u))
 	.annotate({ description: "Artifact version number" })
 	.pipe(
@@ -899,6 +1013,15 @@ export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
 export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
+export const ListWebhooksResponse = listResponse(WebhookResource, ResourceListCursor)
+export type ListWebhooksResponse = typeof ListWebhooksResponse.Type
+
+export const ListWebhookDeliveriesResponse = listResponse(
+	WebhookDeliveryResource,
+	ResourceListCursor,
+)
+export type ListWebhookDeliveriesResponse = typeof ListWebhookDeliveriesResponse.Type
+
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
 	Schema.decodeTo(
 		Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
@@ -995,6 +1118,15 @@ const automationParams = {
 }
 const artifactParams = { artifact_id: ArtifactId.annotate({ description: "Artifact ID" }) }
 const artifactVersionParams = { ...artifactParams, version: ArtifactVersionFromString }
+const webhookParams = { webhook_id: WebhookId.annotate({ description: "Webhook ID" }) }
+const webhookDeliveryParams = {
+	...webhookParams,
+	delivery_id: WebhookDeliveryId.annotate({ description: "Webhook delivery ID" }),
+}
+const webhookDeliveryListQuery = {
+	after: Schema.optionalKey(ResourceListCursor),
+	limit: Schema.optionalKey(ListLimitFromString),
+}
 
 const IdempotencyHeaders = Schema.Struct({
 	"idempotency-key": Schema.optionalKey(
@@ -1920,6 +2052,241 @@ const Artifacts = HttpApiGroup.make("artifacts")
 	.annotate(OpenApi.Description, "Manage artifacts")
 	.middleware(Authentication)
 
+const Webhooks = HttpApiGroup.make("webhooks")
+	.add(
+		HttpApiEndpoint.post("create", "/v1/webhooks", {
+			headers: IdempotencyHeaders,
+			payload: CreateWebhookBody,
+			success: WebhookCreatedResource.pipe(HttpApiSchema.status(201)),
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a webhook")
+			.annotate(
+				OpenApi.Description,
+				"Register an outbound HTTPS webhook endpoint and return its Standard Webhooks signing secret once.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "create" },
+				"x-checkfu-mcp": { name: "webhooks_createWebhook", destructive: false },
+				"x-checkfu-cli": {
+					examples: [
+						{
+							command:
+								'checkfu webhooks create --url "https://hooks.example.com/checkfu" --event-types \'["session.status_idle","automation.run_failed"]\'',
+							description: "Create a webhook subscribed to session and automation events",
+						},
+					],
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/webhooks", {
+			query: artifactListQuery,
+			success: ListWebhooksResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List webhooks")
+			.annotate(
+				OpenApi.Description,
+				"List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "list" },
+				"x-checkfu-mcp": { name: "webhooks_listWebhooks" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/webhooks/:webhook_id", {
+			params: webhookParams,
+			success: WebhookResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a webhook")
+			.annotate(OpenApi.Description, "Retrieve a webhook endpoint by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "get" },
+				"x-checkfu-mcp": { name: "webhooks_getWebhook" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("update", "/v1/webhooks/:webhook_id", {
+			params: webhookParams,
+			payload: UpdateWebhookBody,
+			success: WebhookResource,
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a webhook")
+			.annotate(
+				OpenApi.Description,
+				"Update a webhook endpoint's URL, description, or subscribed event types, and optionally reactivate it.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "update" },
+				"x-checkfu-mcp": { name: "webhooks_updateWebhook" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("pause", "/v1/webhooks/:webhook_id/pause", {
+			params: webhookParams,
+			success: WebhookResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Pause a webhook")
+			.annotate(OpenApi.Description, "Pause deliveries to a webhook endpoint without deleting it.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "pause",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "pause" },
+				"x-checkfu-mcp": { name: "webhooks_pauseWebhook" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("resume", "/v1/webhooks/:webhook_id/resume", {
+			params: webhookParams,
+			success: WebhookResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Resume a webhook")
+			.annotate(
+				OpenApi.Description,
+				"Resume a paused or auto-disabled webhook endpoint and clear its failure window.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "resume",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "resume" },
+				"x-checkfu-mcp": { name: "webhooks_resumeWebhook" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("rotateSecret", "/v1/webhooks/:webhook_id/rotate-secret", {
+			params: webhookParams,
+			headers: IdempotencyHeaders,
+			success: WebhookSecretRotatedResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Rotate a webhook signing secret")
+			.annotate(
+				OpenApi.Description,
+				"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "rotateSecret",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "rotateSecret" },
+				"x-checkfu-mcp": { name: "webhooks_rotateWebhookSecret" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("test", "/v1/webhooks/:webhook_id/test", {
+			params: webhookParams,
+			success: WebhookDeliveryResource.pipe(HttpApiSchema.status(201)),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Send a test webhook event")
+			.annotate(
+				OpenApi.Description,
+				"Queue a signed webhook.test delivery for an active webhook endpoint.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "test",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "test" },
+				"x-checkfu-mcp": { name: "webhooks_testWebhook", destructive: false },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/v1/webhooks/:webhook_id", {
+			params: webhookParams,
+			success: WebhookDeletedResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a webhook")
+			.annotate(
+				OpenApi.Description,
+				"Delete a webhook endpoint, discard its signing secrets, and purge its delivery queue.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "webhooks_deleteWebhook" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listDeliveries", "/v1/webhooks/:webhook_id/deliveries", {
+			params: webhookParams,
+			query: webhookDeliveryListQuery,
+			success: ListWebhookDeliveriesResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List webhook deliveries")
+			.annotate(
+				OpenApi.Description,
+				"List recent delivery attempts for a webhook endpoint, newest first.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks.deliveries",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "listDeliveries" },
+				"x-checkfu-mcp": { name: "webhooks_listDeliveries" },
+				"x-checkfu-cli": {
+					groupDescription: "Inspect and replay webhook deliveries",
+					...resourceListCli,
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getDelivery", "/v1/webhooks/:webhook_id/deliveries/:delivery_id", {
+			params: webhookDeliveryParams,
+			success: WebhookDeliveryResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a webhook delivery")
+			.annotate(OpenApi.Description, "Retrieve one delivery record for a webhook endpoint.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks.deliveries",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "getDelivery" },
+				"x-checkfu-mcp": { name: "webhooks_getDelivery" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post(
+			"redeliver",
+			"/v1/webhooks/:webhook_id/deliveries/:delivery_id/redeliver",
+			{
+				params: webhookDeliveryParams,
+				success: WebhookDeliveryResource.pipe(HttpApiSchema.status(201)),
+				error: HandlerErrors,
+			},
+		)
+			.annotate(OpenApi.Summary, "Redeliver a webhook event")
+			.annotate(
+				OpenApi.Description,
+				"Queue a fresh delivery attempt for the payload of an existing webhook delivery.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "webhooks.deliveries",
+				"x-forge-method-name": "redeliver",
+				"x-checkfu-endpoint": { group: "webhooks", endpoint: "redeliver" },
+				"x-checkfu-mcp": { name: "webhooks_redeliver", destructive: false },
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage outbound webhooks")
+	.middleware(Authentication)
+
 export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
 	.add(Auth)
@@ -1928,11 +2295,12 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Sessions)
 	.add(Automations)
 	.add(Artifacts)
+	.add(Webhooks)
 	.annotate(OpenApi.Title, "Checkfu API")
 	.annotate(OpenApi.Version, "0.0.1")
 	.annotate(
 		OpenApi.Description,
-		"Managed agents API for managing agents, environments, sessions, automations, and artifacts.",
+		"Managed agents API for managing agents, environments, sessions, automations, artifacts, and outbound webhooks.",
 	)
 	.annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
 	.middleware(RequestValidation)

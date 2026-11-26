@@ -84,7 +84,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(6)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(7)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -98,6 +98,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"event:Checkfu.AutomationCapacity/automation_slot.reserved",
 						"event:Checkfu.Session/idempotency_key.claimed",
 						"command-reply:Checkfu/ClaimIdempotencyKey",
+						"state:Webhooks.WebhookEndpoint",
+						"event:Webhooks.WebhookEndpoint/webhook.created",
+						"scheduled-command:Webhooks.WebhookEndpoint/ExpirePreviousWebhookSecret",
+						"webhook-table:webhook_deliveries",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
 					]),

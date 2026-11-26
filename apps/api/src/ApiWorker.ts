@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { Webhooks, WebhooksHandlersLive } from "@checkfu/domain/Webhooks.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
@@ -25,6 +26,9 @@ import { apiWorkerCustomProvidersProps } from "./Pi/PiCatalog.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { WebhookDelivererLive, WebhookDeliveryStoreDo } from "./Webhooks/WebhookDeliverer.do.ts"
+import { WebhookEventsLive } from "./Webhooks/WebhookEventsLive.ts"
+import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -65,13 +69,38 @@ const ArtifactStoreLive = ArtifactStoreR2.pipe(
 	Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
 )
 
+const ListingStoreLive = D1ListingStore.pipe(Layer.provide(Cloudflare.D1.QueryDatabaseBinding))
+
+const WebhooksLive = Webhooks.layer(
+	WebhooksHandlersLive.pipe(Layer.provide(ListingStoreLive)),
+).pipe(Layer.provide(PlacedDurableObjects))
+
+const WebhookMasterKeyLive = WebhookSigningMasterKeyLive
+
+const WebhookDeliveriesLive = WebhookDeliveryStoreDo.pipe(
+	Layer.provide(
+		WebhookDelivererLive.pipe(
+			Layer.provide(WebhooksLive),
+			Layer.provide(WebhookMasterKeyLive),
+			Layer.provide(Mac.layerWebCrypto),
+		),
+	),
+)
+
+const WebhookEventsRuntimeLive = WebhookEventsLive.pipe(
+	Layer.provide(ListingStoreLive),
+	Layer.provide(WebhooksLive),
+	Layer.provide(WebhookDeliveriesLive),
+	Layer.provide(Digest.layerWebCrypto),
+)
+
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(PiDurableHarnessLive),
 		Layer.provide(SessionOutputsLive),
 		Layer.provide(ArtifactBytesLive),
-		Layer.provide(D1ListingStore),
-		Layer.provide(Cloudflare.D1.QueryDatabaseBinding),
+		Layer.provide(ListingStoreLive),
+		Layer.provide(WebhookEventsRuntimeLive),
 	),
 ).pipe(
 	Layer.provide(PiHarnessExecutorLive),
@@ -80,12 +109,16 @@ const CheckfuLive = Checkfu.layer(
 )
 
 const ApiWorkerLive = Layer.mergeAll(
+	WebhooksLive,
+	WebhookDeliveriesLive,
+	WebhookMasterKeyLive,
 	CheckfuLive,
 	ArtifactStoreLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
+	Mac.layerWebCrypto,
 ).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export const API_WORKER_PROPS = {

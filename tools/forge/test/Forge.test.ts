@@ -200,6 +200,68 @@ describe("Cloudflare Forge pipeline", () => {
 				httpMethod: "GET",
 				path: "/v1/sessions/{session_id}/outputs",
 			},
+			{ group: "webhooks", name: "create", httpMethod: "POST", path: "/v1/webhooks" },
+			{
+				group: "webhooks",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/webhooks/{webhook_id}",
+			},
+			{ group: "webhooks", name: "list", httpMethod: "GET", path: "/v1/webhooks" },
+			{
+				group: "webhooks",
+				name: "pause",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/pause",
+			},
+			{
+				group: "webhooks",
+				name: "resume",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/resume",
+			},
+			{
+				group: "webhooks",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/webhooks/{webhook_id}",
+			},
+			{
+				group: "webhooks",
+				name: "rotate-secret",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/rotate-secret",
+			},
+			{
+				group: "webhooks",
+				name: "test",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/test",
+			},
+			{
+				group: "webhooks",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}",
+			},
+			{
+				group: "webhooks:deliveries",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/webhooks/{webhook_id}/deliveries",
+			},
+			{
+				group: "webhooks:deliveries",
+				name: "redeliver",
+				httpMethod: "POST",
+				path: "/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
+			},
+			{
+				group: "webhooks:deliveries",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/webhooks/{webhook_id}/deliveries/{delivery_id}",
+			},
 		])
 
 		for (const item of resolved) {
@@ -537,7 +599,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(39)
+		expect(inspectedMethods.length).toBe(51)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

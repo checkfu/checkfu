@@ -36,6 +36,7 @@ import {
 	requestPath,
 } from "./HttpHelpers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
+import { WebhooksLive } from "./WebhooksHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
 export { ArtifactReadWaitTimeout } from "./ArtifactsHandlers.ts"
@@ -88,6 +89,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		SessionsLive,
 		AutomationsLive,
 		ArtifactsLive,
+		WebhooksLive,
 	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),

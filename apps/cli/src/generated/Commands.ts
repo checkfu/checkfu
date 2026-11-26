@@ -8,6 +8,7 @@ import {
 } from "effect/cli/Command"
 import type { Command } from "effect/cli/Command"
 import {
+	Boolean as FlagBoolean,
 	Int as FlagInt,
 	Literals as FlagLiterals,
 	String as FlagString,
@@ -2219,6 +2220,569 @@ const sessionsOutputsRetrieveCommand = CommandMake(
 	),
 )
 
+const webhooksCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks create",
+	apiGroup: "webhooks",
+	apiEndpoint: "create",
+	hasBody: true,
+	flags: [
+		{
+			propName: "url",
+			flagName: "url",
+			wireName: "url",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "description",
+			flagName: "description",
+			wireName: "description",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "eventTypes",
+			flagName: "event-types",
+			wireName: "event_types",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const webhooksCreateCommand = CommandMake(
+	"create",
+	{
+		url: FlagString("url").pipe(
+			FlagWithDescription(
+				"Public HTTPS destination URL that receives signed webhook POST requests",
+			),
+			FlagOptional,
+		),
+		description: FlagString("description").pipe(
+			FlagWithDescription("Optional human-readable description for this webhook endpoint"),
+			FlagOptional,
+		),
+		eventTypes: FlagString("event-types").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				'Subscribed event types (or ["*"] to subscribe to all events) (JSON, YAML, or @file)',
+			),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Register an outbound HTTPS webhook endpoint and return its Standard Webhooks signing secret once. (accepts flags and/or JSON/YAML on stdin)",
+	),
+	CommandWithExamples([
+		{
+			command:
+				'checkfu webhooks create --url "https://hooks.example.com/checkfu" --event-types \'["session.status_idle","automation.run_failed"]\'',
+			description: "Create a webhook subscribed to session and automation events",
+		},
+	]),
+)
+
+const webhooksDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks delete",
+	apiGroup: "webhooks",
+	apiEndpoint: "delete",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksDeleteCommand = CommandMake(
+	"delete",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksDeleteCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Delete a webhook endpoint, discard its signing secrets, and purge its delivery queue.",
+	),
+)
+
+const webhooksListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks list",
+	apiGroup: "webhooks",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const webhooksListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear.",
+	),
+)
+
+const webhooksPauseCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks pause",
+	apiGroup: "webhooks",
+	apiEndpoint: "pause",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksPauseCommand = CommandMake(
+	"pause",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksPauseCommandSpec, flags),
+).pipe(CommandWithDescription("Pause deliveries to a webhook endpoint without deleting it."))
+
+const webhooksResumeCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks resume",
+	apiGroup: "webhooks",
+	apiEndpoint: "resume",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksResumeCommand = CommandMake(
+	"resume",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksResumeCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Resume a paused or auto-disabled webhook endpoint and clear its failure window.",
+	),
+)
+
+const webhooksRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks retrieve",
+	apiGroup: "webhooks",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a webhook endpoint by ID"))
+
+const webhooksRotateSecretCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks rotate-secret",
+	apiGroup: "webhooks",
+	apiEndpoint: "rotateSecret",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const webhooksRotateSecretCommand = CommandMake(
+	"rotate-secret",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksRotateSecretCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours.",
+	),
+)
+
+const webhooksTestCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks test",
+	apiGroup: "webhooks",
+	apiEndpoint: "test",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksTestCommand = CommandMake(
+	"test",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksTestCommandSpec, flags),
+).pipe(
+	CommandWithDescription("Queue a signed webhook.test delivery for an active webhook endpoint."),
+)
+
+const webhooksUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks update",
+	apiGroup: "webhooks",
+	apiEndpoint: "update",
+	hasBody: true,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "url",
+			flagName: "url",
+			wireName: "url",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "description",
+			flagName: "description",
+			wireName: "description",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "eventTypes",
+			flagName: "event-types",
+			wireName: "event_types",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "reactivate",
+			flagName: "reactivate",
+			wireName: "reactivate",
+			location: "body",
+			kind: "boolean",
+			required: false,
+		},
+	],
+}
+
+const webhooksUpdateCommand = CommandMake(
+	"update",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+		url: FlagString("url").pipe(
+			FlagWithDescription("New public HTTPS destination URL"),
+			FlagOptional,
+		),
+		description: FlagString("description").pipe(
+			FlagWithDescription("Updated description for this webhook endpoint"),
+			FlagOptional,
+		),
+		eventTypes: FlagString("event-types").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				'Subscribed event types (or ["*"] to subscribe to all events) (JSON, YAML, or @file)',
+			),
+			FlagOptional,
+		),
+		reactivate: FlagBoolean("reactivate").pipe(
+			FlagWithDescription("Set to true to reactivate a paused or auto-disabled endpoint"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Update a webhook endpoint's URL, description, or subscribed event types, and optionally reactivate it. (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const webhooksDeliveriesListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks:deliveries list",
+	apiGroup: "webhooks",
+	apiEndpoint: "listDeliveries",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+	],
+}
+
+const webhooksDeliveriesListCommand = CommandMake(
+	"list",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksDeliveriesListCommandSpec, flags),
+).pipe(
+	CommandWithDescription("List recent delivery attempts for a webhook endpoint, newest first."),
+)
+
+const webhooksDeliveriesRedeliverCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks:deliveries redeliver",
+	apiGroup: "webhooks",
+	apiEndpoint: "redeliver",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "deliveryId",
+			flagName: "delivery-id",
+			wireName: "delivery_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksDeliveriesRedeliverCommand = CommandMake(
+	"redeliver",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+		deliveryId: FlagString("delivery-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook delivery ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksDeliveriesRedeliverCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Queue a fresh delivery attempt for the payload of an existing webhook delivery.",
+	),
+)
+
+const webhooksDeliveriesRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "webhooks:deliveries retrieve",
+	apiGroup: "webhooks",
+	apiEndpoint: "getDelivery",
+	hasBody: false,
+	flags: [
+		{
+			propName: "webhookId",
+			flagName: "webhook-id",
+			wireName: "webhook_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "deliveryId",
+			flagName: "delivery-id",
+			wireName: "delivery_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const webhooksDeliveriesRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		webhookId: FlagString("webhook-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook ID"),
+		),
+		deliveryId: FlagString("delivery-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Webhook delivery ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(webhooksDeliveriesRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve one delivery record for a webhook endpoint."))
+
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -2229,6 +2793,8 @@ export const buildGeneratedResourceCommands = <
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsOutputsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const WebhooksExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const WebhooksDeliveriesExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
 	readonly artifacts?: ArtifactsExtras
@@ -2239,6 +2805,8 @@ export const buildGeneratedResourceCommands = <
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
 	readonly "sessions:outputs"?: SessionsOutputsExtras
+	readonly webhooks?: WebhooksExtras
+	readonly "webhooks:deliveries"?: WebhooksDeliveriesExtras
 }) =>
 	[
 		CommandMake("agents").pipe(
@@ -2332,6 +2900,30 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				sessionsOutputsRetrieveCommand,
 				...(extras?.["sessions:outputs"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("webhooks").pipe(
+			CommandWithDescription("Manage webhooks"),
+			CommandWithSubcommands([
+				webhooksCreateCommand,
+				webhooksDeleteCommand,
+				webhooksListCommand,
+				webhooksPauseCommand,
+				webhooksResumeCommand,
+				webhooksRetrieveCommand,
+				webhooksRotateSecretCommand,
+				webhooksTestCommand,
+				webhooksUpdateCommand,
+				...(extras?.["webhooks"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("webhooks:deliveries").pipe(
+			CommandWithDescription("Inspect and replay webhook deliveries"),
+			CommandWithSubcommands([
+				webhooksDeliveriesListCommand,
+				webhooksDeliveriesRedeliverCommand,
+				webhooksDeliveriesRetrieveCommand,
+				...(extras?.["webhooks:deliveries"] ?? ([] as const)),
 			]),
 		),
 	] as const

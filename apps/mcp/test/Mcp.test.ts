@@ -203,6 +203,18 @@ describe("Checkfu MCP server", () => {
 				"sessions_listEvents",
 				"sessions_listSessions",
 				"sessions_sendSessionEvents",
+				"webhooks_createWebhook",
+				"webhooks_deleteWebhook",
+				"webhooks_getDelivery",
+				"webhooks_getWebhook",
+				"webhooks_listDeliveries",
+				"webhooks_listWebhooks",
+				"webhooks_pauseWebhook",
+				"webhooks_redeliver",
+				"webhooks_resumeWebhook",
+				"webhooks_rotateWebhookSecret",
+				"webhooks_testWebhook",
+				"webhooks_updateWebhook",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
 				GENERATED_TOOLS.map((tool) => tool.inputSchema),
@@ -257,6 +269,18 @@ describe("Checkfu MCP server", () => {
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
+				webhooks_createWebhook: "writes, additive, not repeatable",
+				webhooks_deleteWebhook: "writes, destructive, repeatable",
+				webhooks_getDelivery: "read-only, additive, repeatable",
+				webhooks_getWebhook: "read-only, additive, repeatable",
+				webhooks_listDeliveries: "read-only, additive, repeatable",
+				webhooks_listWebhooks: "read-only, additive, repeatable",
+				webhooks_pauseWebhook: "writes, destructive, repeatable",
+				webhooks_redeliver: "writes, additive, not repeatable",
+				webhooks_resumeWebhook: "writes, destructive, repeatable",
+				webhooks_rotateWebhookSecret: "writes, destructive, not repeatable",
+				webhooks_testWebhook: "writes, additive, not repeatable",
+				webhooks_updateWebhook: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
 	)
@@ -400,6 +424,8 @@ describe("Checkfu MCP server", () => {
 				const automation = { path: { automation_id: "auto_1" } }
 				const artifact = { path: { artifact_id: "art_1" } }
 				const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
+				const webhook = { path: { webhook_id: "whe_1" } }
+				const webhookDelivery = { path: { webhook_id: "whe_1", delivery_id: "wdel_1" } }
 				const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
 				const calls = {
 					agents_archiveAgent: agent,
@@ -457,6 +483,23 @@ describe("Checkfu MCP server", () => {
 						body: {
 							events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
 						},
+					},
+					webhooks_createWebhook: {
+						body: { url: "https://hooks.example.com/events", event_types: ["*"] },
+					},
+					webhooks_deleteWebhook: webhook,
+					webhooks_getDelivery: webhookDelivery,
+					webhooks_getWebhook: webhook,
+					webhooks_listDeliveries: { ...webhook, query: { limit: "5" } },
+					webhooks_listWebhooks: { query: { limit: "5", order: "desc" } },
+					webhooks_pauseWebhook: webhook,
+					webhooks_redeliver: webhookDelivery,
+					webhooks_resumeWebhook: webhook,
+					webhooks_rotateWebhookSecret: webhook,
+					webhooks_testWebhook: webhook,
+					webhooks_updateWebhook: {
+						...webhook,
+						body: { description: "Updated", reactivate: true },
 					},
 				} satisfies Record<string, Argument>
 				expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
@@ -536,6 +579,8 @@ describe("Checkfu MCP server", () => {
 			"environments_createEnvironment",
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
+			"webhooks_createWebhook",
+			"webhooks_rotateWebhookSecret",
 		])
 		for (const [name, schema] of keyed) {
 			const accepts = Schema.is(

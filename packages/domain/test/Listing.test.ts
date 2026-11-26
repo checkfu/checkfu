@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer"
 import { Harness } from "../src/Session/Harness.external.ts"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 import type { ListingFilter } from "../src/Listing/ListingStore.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -37,8 +38,7 @@ const HarnessStubLayer = Harness.toLayer(
 
 const CheckfuInMemory = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
-		Layer.provide(ArtifactBytesKept),
-		Layer.provide(SessionOutputsUnpublished),
+		Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 		Layer.provide([HarnessStubLayer, ListingStore.memory]),
 	),
 ).pipe(Layer.provide(Domain.InMemory))

@@ -11,6 +11,7 @@ export const ListingKind = Schema.Literals([
 	"session",
 	"automation",
 	"artifact",
+	"webhook",
 ])
 export type ListingKind = typeof ListingKind.Type
 
@@ -70,6 +71,55 @@ const compareIds = (a: string, b: string): number => {
 const compareRows = (a: ListingPosition, b: ListingPosition): number =>
 	a.created_at - b.created_at || compareIds(a.id, b.id)
 
+export const makeListingStoreMemory = () => {
+	const rows = new Map<string, ListingChange>()
+	const record = (changes: ReadonlyArray<ListingChange>): Effect.Effect<void> =>
+		Effect.sync(() => {
+			for (const change of changes) {
+				const key = `${change.kind}/${change.id}`
+				const row = rows.get(key)
+				rows.set(
+					key,
+					row === undefined
+						? change
+						: {
+								...row,
+								agent_id: change.agent_id ?? row.agent_id,
+								status: change.status > row.status ? change.status : row.status,
+							},
+				)
+			}
+		})
+	const page = (
+		filter: ListingFilter,
+		{ after, take }: Query.PageRequest,
+	): Effect.Effect<Query.Page<ListingEntry>> =>
+		Effect.sync(() => {
+			const cursor = after === undefined ? undefined : parseListingCursor(after)
+			const direction = filter.order === "asc" ? 1 : -1
+			const matching = [...rows.values()]
+				.filter(
+					(row) =>
+						row.kind === filter.kind &&
+						row.status <= (filter.include_archived ? ARCHIVED : LISTED) &&
+						(filter.agent_id === null || row.agent_id === filter.agent_id) &&
+						(cursor === undefined || compareRows(row, cursor) * direction > 0),
+				)
+				.sort((a, b) => compareRows(a, b) * direction)
+			const entries = matching.slice(0, take)
+			const last = entries.at(-1)
+			return {
+				entries: entries.map(({ id, created_at }) => ({ id, created_at })),
+				cursor: matching.length > take && last !== undefined ? listingCursor(last) : null,
+			}
+		})
+	return {
+		record,
+		page,
+		layer: Layer.succeed(ListingStore, ListingStore.of({ record, page })),
+	}
+}
+
 /** @effect-expect-leaking RuntimeContext */
 export class ListingStore extends Context.Service<
 	ListingStore,
@@ -83,46 +133,5 @@ export class ListingStore extends Context.Service<
 		) => Effect.Effect<Query.Page<ListingEntry>, never, RuntimeContext>
 	}
 >()("Checkfu/ListingStore") {
-	static readonly memory = Layer.sync(ListingStore, () => {
-		const rows = new Map<string, ListingChange>()
-		return ListingStore.of({
-			record: (changes) =>
-				Effect.sync(() => {
-					for (const change of changes) {
-						const key = `${change.kind}/${change.id}`
-						const row = rows.get(key)
-						rows.set(
-							key,
-							row === undefined
-								? change
-								: {
-										...row,
-										agent_id: change.agent_id ?? row.agent_id,
-										status: change.status > row.status ? change.status : row.status,
-									},
-						)
-					}
-				}),
-			page: (filter, { after, take }) =>
-				Effect.sync(() => {
-					const cursor = after === undefined ? undefined : parseListingCursor(after)
-					const direction = filter.order === "asc" ? 1 : -1
-					const matching = [...rows.values()]
-						.filter(
-							(row) =>
-								row.kind === filter.kind &&
-								row.status <= (filter.include_archived ? ARCHIVED : LISTED) &&
-								(filter.agent_id === null || row.agent_id === filter.agent_id) &&
-								(cursor === undefined || compareRows(row, cursor) * direction > 0),
-						)
-						.sort((a, b) => compareRows(a, b) * direction)
-					const page = matching.slice(0, take)
-					const last = page.at(-1)
-					return {
-						entries: page.map(({ id, created_at }) => ({ id, created_at })),
-						cursor: matching.length > take && last !== undefined ? listingCursor(last) : null,
-					}
-				}),
-		})
-	})
+	static readonly memory = Layer.unwrap(Effect.sync(() => makeListingStoreMemory().layer))
 }

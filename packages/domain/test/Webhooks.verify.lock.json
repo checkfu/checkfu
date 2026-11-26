@@ -1,0 +1,107 @@
+{
+	"version": 1,
+	"rules": {
+		"Webhooks": {
+			"WebhookEndpoint.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"paused\",\n\t\t\t\ts.status === \"disabled_redirect\",\n\t\t\t\ts.status === \"disabled_sustained_failure\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.CreatedExactlyWhenRevised": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.definition_revision === 0, s.secret_revision === 0, s.url === \"\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t\t[s.status !== \"\", s.definition_revision >= 1, s.secret_revision >= 1, s.url !== \"\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.LiveEndpointHoldsSecretSalt": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"deleted\", s.secret_salt !== \"\"].some((ok) => ok)"
+			},
+			"WebhookEndpoint.LiveEndpointUsesHttps": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.url.startsWith(\"https://\")].some((ok) => ok)"
+			},
+			"WebhookEndpoint.DeletedHoldsNoSecrets": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status !== \"deleted\",\n\t\t\t\t[\n\t\t\t\t\ts.secret_salt === \"\",\n\t\t\t\t\ts.previous_secret_revision === 0,\n\t\t\t\t\ts.previous_secret_salt === \"\",\n\t\t\t\t\ts.previous_secret_expires_at === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.PreviousSecretConsistency": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\ts.previous_secret_revision === 0,\n\t\t\t\t\ts.previous_secret_salt === \"\",\n\t\t\t\t\ts.previous_secret_expires_at === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.previous_secret_revision >= 1,\n\t\t\t\t\ts.previous_secret_revision < s.secret_revision,\n\t\t\t\t\ts.previous_secret_salt !== \"\",\n\t\t\t\t\ts.previous_secret_expires_at >= 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.FailureWindowOrdered": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.failure_window_started_at === 0, s.last_failure_at >= s.failure_window_started_at].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"WebhookEndpoint.NoWindowImpliesZeroConsecutiveFailures": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.failure_window_started_at !== 0,\n\t\t\t\t[s.last_failure_at === 0, s.consecutive_failures === 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.CreatedNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"WebhookEndpoint.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"deleted\", after.status === \"deleted\"].some((ok) => ok)"
+			},
+			"WebhookEndpoint.SecretRevisionMonotonic": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.secret_revision === before.secret_revision,\n\t\t\t\tafter.secret_revision === before.secret_revision + 1,\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.OnlyCreateOrRotateChangesSecretRevision": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.secret_revision === before.secret_revision,\n\t\t\t\tcommand._tag === \"CreateWebhookEndpoint\",\n\t\t\t\tcommand._tag === \"RotateWebhookSecret\",\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.DefinitionRevisionMonotonic": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.definition_revision === before.definition_revision,\n\t\t\t\tafter.definition_revision === before.definition_revision + 1,\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.StaleOrInactiveOutcomeIgnored": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookOutcome\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\t[\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tcommand.definition_revision === before.definition_revision,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.failure_window_started_at === before.failure_window_started_at,\n\t\t\t\t\tafter.last_failure_at === before.last_failure_at,\n\t\t\t\t\tafter.consecutive_failures === before.consecutive_failures,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.RedirectImmediatelyDisablesActiveEndpoint": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookOutcome\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tcommand.definition_revision !== before.definition_revision,\n\t\t\t\tcommand.outcome !== \"redirect\",\n\t\t\t\tafter.status === \"disabled_redirect\",\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.SustainedFailureDisablesActiveEndpoint": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookOutcome\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tcommand.definition_revision !== before.definition_revision,\n\t\t\t\tcommand.outcome !== \"failed\",\n\t\t\t\tafter.status === \"disabled_sustained_failure\",\n\t\t\t\tafter.last_failure_at - after.failure_window_started_at <\n\t\t\t\t\tSUSTAINED_FAILURE_DISABLE_WINDOW_MS,\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.StaleSecretExpiryLeavesPreviousSecretUntouched": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"ExpirePreviousWebhookSecret\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tcommand.for_revision === before.secret_revision,\n\t\t\t\t[\n\t\t\t\t\tafter.previous_secret_revision === before.previous_secret_revision,\n\t\t\t\t\tafter.previous_secret_expires_at === before.previous_secret_expires_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.ClaimingKeyChangesNoState": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"ClaimWebhookIdempotencyKey\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.url === before.url,\n\t\t\t\t\tafter.definition_revision === before.definition_revision,\n\t\t\t\t\tafter.secret_revision === before.secret_revision,\n\t\t\t\t\tafter.previous_secret_revision === before.previous_secret_revision,\n\t\t\t\t\tafter.previous_secret_expires_at === before.previous_secret_expires_at,\n\t\t\t\t\tafter.failure_window_started_at === before.failure_window_started_at,\n\t\t\t\t\tafter.last_failure_at === before.last_failure_at,\n\t\t\t\t\tafter.consecutive_failures === before.consecutive_failures,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Webhooks.AnEndpointIsCreated": {
+				"kind": "sometimes",
+				"source": "(m) => m.WebhookEndpoint.some((w) => w.state.status === \"active\")"
+			},
+			"Webhooks.AnEndpointRotatesItsSecret": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.WebhookEndpoint.some((w) =>\n\t\t\t\t[\n\t\t\t\t\tw.state.status === \"active\",\n\t\t\t\t\tw.state.secret_revision >= 2,\n\t\t\t\t\tw.state.previous_secret_revision >= 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t)"
+			},
+			"Webhooks.AnEndpointExpiresItsPreviousSecret": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.WebhookEndpoint.some((w) =>\n\t\t\t\t[\n\t\t\t\t\tw.state.status === \"active\",\n\t\t\t\t\tw.state.secret_revision >= 2,\n\t\t\t\t\tw.state.previous_secret_revision === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t)"
+			},
+			"Webhooks.AnEndpointIsPaused": {
+				"kind": "sometimes",
+				"source": "(m) => m.WebhookEndpoint.some((w) => w.state.status === \"paused\")"
+			},
+			"Webhooks.AnEndpointIsDisabledByRedirect": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.WebhookEndpoint.some((w) => w.state.status === \"disabled_redirect\")"
+			},
+			"Webhooks.AnEndpointIsDisabledBySustainedFailure": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.WebhookEndpoint.some((w) => w.state.status === \"disabled_sustained_failure\")"
+			},
+			"Webhooks.AnEndpointIsDeleted": {
+				"kind": "sometimes",
+				"source": "(m) => m.WebhookEndpoint.some((w) => w.state.status === \"deleted\")"
+			}
+		}
+	}
+}

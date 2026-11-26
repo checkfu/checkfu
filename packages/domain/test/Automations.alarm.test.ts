@@ -8,6 +8,7 @@ import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
@@ -141,8 +142,7 @@ describe("Automation alarms", () => {
 			Effect.provide(
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
-						Layer.provide(ArtifactBytesKept),
-						Layer.provide(SessionOutputsUnpublished),
+						Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 						Layer.provide([harness, ListingStore.memory]),
 					),
 				).pipe(Layer.provide(platform.layer)),

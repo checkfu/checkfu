@@ -69,6 +69,7 @@ import {
 } from "../src/Automation/StartAutomationRun.policy.ts"
 import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 import { EnvironmentCreated } from "../src/Environment/CreateEnvironment.command.ts"
 import {
 	DeleteEnvironment,
@@ -91,8 +92,7 @@ import { SessionView } from "../src/Session/SessionView.view.ts"
 
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
-		Layer.provide(ArtifactBytesKept),
-		Layer.provide(SessionOutputsUnpublished),
+		Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
