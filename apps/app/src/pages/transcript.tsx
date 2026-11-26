@@ -1,5 +1,5 @@
 import { cn } from "@checkfu/ui/cn"
-import type { JsonSessionEvent } from "@checkfu/sdk/client"
+import type { JsonSessionEvent, SessionMessagePreview } from "@checkfu/sdk/client"
 import type * as React from "react"
 import { toolCallsOf } from "../tool-calls.ts"
 import type { ToolCalls } from "../tool-calls.ts"
@@ -90,8 +90,14 @@ export function Transcript({
 	readonly events: ReadonlyArray<JsonSessionEvent>
 	readonly calls?: ToolCalls | undefined
 	readonly send?: SendAnswer | undefined
-	readonly preview?: { readonly id: string; readonly text: string } | undefined
+	readonly preview?: SessionMessagePreview | undefined
 }): React.JSX.Element {
+	const previewText =
+		preview === undefined
+			? ""
+			: Object.values(preview.content)
+					.map((block) => block?.text ?? "")
+					.join("")
 	const rows = events.flatMap((event) => {
 		const entry = entryOf(event, calls, send)
 		return entry === null ? [] : [<li key={event.seq}>{entry}</li>]
@@ -103,9 +109,9 @@ export function Transcript({
 			) : (
 				rows
 			)}
-			{preview === undefined || preview.text === "" ? null : (
+			{preview === undefined || previewText === "" ? null : (
 				<li key={preview.id}>
-					<Bubble from="Agent">{preview.text}</Bubble>
+					<Bubble from="Agent">{previewText}</Bubble>
 				</li>
 			)}
 		</ol>

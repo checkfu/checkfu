@@ -360,3 +360,5 @@ export class Checkfu extends PromiseResources {
 }
 
 export default Checkfu
+
+export { accumulateSessionEvent, type SessionMessagePreview } from "./SessionEventPreview.ts"

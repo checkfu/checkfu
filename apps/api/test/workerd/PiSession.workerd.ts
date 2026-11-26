@@ -1,4 +1,5 @@
-import { Checkfu } from "@checkfu/sdk"
+import { Checkfu, accumulateSessionEvent } from "@checkfu/sdk"
+import type { SessionMessagePreview } from "@checkfu/sdk"
 import { spawn } from "node:child_process"
 import { createHash, createHmac } from "node:crypto"
 import type { ChildProcess } from "node:child_process"
@@ -1601,7 +1602,7 @@ describe("PiSession real Durable Object under workerd", () => {
 				],
 			})
 			let eventId: string | undefined
-			let text = ""
+			let preview: SessionMessagePreview | undefined
 			let final:
 				| { readonly id: string; readonly content: ReadonlyArray<{ readonly text: string }> }
 				| undefined
@@ -1609,8 +1610,9 @@ describe("PiSession real Durable Object under workerd", () => {
 				if (event.type === "event_start" && event.event.type === "agent.message") {
 					eventId = event.event.id
 				}
-				if (event.type === "event_delta" && event.event_id === eventId) {
-					text += event.delta.content.text
+				if (event.type === "event_start" || event.type === "event_delta") {
+					expect(final).toBeUndefined()
+					preview = accumulateSessionEvent(preview, event)
 				}
 				if (event.type === "agent.message") {
 					final = event
@@ -1619,9 +1621,9 @@ describe("PiSession real Durable Object under workerd", () => {
 					break
 				}
 			}
-			expect(text).toBe("Live preview.")
+			expect(preview?.content[0]?.text).toBe("Live preview.")
 			expect(final?.id).toBe(eventId)
-			expect(final?.content).toEqual([{ type: "text", text }])
+			expect(final?.content).toEqual([{ type: "text", text: "Live preview." }])
 			const saved = await listAllEvents(session.id)
 			expect(
 				saved.some((event) => event.type === "event_start" || event.type === "event_delta"),
