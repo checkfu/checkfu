@@ -12,6 +12,10 @@ const TONES = new Map<string, Tone>([
 	["archived", "gray"],
 	["started", "green"],
 	["failed", "red"],
+	["storing", "yellow"],
+	["held", "green"],
+	["erasing", "yellow"],
+	["erased", "gray"],
 ])
 
 const LABELS = new Map<string, string>([["waiting", "Waiting on you"]])

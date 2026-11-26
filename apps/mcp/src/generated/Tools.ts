@@ -301,11 +301,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1006,11 +1005,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1225,7 +1223,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+								'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -1395,11 +1393,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1461,11 +1458,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}$",
-							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1661,7 +1657,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+								'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -1947,11 +1943,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -2614,7 +2609,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_createSession",
 		title: "Create a session",
 		description:
-			"Create an agent instance in an environment. Send a user.message event to start work.",
+			"Create an agent instance in an environment. Include initial user messages to start work immediately.",
 		method: "POST",
 		path: "/v1/sessions",
 		readOnly: false,
@@ -2689,8 +2684,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								required: ["type", "content"],
 								additionalProperties: false,
 							},
-							maxItems: 1,
-							description: "A text user message to send when the session is created.",
+							maxItems: 50,
+							description: "User messages to send in order when the session is created.",
 						},
 						environment_id: {
 							type: "string",
@@ -2939,7 +2934,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_listEvents",
 		title: "List session events",
 		description:
-			"List persisted events for a session. Use the returned cursor to continue through its history.",
+			"List persisted events for a session. Use next_page to continue through its history.",
 		method: "GET",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: true,
@@ -2965,16 +2960,43 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}$",
-							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
 							description: "Maximum number of events to return (1-100)",
+						},
+						types: {
+							type: "array",
+							items: {
+								type: "string",
+								enum: [
+									"system.message",
+									"user.message",
+									"user.interrupt",
+									"user.tool_confirmation",
+									"user.custom_tool_result",
+									"session.status_running",
+									"span.model_request_start",
+									"agent.tool_use",
+									"agent.tool_result",
+									"agent.mcp_tool_use",
+									"agent.mcp_tool_result",
+									"agent.custom_tool_use",
+									"agent.thinking",
+									"agent.message",
+									"span.model_request_end",
+									"session.status_idle",
+									"session.error",
+									"session.status_terminated",
+									"session.archived",
+								],
+							},
+							description: "Return events with one of these types.",
 						},
 						order: {
 							type: "string",
@@ -3037,11 +3059,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -3171,6 +3192,42 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											},
 											type: {
 												type: "string",
+												enum: ["system.message"],
+											},
+											content: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["text"],
+														},
+														text: {
+															type: "string",
+														},
+													},
+													required: ["type", "text"],
+													additionalProperties: false,
+												},
+												minItems: 1,
+												maxItems: 1000,
+											},
+										},
+										required: ["type", "content"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											id: {
+												type: "string",
+												pattern: "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+												minLength: 1,
+												maxLength: 128,
+											},
+											type: {
+												type: "string",
 												enum: ["user.tool_confirmation"],
 											},
 											tool_use_id: {
@@ -3265,7 +3322,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "vaults_archiveCredential",
 		title: "Archive a credential",
 		description:
-			"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+			"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
 		method: "POST",
 		path: "/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
 		readOnly: false,
@@ -3302,7 +3359,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "vaults_archiveVault",
 		title: "Archive a vault",
 		description:
-			"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+			"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
 		method: "POST",
 		path: "/v1/vaults/{vault_id}/archive",
 		readOnly: false,
@@ -3371,7 +3428,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "vaults_deleteCredential",
 		title: "Delete a credential",
 		description:
-			"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+			"Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
 		method: "DELETE",
 		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
 		readOnly: false,
@@ -3408,7 +3465,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "vaults_deleteVault",
 		title: "Delete a vault",
 		description:
-			"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+			"Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 		method: "DELETE",
 		path: "/v1/vaults/{vault_id}",
 		readOnly: false,
@@ -3530,11 +3587,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -3576,11 +3632,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",

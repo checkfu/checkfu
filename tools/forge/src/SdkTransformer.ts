@@ -110,6 +110,7 @@ const generateResourcesFile = (
 	const errorsMod = module("../Errors.ts")
 	const runtimeMod = module("../Runtime.ts")
 	const promiseRuntimeMod = module("../PromiseRuntime.ts")
+	const SessionEvent = module("../Api.ts").ident("SessionEvent").ty()
 
 	const EffectType = effectMod.ident("Effect").ty()
 	const EffectFlatMap = effectMod.ident("flatMap").as("EffectFlatMap")
@@ -121,6 +122,7 @@ const generateResourcesFile = (
 	const EffectSdkRuntime = runtimeMod.ident("EffectSdkRuntime").ty()
 	const EndpointBody = runtimeMod.ident("EndpointBody").ty()
 	const EndpointJsonSuccess = runtimeMod.ident("EndpointJsonSuccess").ty()
+	const EndpointJsonBody = runtimeMod.ident("EndpointJsonBody").ty()
 	const EndpointParams = runtimeMod.ident("EndpointParams").ty()
 	const PathParam = runtimeMod.ident("PathParam").ty()
 	const EndpointQuery = runtimeMod.ident("EndpointQuery").ty()
@@ -172,7 +174,15 @@ const generateResourcesFile = (
 				if (op.kind === "sse") {
 					if (op.sse?.cursorParam !== undefined) {
 						out(
-							"{ readonly ",
+							"Omit<",
+							EndpointQuery,
+							"<",
+							g,
+							", ",
+							e,
+							">, ",
+							JSON.stringify(op.sse.cursorParam),
+							"> & { readonly ",
 							JSON.stringify(op.sse.cursorParam),
 							"?: ",
 							op.sse.cursorType,
@@ -192,7 +202,9 @@ const generateResourcesFile = (
 						out(EndpointQuery, "<", g, ", ", e, ">,")
 					}
 					out(EndpointBody, "<", g, ", ", e, ">,")
-					out(EndpointSuccess, "<", g, ", ", e, ">")
+					out(EndpointSuccess, "<", g, ", ", e, ">,")
+					out(EndpointJsonSuccess, "<", g, ", ", e, ">,")
+					out(EndpointJsonBody, "<", g, ", ", e, ">")
 				}
 			})
 			out(">")
@@ -214,6 +226,30 @@ const generateResourcesFile = (
 		}))
 
 		if (op.kind === "sse") {
+			if (op.operationId === "sessions.events.stream") {
+				for (const previews of [false, true]) {
+					out(op.methodName, "(")
+					out.indent(() => {
+						out("sessionId: ", PathParam, "<", g, ", ", e, ', "session_id">,')
+						out("params?: { readonly after?: number | undefined },")
+						out(
+							"options?: ",
+							SessionEventsStreamOptions,
+							previews ? "," : " & { readonly event_deltas?: undefined },",
+						)
+					})
+					out(
+						"): ",
+						StreamType,
+						"<",
+						previews ? EndpointSseEvent : SessionEvent,
+						...(previews ? ["<", g, ", ", e, ">"] : []),
+						", ",
+						CheckfuSdkError,
+						">",
+					)
+				}
+			}
 			out("/** ", docText, " */")
 			out(op.methodName, "(")
 			out.indent(() => {
@@ -543,11 +579,7 @@ const generateResourcesFile = (
 		out("}")
 		out()
 
-		if (op.kind === "paginated" && op.pagination !== undefined) {
-			const cursorParam = op.pagination.cursorParam
-			const cursorKeyJson = JSON.stringify(cursorParam)
-			const orderExpr = op.pagination.hasOrderParam ? 'params?.order ?? "asc"' : '"asc"'
-
+		if (op.kind === "paginated") {
 			out("/** Auto-paginate pages for ", docText, " */")
 			out(op.methodName, "Pages(")
 			out.indent(() => {
@@ -561,7 +593,7 @@ const generateResourcesFile = (
 			out.indent(() => {
 				out("return ", executePaginatedPagesEffect, "(")
 				out.indent(() => {
-					out("(cursor) =>")
+					out("(page) =>")
 					out.indent(() => {
 						out("this.", op.methodName, "(")
 						out.indent(() => {
@@ -571,15 +603,14 @@ const generateResourcesFile = (
 							out("{")
 							out.indent(() => {
 								out("...params,")
-								out("...(cursor === undefined ? {} : { ", cursorKeyJson, ": cursor }),")
+								out("...(page === undefined ? {} : { page }),")
 							})
 							out("},")
 							out("options,")
 						})
 						out("),")
 					})
-					out("params?.[", cursorKeyJson, "],")
-					out(orderExpr, ",")
+					out("params?.page,")
 				})
 				out(")")
 			})
@@ -613,7 +644,7 @@ const generateResourcesFile = (
 			out.indent(() => {
 				out("return ", executePaginatedStreamEffect, "(")
 				out.indent(() => {
-					out("(cursor) =>")
+					out("(page) =>")
 					out.indent(() => {
 						out("this.", op.methodName, "(")
 						out.indent(() => {
@@ -623,15 +654,14 @@ const generateResourcesFile = (
 							out("{")
 							out.indent(() => {
 								out("...params,")
-								out("...(cursor === undefined ? {} : { ", cursorKeyJson, ": cursor }),")
+								out("...(page === undefined ? {} : { page }),")
 							})
 							out("},")
 							out("options,")
 						})
 						out("),")
 					})
-					out("params?.[", cursorKeyJson, "],")
-					out(orderExpr, ",")
+					out("params?.page,")
 				})
 				out(")")
 			})
@@ -650,6 +680,30 @@ const generateResourcesFile = (
 		}))
 
 		if (op.kind === "sse") {
+			if (op.operationId === "sessions.events.stream") {
+				for (const previews of [false, true]) {
+					out(op.methodName, "(")
+					out.indent(() => {
+						out("sessionId: ", PathParam, "<", g, ", ", e, ', "session_id">,')
+						out("params?: { readonly after?: number | undefined },")
+						out(
+							"options?: ",
+							PromiseStreamOptions,
+							previews ? "," : " & { readonly event_deltas?: undefined },",
+						)
+					})
+					out(
+						"): ",
+						EventStreamPromise,
+						"<",
+						IsoDateTimes,
+						"<",
+						previews ? EndpointSseEvent : SessionEvent,
+						...(previews ? ["<", g, ", ", e, ">"] : []),
+						">>",
+					)
+				}
+			}
 			out("/** ", docText, " */")
 			out(op.methodName, "(")
 			out.indent(() => {
@@ -710,12 +764,7 @@ const generateResourcesFile = (
 			return
 		}
 
-		if (op.kind === "paginated" && op.pagination !== undefined) {
-			const cursorParam = op.pagination.cursorParam
-			const cursorKeyJson = JSON.stringify(cursorParam)
-			const cursorType = op.pagination.cursorType
-			const orderExpr = op.pagination.hasOrderParam ? 'params?.order ?? "asc"' : '"asc"'
-
+		if (op.kind === "paginated") {
 			out("/** ", docText, " */")
 			out(op.methodName, "(")
 			out.indent(() => {
@@ -738,9 +787,7 @@ const generateResourcesFile = (
 				g,
 				", ",
 				e,
-				">>, ",
-				cursorType,
-				">, ",
+				">>>, ",
 				ItemOf,
 				"<",
 				EndpointJsonSuccess,
@@ -754,10 +801,9 @@ const generateResourcesFile = (
 				out("return ", executePaginatedPromise, "(")
 				out.indent(() => {
 					out("this.#runtime,")
-					out("params?.[", cursorKeyJson, "],")
-					out(orderExpr, ",")
+					out("params?.page,")
 					out("options,")
-					out("(effectRuntime, cursor, effectOpts) =>")
+					out("(effectRuntime, page, effectOpts) =>")
 					out.indent(() => {
 						out("new ", effectClsName, "(effectRuntime).", op.methodName, "(")
 						out.indent(() => {
@@ -767,7 +813,7 @@ const generateResourcesFile = (
 							out("{")
 							out.indent(() => {
 								out("...params,")
-								out("...(cursor === undefined ? {} : { ", cursorKeyJson, ": cursor }),")
+								out("...(page === undefined ? {} : { page }),")
 							})
 							out("},")
 							out("{ ...effectOpts, withResponse: true },")

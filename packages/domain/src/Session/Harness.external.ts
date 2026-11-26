@@ -63,10 +63,12 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			resources: SessionResources,
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
+			system_context: Schema.optionalKey(Schema.String),
 			last_reply_turn: Schema.optionalKey(NonNegativeInt),
 			segment: Schema.optionalKey(PositiveInt),
 		},
 		success: {
+			response_started_at: Schema.optionalKey(NonNegativeInt),
 			thinking: Schema.NullOr(ThinkingText),
 			text: MessageText,
 			truncated: Schema.optional(Schema.Literal(true)),
@@ -107,6 +109,7 @@ const clampText = (value: string, maxLength: number, fallback: string): string =
 }
 
 export interface HarnessReply {
+	readonly response_started_at?: number
 	readonly thinking: string | null
 	readonly text: string
 	readonly input_tokens: number
@@ -172,6 +175,7 @@ export const boundedHarness = <R = never>(
 				readonly resources: SessionResources
 				readonly turn: number
 				readonly input: ReadonlyArray<string>
+				readonly system_context?: string
 				readonly last_reply_turn?: number
 				readonly segment?: number
 			}) => Effect.Effect<
