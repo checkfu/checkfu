@@ -1,6 +1,7 @@
 import { CheckfuFetchError, createFetchClient, operationUrl } from "@checkfu/sdk/fetch"
 import type { FetchResult } from "@checkfu/sdk/fetch"
 import type {
+	ERROR_CODES,
 	CreateAgentBody,
 	CreateArtifactLinkBody,
 	CreateAutomationBody,
@@ -21,6 +22,9 @@ import type {
 } from "@checkfu/sdk/client"
 
 export { CheckfuFetchError as ApiError }
+
+export const SESSION_AWAITING_ACTION: (typeof ERROR_CODES)["sessionAwaitingAction"] =
+	"session_awaiting_action"
 
 export type RunPage = FetchResult<"automations.runs.list">
 export type JsonAutomationRun = RunPage["data"][number]
