@@ -44,6 +44,7 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		resources: SessionResources,
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
+		system_context: Schema.optionalKey(Schema.String),
 		last_reply_turn: Schema.optionalKey(NonNegativeInt),
 		segment: Schema.optionalKey(PositiveInt),
 	},
@@ -102,6 +103,9 @@ export const RunTurnLive = RunTurn.toLayer(
 						resources: payload.resources,
 						turn: payload.turn,
 						input: payload.input,
+						...(payload.system_context === undefined
+							? {}
+							: { system_context: payload.system_context }),
 						...(payload.last_reply_turn === undefined
 							? {}
 							: { last_reply_turn: payload.last_reply_turn }),
@@ -111,6 +115,9 @@ export const RunTurnLive = RunTurn.toLayer(
 						Effect.map((reply) => ({
 							ok: true as const,
 							thinking: reply.thinking,
+							...(reply.response_started_at === undefined
+								? {}
+								: { response_started_at: reply.response_started_at }),
 							text: reply.text,
 							truncated: reply.truncated,
 							input_tokens: reply.input_tokens,
@@ -249,6 +256,9 @@ export const RunTurnLive = RunTurn.toLayer(
 							request_seq: segment,
 							model_request_start_id: requestId,
 							thinking: generated.thinking,
+							...(generated.response_started_at === undefined
+								? {}
+								: { response_started_at: generated.response_started_at }),
 							text: generated.text,
 							truncated: generated.truncated,
 							model_usage: {

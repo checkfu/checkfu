@@ -14,12 +14,17 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 export interface ListQuery {
-	readonly after?: string
+	readonly page?: string
 	readonly limit?: number
 	readonly order?: ListingOrder
 	readonly include_archived?: boolean
 	readonly agent_id?: string
 }
+
+export const listPage = <Item>(data: ReadonlyArray<Item>, cursor: string | number | null) => ({
+	data,
+	next_page: cursor === null ? null : String(cursor),
+})
 
 export const LIST_PAGE_BYTES = 4_000_000
 
@@ -66,7 +71,7 @@ const listWith =
 			const include_archived = input.include_archived ?? false
 			const page = yield* pageOf(
 				{ kind, include_archived, agent_id: input.agent_id ?? null, order: input.order ?? "asc" },
-				{ take: input.limit ?? 50, after: input.after },
+				{ take: input.limit ?? 50, after: input.page },
 			)
 			const data: Array<A> = []
 			let bytes = 0
@@ -103,9 +108,8 @@ const listWith =
 					}),
 				),
 			)
-			return cut && handled !== undefined
-				? { data, has_more: true, next_cursor: listingCursor(handled) }
-				: { data, has_more: page.cursor !== null, next_cursor: page.cursor }
+			const cursor = cut && handled !== undefined ? listingCursor(handled) : page.cursor
+			return listPage(data, cursor)
 		})
 
 export const makeLister = Effect.gen(function* () {

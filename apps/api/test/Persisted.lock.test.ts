@@ -3,7 +3,7 @@ import { AbandonTurn } from "@checkfu/domain/Session/AbandonTurn.command"
 import { RUN_TURN_ACTIVITIES, RunTurn } from "@checkfu/domain/Session/RunTurn.saga"
 import { UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { NonNegativeInt } from "@checkfu/domain/Session/SessionTypes"
-import { TurnInputState } from "@checkfu/domain/Session/TurnInput.view"
+import { TurnInput, TurnInputState } from "@checkfu/domain/Session/TurnInput.view"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { DocumentId, JsonObject } from "@earendil-works/pi-durable"
@@ -84,7 +84,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(12)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(13)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -95,6 +95,8 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"command-reply:Checkfu/RunAutomation",
 						"command-reply:Checkfu/AdmitAutomation",
 						"state:Checkfu.AutomationCapacity",
+						"state:Checkfu.SystemContext",
+						"event:Checkfu.SystemContext/system_context.appended",
 						"event:Checkfu.AutomationCapacity/automation_slot.reserved",
 						"event:Checkfu.Session/idempotency_key.claimed",
 						"command-reply:Checkfu/ClaimIdempotencyKey",
@@ -115,6 +117,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"command-reply:Checkfu/WriteMemory",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
+						"pi-doc:checkfu.session-system-context",
 					]),
 				)
 			}),
@@ -570,10 +573,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("lets a view change shape only when its version increased", () =>
 		Effect.gen(function* () {
-			const id = "view:Checkfu.TurnInput@v4"
+			const id = viewShapeId("Checkfu", "TurnInput", TurnInput.definition.version ?? 0)
 			expect(persistedShapes.map((shape) => shape.id)).toContain(id)
 			const earlier = viewShapeId("Checkfu", "TurnInput", 0)
-			const later = viewShapeId("Checkfu", "TurnInput", 5)
+			const later = viewShapeId("Checkfu", "TurnInput", (TurnInput.definition.version ?? 0) + 1)
 
 			expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
 
@@ -626,7 +629,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("blocks a view version bump whose new state breaks queued policy deliveries", () =>
 		Effect.gen(function* () {
-			const viewId = "view:Checkfu.TurnInput@v4"
+			const viewId = viewShapeId("Checkfu", "TurnInput", TurnInput.definition.version ?? 0)
 			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
 			expect(persistedShapes.map((shape) => shape.id)).toEqual(
 				expect.arrayContaining([viewId, startDeliveryId]),
@@ -640,7 +643,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					if (shape.id === viewId) {
 						return {
 							...shape,
-							id: viewShapeId("Checkfu", "TurnInput", 5),
+							id: viewShapeId("Checkfu", "TurnInput", (TurnInput.definition.version ?? 0) + 1),
 							schema: nextState as unknown as PersistedShape["schema"],
 						}
 					}

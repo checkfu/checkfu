@@ -4,12 +4,19 @@ import * as Model from "@alchemy.run/domain/Model"
 import { CredentialListingLive } from "@checkfu/domain/Vault/CredentialListing.projection"
 import { ListCredentialsLive } from "@checkfu/domain/Vault/ListCredentials.query"
 import { ListVaultsLive } from "@checkfu/domain/Vault/ListVaults.query"
-import { RetireReleasedCredentials } from "@checkfu/domain/Vault/RetireReleasedCredentials.policy"
-import { SettleCredentialSecret } from "@checkfu/domain/Vault/SettleCredentialSecret.policy"
+import {
+	RetireReleasedCredentials,
+	RetireReleasedCredentialsLive,
+} from "@checkfu/domain/Vault/RetireReleasedCredentials.policy"
+import {
+	SettleCredentialSecret,
+	SettleCredentialSecretLive,
+} from "@checkfu/domain/Vault/SettleCredentialSecret.policy"
 import { VaultListingLive } from "@checkfu/domain/Vault/VaultListing.projection"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type * as Schedule from "effect/Schedule"
 import {
 	ConnectionCallFailed,
 	CredentialSecretsLive,
@@ -37,7 +44,25 @@ const StalledPoliciesLive = Layer.mergeAll(
 	ListCredentialsLive,
 )
 
-export const makeVaultsTestLayer = (options: { readonly policies?: "stalled" } = {}) => {
+const RedeliveredPoliciesLive = (retry: Schedule.Schedule<unknown, unknown>) =>
+	Layer.mergeAll(
+		RetireReleasedCredentials.toLayer(RetireReleasedCredentials, { retry }).pipe(
+			Layer.provide(RetireReleasedCredentialsLive),
+		),
+		SettleCredentialSecret.toLayer(SettleCredentialSecret, { retry }).pipe(
+			Layer.provide(SettleCredentialSecretLive),
+		),
+		VaultListingLive,
+		ListVaultsLive,
+		CredentialListingLive,
+		ListCredentialsLive,
+	)
+
+export const makeVaultsTestLayer = (
+	options: {
+		readonly policies?: "stalled" | { readonly redeliver: Schedule.Schedule<unknown, unknown> }
+	} = {},
+) => {
 	const connections = new Map<string, InMemoryConnection>()
 	const vaultOf = new Map<string, string>()
 	const unreachable = new Set<string>()
@@ -87,7 +112,12 @@ export const makeVaultsTestLayer = (options: { readonly policies?: "stalled" } =
 		return vaultId === undefined ? null : open(vaultId).custody.read(credentialId)
 	}
 
-	const handlers = options.policies === "stalled" ? StalledPoliciesLive : VaultsHandlersLive
+	const handlers =
+		options.policies === "stalled"
+			? StalledPoliciesLive
+			: options.policies === undefined
+				? VaultsHandlersLive
+				: RedeliveredPoliciesLive(options.policies.redeliver)
 	const model = Vaults.layer(handlers.pipe(Layer.provide(ListingStore.memory))).pipe(
 		Layer.provideMerge(CredentialSecretsLive),
 		Layer.provideMerge(

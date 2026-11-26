@@ -11,6 +11,7 @@ import {
 	Int as FlagInt,
 	Literals as FlagLiterals,
 	String as FlagString,
+	atLeast as FlagAtLeast,
 	between as FlagBetween,
 	optional as FlagOptional,
 	withDescription as FlagWithDescription,
@@ -175,9 +176,9 @@ const agentsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -214,10 +215,8 @@ const agentsListCommandSpec: GeneratedOperationDescriptor = {
 const agentsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -557,9 +556,9 @@ const artifactsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -588,10 +587,8 @@ const artifactsListCommandSpec: GeneratedOperationDescriptor = {
 const artifactsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -1083,7 +1080,7 @@ const automationsCreateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
+				'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
 		),
@@ -1135,9 +1132,9 @@ const automationsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -1182,10 +1179,8 @@ const automationsListCommandSpec: GeneratedOperationDescriptor = {
 const automationsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -1422,7 +1417,7 @@ const automationsUpdateCommand = CommandMake(
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
 			FlagWithDescription(
-				'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
+				'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
 		),
@@ -1466,13 +1461,12 @@ const automationsRunsListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
-			kind: "int",
+			kind: "string",
 			required: false,
-			min: 0,
 		},
 		{
 			propName: "limit",
@@ -1502,11 +1496,8 @@ const automationsRunsListCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
 		),
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
-			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque pagination cursor from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -1711,9 +1702,9 @@ const environmentsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -1750,10 +1741,8 @@ const environmentsListCommandSpec: GeneratedOperationDescriptor = {
 const environmentsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -2472,7 +2461,7 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "repeat-structured",
 			required: false,
 			min: 0,
-			max: 1,
+			max: 50,
 		},
 		{
 			propName: "environmentId",
@@ -2529,8 +2518,8 @@ const sessionsCreateCommand = CommandMake(
 		),
 		initialEvents: FlagString("initial-event").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("Initial user message as JSON, YAML, or @file"),
-			FlagBetween(0, 1),
+			FlagWithDescription("Initial user message as JSON, YAML, or @file (repeatable, up to 50)"),
+			FlagBetween(0, 50),
 		),
 		environmentId: FlagString("environment-id").pipe(
 			FlagWithMetavar("ID"),
@@ -2561,7 +2550,7 @@ const sessionsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create an agent instance in an environment. Send a user.message event to start work. (accepts flags and/or JSON/YAML on stdin)",
+		"Create an agent instance in an environment. Include initial user messages to start work immediately. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{
@@ -2578,9 +2567,9 @@ const sessionsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -2625,10 +2614,8 @@ const sessionsListCommandSpec: GeneratedOperationDescriptor = {
 const sessionsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -2700,13 +2687,12 @@ const sessionsEventsListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
-			kind: "int",
+			kind: "string",
 			required: false,
-			min: 0,
 		},
 		{
 			propName: "limit",
@@ -2717,6 +2703,15 @@ const sessionsEventsListCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 			min: 1,
 			max: 100,
+		},
+		{
+			propName: "types",
+			flagName: "type",
+			wireName: "types",
+			location: "query",
+			kind: "repeat-query",
+			required: false,
+			min: 0,
 		},
 		{
 			propName: "order",
@@ -2736,17 +2731,18 @@ const sessionsEventsListCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Session ID"),
 		),
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
-			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque pagination cursor from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
 			FlagWithMetavar("N"),
 			FlagWithDescription("Maximum number of events to return (1-100)"),
 			FlagOptional,
+		),
+		types: FlagString("type").pipe(
+			FlagWithDescription("Return events with one of these types."),
+			FlagAtLeast(0),
 		),
 		order: FlagLiterals("order", ["asc", "desc"]).pipe(
 			FlagWithDescription("Sort order: asc or desc"),
@@ -2756,7 +2752,7 @@ const sessionsEventsListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsEventsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List persisted events for a session. Use the returned cursor to continue through its history.",
+		"List persisted events for a session. Use next_page to continue through its history.",
 	),
 )
 
@@ -2847,6 +2843,14 @@ const sessionsEventsStreamCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
+			propName: "eventDeltas",
+			flagName: "event-deltas",
+			wireName: "event_deltas[]",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
 			propName: "after",
 			flagName: "after",
 			wireName: "after",
@@ -2864,6 +2868,10 @@ const sessionsEventsStreamCommand = CommandMake(
 		sessionId: FlagString("session-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Session ID"),
+		),
+		eventDeltas: FlagString("event-deltas").pipe(
+			FlagWithDescription("Event types to preview on this connection."),
+			FlagOptional,
 		),
 		after: FlagInt("after").pipe(
 			FlagWithMetavar("SEQ"),
@@ -3058,7 +3066,7 @@ const vaultsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
 	),
 )
 
@@ -3132,7 +3140,7 @@ const vaultsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsDeleteCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		"Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 	),
 )
 
@@ -3143,9 +3151,9 @@ const vaultsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -3182,10 +3190,8 @@ const vaultsListCommandSpec: GeneratedOperationDescriptor = {
 const vaultsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -3308,7 +3314,7 @@ const vaultsCredentialsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+		"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
 	),
 )
 
@@ -3418,7 +3424,7 @@ const vaultsCredentialsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsDeleteCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+		"Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
 	),
 )
 
@@ -3437,9 +3443,9 @@ const vaultsCredentialsListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
 			location: "query",
 			kind: "string",
 			required: false,
@@ -3475,10 +3481,8 @@ const vaultsCredentialsListCommand = CommandMake(
 	"list",
 	{
 		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagString("limit").pipe(

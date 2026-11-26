@@ -8,6 +8,7 @@ import { EnvironmentArchivedError } from "../Environment/EnvironmentArchived.rej
 import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejection.ts"
 import { McpServerCredentialsText } from "../Mcp/McpServers.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
+import { InitialMessages } from "./InitialMessages.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionResources } from "./SessionResource.ts"
 import { MAX_IDENTIFIER_LENGTH, PositiveInt, SessionTitle } from "./SessionTypes.ts"
@@ -31,7 +32,7 @@ export class AgentVersionNotFound extends Domain.Rejection(
 	{ httpApiStatus: 404, description: "Agent version not found." },
 ) {}
 
-export class AdmitSession extends Domain.Command("AdmitSession", {
+const admission = {
 	input: {
 		session_id: SessionId,
 		agent_id: BoundedAgentId,
@@ -53,4 +54,10 @@ export class AdmitSession extends Domain.Command("AdmitSession", {
 	reply: {
 		agent_version: PositiveInt,
 	},
+}
+export class AdmitSession extends Domain.Command("AdmitSession", admission) {}
+
+export class AdmitSessionWithMessages extends Domain.Command("AdmitSessionWithMessages", {
+	...admission,
+	input: { ...admission.input, initial_messages: InitialMessages },
 }) {}

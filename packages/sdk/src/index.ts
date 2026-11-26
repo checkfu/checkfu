@@ -21,6 +21,8 @@ export type {
 	JsonListSessionEventsResponse,
 	JsonSession,
 	JsonSessionEvent,
+	JsonSessionEventPreview,
+	JsonSessionStreamEvent,
 	PromiseRequestOptions,
 	PromiseStreamOptions,
 	PromiseWaitForPendingOptions,
