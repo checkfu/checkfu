@@ -20,10 +20,7 @@ export interface PiProviderSessionContext {
 
 export interface PiSessionProviders {
 	readonly createModels: () => MutableModels
-	readonly checkCredentials: (
-		provider: string,
-		signal?: AbortSignal,
-	) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
+	readonly checkCredentials: (provider: string) => ProviderCredentialCheck
 }
 
 export interface PiProviderRuntimeService {

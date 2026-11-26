@@ -56,10 +56,7 @@ export const makePiHarnessBackend = (
 	options?: {
 		readonly aiBinding?: CloudflareAiBindingLike | null
 		readonly customProviders?: ReadonlyArray<ProviderSpec>
-		readonly checkCredentials?: (
-			provider: string,
-			signal?: AbortSignal,
-		) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
+		readonly checkCredentials?: (provider: string) => ProviderCredentialCheck
 	},
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
@@ -67,22 +64,16 @@ export const makePiHarnessBackend = (
 		lock.withPermit(Effect.uninterruptible(effect))
 	const runtimeConfig = toProviderRuntimeConfig(apiKeys, undefined, options)
 	const customProviders = options?.customProviders
-	const catalogCheck = (provider: string): ProviderCredentialCheck =>
-		checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
-	const checkCredentials = (
-		provider: string,
-		signal?: AbortSignal,
-	): ProviderCredentialCheck | Promise<ProviderCredentialCheck> =>
+	const checkCredentials = (provider: string): ProviderCredentialCheck =>
 		options?.checkCredentials !== undefined
-			? options.checkCredentials(provider, signal)
-			: catalogCheck(provider)
+			? options.checkCredentials(provider)
+			: checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
 
 	return {
 		withLock,
-		checkCredentials,
-		hasApiKey: (provider) => catalogCheck(provider).ok,
+		hasApiKey: (provider) => checkCredentials(provider).ok,
 		missingCredentialsMessage: (provider) => {
-			const check = catalogCheck(provider)
+			const check = checkCredentials(provider)
 			return check.ok ? `Missing credentials for provider "${provider}".` : check.message
 		},
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
@@ -209,8 +200,7 @@ export const PiSessionLive = PiSession.make(
 					return entered
 				},
 				{
-					checkCredentials: (provider, signal) =>
-						sessionProviders.checkCredentials(provider, signal),
+					checkCredentials: (provider) => sessionProviders.checkCredentials(provider),
 				},
 			)
 

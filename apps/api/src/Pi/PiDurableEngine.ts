@@ -1,5 +1,4 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
-import type { ProviderCredentialCheck } from "@checkfu/pi-providers/catalog"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import {
@@ -26,7 +25,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
-import { beginTurnUsage, isStaleTurn, settleTurnUsage } from "./PiTurnUsage.ts"
+import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
@@ -34,10 +33,6 @@ export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 	readonly hasApiKey: (provider: string) => boolean
 	readonly missingCredentialsMessage?: (provider: string) => string
-	readonly checkCredentials?: (
-		provider: string,
-		signal?: AbortSignal,
-	) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
 	readonly isCancelled: (operationId: string) => boolean
 	readonly enterWorkspace: (turn: number) => Promise<boolean>
 	readonly pi: () => Promise<Harness>
@@ -254,62 +249,6 @@ export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortG
 	defaultValue: () => "10 seconds",
 })
 
-export const CredentialCheckTimeout = Context.Reference<Duration.Input>(
-	"@checkfu/api/CredentialCheckTimeout",
-	{
-		defaultValue: () => "10 seconds",
-	},
-)
-
-interface PendingCredentialCheck {
-	readonly operationId: string
-	readonly turn: number
-	readonly wake: Deferred.Deferred<void>
-}
-
-const pendingCredentialChecks = new WeakMap<PiDurableBackend, Set<PendingCredentialCheck>>()
-
-const pendingChecksOf = (backend: PiDurableBackend) => {
-	const existing = pendingCredentialChecks.get(backend)
-	if (existing !== undefined) {
-		return existing
-	}
-	const created = new Set<PendingCredentialCheck>()
-	pendingCredentialChecks.set(backend, created)
-	return created
-}
-
-const wakePendingChecks = (
-	backend: PiDurableBackend,
-	predicate: (entry: PendingCredentialCheck) => boolean,
-): Effect.Effect<void> =>
-	Effect.suspend(() => {
-		const active = pendingCredentialChecks.get(backend)
-		if (active === undefined || active.size === 0) {
-			return Effect.void
-		}
-		const matching = [...active].filter(predicate)
-		if (matching.length === 0) {
-			return Effect.void
-		}
-		return Effect.forEach(matching, (entry) => Deferred.succeed(entry.wake, undefined), {
-			discard: true,
-		})
-	})
-
-const notifyAdmissionAbort = (
-	backend: PiDurableBackend,
-	operationId: string,
-): Effect.Effect<void> => wakePendingChecks(backend, (entry) => entry.operationId === operationId)
-
-const notifyAdmissionSubmitted = (
-	backend: PiDurableBackend,
-	operationId: string,
-): Effect.Effect<void> => wakePendingChecks(backend, (entry) => entry.operationId === operationId)
-
-const notifyTurnFenceAdvanced = (backend: PiDurableBackend, turn: number): Effect.Effect<void> =>
-	wakePendingChecks(backend, (entry) => entry.turn < turn)
-
 export const abortPiDurableTurn = (
 	backend: PiDurableBackend,
 	operationId: string,
@@ -318,10 +257,7 @@ export const abortPiDurableTurn = (
 		const grace = yield* AbortGrace
 		const watched = yield* Effect.forkDetach(
 			Effect.gen(function* () {
-				const aborting = yield* Effect.forkDetach(backend.abort(operationId), {
-					startImmediately: true,
-				})
-				yield* notifyAdmissionAbort(backend, operationId)
+				const aborting = yield* Effect.forkDetach(backend.abort(operationId))
 				return yield* Fiber.join(aborting).pipe(
 					Effect.timeoutOrElse({ duration: grace, orElse: () => backend.reset }),
 				)
@@ -342,35 +278,11 @@ const admissionsOf = (backend: PiDurableBackend) => {
 	return created
 }
 
-type CredentialFailureResult =
-	| { readonly _tag: "missing_key"; readonly message: string | undefined }
-	| { readonly _tag: "credential_timeout"; readonly message: string }
-	| { readonly _tag: "credential_error"; readonly message: string }
-
-type AdmitPiTurnResult = boolean | CredentialFailureResult
-
-type AdmitLockOutcome =
-	| AdmitPiTurnResult
-	| { readonly _tag: "waiting"; readonly waitingFor: string }
-
 const admitPiTurn = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<AdmitPiTurnResult> => {
-	const releaseAdmission = (done: Deferred.Deferred<void>): Effect.Effect<void> =>
-		Effect.andThen(
-			Effect.sync(() => {
-				const admissions = admissionsOf(backend)
-				const active = admissions.get(request.operationId)
-				active?.delete(done)
-				if (active?.size === 0) {
-					admissions.delete(request.operationId)
-				}
-			}),
-			Deferred.succeed(done, undefined),
-		)
-
-	return Effect.acquireUseRelease(
+): Effect.Effect<boolean | "missing_key"> =>
+	Effect.acquireUseRelease(
 		Effect.sync(() => {
 			const done = Deferred.makeUnsafe<void>()
 			const admissions = admissionsOf(backend)
@@ -379,259 +291,81 @@ const admitPiTurn = (
 			admissions.set(request.operationId, active)
 			return done
 		}),
-		(done) => admitPiTurnUnderWay(backend, request, releaseAdmission(done)),
-		releaseAdmission,
+		() => admitPiTurnUnderWay(backend, request),
+		(done) =>
+			Effect.andThen(
+				Effect.sync(() => {
+					const admissions = admissionsOf(backend)
+					const active = admissions.get(request.operationId)
+					active?.delete(done)
+					if (active?.size === 0) {
+						admissions.delete(request.operationId)
+					}
+				}),
+				Deferred.succeed(done, undefined),
+			),
 	)
-}
 
 const admitPiTurnUnderWay = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-	releaseOwnAdmission: Effect.Effect<void>,
-): Effect.Effect<AdmitPiTurnResult> => {
+): Effect.Effect<boolean | "missing_key"> => {
 	const operationId = request.operationId
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
 		instructions: request.system !== null && request.system.length > 0 ? request.system : null,
 	}
-	const finalizeCredentialFailure = (
-		failure: CredentialFailureResult,
-	): Effect.Effect<AdmitPiTurnResult> =>
-		Effect.gen(function* () {
-			yield* releaseOwnAdmission
-			while (true) {
-				const others = admissionsOf(backend).get(operationId)
-				if (others !== undefined && others.size > 0) {
-					yield* Effect.forEach([...others], Deferred.await, { discard: true })
-					continue
-				}
-				const probe = yield* backend.withLock(
-					Effect.gen(function* () {
-						const active = admissionsOf(backend).get(operationId)
-						if (active !== undefined && active.size > 0) {
-							return "retry" as const
-						}
-						const status = yield* Effect.promise(
-							async (): Promise<"submitted" | "cancelled" | "unresolved"> => {
-								const pi = await backend.pi()
-								if ((await submissionOf(pi, operationId)) !== undefined) {
-									return "submitted"
-								}
-								if (
-									backend.isCancelled(operationId) ||
-									(await isStaleTurn(pi, operationId, request.turn))
-								) {
-									return "cancelled"
-								}
-								return "unresolved"
-							},
-						)
-						if (status === "submitted") {
-							yield* notifyAdmissionSubmitted(backend, operationId)
-						}
-						return status
-					}),
-				)
-				if (probe === "retry") {
-					continue
-				}
-				if (probe === "submitted") {
-					return true
-				}
-				if (probe === "cancelled") {
-					return false
-				}
-				return failure
-			}
-		})
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
-		const credentialTimeout = yield* CredentialCheckTimeout
-		const hasCheckCredentials = backend.checkCredentials !== undefined
 		let finalizedPrevious: string | undefined
-		let credentialsVerified = !hasCheckCredentials
 		while (true) {
-			if (!credentialsVerified && hasCheckCredentials) {
-				const credentialOutcome = yield* Effect.acquireUseRelease(
-					Effect.sync(() => {
-						const entry: PendingCredentialCheck = {
-							operationId,
-							turn: request.turn,
-							wake: Deferred.makeUnsafe<void>(),
-						}
-						pendingChecksOf(backend).add(entry)
-						return entry
-					}),
-					(entry) =>
-						Effect.gen(function* () {
-							const precheck = yield* backend.withLock(
-								Effect.gen(function* () {
-									const status = yield* Effect.promise(
-										async (): Promise<"submitted" | "cancelled" | "check_credentials"> => {
-											const pi = await backend.pi()
-											if ((await submissionOf(pi, operationId)) !== undefined) {
-												return "submitted"
-											}
-											if (
-												backend.isCancelled(operationId) ||
-												(await isStaleTurn(pi, operationId, request.turn))
-											) {
-												return "cancelled"
-											}
-											return "check_credentials"
-										},
-									)
-									if (status === "submitted") {
-										yield* notifyAdmissionSubmitted(backend, operationId)
-									}
-									return status
-								}),
-							)
-							if (precheck === "submitted") {
-								return "submitted" as const
-							}
-							if (precheck === "cancelled") {
-								return "cancelled" as const
-							}
-							return yield* Effect.raceFirst(
-								Deferred.await(entry.wake).pipe(Effect.as("woken" as const)),
-								Effect.tryPromise({
-									try: async (signal): Promise<AdmitPiTurnResult> => {
-										if (backend.checkCredentials === undefined) {
-											return true
-										}
-										const check = await backend.checkCredentials(request.provider, signal)
-										return check.ok ? true : { _tag: "missing_key", message: check.message }
-									},
-									catch: () =>
-										({
-											_tag: "credential_error",
-											message: `Failed to check credentials for provider "${request.provider}".`,
-										}) as const,
-								}).pipe(Effect.catch((error) => Effect.succeed<AdmitPiTurnResult>(error))),
-							).pipe(
-								Effect.timeoutOrElse({
-									duration: credentialTimeout,
-									orElse: () => Effect.succeed("timed_out" as const),
-								}),
-							)
-						}),
-					(entry) =>
-						Effect.sync(() => {
-							const active = pendingCredentialChecks.get(backend)
-							active?.delete(entry)
-							if (active?.size === 0) {
-								pendingCredentialChecks.delete(backend)
-							}
-						}),
-				)
-				if (credentialOutcome === "submitted") {
-					return true
-				}
-				if (credentialOutcome === "cancelled") {
-					return false
-				}
-				if (credentialOutcome === "woken") {
-					const raced = yield* backend.withLock(
-						Effect.gen(function* () {
-							const submitted = yield* Effect.promise(
-								async () => (await submissionOf(await backend.pi(), operationId)) !== undefined,
-							)
-							if (submitted) {
-								yield* notifyAdmissionSubmitted(backend, operationId)
-							}
-							return submitted
-						}),
-					)
-					return raced
-				}
-				if (credentialOutcome === "timed_out") {
-					return yield* finalizeCredentialFailure({
-						_tag: "credential_timeout",
-						message: `Timed out checking credentials for provider "${request.provider}".`,
-					})
-				}
-				if (typeof credentialOutcome === "object") {
-					return yield* finalizeCredentialFailure(credentialOutcome)
-				}
-				credentialsVerified = true
-			}
-
-			const admitted: AdmitLockOutcome = yield* backend.withLock(
-				Effect.gen(function* () {
-					let turnFenceAdvanced = false
-					const outcome = yield* Effect.promise(async (): Promise<AdmitLockOutcome> => {
-						const pi = await backend.pi()
-						if ((await submissionOf(pi, operationId)) !== undefined) {
-							return true
-						}
-						if (
-							backend.isCancelled(operationId) ||
-							(await isStaleTurn(pi, operationId, request.turn))
-						) {
-							return false
-						}
-						if (!hasCheckCredentials && !backend.hasApiKey(request.provider)) {
-							return {
-								_tag: "missing_key",
-								message: backend.missingCredentialsMessage?.(request.provider),
-							}
-						}
-						await backend.ensureRoot(agent)
-						if (backend.isCancelled(operationId)) {
-							return false
-						}
-						while (true) {
-							const turnState = await beginTurnUsage(
-								pi,
-								operationId,
-								request.turn,
-								finalizedPrevious,
-							)
-							if (turnState.status === "stale") {
-								return false
-							}
-							if (turnState.status === "waiting") {
-								return { _tag: "waiting", waitingFor: turnState.operationId }
-							}
-							if (turnState.status === "finalize") {
-								await finalizeSettledTurn(pi, turnState.operationId, restoredLimit)
-								finalizedPrevious = turnState.operationId
-								continue
-							}
-							turnFenceAdvanced = true
-							break
-						}
-						if (!(await backend.enterWorkspace(request.turn))) {
-							await settleTurnUsage(pi, operationId)
-							return false
-						}
-						for (const unpublished of request.unpublishedOperationIds ?? []) {
-							await omitTurnEntries(pi, unpublished, restoredLimit)
-						}
-						if (backend.isCancelled(operationId)) {
-							return false
-						}
-						await backend.submit(request.text, operationId)
+			const admitted = yield* backend.withLock(
+				Effect.promise(async () => {
+					const pi = await backend.pi()
+					if ((await submissionOf(pi, operationId)) !== undefined) {
 						return true
-					}).pipe(
-						Effect.ensuring(
-							Effect.suspend(() =>
-								turnFenceAdvanced ? notifyTurnFenceAdvanced(backend, request.turn) : Effect.void,
-							),
-						),
-					)
-					if (outcome === true) {
-						yield* notifyAdmissionSubmitted(backend, operationId)
 					}
-					return outcome
+					if (backend.isCancelled(operationId)) {
+						return false
+					}
+					if (!backend.hasApiKey(request.provider)) {
+						return "missing_key"
+					}
+					await backend.ensureRoot(agent)
+					if (backend.isCancelled(operationId)) {
+						return false
+					}
+					while (true) {
+						const turnState = await beginTurnUsage(pi, operationId, request.turn, finalizedPrevious)
+						if (turnState.status === "stale") {
+							return false
+						}
+						if (turnState.status === "waiting") {
+							return { waitingFor: turnState.operationId }
+						}
+						if (turnState.status === "finalize") {
+							await finalizeSettledTurn(pi, turnState.operationId, restoredLimit)
+							finalizedPrevious = turnState.operationId
+							continue
+						}
+						break
+					}
+					if (!(await backend.enterWorkspace(request.turn))) {
+						await settleTurnUsage(pi, operationId)
+						return false
+					}
+					for (const unpublished of request.unpublishedOperationIds ?? []) {
+						await omitTurnEntries(pi, unpublished, restoredLimit)
+					}
+					if (backend.isCancelled(operationId)) {
+						return false
+					}
+					await backend.submit(request.text, operationId)
+					return true
 				}),
 			)
-			if (typeof admitted === "boolean") {
+			if (typeof admitted !== "object") {
 				return admitted
-			}
-			if (admitted._tag !== "waiting") {
-				return yield* finalizeCredentialFailure(admitted)
 			}
 			yield* abortPiDurableTurn(backend, admitted.waitingFor)
 			yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
@@ -728,32 +462,10 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 ): Effect.fn.Return<PiTurnOutcome> {
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
-	if (typeof admitted === "object") {
-		if (admitted._tag === "credential_timeout") {
-			return {
-				ok: false,
-				error: {
-					_tag: "TurnFailed",
-					error_type: "credential_check_timeout",
-					message: admitted.message,
-					terminal: false,
-				},
-			}
-		}
-		if (admitted._tag === "credential_error") {
-			return {
-				ok: false,
-				error: {
-					_tag: "TurnFailed",
-					error_type: "credential_check_error",
-					message: admitted.message,
-					terminal: false,
-				},
-			}
-		}
+	if (admitted === "missing_key") {
 		const fallbackCheck = checkCatalogProviderCredentials(request.provider, { env: {} })
 		const message =
-			admitted.message ??
+			backend.missingCredentialsMessage?.(request.provider) ??
 			(fallbackCheck.ok
 				? `Missing credentials for provider "${request.provider}".`
 				: fallbackCheck.message)
