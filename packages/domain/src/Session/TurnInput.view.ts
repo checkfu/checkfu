@@ -5,7 +5,6 @@ import { TurnAbandoned } from "./AbandonTurn.command.ts"
 import { SessionStatusIdle } from "./CommitModelReply.command.ts"
 import { TurnContinued } from "./PauseTurn.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
-import { systemMessageText } from "./SendSystemMessage.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { MessageText, NonNegativeInt, PositiveInt, ResourceId } from "./SessionTypes.ts"
@@ -51,16 +50,17 @@ export class TurnInput extends Domain.View("TurnInput", {
 						last_reply_turn: 0,
 						segment: 1,
 					},
-		"system.message": (state, event) =>
-			state === null
-				? null
-				: {
-						...state,
-						system_context:
-							state.system_context === undefined
-								? systemMessageText(event.content)
-								: `${state.system_context}\n\n${systemMessageText(event.content)}`,
-					},
+		"system.message": (state, event) => {
+			if (state === null) {
+				return null
+			}
+			const text = event.content.map((block) => block.text).join("\n")
+			return {
+				...state,
+				system_context:
+					state.system_context === undefined ? text : `${state.system_context}\n\n${text}`,
+			}
+		},
 		"user.message": (state, e) =>
 			state === null
 				? null

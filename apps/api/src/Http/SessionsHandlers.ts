@@ -16,7 +16,10 @@ import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
 import { recordInitialMessages } from "@checkfu/domain/Session/RecordInitialMessages.policy"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendSystemMessageDecision } from "@checkfu/domain/Session/SendSystemMessage.decision"
-import { SendSystemMessage } from "@checkfu/domain/Session/SendSystemMessage.command"
+import {
+	encodeSystemMessage,
+	SendSystemMessage,
+} from "@checkfu/domain/Session/SendSystemMessage.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -267,7 +270,12 @@ export const serializeSessionEvent = (
 
 	switch (type) {
 		case "system.message":
-			return { ...base, type, content: event.content, processed_at: event.processed_at }
+			return {
+				...base,
+				type,
+				content: event.content,
+				processed_at: event.processed_at,
+			}
 		case "user.message":
 			return { ...base, type, content: event.content }
 		case "user.interrupt":
@@ -841,7 +849,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										claimed.pipe(
 											Effect.andThen(
 												sendSystem.send(
-													new SendSystemMessage({ session_id: id, content: item.content }),
+													new SendSystemMessage({
+														session_id: id,
+														content_json: encodeSystemMessage(item.content),
+													}),
 													sendOptions,
 												),
 											),

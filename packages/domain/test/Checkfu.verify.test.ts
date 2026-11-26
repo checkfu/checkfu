@@ -9,7 +9,7 @@ import {
 } from "../src/Mcp/McpServers.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
-import { systemMessageText } from "../src/Session/SendSystemMessage.command.ts"
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import * as Verify from "@alchemy.run/domain/Verify"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -329,7 +329,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					decodeAgentTools,
 					addToolUseId,
 					removeToolUseId,
-					systemMessageText,
+					decodeSystemMessage,
 				],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
