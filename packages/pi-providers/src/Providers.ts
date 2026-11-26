@@ -120,22 +120,6 @@ export const BUILTIN_PROVIDER_IDS: ReadonlyArray<BuiltinProviderId> = BUILTIN_PR
 	(provider) => provider.id,
 )
 
-export interface DefaultProviderModel {
-	readonly provider: BuiltinProviderId
-	readonly modelId: string
-	readonly specifier: string
-}
-
-export const DEFAULT_PROVIDER_MODELS: ReadonlyArray<DefaultProviderModel> = BUILTIN_PROVIDERS.map(
-	(provider) => ({
-		provider: provider.id,
-		modelId: provider.defaultModel.startsWith(`${provider.id}/`)
-			? provider.defaultModel.slice(provider.id.length + 1)
-			: provider.defaultModel,
-		specifier: provider.defaultModel,
-	}),
-)
-
 const BUILTIN_PROVIDER_MAP: ReadonlyMap<string, BuiltinProvider> = new Map(
 	BUILTIN_PROVIDERS.map((provider) => [provider.id, provider]),
 )
