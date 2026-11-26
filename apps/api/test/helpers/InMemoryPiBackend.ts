@@ -21,8 +21,38 @@ export interface InMemoryPiDurableBackend extends PiDurableBackend {
 
 export type InMemoryStorage = InstrumentedMemoryStorage
 
+const writtenBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length
+
+export interface StoredWrite {
+	readonly kind: string
+	readonly bytes: number
+}
+
+export const storedWrites: Array<StoredWrite> = []
+
 class InstrumentedMemoryStorage extends MemoryStorage {
 	readonly cancelledOps = new Set<string>()
+	readonly #documentKinds = new Map<unknown, string>()
+
+	#record(write: Parameters<Storage["commit"]>[0][number][number]): void {
+		switch (write.type) {
+			case "entry":
+				storedWrites.push({ kind: write.value.kind, bytes: writtenBytes(write.value) })
+				break
+			case "document.create":
+				this.#documentKinds.set(write.record.id, write.record.kind)
+				storedWrites.push({ kind: write.record.kind, bytes: writtenBytes(write.content) })
+				break
+			case "document.change":
+				storedWrites.push({
+					kind: this.#documentKinds.get(write.id) ?? "unknown",
+					bytes: writtenBytes(write.content),
+				})
+				break
+			default:
+				break
+		}
+	}
 
 	override commit(
 		batches: Parameters<Storage["commit"]>[0],
@@ -31,6 +61,7 @@ class InstrumentedMemoryStorage extends MemoryStorage {
 	): ReturnType<Storage["commit"]> {
 		for (const batch of batches) {
 			for (const write of batch) {
+				this.#record(write)
 				if (
 					(write.type === "document.create" || write.type === "document.copy") &&
 					!write.record.kind.startsWith("pi.") &&

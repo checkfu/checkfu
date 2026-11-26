@@ -340,6 +340,20 @@ describe("CLI sessions:events and sessions connect", () => {
 								output_tokens: 4,
 								stop_reason: { type: "end_turn" as const },
 							}),
+						toolEvents: () => [
+							{
+								type: "tool_use",
+								tool_use_id: "call_1",
+								name: "read\u001b[2J",
+								input: { path: "/workspace/a.md" },
+							},
+							{
+								type: "tool_result",
+								tool_use_id: "call_1",
+								content: [{ type: "text", text: "# A" }],
+								is_error: false,
+							},
+						],
 					})
 					const sessionId = yield* createReadySession(cli)
 
@@ -348,6 +362,10 @@ describe("CLI sessions:events and sessions connect", () => {
 					})
 					expect(result.exitCode).toBe(0)
 					expect(result.stderr).toContain(`Connected to ${sessionId}`)
+					expect(result.stderr).toContain(String.raw`[tool] read\x1b[2J`)
+					expect(result.stderr.indexOf("[tool] read")).toBeLessThan(
+						result.stderr.indexOf("[thinking] pondering"),
+					)
 					expect(result.stderr).toContain("[thinking] pondering")
 					expect(result.stdout).toContain("Reply(1): first prompt")
 					expect(result.stdout).toContain("second prompt")

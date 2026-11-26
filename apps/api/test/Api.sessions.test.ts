@@ -24,6 +24,7 @@ import {
 	SpanModelRequestEnd,
 } from "@checkfu/domain/Session/CommitModelReply.command"
 import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
+import { AgentToolResult, AgentToolUse } from "@checkfu/domain/Session/RecordToolCall.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -2307,10 +2308,44 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new AgentThinking({ thinking: "Let me think" }),
+				event: new AgentToolUse({
+					tool_use_id: "call_1",
+					name: "read",
+					input: { path: "/workspace/notes.md", lines: [1, 20] },
+				}),
 				expectedJson: {
 					id: "evt_5",
 					seq: 5,
+					type: "agent.tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_1",
+					name: "read",
+					input: { path: "/workspace/notes.md", lines: [1, 20] },
+				},
+			},
+			{
+				event: new AgentToolResult({
+					tool_use_id: "call_1",
+					content: [{ type: "text", text: "# Notes" }],
+					is_error: false,
+					truncated: true,
+				}),
+				expectedJson: {
+					id: "evt_6",
+					seq: 6,
+					type: "agent.tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_1",
+					content: [{ type: "text", text: "# Notes" }],
+					is_error: false,
+					truncated: true,
+				},
+			},
+			{
+				event: new AgentThinking({ thinking: "Let me think" }),
+				expectedJson: {
+					id: "evt_7",
+					seq: 7,
 					type: "agent.thinking",
 					created_at: "2026-01-01T00:00:00.000Z",
 					thinking: "Let me think",
@@ -2319,8 +2354,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new AgentMessage({ content: [{ type: "text", text: "Hi there" }] }),
 				expectedJson: {
-					id: "evt_6",
-					seq: 6,
+					id: "evt_8",
+					seq: 8,
 					type: "agent.message",
 					created_at: "2026-01-01T00:00:00.000Z",
 					content: [{ type: "text", text: "Hi there" }],
@@ -2332,8 +2367,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					truncated: true,
 				}),
 				expectedJson: {
-					id: "evt_7",
-					seq: 7,
+					id: "evt_9",
+					seq: 9,
 					type: "agent.message",
 					created_at: "2026-01-01T00:00:00.000Z",
 					content: [{ type: "text", text: "Hi..." }],
@@ -2347,8 +2382,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					is_error: false,
 				}),
 				expectedJson: {
-					id: "evt_8",
-					seq: 8,
+					id: "evt_10",
+					seq: 10,
 					type: "span.model_request_end",
 					created_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
@@ -2363,8 +2398,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					is_error: null,
 				}),
 				expectedJson: {
-					id: "evt_9",
-					seq: 9,
+					id: "evt_11",
+					seq: 11,
 					type: "span.model_request_end",
 					created_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
@@ -2375,8 +2410,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				expectedJson: {
-					id: "evt_10",
-					seq: 10,
+					id: "evt_12",
+					seq: 12,
 					type: "session.status_idle",
 					created_at: "2026-01-01T00:00:00.000Z",
 					stop_reason: { type: "end_turn" },
@@ -2392,8 +2427,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					},
 				}),
 				expectedJson: {
-					id: "evt_11",
-					seq: 11,
+					id: "evt_13",
+					seq: 13,
 					type: "session.error",
 					created_at: "2026-01-01T00:00:00.000Z",
 					error: {
@@ -2406,8 +2441,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionStatusTerminated({ running_turn: null }),
 				expectedJson: {
-					id: "evt_12",
-					seq: 12,
+					id: "evt_14",
+					seq: 14,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2415,8 +2450,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_13",
-					seq: 13,
+					id: "evt_15",
+					seq: 15,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},

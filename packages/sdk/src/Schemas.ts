@@ -203,6 +203,9 @@ export type ModelUsage = typeof ModelUsage.Type
 export const SessionStatus = Schema.Literals(["idle", "running", "terminated"])
 export type SessionStatus = typeof SessionStatus.Type
 
+export const ToolRejection = Schema.Literals(["unavailable", "invalid_arguments", "blocked"])
+export type ToolRejection = typeof ToolRejection.Type
+
 export const SessionEventFields = {
 	"user.message": {
 		content: TextBlocks,
@@ -213,6 +216,19 @@ export const SessionEventFields = {
 	},
 	"span.model_request_start": {
 		model_request_start_id: NonEmptyString,
+	},
+	"agent.tool_use": {
+		tool_use_id: ResourceId,
+		name: ResourceId,
+		input: Schema.JsonObject,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.tool_result": {
+		tool_use_id: ResourceId,
+		content: Schema.Array(TextBlock),
+		is_error: Schema.Boolean,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+		rejected: Schema.optionalKey(ToolRejection),
 	},
 	"agent.thinking": {
 		thinking: Schema.String,
