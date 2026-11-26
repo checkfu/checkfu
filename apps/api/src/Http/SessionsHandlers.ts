@@ -13,7 +13,12 @@ import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.com
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
+import {
+	MAX_CUSTOM_TOOL_RESULT_LENGTH,
+	MAX_MESSAGE_TEXT_LENGTH,
+	MessageText,
+	decodeToolUseIds,
+} from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
@@ -29,9 +34,34 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
+import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import {
+	NO_MCP_SERVER_CREDENTIALS,
+	decodeMcpServers,
+	encodeMcpServerCredentials,
+	mcpHostAllowed,
+	resolveMcpServerCredentials,
+} from "@checkfu/domain/Mcp/McpServers"
+import type { CredentialRequest } from "@checkfu/domain/Mcp/McpServers"
+import { ConfirmTool } from "@checkfu/domain/Session/ConfirmTool.command"
+import { ConfirmToolDecision } from "@checkfu/domain/Session/ConfirmTool.decision"
+import { ReturnCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
+import { ReturnCustomToolResultDecision } from "@checkfu/domain/Session/ReturnCustomToolResult.decision"
+import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
+import { Credential } from "@checkfu/domain/Vault/Credential.aggregate"
+import { CredentialId } from "@checkfu/domain/Vault/Credential.id"
+import {
+	CredentialUrlClaim,
+	credentialUrlClaimId,
+} from "@checkfu/domain/Vault/CredentialUrlClaim.aggregate"
+import { Vault } from "@checkfu/domain/Vault/Vault.aggregate"
+import { VaultId } from "@checkfu/domain/Vault/Vault.id"
+import * as Result from "effect/Result"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
@@ -95,28 +125,50 @@ const sessionEventCommandId = (
 			: [sessionId, "batch", scope.key, scope.index],
 	)
 
+type PreparedEvent =
+	| { readonly type: "user.interrupt" }
+	| { readonly type: "user.message"; readonly text: string }
+	| {
+			readonly type: "user.tool_confirmation"
+			readonly tool_use_id: string
+			readonly result: "allow" | "deny"
+			readonly deny_message: string
+	  }
+	| {
+			readonly type: "user.custom_tool_result"
+			readonly custom_tool_use_id: string
+			readonly text: string
+			readonly is_error: boolean
+	  }
+
+const eventFields = (item: PreparedEvent) => {
+	switch (item.type) {
+		case "user.interrupt":
+			return {}
+		case "user.message":
+			return { text: item.text }
+		case "user.tool_confirmation":
+			return { tool_use_id: item.tool_use_id, result: item.result, deny_message: item.deny_message }
+		case "user.custom_tool_result":
+			return {
+				custom_tool_use_id: item.custom_tool_use_id,
+				text: item.text,
+				is_error: item.is_error,
+			}
+	}
+}
+
 const eventBatchFingerprint = (
 	digest: Digest.Digest["Service"],
-	items: ReadonlyArray<
-		| { readonly type: "user.interrupt"; readonly eventId: string | undefined }
-		| {
-				readonly type: "user.message"
-				readonly eventId: string | undefined
-				readonly text: string
-		  }
-	>,
+	items: ReadonlyArray<PreparedEvent & { readonly eventId: string | undefined }>,
 ) =>
 	sha256Json(
 		digest,
-		items.map((item) =>
-			item.type === "user.interrupt"
-				? { type: item.type, ...(item.eventId === undefined ? {} : { id: item.eventId }) }
-				: {
-						type: item.type,
-						...(item.eventId === undefined ? {} : { id: item.eventId }),
-						text: item.text,
-					},
-		),
+		items.map((item) => ({
+			type: item.type,
+			...(item.eventId === undefined ? {} : { id: item.eventId }),
+			...eventFields(item),
+		})),
 	)
 
 const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnapshot) => ({
@@ -155,6 +207,27 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 			}
 		case "user.interrupt":
 			return sessionEventEnvelope(entry, "user.interrupt")
+		case "user.tool_confirmation":
+			return {
+				...sessionEventEnvelope(entry, "user.tool_confirmation"),
+				tool_use_id: event.tool_use_id,
+				result: event.result,
+				...(event.deny_message === undefined ? {} : { deny_message: event.deny_message }),
+			}
+		case "user.custom_tool_result":
+			return {
+				...sessionEventEnvelope(entry, "user.custom_tool_result"),
+				custom_tool_use_id: event.custom_tool_use_id,
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				...(event.is_error === undefined ? {} : { is_error: event.is_error }),
+			}
+		case "agent.custom_tool_use":
+			return {
+				...sessionEventEnvelope(entry, "agent.custom_tool_use"),
+				tool_use_id: event.tool_use_id,
+				name: event.name,
+				input: event.input,
+			}
 		case "session.status_running":
 			return {
 				...sessionEventEnvelope(entry, "session.status_running"),
@@ -172,6 +245,27 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				name: event.name,
 				input: event.input,
 				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
+		case "agent.mcp_tool_use":
+			return {
+				...sessionEventEnvelope(entry, "agent.mcp_tool_use"),
+				tool_use_id: event.tool_use_id,
+				mcp_server_name: event.mcp_server_name,
+				name: event.name,
+				input: event.input,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+				...(event.evaluated_permission === undefined
+					? {}
+					: { evaluated_permission: event.evaluated_permission }),
+			}
+		case "agent.mcp_tool_result":
+			return {
+				...sessionEventEnvelope(entry, "agent.mcp_tool_result"),
+				tool_use_id: event.tool_use_id,
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				is_error: event.is_error,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
 			}
 		case "agent.tool_result":
 			return {
@@ -203,12 +297,21 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				},
 				is_error: event.is_error,
 			}
-		case "session.status_idle":
-			return {
-				...sessionEventEnvelope(entry, "session.status_idle"),
-				stop_reason: { type: event.stop_reason.type },
-				turn: event.turn,
-			}
+		case "session.status_idle": {
+			const unanswered = decodeToolUseIds(event.event_ids ?? "[]")
+			return event.stop_reason.type === "requires_action"
+				? {
+						...sessionEventEnvelope(entry, "session.status_idle"),
+						stop_reason: { type: "requires_action", event_ids: unanswered },
+						turn: event.turn,
+					}
+				: {
+						...sessionEventEnvelope(entry, "session.status_idle"),
+						stop_reason: { type: event.stop_reason.type },
+						turn: event.turn,
+						...(unanswered.length === 0 ? {} : { cancelled_event_ids: unanswered }),
+					}
+		}
 		case "session.error":
 			return {
 				...sessionEventEnvelope(entry, "session.error"),
@@ -218,8 +321,13 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 					retry_status: { type: event.error.retry_status.type },
 				},
 			}
-		case "session.status_terminated":
-			return sessionEventEnvelope(entry, "session.status_terminated")
+		case "session.status_terminated": {
+			const unanswered = decodeToolUseIds(event.event_ids ?? "[]")
+			return {
+				...sessionEventEnvelope(entry, "session.status_terminated"),
+				...(unanswered.length === 0 ? {} : { cancelled_event_ids: unanswered }),
+			}
+		}
 		case "session.archived":
 			return sessionEventEnvelope(entry, "session.archived")
 		default: {
@@ -229,10 +337,27 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 	}
 }
 
+const created = (snapshot: SessionSnapshot) => ({
+	id: snapshot.id,
+	type: "session" as const,
+	status: "idle" as const,
+	agent: { id: snapshot.agent_id, version: snapshot.agent_version },
+	environment_id: snapshot.environment_id,
+	title: snapshot.title,
+	turn: 0,
+	usage: { input_tokens: 0, output_tokens: 0 },
+	mcp_server_credentials: snapshot.mcp_server_credentials,
+	created_at: snapshot.created_at,
+	updated_at: snapshot.created_at,
+	archived_at: null,
+})
+
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const confirmTool = yield* ConfirmToolDecision
+		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
 		const digest = yield* Digest.Digest
@@ -249,6 +374,107 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		}
 		const { readArtifact } = yield* artifactReads
 		const artifacts = yield* Artifact
+
+		const agents = yield* Agent
+		const environments = yield* Environment
+		const vaults = yield* Vault
+		const credentials = yield* Credential
+		const urlClaims = yield* CredentialUrlClaim
+
+		const placeOf = (credentialId: string) =>
+			Effect.gen(function* () {
+				const credential = yield* credentials.get(CredentialId.make(credentialId))
+				if (credential.status !== "active") {
+					return { vault_id: null, target: null }
+				}
+				const vault = yield* vaults.get(VaultId.make(credential.vault_id))
+				return vault.status === "active"
+					? { vault_id: credential.vault_id, target: credential.mcp_server_url }
+					: { vault_id: null, target: null }
+			})
+
+		const credentialsFor = (
+			agentId: AgentId,
+			agentVersion: number | null,
+			environmentId: EnvironmentId,
+			payload: {
+				readonly vault_ids?: ReadonlyArray<string>
+				readonly mcp_server_credentials?: ReadonlyArray<{
+					readonly mcp_server_name: string
+					readonly credential_id: string
+				}>
+			},
+		) =>
+			Effect.gen(function* () {
+				const head = yield* agents.get(agentId)
+				const environment = yield* environments.get(environmentId)
+				const pinned = agentVersion ?? head.version
+				const refusal = admissionRefusal(
+					{ id: agentId, state: head },
+					{ id: environmentId, state: environment },
+					pinned,
+				)
+				if (refusal !== undefined) {
+					return yield* refusal
+				}
+				const version =
+					pinned === head.version
+						? { mcp_servers: decodeMcpServers(head.mcp_servers) }
+						: yield* agentVersionsByNumber
+								.waitFor(
+									agentVersionLookupKey(agentId, pinned),
+									{ version: pinned },
+									{ timeout: yield* AgentVersionWaitTimeout },
+								)
+								.pipe(Effect.orElseSucceed(() => null))
+				if (version === null) {
+					return yield* reject(503, `Agent ${agentId} version ${pinned} is not ready yet.`)
+				}
+				const servers = version.mcp_servers
+				const networking = environment.config?.networking
+				for (const server of servers) {
+					const { host } = new URL(server.url)
+					if (!mcpHostAllowed(networking, host)) {
+						return yield* reject(
+							400,
+							`MCP server "${server.name}" (${host}) is not allowed by the environment's network rules.`,
+						)
+					}
+				}
+				const urls = [...new Set(servers.map((server) => server.url))]
+				const claimed: Array<CredentialRequest["vaults"][number]> = []
+				for (const vaultId of new Set(payload.vault_ids)) {
+					const vault = yield* vaults.get(VaultId.make(vaultId))
+					if (vault.status !== "active") {
+						return yield* reject(400, `Vault ${vaultId} is not an active vault.`)
+					}
+					const holders = yield* Effect.forEach(
+						urls,
+						(mcp_server_url) =>
+							Effect.map(urlClaims.get(credentialUrlClaimId(vaultId, mcp_server_url)), (claim) => ({
+								credential_id: claim.holder,
+								mcp_server_url,
+							})),
+						{ concurrency: 8 },
+					)
+					claimed.push({
+						id: vaultId,
+						credentials: holders.filter((entry) => entry.credential_id !== ""),
+					})
+				}
+				const explicit = yield* Effect.forEach(payload.mcp_server_credentials ?? [], (pair) =>
+					Effect.map(placeOf(pair.credential_id), (place) => ({ ...pair, ...place })),
+				)
+				const resolved = resolveMcpServerCredentials({ servers, explicit, vaults: claimed })
+				if (Result.isFailure(resolved)) {
+					return yield* reject(400, resolved.failure)
+				}
+				const text = encodeMcpServerCredentials(resolved.success)
+				if (text === undefined) {
+					return yield* reject(400, "The session's MCP server credentials are too long.")
+				}
+				return { agent_version: pinned, text }
+			})
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -348,18 +574,25 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
+							vault_ids: payload.vault_ids,
+							mcp_server_credentials: payload.mcp_server_credentials,
 						},
 					})
 					const id = SessionId.make(identity.id)
 					const sendOptions = identity.options
+					const given =
+						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
+							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
+							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
 					const receipt = yield* admitSession
 						.send(
 							new AdmitSession({
 								session_id: id,
 								agent_id: agentId,
-								agent_version: agentVersion,
+								agent_version: given.agent_version,
 								environment_id: environmentId,
 								title,
+								mcp_server_credentials: given.text,
 							}),
 							sendOptions,
 						)
@@ -385,23 +618,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(result)) {
 						return result
 					}
-					const snapshot = yield* present(result, 500, "Failed to load created session.")
-					return {
-						id,
-						type: "session" as const,
-						status: "idle" as const,
-						agent: { id: agentId, version: pinnedVersion },
-						environment_id: environmentId,
-						title,
-						turn: 0,
-						usage: {
-							input_tokens: 0,
-							output_tokens: 0,
-						},
-						created_at: snapshot.created_at,
-						updated_at: snapshot.created_at,
-						archived_at: null,
-					}
+					return created(yield* present(result, 500, "Failed to load created session."))
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
@@ -457,17 +674,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const idempotencyKey = headers["idempotency-key"]
 					const seenEventIds = new Set<string>()
 					const prepared: Array<
-						| {
-								readonly type: "user.interrupt"
-								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
-						  }
-						| {
-								readonly type: "user.message"
-								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
-								readonly text: typeof MessageText.Type
-						  }
+						PreparedEvent & {
+							readonly eventId: ClientEventId | undefined
+							readonly commandId: string | undefined
+						}
 					> = []
 					for (const [index, event] of payload.events.entries()) {
 						if (event.id !== undefined) {
@@ -488,6 +698,41 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									: undefined
 						if (event.type === "user.interrupt") {
 							prepared.push({ type: "user.interrupt", eventId: event.id, commandId })
+							continue
+						}
+						if (event.type === "user.tool_confirmation") {
+							if (event.result === "allow" && event.deny_message !== undefined) {
+								return yield* reject(
+									400,
+									`events[${index}] has a deny_message but allows the call.`,
+								)
+							}
+							prepared.push({
+								type: "user.tool_confirmation",
+								eventId: event.id,
+								commandId,
+								tool_use_id: event.tool_use_id,
+								result: event.result,
+								deny_message: event.deny_message ?? "",
+							})
+							continue
+						}
+						if (event.type === "user.custom_tool_result") {
+							const resultText = event.content.map((block) => block.text).join("\n")
+							if (resultText.length > MAX_CUSTOM_TOOL_RESULT_LENGTH) {
+								return yield* reject(
+									400,
+									`events[${index}] content is more than ${MAX_CUSTOM_TOOL_RESULT_LENGTH} characters.`,
+								)
+							}
+							prepared.push({
+								type: "user.custom_tool_result",
+								eventId: event.id,
+								commandId,
+								custom_tool_use_id: event.custom_tool_use_id,
+								text: resultText,
+								is_error: event.is_error === true,
+							})
 							continue
 						}
 						const joined = event.content.map((block) => block.text).join("\n")
@@ -522,52 +767,119 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					for (const [index, item] of prepared.entries()) {
 						const sendOptions =
 							item.commandId === undefined ? undefined : { commandId: item.commandId }
+						const claimed =
+							sendOptions === undefined
+								? Effect.void
+								: Effect.gen(function* () {
+										const fingerprint = yield* eventBatchFingerprint(digest, [item])
+										const claim = yield* sessions.send(
+											new ClaimIdempotencyKey({ session_id: id, fingerprint }),
+											sendOptions,
+										)
+										if (
+											!claim.events.some(
+												(event) =>
+													event._tag === "idempotency_key.claimed" &&
+													event.fingerprint === fingerprint,
+											)
+										) {
+											return yield* reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+										}
+									})
 						const outcome =
-							item.type === "user.interrupt"
+							item.type === "user.tool_confirmation"
 								? yield* settled(
-										sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions).pipe(
-											Effect.flatMap((receipt) =>
-												receipt.events.some((event) => event._tag === "user.interrupt")
-													? Effect.succeed({
-															type: "user.interrupt" as const,
-															...(item.eventId === undefined ? {} : { id: item.eventId }),
-														})
-													: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+										claimed.pipe(
+											Effect.andThen(
+												confirmTool.send(
+													new ConfirmTool({
+														session_id: id,
+														confirmation_id: toolConfirmationId(id, item.tool_use_id),
+														tool_use_id: item.tool_use_id,
+														result: item.result,
+														deny_message: item.deny_message,
+													}),
+													sendOptions,
+												),
 											),
+											Effect.as({
+												type: "user.tool_confirmation" as const,
+												...(item.eventId === undefined ? {} : { id: item.eventId }),
+												tool_use_id: item.tool_use_id,
+												result: item.result,
+											}),
 										),
 									)
-								: yield* settled(
-										sessions
-											.send(new SendUserMessage({ session_id: id, text: item.text }), sendOptions)
-											.pipe(
-												Effect.flatMap((receipt) => {
-													const committed = receipt.events.find(
-														(event) => event._tag === "user.message",
-													)
-													if (
-														committed?._tag !== "user.message" ||
-														committed.content[0]?.text !== item.text
-													) {
-														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-													}
-													if (receipt.reply === undefined) {
-														return Effect.die(
-															new Error("SendUserMessage receipt is missing reply."),
-														)
-													}
-													const queued = !receipt.events.some(
-														(event) => event._tag === "session.status_running",
-													)
-													return Effect.succeed({
-														type: "user.message" as const,
-														...(item.eventId === undefined ? {} : { id: item.eventId }),
-														turn: receipt.reply.turn,
-														queued,
-														content: [{ type: "text" as const, text: item.text }],
-													})
+								: item.type === "user.custom_tool_result"
+									? yield* settled(
+											claimed.pipe(
+												Effect.andThen(
+													returnCustomToolResult.send(
+														new ReturnCustomToolResult({
+															session_id: id,
+															confirmation_id: toolConfirmationId(id, item.custom_tool_use_id),
+															custom_tool_use_id: item.custom_tool_use_id,
+															text: item.text,
+															is_error: item.is_error,
+														}),
+														sendOptions,
+													),
+												),
+												Effect.as({
+													type: "user.custom_tool_result" as const,
+													...(item.eventId === undefined ? {} : { id: item.eventId }),
+													custom_tool_use_id: item.custom_tool_use_id,
 												}),
 											),
-									)
+										)
+									: item.type === "user.interrupt"
+										? yield* settled(
+												sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions).pipe(
+													Effect.flatMap((receipt) =>
+														receipt.events.some((event) => event._tag === "user.interrupt")
+															? Effect.succeed({
+																	type: "user.interrupt" as const,
+																	...(item.eventId === undefined ? {} : { id: item.eventId }),
+																})
+															: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+													),
+												),
+											)
+										: yield* settled(
+												sessions
+													.send(
+														new SendUserMessage({ session_id: id, text: item.text }),
+														sendOptions,
+													)
+													.pipe(
+														Effect.flatMap((receipt) => {
+															const committed = receipt.events.find(
+																(event) => event._tag === "user.message",
+															)
+															if (
+																committed?._tag !== "user.message" ||
+																committed.content[0]?.text !== item.text
+															) {
+																return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+															}
+															if (receipt.reply === undefined) {
+																return Effect.die(
+																	new Error("SendUserMessage receipt is missing reply."),
+																)
+															}
+															const queued = !receipt.events.some(
+																(event) => event._tag === "session.status_running",
+															)
+															return Effect.succeed({
+																type: "user.message" as const,
+																...(item.eventId === undefined ? {} : { id: item.eventId }),
+																turn: receipt.reply.turn,
+																queued,
+																content: [{ type: "text" as const, text: item.text }],
+															})
+														}),
+													),
+											)
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure
 							const mapped = toApiError(error, yield* currentRequestId)

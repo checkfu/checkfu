@@ -230,12 +230,14 @@ export const cutBaseline = (
 				samples: sampleEncoded(shape),
 			}).pipe(Effect.map(({ fingerprint, samples }) => ({ id: shape.id, fingerprint, samples }))),
 		)
-		return {
-			label,
-			cut_at: cutAt,
-			schemas: Object.fromEntries(entries.map((entry) => [entry.id, entry.fingerprint])),
-			shapes: Object.fromEntries(entries.map((entry) => [entry.id, entry.samples])),
-		}
+		return decodeBaselineJson(
+			JSON.stringify({
+				label,
+				cut_at: cutAt,
+				schemas: Object.fromEntries(entries.map((entry) => [entry.id, entry.fingerprint])),
+				shapes: Object.fromEntries(entries.map((entry) => [entry.id, entry.samples])),
+			}),
+		)
 	})
 
 export const readLockFile: Effect.Effect<

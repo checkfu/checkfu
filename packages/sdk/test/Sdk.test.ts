@@ -9,7 +9,9 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { AgentResource, ListAgentsResponse, SessionResource } from "../src/Api.ts"
 import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
 import {
 	executePaginatedPromise,
@@ -114,6 +116,8 @@ const sampleAgent = (overrides?: {
 }) => ({
 	id: "agent_1",
 	type: "agent" as const,
+	mcp_servers: [],
+	tools: [],
 	version: 1,
 	name: "Assistant",
 	model: { id: "gpt-6.2-sol" },
@@ -176,6 +180,7 @@ const sampleSession = (overrides?: {
 }) => ({
 	id: "sess_1",
 	type: "session" as const,
+	mcp_server_credentials: [],
 	status: "idle" as const,
 	agent: { id: "agent_1", version: 1 },
 	environment_id: "env_1",
@@ -261,6 +266,46 @@ const makeEffectLayer = (
 			: { autoIdempotencyKey: config.autoIdempotencyKey }),
 		fetch: fetchImpl,
 	})
+
+describe("Responses from a server that predates a field", () => {
+	it("reads an agent without mcp_servers and a session without mcp_server_credentials as having none", () => {
+		const { mcp_servers: _servers, ...agent } = sampleAgent()
+		const { mcp_server_credentials: _credentials, ...session } = sampleSession()
+		const readAgent = Schema.decodeUnknownSync(Schema.toCodecJson(AgentResource))
+		const readSession = Schema.decodeUnknownSync(Schema.toCodecJson(SessionResource))
+		expect(readAgent(agent).mcp_servers).toEqual([])
+		expect(readSession(session).mcp_server_credentials).toEqual([])
+		const bound = [
+			{ mcp_server_name: "docs", credential_id: "cred_1" },
+			{ mcp_server_name: "files", credential_id: "cred_2", vault_id: "vlt_1" },
+		]
+		expect(
+			readSession({ ...session, mcp_server_credentials: bound }).mcp_server_credentials,
+		).toEqual(bound)
+	})
+
+	it("reads an agent as the server sent it before agents declared servers or tools, retrieved or listed", () => {
+		const body = JSON.stringify({
+			id: "agent_1",
+			type: "agent",
+			version: 1,
+			name: "Assistant",
+			model: { id: "gpt-6.2-sol" },
+			system: "Be concise.",
+			description: null,
+			created_at: ISO_NOW,
+			updated_at: ISO_NOW,
+			archived_at: null,
+		})
+		const retrieved = Schema.decodeUnknownSync(Schema.toCodecJson(AgentResource))(JSON.parse(body))
+		expect(retrieved.tools).toEqual([])
+		expect(retrieved.mcp_servers).toEqual([])
+		const listed = Schema.decodeUnknownSync(Schema.toCodecJson(ListAgentsResponse))(
+			JSON.parse(`{"data":[${body}],"has_more":false,"next_cursor":null}`),
+		)
+		expect(listed.data.map((agent) => [agent.tools, agent.mcp_servers])).toEqual([[[], []]])
+	})
+})
 
 describe("@checkfu/sdk", () => {
 	describe("config & URL security", () => {

@@ -1,11 +1,13 @@
 import * as Domain from "@alchemy.run/domain"
 import { AgentSnapshot } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
+import { decodeAgentTools, decodeMcpServers } from "../Mcp/McpServers.ts"
 import { Agent } from "./Agent.aggregate.ts"
 
 export { AgentSnapshot }
 
 export class AgentView extends Domain.View("AgentView", {
+	version: 3,
 	from: [Agent],
 	key: Agent,
 	state: Schema.NullOr(AgentSnapshot),
@@ -20,6 +22,8 @@ export class AgentView extends Domain.View("AgentView", {
 			model: e.model,
 			system: e.system,
 			description: e.description,
+			mcp_servers: decodeMcpServers(e.mcp_servers),
+			tools: decodeAgentTools(e.tools),
 			created_at: ctx.at,
 			updated_at: ctx.at,
 			archived_at: null,
@@ -35,6 +39,9 @@ export class AgentView extends Domain.View("AgentView", {
 						model: e.model,
 						system: e.system,
 						description: e.description,
+						mcp_servers:
+							e.mcp_servers === undefined ? state.mcp_servers : decodeMcpServers(e.mcp_servers),
+						tools: e.tools === undefined ? state.tools : decodeAgentTools(e.tools),
 						updated_at: ctx.at,
 					},
 		"agent.archived": (state, _e, ctx) =>

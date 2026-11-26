@@ -1,15 +1,20 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
+import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
 import { DiscardWorkspace, DiscardWorkspaceLive } from "./Session/DiscardWorkspace.policy.ts"
+import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.ts"
+import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest, StopModelRequestLive } from "./Session/StopModelRequest.policy.ts"
+import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 
 export class Sessions extends Domain.Model("Sessions", {
-	aggregates: [Session],
+	aggregates: [Session, ToolConfirmation],
+	decisions: [RequestToolActionDecision, ConfirmToolDecision, ReturnCustomToolResultDecision],
 	views: [SessionView, TurnInput],
 	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
 	sagas: [RunTurn],
@@ -35,7 +40,7 @@ export class Sessions extends Domain.Model("Sessions", {
 					if (s.state._tag === "Running") {
 						return [
 							view.state.id === s.id,
-							view.state.status === "running",
+							view.state.status === (s.state.paused ? "idle" : "running"),
 							view.state.turn === s.state.turn,
 							!view.state.archived_at,
 						].every((ok) => ok)
@@ -104,13 +109,20 @@ export class Sessions extends Domain.Model("Sessions", {
 			m.Session.some((s) => s.state._tag === "Terminated" && s.state.archived),
 	},
 	eventually: {
-		EveryTurnSettles: (m) => m.Session.every((s) => s.state._tag !== "Running"),
+		EveryTurnSettles: (m) => m.Session.every((s) => s.state._tag !== "Running" || s.state.paused),
 	},
 }) {}
 
 export class SessionsApi extends Domain.Api("SessionsApi", {
 	model: Sessions,
-	commands: ["CreateSession", "SendUserMessage", "SendUserInterrupt", "ArchiveSession"],
+	commands: [
+		"CreateSession",
+		"SendUserMessage",
+		"SendUserInterrupt",
+		"ConfirmTool",
+		"ReturnCustomToolResult",
+		"ArchiveSession",
+	],
 	views: ["SessionView"],
 }) {}
 

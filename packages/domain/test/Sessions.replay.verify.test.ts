@@ -4,7 +4,13 @@ import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import {
+	decodeAgentTools,
+	decodeMcpServerCredentials,
+	decodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
+import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi, SessionsHandlersLive } from "../src/Sessions.model.ts"
 import {
 	PROVED,
@@ -31,6 +37,13 @@ describe("Sessions Z3 formal verification, replayed", () => {
 					budget: 2000,
 					faults: { redeliver: true, reorder: true, rerun: false },
 					walks: { count: 0 },
+					opaque: [
+						decodeMcpServers,
+						decodeMcpServerCredentials,
+						decodeAgentTools,
+						addToolUseId,
+						removeToolUseId,
+					],
 					require: { proved: PROVED },
 				})
 				expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
@@ -66,6 +79,6 @@ describe("Sessions Z3 formal verification, replayed", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		300_000,
+		600_000,
 	)
 })

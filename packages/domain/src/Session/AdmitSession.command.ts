@@ -5,6 +5,7 @@ import { AgentArchivedError } from "../Agent/AgentArchived.rejection.ts"
 import { AgentNotFound } from "../Agent/AgentNotFound.rejection.ts"
 import { EnvironmentArchivedError } from "../Environment/EnvironmentArchived.rejection.ts"
 import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejection.ts"
+import { McpServerCredentialsText } from "../Mcp/McpServers.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { SessionId } from "./Session.id.ts"
 import { MAX_IDENTIFIER_LENGTH, PositiveInt, SessionTitle } from "./SessionTypes.ts"
@@ -35,6 +36,7 @@ export class AdmitSession extends Domain.Command("AdmitSession", {
 		agent_version: Schema.NullOr(PositiveInt),
 		environment_id: BoundedEnvironmentId,
 		title: Schema.NullOr(SessionTitle),
+		mcp_server_credentials: McpServerCredentialsText,
 	},
 	events: [SessionCreated],
 	rejects: [

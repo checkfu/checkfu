@@ -101,6 +101,131 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							],
 							description: "Agent description",
 						},
+						mcp_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["url"],
+									},
+									name: {
+										type: "string",
+										minLength: 1,
+										maxLength: 32,
+										pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+									},
+									url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+									},
+								},
+								required: ["type", "name", "url"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description:
+								"MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>.",
+						},
+						tools: {
+							type: "array",
+							items: {
+								anyOf: [
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["mcp_toolset"],
+											},
+											mcp_server_name: {
+												type: "string",
+												minLength: 1,
+												maxLength: 32,
+												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+											},
+											default_config: {
+												type: "object",
+												properties: {
+													permission_policy: {
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["always_allow", "always_ask"],
+															},
+														},
+														required: ["type"],
+														additionalProperties: false,
+													},
+												},
+												additionalProperties: false,
+												description:
+													"Applies to tools without their own configuration. MCP tools require confirmation by default.",
+											},
+											configs: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														name: {
+															type: "string",
+															minLength: 1,
+															maxLength: 128,
+														},
+														permission_policy: {
+															type: "object",
+															properties: {
+																type: {
+																	type: "string",
+																	enum: ["always_allow", "always_ask"],
+																},
+															},
+															required: ["type"],
+															additionalProperties: false,
+														},
+													},
+													required: ["name"],
+													additionalProperties: false,
+												},
+												maxItems: 128,
+											},
+										},
+										required: ["type", "mcp_server_name"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["custom"],
+											},
+											name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,64}$",
+											},
+											description: {
+												type: "string",
+												minLength: 1,
+												maxLength: 4096,
+											},
+											input_schema: {
+												type: "object",
+											},
+										},
+										required: ["type", "name", "description", "input_schema"],
+										additionalProperties: false,
+									},
+								],
+							},
+							maxItems: 84,
+							description:
+								"Permission policies for MCP servers' tools (mcp_toolset) and custom tools the caller's application runs (custom).",
+						},
 					},
 					required: ["name", "model"],
 					additionalProperties: false,
@@ -338,6 +463,129 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description: "Updated agent description",
+						},
+						mcp_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["url"],
+									},
+									name: {
+										type: "string",
+										minLength: 1,
+										maxLength: 32,
+										pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+									},
+									url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+									},
+								},
+								required: ["type", "name", "url"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description: "Replacement list of the agent's MCP servers",
+						},
+						tools: {
+							type: "array",
+							items: {
+								anyOf: [
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["mcp_toolset"],
+											},
+											mcp_server_name: {
+												type: "string",
+												minLength: 1,
+												maxLength: 32,
+												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+											},
+											default_config: {
+												type: "object",
+												properties: {
+													permission_policy: {
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["always_allow", "always_ask"],
+															},
+														},
+														required: ["type"],
+														additionalProperties: false,
+													},
+												},
+												additionalProperties: false,
+												description:
+													"Applies to tools without their own configuration. MCP tools require confirmation by default.",
+											},
+											configs: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														name: {
+															type: "string",
+															minLength: 1,
+															maxLength: 128,
+														},
+														permission_policy: {
+															type: "object",
+															properties: {
+																type: {
+																	type: "string",
+																	enum: ["always_allow", "always_ask"],
+																},
+															},
+															required: ["type"],
+															additionalProperties: false,
+														},
+													},
+													required: ["name"],
+													additionalProperties: false,
+												},
+												maxItems: 128,
+											},
+										},
+										required: ["type", "mcp_server_name"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["custom"],
+											},
+											name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,64}$",
+											},
+											description: {
+												type: "string",
+												minLength: 1,
+												maxLength: 4096,
+											},
+											input_schema: {
+												type: "object",
+											},
+										},
+										required: ["type", "name", "description", "input_schema"],
+										additionalProperties: false,
+									},
+								],
+							},
+							maxItems: 84,
+							description: "Replacement list of the agent's tool declarations",
 						},
 					},
 					additionalProperties: false,
@@ -1957,6 +2205,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									],
 									description: "Optional session title",
 								},
+								vault_ids: {
+									type: "array",
+									items: {
+										type: "string",
+										minLength: 1,
+									},
+									maxItems: 20,
+									description:
+										"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+								},
+								mcp_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											mcp_server_name: {
+												type: "string",
+												minLength: 1,
+												maxLength: 32,
+												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+											},
+										},
+										required: ["mcp_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 20,
+									description:
+										"Explicit credentials for named servers. An explicit binding wins over vault matching.",
+								},
 							},
 							required: ["agent", "environment_id"],
 							additionalProperties: false,
@@ -2025,6 +2306,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										},
 									],
 									description: "Optional session title",
+								},
+								vault_ids: {
+									type: "array",
+									items: {
+										type: "string",
+										minLength: 1,
+									},
+									maxItems: 20,
+									description:
+										"Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it.",
+								},
+								mcp_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											mcp_server_name: {
+												type: "string",
+												minLength: 1,
+												maxLength: 32,
+												pattern: "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+											},
+										},
+										required: ["mcp_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 20,
+									description:
+										"Explicit credentials for named servers. An explicit binding wins over vault matching.",
 								},
 							},
 							required: ["agent_id", "environment_id"],
@@ -2300,6 +2614,83 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											},
 										},
 										required: ["type"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											id: {
+												type: "string",
+												pattern: "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+												minLength: 1,
+												maxLength: 128,
+											},
+											type: {
+												type: "string",
+												enum: ["user.tool_confirmation"],
+											},
+											tool_use_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+												description: "The agent.mcp_tool_use event that waits for this answer",
+											},
+											result: {
+												type: "string",
+												enum: ["allow", "deny"],
+											},
+											deny_message: {
+												type: "string",
+												maxLength: 4096,
+												description: "Why the call was denied; the model reads it",
+											},
+										},
+										required: ["type", "tool_use_id", "result"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											id: {
+												type: "string",
+												pattern: "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+												minLength: 1,
+												maxLength: 128,
+											},
+											type: {
+												type: "string",
+												enum: ["user.custom_tool_result"],
+											},
+											custom_tool_use_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+												description: "The agent.custom_tool_use event this result answers",
+											},
+											content: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["text"],
+														},
+														text: {
+															type: "string",
+														},
+													},
+													required: ["type", "text"],
+													additionalProperties: false,
+												},
+												maxItems: 64,
+												description: "The result the model reads; at most 16384 characters in all",
+											},
+											is_error: {
+												type: "boolean",
+											},
+										},
+										required: ["type", "custom_tool_use_id", "content"],
 										additionalProperties: false,
 									},
 								],

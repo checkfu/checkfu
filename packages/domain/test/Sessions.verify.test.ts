@@ -1,7 +1,13 @@
 import * as Verify from "@alchemy.run/domain/Verify"
+import {
+	decodeAgentTools,
+	decodeMcpServerCredentials,
+	decodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi } from "../src/Sessions.model.ts"
 import { PROVED, STANDING } from "./Sessions.verify.standing.ts"
 
@@ -17,6 +23,13 @@ describe("Sessions Z3 formal verification", () => {
 					budget: 20_000,
 					faults: { redeliver: true, reorder: true, rerun: true },
 					walks: { count: 25 },
+					opaque: [
+						decodeMcpServers,
+						decodeMcpServerCredentials,
+						decodeAgentTools,
+						addToolUseId,
+						removeToolUseId,
+					],
 					lock: "./Sessions.verify.lock.json",
 					require: { proved: PROVED },
 				})
