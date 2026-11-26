@@ -4,11 +4,18 @@ import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Scope from "effect/Scope"
-import { toCodemodeIdentifier } from "@earendil-works/pi-codemode/declarations"
+import { renderToolSample, toCodemodeIdentifier } from "@earendil-works/pi-codemode/declarations"
 import fc from "fast-check"
 import { createCommandId, idempotentCommandId } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import { mcpExtension, mcpRegistry } from "../src/Pi/PiMcp.ts"
+import {
+	MAX_TOOL_CATALOG_BYTES,
+	MAX_TOOL_LIST_BYTES,
+	mcpExtension,
+	mcpRegistry,
+	withinCatalog,
+} from "../src/Pi/PiMcp.ts"
+import type { McpServerEntry } from "../src/Pi/PiMcp.ts"
 import type { McpCallOutcome, McpToolDescriptor } from "../src/Pi/PiMcpTypes.ts"
 import {
 	MAX_PUBLIC_TOOL_NAME_LENGTH,
@@ -494,6 +501,80 @@ describe("MCP tool registry", () => {
 	]
 	const modelNameOf = (registry: ReturnType<typeof mcpRegistry>, tool: string): string =>
 		[...registry.byName].find(([, registered]) => registered.tool.name === tool)?.[0] ?? ""
+
+	type SampledSchema = NonNullable<Parameters<typeof renderToolSample>[0]["inputSchema"]>
+
+	it("keeps the combined catalog a script starts with under its budget, and says which servers it left out", () => {
+		const servers: ReadonlyArray<McpServerEntry> = Array.from({ length: 9 }, (_, server) => ({
+			binding: {
+				name: `s${server}`,
+				url: `https://s${server}.mcp.example/mcp`,
+				credential_id: null,
+				vault_id: null,
+			},
+			tools: {
+				status: "listed",
+				tools: Array.from({ length: 30 }, (_, tool) => ({
+					name: `tool_${tool}`,
+					description: "d".repeat(8000),
+					inputSchema: { type: "object", properties: { q: { type: "string" } } },
+				})),
+			},
+		}))
+		for (const { tools } of servers) {
+			expect(new TextEncoder().encode(JSON.stringify(tools)).byteLength).toBeLessThan(
+				MAX_TOOL_LIST_BYTES,
+			)
+		}
+		const kept = withinCatalog(servers)
+		const listedNow = kept.filter(({ tools }) => tools.status === "listed")
+		const left = kept.filter(({ tools }) => tools.status === "unavailable")
+		expect(listedNow.length).toBeGreaterThan(0)
+		expect(left.length).toBeGreaterThan(0)
+		expect(kept.map(({ tools }) => tools.status)).toEqual([
+			...listedNow.map(() => "listed"),
+			...left.map(() => "unavailable"),
+		])
+		const registry = mcpRegistry(kept)
+		const dispatch = async (): Promise<McpCallOutcome> => ({
+			ok: true,
+			content: [],
+			isError: false,
+		})
+		const extensions = kept.map(({ binding, tools }) =>
+			mcpExtension(binding, tools, registry, dispatch),
+		)
+		const written = extensions
+			.flatMap((extension) => extension.tools ?? [])
+			.reduce((total, tool) => {
+				const sample = renderToolSample({
+					name: tool.name,
+					description: tool.description,
+					inputSchema: tool.parameters as SampledSchema,
+					outputSchema: (tool.structuredOutputSchema ?? { type: "string" }) as SampledSchema,
+				})
+				return (
+					total +
+					new TextEncoder().encode(
+						JSON.stringify({
+							name: tool.name,
+							jsName: toCodemodeIdentifier(tool.name),
+							description: sample,
+						}),
+					).byteLength
+				)
+			}, 0)
+		expect(written).toBeLessThanOrEqual(MAX_TOOL_CATALOG_BYTES)
+		for (const [index, { tools }] of kept.entries()) {
+			if (tools.status === "unavailable") {
+				expect(tools.reason).toContain("combined tool catalog is too large")
+				expect(extensions[index]?.tools).toEqual([])
+				expect(extensions[index]?.namespace?.description).toContain(
+					"combined tool catalog is too large",
+				)
+			}
+		}
+	})
 
 	it("gives a long or unusual tool name a stable alias the model can call", async () => {
 		const long = `search_${"really_".repeat(12)}long_name`
