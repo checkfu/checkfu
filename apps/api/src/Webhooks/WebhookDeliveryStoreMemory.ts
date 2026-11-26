@@ -159,7 +159,7 @@ export const makeWebhookDeliveryStoreMemory = (options: MemoryWebhookDeliveryOpt
 					Effect.gen(function* () {
 						const entry = engines.get(webhookId)
 						if (entry === undefined) {
-							return { data: [], has_more: false, next_cursor: null }
+							return { data: [], next_page: null }
 						}
 						const nowMillis = yield* Clock.currentTimeMillis
 						return yield* Effect.try({

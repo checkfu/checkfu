@@ -5,7 +5,7 @@ import type * as HttpApiClient from "effect/http-api/HttpApiClient"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
-import type { CheckfuApi, CheckfuHttpApiClient, SessionEvent } from "./Api.ts"
+import type { CheckfuApi, CheckfuHttpApiClient, SessionStreamEvent } from "./Api.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import type { ApiSseError } from "./Sse.ts"
 
@@ -91,7 +91,7 @@ export const lookupRawSseMethod = (
 }
 
 export const asEndpointSseStream = <G extends ApiGroupName, E extends ApiEndpointName<G>>(
-	stream: Stream.Stream<SessionEvent, CheckfuSdkError>,
+	stream: Stream.Stream<SessionStreamEvent, CheckfuSdkError>,
 ): Stream.Stream<EndpointSseEvent<G, E>, CheckfuSdkError> =>
 	stream as Stream.Stream<EndpointSseEvent<G, E>, CheckfuSdkError>
 

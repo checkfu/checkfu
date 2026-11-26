@@ -390,7 +390,7 @@ describe("WebhookEventsLive isolation, event-time bounds, and resumable batched 
 								completed_at: null,
 							})
 						}),
-					listDeliveries: () => Effect.succeed({ data: [], has_more: false, next_cursor: null }),
+					listDeliveries: () => Effect.succeed({ data: [], next_page: null }),
 					getDelivery: () => Effect.succeed(null),
 					redeliver: () => Effect.succeed(null),
 					purge: () => Effect.void,

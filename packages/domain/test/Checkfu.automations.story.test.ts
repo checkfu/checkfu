@@ -120,7 +120,7 @@ const config = {
 	name: "Morning report",
 	description: null as string | null,
 	agent_id: agent.id,
-	agent_version: null as number | null,
+	agent_version: 1,
 	environment_id: environment.id,
 	text: "Write the morning report.",
 	schedule: { type: "cron" as const, expression: "0 9 * * *", timezone: "UTC" },
@@ -140,7 +140,10 @@ const world = [
 	),
 ]
 
-const admit = (overrides: Partial<typeof config> = {}, id = automation.id) =>
+const admit = (
+	overrides: Partial<Omit<typeof config, "agent_version">> & { agent_version?: number | null } = {},
+	id = automation.id,
+) =>
 	new AdmitAutomation({
 		automation_id: id,
 		capacity_id: AUTOMATION_CAPACITY,
@@ -162,10 +165,8 @@ const update = (changes: Partial<typeof config>, expected_revision = 1, base = c
 			(key) => next[key as keyof typeof next] !== base[key as keyof typeof base],
 		),
 		reschedule: !sameSchedule(next.schedule, base.schedule),
-		agent_changed: [
-			next.agent_id === base.agent_id,
-			next.agent_version === base.agent_version,
-		].includes(false),
+		agent_id_changed: next.agent_id !== base.agent_id,
+		previous_agent_version: base.agent_version,
 		environment_changed: next.environment_id !== base.environment_id,
 	})
 }
@@ -185,7 +186,7 @@ const noon = {
 const created = (agent_version: number | null = null) => [
 	...world,
 	Story.when(admit({ agent_version })),
-	Story.then(automation, new AutomationCreated({ ...config, agent_version })),
+	Story.then(automation, new AutomationCreated({ ...config, agent_version: agent_version ?? 1 })),
 	Story.then(capacity, new AutomationSlotReserved({ automation_id: automation.id })),
 ]
 
@@ -221,7 +222,7 @@ const failedOn = (run: number, iso: string | null, type: string, message: string
 		trigger: iso === null ? "manual" : "schedule",
 		scheduled_at: iso === null ? null : ms(iso),
 		agent_id: agent.id,
-		agent_version: null,
+		agent_version: 1,
 		error: { type, message },
 	})
 
@@ -469,7 +470,7 @@ describe("Checkfu automations", () => {
 			),
 	)
 
-	it.effect("follows the agent's latest version unless a version is pinned", () => {
+	it.effect("pins either the current agent version or the explicitly requested version", () => {
 		const updated = [
 			Story.given(
 				agent,
@@ -485,14 +486,17 @@ describe("Checkfu automations", () => {
 			...created(),
 			...updated,
 			Story.when(new RunAutomation({ automation_id: automation.id })),
-			Story.then(automation, manual(1), startedOn(1, null, 2)),
+			Story.then(automation, manual(1), startedOn(1, null, 1)),
 			Story.replied({ run: 1 }),
-			...opened(1, 2),
+			...opened(1, 1),
 		).pipe(
 			Effect.andThen(
 				story(
-					...created(1),
+					...world,
 					...updated,
+					Story.when(admit({ agent_version: 1 })),
+					Story.then(automation, new AutomationCreated({ ...config, agent_version: 1 })),
+					Story.then(capacity, new AutomationSlotReserved({ automation_id: automation.id })),
 					Story.when(new RunAutomation({ automation_id: automation.id })),
 					Story.then(automation, manual(1), startedOn(1, null)),
 					Story.replied({ run: 1 }),

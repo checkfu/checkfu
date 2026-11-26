@@ -1,6 +1,6 @@
-import type { JsonSessionEvent } from "@checkfu/sdk/client"
+import type { JsonSessionEvent, JsonSessionEventPreview } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
-import { parseEventJson } from "./json-boundary.ts"
+import { parseApiJson, parseEventJson } from "./json-boundary.ts"
 
 export interface Source {
 	readonly readyState: number
@@ -19,6 +19,7 @@ const BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000] as const
 
 const EVENT_TYPES: Record<SessionEventType, true> = {
 	"user.message": true,
+	"system.message": true,
 	"user.interrupt": true,
 	"session.status_running": true,
 	"span.model_request_start": true,
@@ -42,11 +43,13 @@ export const follow = ({
 	open,
 	cursor,
 	receive,
+	preview,
 	mayRetry,
 	connection,
 }: {
 	readonly open: (after: number) => Source
 	readonly cursor: () => number
+	readonly preview?: (event: JsonSessionEventPreview) => void
 	readonly receive: (event: JsonSessionEvent) => void
 	readonly mayRetry: () => Promise<boolean>
 	readonly connection: (state: Connection) => void
@@ -94,6 +97,13 @@ export const follow = ({
 					stop()
 				}
 			})
+		}
+		if (preview !== undefined) {
+			for (const type of ["event_start", "event_delta"]) {
+				current.addEventListener(type, ({ data }) =>
+					preview(parseApiJson<JsonSessionEventPreview>(data)),
+				)
+			}
 		}
 		current.addEventListener("open", () => {
 			attempt = 0

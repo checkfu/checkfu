@@ -244,7 +244,7 @@ describe("MCP tool projection", () => {
 					name: "ids",
 					in: "query",
 					required: false,
-					schema: { type: "array", items: { type: "string" } },
+					schema: { type: "array", items: { type: "object" } },
 				},
 				/cannot send the query parameter "ids"/,
 			],

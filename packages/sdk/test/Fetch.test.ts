@@ -82,7 +82,7 @@ describe("the fetch client", () => {
 				query: { after: 0 },
 			}),
 		).toBe("/v1/sessions/sess_1/events/stream?after=0")
-		expect(operationUrl("agents.list", { query: { order: "desc", after: undefined } })).toBe(
+		expect(operationUrl("agents.list", { query: { order: "desc", page: undefined } })).toBe(
 			"/v1/agents?order=desc",
 		)
 	})

@@ -5,14 +5,21 @@ import { CredentialListingLive } from "@checkfu/domain/Vault/CredentialListing.p
 import { ListCredentialsLive } from "@checkfu/domain/Vault/ListCredentials.query"
 import { ListVaultsLive } from "@checkfu/domain/Vault/ListVaults.query"
 import { PublishVaultWebhookEvents } from "@checkfu/domain/Vault/PublishVaultWebhookEvents.policy"
-import { RetireReleasedCredentials } from "@checkfu/domain/Vault/RetireReleasedCredentials.policy"
-import { SettleCredentialSecret } from "@checkfu/domain/Vault/SettleCredentialSecret.policy"
+import {
+	RetireReleasedCredentials,
+	RetireReleasedCredentialsLive,
+} from "@checkfu/domain/Vault/RetireReleasedCredentials.policy"
+import {
+	SettleCredentialSecret,
+	SettleCredentialSecretLive,
+} from "@checkfu/domain/Vault/SettleCredentialSecret.policy"
 import { VaultListingLive } from "@checkfu/domain/Vault/VaultListing.projection"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import type { WebhookEvents } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type * as Schedule from "effect/Schedule"
 import {
 	ConnectionCallFailed,
 	CredentialSecretsLive,
@@ -41,9 +48,24 @@ const StalledPoliciesLive = Layer.mergeAll(
 	ListCredentialsLive,
 )
 
+const RedeliveredPoliciesLive = (retry: Schedule.Schedule<unknown, unknown>) =>
+	Layer.mergeAll(
+		RetireReleasedCredentials.toLayer(RetireReleasedCredentials, { retry }).pipe(
+			Layer.provide(RetireReleasedCredentialsLive),
+		),
+		SettleCredentialSecret.toLayer(SettleCredentialSecret, { retry }).pipe(
+			Layer.provide(SettleCredentialSecretLive),
+		),
+		PublishVaultWebhookEvents.toLayer(Effect.succeed(() => Effect.void)),
+		VaultListingLive,
+		ListVaultsLive,
+		CredentialListingLive,
+		ListCredentialsLive,
+	)
+
 export const makeVaultsTestLayer = (
 	options: {
-		readonly policies?: "stalled"
+		readonly policies?: "stalled" | { readonly redeliver: Schedule.Schedule<unknown, unknown> }
 		readonly webhookEvents?: Layer.Layer<WebhookEvents>
 	} = {},
 ) => {
@@ -96,15 +118,18 @@ export const makeVaultsTestLayer = (
 		return vaultId === undefined ? null : open(vaultId).custody.read(credentialId)
 	}
 
-	const webhookEventsLayer = options.webhookEvents ?? WebhookEventsNoop
 	const handlers =
 		options.policies === "stalled"
-			? StalledPoliciesLive.pipe(Layer.provide(ListingStore.memory))
-			: VaultsHandlersLive.pipe(
-					Layer.provide(ListingStore.memory),
-					Layer.provide(webhookEventsLayer),
-				)
-	const model = Vaults.layer(handlers).pipe(
+			? StalledPoliciesLive
+			: options.policies === undefined
+				? VaultsHandlersLive
+				: RedeliveredPoliciesLive(options.policies.redeliver)
+	const model = Vaults.layer(
+		handlers.pipe(
+			Layer.provide(ListingStore.memory),
+			Layer.provide(options.webhookEvents ?? WebhookEventsNoop),
+		),
+	).pipe(
 		Layer.provideMerge(CredentialSecretsLive),
 		Layer.provideMerge(
 			makeConnectionExecutorLayer({

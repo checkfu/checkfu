@@ -9,6 +9,7 @@ import {
 } from "../src/Mcp/McpServers.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
+import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import * as Verify from "@alchemy.run/domain/Verify"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -98,9 +99,14 @@ const STANDING = {
 	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"SystemContext.LengthStaysWithinCapacity": "proved",
+	"SendSystemMessage.SystemContextGrowsOnAnActiveSession": "proved",
+	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
 	"Session.OpenModelRequestRequiresStartedCount": "proved",
+	"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": "proved",
+	"Session.OnlyTheLastInitialMessageStartsTheTurn": "proved",
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
@@ -191,6 +197,11 @@ const STANDING = {
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
+	"AdmitSessionWithMessages.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
+	"AdmitSessionWithMessages.PinnedVersionWithinAgentHead": "proved",
+	"AdmitSessionWithMessages.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"AdmitSessionWithMessages.AdmissionKeepsTheCredentialsItWasGiven": "proved",
+	"AdmitSessionWithMessages.AdmissionKeepsTheInitialPlan": "proved",
 	"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
 	"AdmitSession.PinnedVersionWithinAgentHead": "proved",
 	"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
@@ -267,6 +278,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"DeleteEnvironment",
 			"AdmitSession",
 			"SendUserMessage",
+			"SendSystemMessage",
 			"SendUserInterrupt",
 			"ConfirmTool",
 			"ReturnCustomToolResult",
@@ -318,6 +330,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					decodeAgentTools,
 					addToolUseId,
 					removeToolUseId,
+					decodeSystemMessage,
 				],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
@@ -336,6 +349,11 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				kind: "projection",
 				name: "Listing",
 				reason: "is not declared in a file the model's file imports",
+			},
+			{
+				kind: "view",
+				name: "SessionTurnCompletion",
+				reason: "no rule reads it and no policy reacts to it",
 			},
 			{ kind: "query", name: "ListResources", reason: "what a query answers is not checked" },
 		])
@@ -661,7 +679,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							expected_revision: 1,
 							changed: true,
 							reschedule: true,
-							agent_changed: true,
+							agent_id_changed: false,
+							previous_agent_version: 2,
 							environment_changed: false,
 							name: "Updated Automation",
 							description: "Moved to noon.",

@@ -528,7 +528,7 @@ export class WebhookDeliveryEngine {
 			this.prune(nowMillis)
 		}
 		const limit = Math.max(1, Math.min(100, query.limit ?? 50))
-		const cursor = query.after === undefined ? null : parseCursor(query.after)
+		const cursor = query.page === undefined ? null : parseCursor(query.page)
 		const rawRows =
 			cursor === null
 				? this.#sql
@@ -554,8 +554,7 @@ export class WebhookDeliveryEngine {
 		const last = page.at(-1)
 		return {
 			data: page.map((row) => toRecord(this.#webhookId, row)),
-			has_more: hasMore,
-			next_cursor: hasMore && last !== undefined ? formatCursor(last) : null,
+			next_page: hasMore && last !== undefined ? formatCursor(last) : null,
 		}
 	}
 

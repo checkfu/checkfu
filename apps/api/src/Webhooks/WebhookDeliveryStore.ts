@@ -41,14 +41,13 @@ export interface EnqueueWebhookDeliveryInput {
 }
 
 export interface ListWebhookDeliveriesQuery {
-	readonly after?: string | undefined
+	readonly page?: string | undefined
 	readonly limit?: number | undefined
 }
 
 export interface ListWebhookDeliveriesPage {
 	readonly data: ReadonlyArray<WebhookDeliveryRecord>
-	readonly has_more: boolean
-	readonly next_cursor: string | null
+	readonly next_page: string | null
 }
 
 export interface WebhookDeliveryStoreService {

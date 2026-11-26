@@ -59,6 +59,7 @@ interface FlagSpec {
 		| "text-or-object"
 		| "structured"
 		| "repeat-structured"
+		| "repeat-query"
 	readonly required: boolean
 	readonly description: string
 	readonly metavar?: string
@@ -274,7 +275,21 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		const intSpec = intQueryParams[field.wireName]
 		const literals = extractStringLiterals(field.type)
 		const flagName = resolveCliFlagName(field)
-		if (intSpec !== undefined || isIntegerScalar(field.type)) {
+		const repeat = cliExt.repeatArrayField
+		if (repeat?.field === field.wireName) {
+			const max = repeat.max ?? extractArrayMaxItems(field.type)
+			pushFlag({
+				propName: field.name.camel(),
+				flagName: repeat.flag,
+				wireName: field.wireName,
+				location: "query",
+				kind: "repeat-query",
+				required: field.required,
+				description: repeat.description ?? field.description ?? `Repeatable ${repeat.flag}`,
+				min: field.required ? 1 : 0,
+				...(max === undefined ? {} : { max }),
+			})
+		} else if (intSpec !== undefined || isIntegerScalar(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
 				flagName,
@@ -545,6 +560,7 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 							metavar !== undefined ||
 							fl.description.length > 0 ||
 							fl.kind === "repeat-structured" ||
+							fl.kind === "repeat-query" ||
 							!fl.required
 
 						const baseIdent =
@@ -593,7 +609,7 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 								if (fl.description.length > 0) {
 									out(FlagWithDescription, "(", JSON.stringify(fl.description), "),")
 								}
-								if (fl.kind === "repeat-structured") {
+								if (fl.kind === "repeat-structured" || fl.kind === "repeat-query") {
 									if (fl.max !== undefined) {
 										out(FlagBetween, "(", fl.min ?? 0, ", ", fl.max, "),")
 									} else {

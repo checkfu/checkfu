@@ -622,13 +622,13 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				}
 				const firstPage = engine.listDeliveries({ limit: 100 }, T0 + 10_000)
 				expect(firstPage.data).toHaveLength(100)
-				expect(firstPage.has_more).toBe(true)
+				expect(firstPage.next_page).not.toBeNull()
 				let totalListed = firstPage.data.length
-				let cursor = firstPage.next_cursor
+				let cursor = firstPage.next_page
 				while (cursor !== null) {
-					const next = engine.listDeliveries({ after: cursor, limit: 100 }, T0 + 10_000)
+					const next = engine.listDeliveries({ page: cursor, limit: 100 }, T0 + 10_000)
 					totalListed += next.data.length
-					cursor = next.next_cursor
+					cursor = next.next_page
 				}
 				expect(totalListed).toBe(WEBHOOK_MAX_STORED_DELIVERIES)
 

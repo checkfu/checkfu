@@ -257,7 +257,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 								? webhookListing.lookup(query.id)
 								: webhookListing.page(query.order ?? "asc", {
 										take: query.limit ?? 50,
-										...(query.after === undefined ? {} : { after: query.after }),
+										...(query.page === undefined ? {} : { after: query.page }),
 									})
 						).pipe(
 							Effect.catchTag("WebhookListingTimeout", () =>
@@ -499,15 +499,11 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 						yield* requireLive(params.webhook_id)
 						const page = yield* storedDelivery(
 							deliveries.listDeliveries(params.webhook_id, {
-								after: query.after,
+								page: query.page,
 								limit: query.limit,
 							}),
 						)
-						return {
-							data: page.data.map(deliveryResource),
-							has_more: page.has_more,
-							next_cursor: page.next_cursor,
-						}
+						return { data: page.data.map(deliveryResource), next_page: page.next_page }
 					}),
 				),
 			)

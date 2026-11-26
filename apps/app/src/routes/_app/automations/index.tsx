@@ -6,6 +6,6 @@ import { AutomationsPage } from "../../../pages/automations.tsx"
 export const Route = createFileRoute("/_app/automations/")({
 	validateSearch: pageSearch,
 	loaderDeps: ({ search }) => search,
-	loader: ({ context, deps }) => context.queryClient.ensureQueryData(automationsPage(deps.after)),
+	loader: ({ context, deps }) => context.queryClient.ensureQueryData(automationsPage(deps.page)),
 	component: AutomationsPage,
 })
