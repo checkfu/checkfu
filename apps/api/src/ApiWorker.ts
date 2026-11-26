@@ -55,6 +55,14 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
+			prepareWorkspace: (sessionId, token, allowedHosts) =>
+				harnessCall(
+					Effect.suspend(() => harness.prepareWorkspace(sessionId, token, allowedHosts)),
+				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
+			interruptWorkspace: (sessionId, token) =>
+				harnessCall(Effect.suspend(() => harness.interruptWorkspace(sessionId, token))).pipe(
+					Effect.withSpan("PiHarness.interruptWorkspace"),
+				),
 			listOutputs: (sessionId, turn) =>
 				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId, turn))).pipe(
 					Effect.withSpan("PiHarness.listOutputs"),

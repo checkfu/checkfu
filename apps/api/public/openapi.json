@@ -7036,7 +7036,7 @@
 						}
 					}
 				},
-				"description": "Update an environment",
+				"description": "Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts.",
 				"summary": "Update an environment",
 				"requestBody": {
 					"content": {
