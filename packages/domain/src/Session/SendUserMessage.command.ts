@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
@@ -7,6 +8,8 @@ import * as Schema from "effect/Schema"
 import { MessageText, PositiveInt, SessionEventFields } from "./SessionTypes.ts"
 
 export class UserMessage extends Domain.Event("user.message", {
+	initial: Schema.optionalKey(Schema.Literal(true)),
+	turn: Schema.optionalKey(PositiveInt),
 	content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: MessageText })).check(
 		Schema.isMinLength(1),
 	),
@@ -35,7 +38,13 @@ export class SendUserMessage extends Domain.Command("SendUserMessage", {
 		text: MessageText,
 	},
 	events: [UserMessage, SessionStatusRunning],
-	rejects: [SessionNotFound, SessionTerminated, PendingMessageQueueFull, SessionAwaitingAction],
+	rejects: [
+		SessionNotFound,
+		SessionTerminated,
+		PendingMessageQueueFull,
+		SessionAwaitingAction,
+		InitialMessagesPending,
+	],
 	reply: {
 		turn: PositiveInt,
 	},

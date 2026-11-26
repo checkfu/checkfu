@@ -34,6 +34,7 @@ export const PiTurnRequest = Schema.Struct({
 	provider: Schema.String.check(Schema.isMinLength(1)),
 	modelId: Schema.String,
 	system: Schema.NullOr(Schema.String),
+	systemContext: Schema.optionalKey(Schema.String),
 	text: Schema.String,
 	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
 	mcp: Schema.optionalKey(McpTurn),
@@ -42,6 +43,7 @@ export const PiTurnRequest = Schema.Struct({
 export type PiTurnRequest = typeof PiTurnRequest.Type
 
 export const PiTurnReply = Schema.Struct({
+	response_started_at: Schema.optionalKey(Schema.Int),
 	thinking: Schema.NullOr(Schema.String),
 	text: Schema.String,
 	input_tokens: Schema.Finite,

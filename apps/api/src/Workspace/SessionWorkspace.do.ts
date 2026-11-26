@@ -14,6 +14,7 @@ import {
 	GITHUB_HOST,
 	cloneCommand,
 	githubBaseUrl,
+	repositoryTokenGate,
 	withRepositoryCredentials,
 } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
@@ -148,7 +149,12 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 		({ state, sandboxes, idleAfter, baseUrl, api, services }) =>
 			Effect.gen(function* () {
 				const { storage } = state.raw
-				const fork = Effect.runForkWith(yield* Effect.context<never>())
+				const tokens = yield* repositoryTokenGate(
+					(id) => storage.kv.get(tokenKey(id)) !== undefined,
+				)
+				const context = yield* Effect.context<never>()
+				const fork = Effect.runForkWith(context)
+				const runPromise = Effect.runPromiseWith(context)
 				const sessionId = state.raw.id.name ?? ""
 				const call = Effect.runPromiseWith(services)
 				const memory = makeSessionMemory(
@@ -293,6 +299,25 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					for (const repository of repositories) {
 						if (signal.aborted) {
 							return INTERRUPTED
+						}
+						if (repository.requires_token && isAllowedHost(allowedHosts(), GITHUB_HOST)) {
+							const ready = await runPromise(tokens.awaitToken(repository.id), {
+								signal,
+							}).catch((error: unknown) => {
+								if (signal.aborted) {
+									return false
+								}
+								throw error
+							})
+							if (!ready) {
+								return signal.aborted
+									? INTERRUPTED
+									: {
+											ok: false,
+											resource_id: repository.id,
+											message: "Repository token was not stored.",
+										}
+							}
 						}
 						await initialize((await workspace()).fs)
 						const cloned = await machine
@@ -507,10 +532,11 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						token: string,
 						replace: boolean,
 					): Effect.Effect<void> =>
-						Effect.sync(() => {
+						Effect.gen(function* () {
 							const stored = storage.kv.get<string>(tokenKey(resourceId)) !== undefined
 							if (storage.kv.get(DISCARDED) !== true && (replace || !stored)) {
 								storage.kv.put(tokenKey(resourceId), token)
+								yield* tokens.stored(resourceId)
 							}
 						}),
 					discard: (discarded: string) =>

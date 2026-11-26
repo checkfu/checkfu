@@ -149,8 +149,7 @@ const run = async <A>(
 
 interface ListBody {
 	readonly data: ReadonlyArray<AutomationBody>
-	readonly has_more: boolean
-	readonly next_cursor: string | null
+	readonly next_page: string | null
 }
 
 const listed = (apiFetch: ApiFetch, query: string, count: number) =>
@@ -163,7 +162,7 @@ const listed = (apiFetch: ApiFetch, query: string, count: number) =>
 	)
 
 const settledRuns = (apiFetch: ApiFetch, automationId: string, count: number) =>
-	call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
+	call<{ data: ReadonlyArray<RunBody>; next_page: string | null }>(
 		apiFetch,
 		"GET",
 		`/v1/automations/${automationId}/runs`,
@@ -191,7 +190,7 @@ describe("Automations API", () => {
 				expect(created.body).toMatchObject({
 					type: "automation",
 					name: "Morning report",
-					agent: { id: agentId, version: null },
+					agent: { id: agentId, version: 1 },
 					environment_id: environmentId,
 					initial_events: message("Write the morning report."),
 					schedule: weekdayMornings,
@@ -228,6 +227,39 @@ describe("Automations API", () => {
 				})
 				expect(pinned.status).toBe(201)
 				expect(pinned.body.agent).toEqual({ id: agentId, version: 1 })
+			}),
+		))
+
+	it("pins the agent version and only changes it when the agent is selected again", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const { body: automation } = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					{
+						name: "Pinned report",
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message("Write a report."),
+						schedule: weekdayMornings,
+					},
+				)
+				const agent = yield* call(apiFetch, "POST", `/v1/agents/${agentId}`, {
+					version: 1,
+					system: "Use the current data.",
+				})
+				expect(agent.status).toBe(200)
+				const path = `/v1/automations/${automation.id}`
+				const renamed = yield* call<AutomationBody>(apiFetch, "POST", path, {
+					name: "Updated report",
+				})
+				expect(renamed.body.agent.version).toBe(1)
+				const repinned = yield* call<AutomationBody>(apiFetch, "POST", path, { agent: agentId })
+				expect(repinned.body.agent.version).toBe(2)
+				const unchanged = yield* call<AutomationBody>(apiFetch, "POST", path, { agent: agentId })
+				expect(unchanged.body).toEqual(repinned.body)
 			}),
 		))
 
@@ -383,15 +415,14 @@ describe("Automations API", () => {
 				expect(newestFirst.body.data.map((entry) => entry.run)).toEqual([2, 1])
 				const oldestFirst = yield* call<{
 					data: ReadonlyArray<RunBody>
-					has_more: boolean
-					next_cursor: number | null
+					next_page: string | null
 				}>(apiFetch, "GET", `/v1/automations/${id}/runs?order=asc&limit=1`)
 				expect(oldestFirst.body.data.map((entry) => entry.run)).toEqual([1])
-				expect(oldestFirst.body.has_more).toBe(true)
-				const rest = yield* call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
+				expect(oldestFirst.body.next_page).not.toBeNull()
+				const rest = yield* call<{ data: ReadonlyArray<RunBody>; next_page: string | null }>(
 					apiFetch,
 					"GET",
-					`/v1/automations/${id}/runs?order=asc&limit=1&after=${oldestFirst.body.next_cursor}`,
+					`/v1/automations/${id}/runs?order=asc&limit=1&page=${oldestFirst.body.next_page}`,
 				)
 				expect(rest.body.data.map((entry) => entry.run)).toEqual([2])
 
@@ -574,7 +605,7 @@ describe("Automations API", () => {
 				const empty = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
 				expect(empty).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null },
+					body: { data: [], next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const [name, agent] of [
@@ -594,25 +625,24 @@ describe("Automations API", () => {
 				const all = yield* listed(apiFetch, "", 3)
 				const order = all.body.data.map((automation) => automation.id)
 				expect(order.toSorted()).toEqual(ids.toSorted())
-				expect(all.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(all.body).toMatchObject({ next_page: null })
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${ids[0]}`)
 				expect(all.body.data.find((automation) => automation.id === ids[0])).toEqual(fetched.body)
 
 				const pages = (query: string) =>
 					Effect.gen(function* () {
 						const seen: Array<string> = []
-						let after: string | null = null
+						let token: string | null = null
 						do {
-							const cursor: string = after === null ? "" : `&after=${after}`
+							const cursor: string = token === null ? "" : `&page=${encodeURIComponent(token)}`
 							const page = yield* call<ListBody>(
 								apiFetch,
 								"GET",
 								`/v1/automations?limit=1${query}${cursor}`,
 							)
 							seen.push(...page.body.data.map((automation) => automation.id))
-							after = page.body.next_cursor
-							expect(page.body.has_more).toBe(after !== null)
-						} while (after !== null)
+							token = page.body.next_page
+						} while (token !== null)
 						return seen
 					})
 				expect(yield* pages("")).toEqual(order)
@@ -722,7 +752,7 @@ describe("Automations API", () => {
 				)
 				expect([
 					unavailable.status,
-					unavailable.body.next_cursor,
+					unavailable.body.next_page,
 					unavailable.body.data,
 					waits,
 				]).toEqual([503, undefined, undefined, 2])
@@ -744,7 +774,7 @@ describe("Automations API", () => {
 	it("refuses list paging values it cannot use", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
-				for (const query of ["limit=0", "limit=101", "after=-1", "order=newest"]) {
+				for (const query of ["limit=0", "limit=101", "page=-1", "order=newest"]) {
 					const refused = yield* call<ErrorBody>(apiFetch, "GET", `/v1/automations?${query}`)
 					expect([query, refused.status]).toEqual([query, 400])
 				}
@@ -1030,7 +1060,7 @@ describe("Automations API", () => {
 				expect(runs.body.data[0]).toMatchObject({
 					run: 1,
 					status: "failed",
-					agent: { id: agentId, version: null },
+					agent: { id: agentId, version: 1 },
 					session_id: null,
 					error: { type: "agent_unavailable" },
 				})

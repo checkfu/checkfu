@@ -15,6 +15,7 @@ export const MAX_TIMEZONE_LENGTH = 64
 
 export const MAX_IDENTIFIER_LENGTH = 256
 export const MAX_TITLE_LENGTH = 1024
+export const MAX_SESSION_INITIAL_EVENTS = 50
 export const MAX_MESSAGE_TEXT_LENGTH = 16_384
 export const MAX_THINKING_TEXT_LENGTH = 16_384
 export const MAX_ERROR_TYPE_LENGTH = 128
@@ -40,8 +41,7 @@ export const ResourceId = Schema.String.check(
 export const ResourceListCursor = Schema.String.check(
 	Schema.isPattern(/^\d{1,15}:[^/\\]+$/u),
 ).annotate({
-	description:
-		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+	description: "Opaque page token from the previous response's next_page.",
 })
 
 export const AgentId = Schema.String.check(Schema.isMinLength(1), SinglePathSegmentCheck).pipe(
@@ -264,6 +264,7 @@ export type TextBlock = typeof TextBlock.Type
 
 export const TextBlocks = Schema.Array(TextBlock).check(Schema.isMinLength(1))
 export type TextBlocks = typeof TextBlocks.Type
+export const SystemMessageContent = TextBlocks.check(Schema.isMaxLength(1000))
 
 export const StopReason = Schema.Struct({
 	type: Schema.Literals([
@@ -331,6 +332,7 @@ export const ToolRejection = Schema.Literals(["unavailable", "invalid_arguments"
 export type ToolRejection = typeof ToolRejection.Type
 
 export const SessionEventFields = {
+	"system.message": { content: SystemMessageContent },
 	"user.message": {
 		content: TextBlocks,
 	},
@@ -620,8 +622,12 @@ export const SkillMount = Schema.Struct({
 })
 export type SkillMount = typeof SkillMount.Type
 
+const GitHubRepositoryMount = GitHubRepositoryResource.mapFields((fields) => ({
+	...fields,
+	requires_token: Schema.optionalKey(Schema.Literal(true)),
+}))
 export const SessionMount = Schema.Union([
-	GitHubRepositoryResource,
+	GitHubRepositoryMount,
 	MemoryStoreResource,
 	ArtifactMount,
 	SkillMount,
@@ -630,7 +636,7 @@ export type SessionMount = typeof SessionMount.Type
 
 export const repositoriesOf = (
 	resources: ReadonlyArray<SessionMount>,
-): ReadonlyArray<GitHubRepositoryResource> =>
+): ReadonlyArray<typeof GitHubRepositoryMount.Type> =>
 	resources.filter((resource) => resource.type === "github_repository")
 
 export const memoryStoresOf = (
@@ -748,7 +754,7 @@ export const AutomationSnapshot = Schema.Struct({
 	name: AutomationName,
 	description: Schema.NullOr(AutomationDescription),
 	agent_id: ResourceId,
-	agent_version: Schema.NullOr(PositiveInt),
+	agent_version: PositiveInt,
 	environment_id: ResourceId,
 	text: MessageText,
 	schedule: AutomationSchedule,

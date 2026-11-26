@@ -13,6 +13,7 @@ const message = (seq: number): JsonSessionEvent => ({
 	seq,
 	type: "agent.message",
 	created_at: at,
+	processed_at: at,
 	content: [{ type: "text", text: `message ${seq}` }],
 })
 
@@ -21,17 +22,17 @@ const archived = (seq: number): JsonSessionEvent => ({
 	seq,
 	type: "session.archived",
 	created_at: at,
+	processed_at: at,
 })
 
 const page = (seqs: ReadonlyArray<number>, next: number | null): EventPage => ({
 	data: seqs.map(message),
-	has_more: next !== null,
-	next_cursor: next,
+	next_page: next === null ? null : String(next),
 })
 
 const transcript = (...pages: ReadonlyArray<EventPage>): Transcript => ({
 	pages: [...pages],
-	pageParams: pages.map((_, index) => (index === 0 ? undefined : index)),
+	pageParams: pages.map((_, index) => (index === 0 ? undefined : String(index))),
 })
 
 const seqs = (events: ReadonlyArray<JsonSessionEvent>) => events.map((event) => event.seq)
@@ -65,8 +66,8 @@ describe("transcript", () => {
 							release = resolve
 							started()
 						}),
-			initialPageParam: undefined as number | undefined,
-			getNextPageParam: (last) => last.next_cursor ?? undefined,
+			initialPageParam: undefined as string | undefined,
+			getNextPageParam: (last) => last.next_page ?? undefined,
 		})
 		await client.fetchInfiniteQuery(options)
 		const live = liveQuery("sess_race").queryKey

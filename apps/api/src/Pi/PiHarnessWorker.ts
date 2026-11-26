@@ -32,6 +32,7 @@ export default PiHarnessWorker.make(
 		const workspace = placedStub(yield* SessionWorkspace, where)
 		const connection = placedStub(yield* Connection, where)
 		return PiHarnessWorker.of({
+			watchPreviews: (conversation) => piSession(conversation).watchPreviews(conversation),
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
 			runTurn: (conversation, request) => Effect.orDie(piSession(conversation).runTurn(request)),

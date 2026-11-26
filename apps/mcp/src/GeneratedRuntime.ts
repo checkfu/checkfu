@@ -56,12 +56,14 @@ const WellFormedString = Schema.String.check(
 	Schema.makeFilter((value) => (value.isWellFormed() ? undefined : "Expected well-formed Unicode")),
 )
 
+const QueryValue = Schema.Union([WellFormedString, Schema.Finite, Schema.Boolean])
+
 const Envelope = Schema.Struct({
 	path: Schema.optionalKey(
 		Schema.Record(Schema.String, Schema.Union([WellFormedString, Schema.Int])),
 	),
 	query: Schema.optionalKey(
-		Schema.Record(Schema.String, Schema.Union([WellFormedString, Schema.Finite, Schema.Boolean])),
+		Schema.Record(Schema.String, Schema.Union([QueryValue, Schema.Array(QueryValue)])),
 	),
 	body: Schema.optionalKey(Schema.Unknown),
 	idempotency_key: Schema.optionalKey(Schema.String),
@@ -113,7 +115,9 @@ export const makeToolHandler = (client: HttpClient.HttpClient, tool: GeneratedTo
 			)
 			const request = HttpClientRequest.make(tool.method)(path).pipe(
 				HttpClientRequest.setUrlParams(
-					Object.entries(args.query ?? {}).map(([name, value]) => [name, String(value)] as const),
+					Object.entries(args.query ?? {}).flatMap(([name, value]) =>
+						(Array.isArray(value) ? value : [value]).map((item) => [name, String(item)] as const),
+					),
 				),
 				HttpClientRequest.setHeaders(yield* callerCredentials),
 				args.idempotency_key === undefined

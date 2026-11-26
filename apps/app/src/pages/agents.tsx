@@ -16,15 +16,24 @@ import { checkfu } from "../api.ts"
 import { agentQuery, agentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
-import { bodyOf, changesFrom, draftOf, emptyDraft, FIELD_LABELS, rebase } from "../agent-draft.ts"
+import {
+	bodyOf,
+	changesFrom,
+	draftOf,
+	emptyDraft,
+	hasProblems,
+	problemsOf,
+	rebase,
+} from "../agent-draft.ts"
 import type { AgentDraft } from "../agent-draft.ts"
+import { AgentToolsFields, AgentToolsSummary } from "./agent-tools.tsx"
 
 const list = getRouteApi("/_app/agents/")
 const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(agentsPage(search.after)).data
+	const page = useSuspenseQuery(agentsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -87,7 +96,7 @@ export function AgentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_page} paged={search.page !== undefined} />
 		</>
 	)
 }
@@ -110,6 +119,7 @@ function AgentForm<Saved>({
 	readonly onCancel?: () => void
 }): React.JSX.Element {
 	const action = useAction(onSubmit, { invalidates: [["agents"]], then: onSaved })
+	const problems = problemsOf(draft)
 	const set =
 		(field: keyof AgentDraft) =>
 		(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -138,10 +148,14 @@ function AgentForm<Saved>({
 				<Field label="Description">
 					<Input value={draft.description} onChange={set("description")} />
 				</Field>
+				<AgentToolsFields draft={draft} problems={problems} onChange={onChange} />
 				{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
 				{notice}
 				<div className="flex gap-2">
-					<Button type="submit" disabled={action.pending || notice !== undefined}>
+					<Button
+						type="submit"
+						disabled={action.pending || notice !== undefined || hasProblems(problems)}
+					>
 						{submitLabel}
 					</Button>
 					{onCancel === undefined ? null : (
@@ -207,16 +221,25 @@ const editNotice = (
 	if (agent.version <= edit.base.version) {
 		return undefined
 	}
-	const { draft, overlapping } = rebase(edit.base, edit.draft, agent)
+	const { draft, overlapping, orphaned } = rebase(edit.base, edit.draft, agent)
 	return (
-		<Callout>
+		<Callout tone={orphaned.length === 0 ? "info" : "error"}>
 			<p>
-				This agent was saved as v{agent.version} while you were editing v{edit.base.version}. Your
-				edits are kept.
-				{overlapping.length === 0
-					? " None of them touch the fields that changed."
-					: ` Yours will replace the newer ${overlapping.map((field) => FIELD_LABELS[field]).join(", ")}.`}
+				This agent was saved as v{agent.version} while you were editing v{edit.base.version}.
+				{orphaned.length > 0 ? "" : " Your edits are kept."}
+				{overlapping.length > 0
+					? ` Yours will replace the newer ${overlapping.join(", ")}.`
+					: orphaned.length > 0
+						? ""
+						: " None of them touch what changed."}
 			</p>
+			{orphaned.map((name) => (
+				<p key={name}>
+					You changed MCP server {name}, which v{agent.version} renamed or removed. Applying your
+					edits adds your version of {name} back as a server of its own: check it, or remove it,
+					before saving.
+				</p>
+			))}
 			<Button size="sm" variant="outline" className="mt-2" onClick={() => apply(draft)}>
 				Apply my edits to v{agent.version}
 			</Button>
@@ -280,6 +303,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 							{agent.system ?? "None"}
 						</pre>
 					</section>
+					<AgentToolsSummary agent={agent} />
 				</>
 			) : (
 				<AgentForm
