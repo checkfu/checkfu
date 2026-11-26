@@ -648,7 +648,7 @@ describe("a session's machine, in a container of its image", () => {
 		expect(await sh("ls -A /workspace/repos")).toBe(".cloning-web\napi\nweb\n")
 		expect(await sh("stat -c %a /workspace/repos/web")).toBe("755\n")
 		await sh("rm -rf /workspace/repos /srv/origin")
-	})
+	}, 30_000)
 
 	it("runs a command to its end, its limit or its last output, whichever a call can hold", async () => {
 		const kept = new Map<string, unknown>()

@@ -1980,19 +1980,29 @@ describe("PiSession real Durable Object under workerd", () => {
 			environment_id: environmentId,
 			resources: [{ type: "skill", artifact_id: artifact.id }],
 		})
-		fakeOpenAI.setHandler((req) =>
-			req.toolOutputs.length === 0
-				? {
-						kind: "tool_call",
-						name: "read",
-						arguments: { path: "/mnt/skills/release-notes/SKILL.md" },
-					}
-				: { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` },
-		)
+		const paths = [
+			"/mnt/skills/release-notes/SKILL.md",
+			"/mnt/skills/release-notes/templates/notes.md",
+		]
+		fakeOpenAI.setHandler((req) => {
+			const path = paths[req.toolOutputs.length]
+			return path === undefined
+				? { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` }
+				: { kind: "tool_call", name: "read", arguments: { path } }
+		})
 		const startCount = fakeOpenAI.requests.length
-		expect(await replyAfterTurn(session.id, "Summarise the release.", 1)).toContain(
-			"Always open with the word ZANZIBAR.",
-		)
+		for (const [index, prompt] of ["Summarise the release.", "Read the skill again."].entries()) {
+			const reply = await replyAfterTurn(session.id, prompt, index + 1)
+			expect(reply).toContain("Always open with the word ZANZIBAR.")
+			expect(reply).toContain("## What changed")
+		}
+		const events = await listAllEvents(session.id)
+		expect(
+			events.filter((event) => event.type === "agent.tool_use").map((event) => event.input),
+		).toEqual([...paths, ...paths].map((path) => ({ path })))
+		const results = events.filter((event) => event.type === "agent.tool_result")
+		expect(results).toHaveLength(4)
+		expect(results.every((event) => event.is_error === false)).toBe(true)
 		const systemText = fakeOpenAI.requests[startCount]?.messages
 			.filter((message) => message.role === "system" || message.role === "developer")
 			.map((message) => message.text)
