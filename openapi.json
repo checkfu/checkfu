@@ -18327,6 +18327,9 @@
 												},
 												"message": {
 													"type": "string"
+												},
+												"code": {
+													"type": "string"
 												}
 											},
 											"required": ["type", "message"],
@@ -18371,6 +18374,9 @@
 													"enum": ["authentication_error"]
 												},
 												"message": {
+													"type": "string"
+												},
+												"code": {
 													"type": "string"
 												}
 											},
@@ -18417,6 +18423,9 @@
 												},
 												"message": {
 													"type": "string"
+												},
+												"code": {
+													"type": "string"
 												}
 											},
 											"required": ["type", "message"],
@@ -18461,6 +18470,9 @@
 													"enum": ["conflict_error"]
 												},
 												"message": {
+													"type": "string"
+												},
+												"code": {
 													"type": "string"
 												}
 											},
@@ -18507,6 +18519,9 @@
 												},
 												"message": {
 													"type": "string"
+												},
+												"code": {
+													"type": "string"
 												}
 											},
 											"required": ["type", "message"],
@@ -18552,6 +18567,9 @@
 												},
 												"message": {
 													"type": "string"
+												},
+												"code": {
+													"type": "string"
 												}
 											},
 											"required": ["type", "message"],
@@ -18596,6 +18614,9 @@
 													"enum": ["service_unavailable"]
 												},
 												"message": {
+													"type": "string"
+												},
+												"code": {
 													"type": "string"
 												}
 											},

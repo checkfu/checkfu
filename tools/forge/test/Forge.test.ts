@@ -92,6 +92,12 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/artifacts/{artifact_id}/versions/{version}",
 			},
 			{
+				group: "automation-runs",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/automation_runs/{automation_run_id}",
+			},
+			{
 				group: "automations",
 				name: "archive",
 				httpMethod: "POST",
@@ -671,7 +677,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(63)
+		expect(inspectedMethods.length).toBe(64)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

@@ -180,6 +180,7 @@ describe("Checkfu MCP server", () => {
 				"artifacts_listArtifacts",
 				"artifacts_publishArtifact",
 				"artifacts_unpublishArtifact",
+				"automationRuns_retrieve",
 				"automations_archiveAutomation",
 				"automations_createAutomation",
 				"automations_getAutomation",
@@ -256,6 +257,7 @@ describe("Checkfu MCP server", () => {
 				artifacts_listArtifacts: "read-only, additive, repeatable",
 				artifacts_publishArtifact: "writes, destructive, not repeatable",
 				artifacts_unpublishArtifact: "writes, destructive, not repeatable",
+				automationRuns_retrieve: "read-only, additive, repeatable",
 				automations_archiveAutomation: "writes, destructive, repeatable",
 				automations_createAutomation: "writes, additive, repeatable",
 				automations_getAutomation: "read-only, additive, repeatable",
@@ -474,6 +476,7 @@ describe("Checkfu MCP server", () => {
 					artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
 					artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
 					artifacts_unpublishArtifact: artifact,
+					automationRuns_retrieve: { path: { automation_run_id: "arun_auto_1_1" } },
 					automations_archiveAutomation: automation,
 					automations_createAutomation: {
 						body: {
