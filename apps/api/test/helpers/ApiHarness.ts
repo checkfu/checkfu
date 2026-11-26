@@ -67,6 +67,7 @@ import {
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { repositoryTokenGate } from "../../src/Workspace/Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -233,6 +234,8 @@ export const checkfuWithHarness = <E, R>(
 		PiDurableHarnessLive.pipe(Layer.provide(executor), Layer.provide(hosted)),
 	)
 }
+
+const repositoryKey = (sessionId: string, resourceId: string) => `${sessionId}/${resourceId}`
 
 export const makePiDurableTestLayer = (
 	handler: (
@@ -501,6 +504,7 @@ export const makePiDurableTestLayer = (
 	const workspaceCalls: Array<string> = []
 	const refusedWorkspaces = new Set<string>()
 	const repositoryTokens = new Map<string, string>()
+	const tokens = Effect.runSync(repositoryTokenGate((key) => repositoryTokens.has(key)))
 	const preparations: Array<WorkspacePreparation> = []
 	const beforeTokenStored: Array<() => Promise<Response>> = []
 	const tokenDeliveries: Array<string> = []
@@ -548,10 +552,22 @@ export const makePiDurableTestLayer = (
 		},
 		{
 			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
-				Effect.sync((): WorkspacePreparation => {
+				Effect.gen(function* (): Effect.fn.Return<WorkspacePreparation> {
 					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
 					if (refusedWorkspaces.has(sessionId)) {
 						return { ok: false, interrupted: true }
+					}
+					for (const repository of repositories) {
+						if (
+							repository.requires_token &&
+							!(yield* tokens.awaitToken(repositoryKey(sessionId, repository.id)))
+						) {
+							return {
+								ok: false,
+								resource_id: repository.id,
+								message: "Repository token was not stored.",
+							}
+						}
 					}
 					preparedWorkspaces.push({ sessionId, repositories, allowedHosts })
 					return preparations.shift() ?? { ok: true }
@@ -568,11 +584,12 @@ export const makePiDurableTestLayer = (
 						: Effect.void
 				}).pipe(
 					Effect.andThen(
-						Effect.promise(async () => {
-							await beforeTokenStored.shift()?.()
-							const key = `${sessionId}/${resourceId}`
+						Effect.gen(function* () {
+							yield* Effect.promise(async () => beforeTokenStored.shift()?.())
+							const key = repositoryKey(sessionId, resourceId)
 							if (replace || !repositoryTokens.has(key)) {
 								repositoryTokens.set(key, token)
+								yield* tokens.stored(key)
 							}
 						}),
 					),

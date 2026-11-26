@@ -932,7 +932,7 @@ describe("Checkfu MCP server", () => {
 			const client = yield* server.connect()
 			const refused = yield* callError(client, "sessions_createSession", {
 				body: {
-					agent: { id: "agent_1", version: 1 },
+					agent: { type: "agent", id: "agent_1", version: 1 },
 					environment_id: "env_1",
 					resources: [
 						{

@@ -1204,6 +1204,9 @@ describe("PiSession real Durable Object under workerd", () => {
 		>("/v1/sessions", {
 			agent: agentId,
 			environment_id: environmentId,
+			initial_events: [
+				{ type: "user.message", content: [{ type: "text", text: "Read the readme." }] },
+			],
 			resources: [
 				{
 					type: "github_repository",
@@ -1226,7 +1229,9 @@ describe("PiSession real Durable Object under workerd", () => {
 			return replies.at(-1)?.content?.[0]?.text ?? ""
 		}
 
-		expect(await turn("Read the readme.", 1)).toContain("# Acme API")
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		const firstReply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(firstReply?.content?.[0]?.text).toContain("# Acme API")
 		const basic = `Basic ${Buffer.from(`x-access-token:${TEST_GITHUB_TOKEN}`).toString("base64")}`
 		expect(fakeGitHub.requests.length).toBeGreaterThan(0)
 		expect(fakeGitHub.requests.map((request) => request.authorization)).toEqual(
