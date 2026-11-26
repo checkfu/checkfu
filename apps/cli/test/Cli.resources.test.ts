@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
-import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "@checkfu/sdk/Schemas"
+import { MAX_ARTIFACT_BODY_BYTES, MAX_INLINE_FILE_BYTES } from "@checkfu/sdk/Schemas"
 import { MAX_INPUT_BYTES } from "../src/Input.ts"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 import type { CliRunResult } from "./helpers/CliHarness.ts"
@@ -392,7 +392,9 @@ describe("CLI help, errors, and resource commands", () => {
 
 					const unpaused = yield* cli.run(["automations", "unpause", ...id])
 					expect(JSON.parse(unpaused.stdout).status).toBe("active")
-					const renamed = yield* cli.run(["automations", "update", ...id, "--name", "Renamed"])
+					const renamed = yield* cli.run(["automations", "update", ...id, "--name", "Renamed"], {
+						stdin: "{}",
+					})
 					expect([renamed.exitCode, renamed.stderr]).toEqual([0, ""])
 					expect(JSON.parse(renamed.stdout)).toMatchObject({
 						name: "Renamed",
@@ -790,7 +792,7 @@ describe("CLI help, errors, and resource commands", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const cli = yield* makeTestServer()
-					const megabyte = "x".repeat(MAX_ARTIFACT_FILE_BYTES)
+					const megabyte = "x".repeat(MAX_INLINE_FILE_BYTES)
 					const upload = JSON.stringify({
 						name: "Two files",
 						files: [
@@ -803,7 +805,7 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(created.stderr).toBe("")
 					expect(created.exitCode).toBe(0)
 					const artifact = JSON.parse(created.stdout) as { id: string; total_bytes: number }
-					expect(artifact.total_bytes).toBe(2 * MAX_ARTIFACT_FILE_BYTES)
+					expect(artifact.total_bytes).toBe(2 * MAX_INLINE_FILE_BYTES)
 
 					const added = yield* cli.run(
 						["artifacts:versions", "create", "--artifact-id", artifact.id],
@@ -947,7 +949,7 @@ describe("CLI help, errors, and resource commands", () => {
 					const cli = yield* makeTestServer()
 					const record = JSON.stringify({
 						path: "newlines.txt",
-						content: "\n".repeat(MAX_ARTIFACT_FILE_BYTES),
+						content: "\n".repeat(MAX_INLINE_FILE_BYTES),
 					})
 					expect(record.length).toBeGreaterThan(MAX_INPUT_BYTES)
 
@@ -958,7 +960,7 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(created.stderr).toBe("")
 					expect(created.exitCode).toBe(0)
 					expect((JSON.parse(created.stdout) as { total_bytes: number }).total_bytes).toBe(
-						MAX_ARTIFACT_FILE_BYTES,
+						MAX_INLINE_FILE_BYTES,
 					)
 
 					let requests = 0

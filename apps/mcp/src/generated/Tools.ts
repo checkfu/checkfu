@@ -290,7 +290,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifact",
 		title: "Create an artifact",
 		description:
-			'Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64".',
+			"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
 		method: "POST",
 		path: "/v1/artifacts",
 		readOnly: false,
@@ -344,11 +344,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								additionalProperties: false,
 							},
 							minItems: 1,
-							maxItems: 64,
-							description: "Every file of the version; a new version replaces the whole set",
+							maxItems: 1000,
+							description:
+								"Every file of version 1. Leave it out to create an empty artifact at version 0, upload large files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}, then add version 1",
 						},
 					},
-					required: ["name", "files"],
+					required: ["name"],
 					additionalProperties: false,
 				},
 				idempotency_key: {
@@ -417,7 +418,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifactVersion",
 		title: "Create an artifact version",
 		description:
-			'Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64".',
+			"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
 		method: "POST",
 		path: "/v1/artifacts/{artifact_id}/versions",
 		readOnly: false,
@@ -444,9 +445,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						version: {
 							type: "integer",
-							minimum: 1,
+							minimum: 0,
 							maximum: 9007199254740991,
-							description: "Current artifact version for optimistic concurrency",
+							description:
+								"Current artifact version for optimistic concurrency (0 for an empty artifact)",
 						},
 						files: {
 							type: "array",
@@ -501,7 +503,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												type: "string",
 												pattern: "^[0-9a-f]{64}$",
 												description:
-													"sha256 of a file in the version being replaced, to keep its bytes without sending them again",
+													"sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}",
 											},
 											content_type: {
 												type: "string",
@@ -518,9 +520,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								],
 							},
 							minItems: 1,
-							maxItems: 64,
+							maxItems: 1000,
 							description:
-								"Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again",
+								"Every file of the version; a new version replaces the whole set. Send a small file's content inline, or name bytes the artifact already holds by their sha256",
 						},
 					},
 					required: ["version", "files"],

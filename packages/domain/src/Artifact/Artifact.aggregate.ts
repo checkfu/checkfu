@@ -26,6 +26,7 @@ import {
 	ArtifactVersionNotFound,
 	PublishArtifact,
 } from "./PublishArtifact.command.ts"
+import { ArtifactOpened, OpenArtifact } from "./OpenArtifact.command.ts"
 import { ArtifactReserved, ReserveArtifact } from "./ReserveArtifact.command.ts"
 import { ArtifactUnpublished, UnpublishArtifact } from "./UnpublishArtifact.command.ts"
 
@@ -77,6 +78,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		ReserveArtifact,
 		ExpireArtifactReservation,
 		CreateArtifact,
+		OpenArtifact,
 		AddArtifactVersion,
 		DeleteArtifact,
 		PublishArtifact,
@@ -90,7 +92,14 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		CreatedExactlyWhenVersioned: (s) =>
 			[
 				[s.status === "", s.version === 0, s.name === "", s.manifest === ""].every((ok) => ok),
-				[s.status !== "", s.version >= 1, s.name !== "", s.manifest !== ""].every((ok) => ok),
+				[
+					s.status !== "",
+					s.name !== "",
+					[
+						[s.version === 0, s.manifest === ""].every((ok) => ok),
+						[s.version >= 1, s.manifest !== ""].every((ok) => ok),
+					].some((ok) => ok),
+				].every((ok) => ok),
 			].some((ok) => ok),
 		PublishedOnlyOnceCreated: (s) => [s.publication_token === "", s.status !== ""].some((ok) => ok),
 		UnpublishedHoldsNoSettings: (s) =>
@@ -125,7 +134,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					before.status === "",
 					[
 						[after.status === "", after.version === 0].every((ok) => ok),
-						[after.status === "active", after.version === 1].every((ok) => ok),
+						[after.status === "active", after.version <= 1].every((ok) => ok),
 					].some((ok) => ok),
 				].every((ok) => ok),
 				[
@@ -172,6 +181,17 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				),
 			].some((ok) => ok)
 		},
+		OpeningTakesTheOpenReservation: ({ before, after, command }) => {
+			if (command._tag !== "OpenArtifact") {
+				return true
+			}
+			return [
+				after.status === before.status,
+				[before.open_reservation !== 0, before.open_reservation === command.reservation].every(
+					(ok) => ok,
+				),
+			].some((ok) => ok)
+		},
 		ATokenIsOnlyOpenedOrDropped: ({ before, after }) =>
 			[
 				after.publication_token === before.publication_token,
@@ -203,6 +223,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				].every((ok) => ok),
 				[
 					before.status === "active",
+					before.version >= 1,
 					after.publication_token !== "",
 					command.pinned_version <= before.version,
 					after.pinned_version === command.pinned_version,
@@ -253,6 +274,15 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				}),
 			]
 		},
+		OpenArtifact: (state, cmd, ctx) => {
+			if (state.status !== "") {
+				return new ArtifactAlreadyExists({ artifact_id: ctx.id })
+			}
+			if (state.open_reservation === 0 || state.open_reservation !== cmd.reservation) {
+				return new ArtifactReservationLapsed({ artifact_id: ctx.id })
+			}
+			return [new ArtifactOpened({ name: cmd.name })]
+		},
 		AddArtifactVersion: (state, cmd, ctx) => {
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
@@ -283,7 +313,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
 			}
-			if (cmd.pinned_version > state.version) {
+			if (state.version === 0 || cmd.pinned_version > state.version) {
 				return new ArtifactVersionNotFound({ artifact_id: ctx.id, version: cmd.pinned_version })
 			}
 			if (state.publication_token === "") {
@@ -312,6 +342,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 	reply: {
 		ReserveArtifact: (state) => ({ reservation: state.reservations }),
 		CreateArtifact: (state) => ({ version: state.version }),
+		OpenArtifact: (state) => ({ version: state.version }),
 		AddArtifactVersion: (state) => ({ version: state.version }),
 	},
 	evolve: {
@@ -332,6 +363,17 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						manifest: e.manifest,
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
+						created_at: DateTime.toEpochMillis(envelope.at),
+						updated_at: DateTime.toEpochMillis(envelope.at),
+					}
+				: state,
+		"artifact.opened": (state, e, envelope) =>
+			state.status === ""
+				? {
+						...state,
+						status: "active",
+						open_reservation: 0,
+						name: e.name,
 						created_at: DateTime.toEpochMillis(envelope.at),
 						updated_at: DateTime.toEpochMillis(envelope.at),
 					}

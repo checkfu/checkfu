@@ -4,6 +4,8 @@ import {
 	MAX_ARTIFACT_FILES,
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_INLINE_FILE_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
 } from "@checkfu/sdk/Schemas"
 import type { ArtifactFileInput, ArtifactVersionFileInput } from "@checkfu/sdk/Schemas"
 import * as Digest from "effect/crypto/Digest"
@@ -29,6 +31,8 @@ export {
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_PATH_LENGTH,
 	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_INLINE_FILE_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
 	Sha256Hex,
 } from "@checkfu/sdk/Schemas"
 
@@ -184,15 +188,13 @@ export const buildArtifactVersion = (
 		const entries: Array<ArtifactFileEntry> = []
 		const blobs = new Map<string, ArtifactBlob>()
 		let totalBytes = 0
+		let inlineBytes = 0
 		for (const file of files) {
 			if ("sha256" in file) {
 				const size = kept.get(file.sha256)
 				if (size === undefined) {
 					return yield* new InvalidArtifactFiles({
-						message:
-							kept.size === 0
-								? `File "${file.path}" keeps a stored file by sha256, but there is no earlier version to keep it from; send its content.`
-								: `File "${file.path}" keeps sha256 ${file.sha256}, which the version being replaced does not hold; send its content.`,
+						message: `File "${file.path}" names sha256 ${file.sha256}, which this artifact does not hold; upload those bytes first, or send the file's content.`,
 					})
 				}
 				totalBytes += size
@@ -209,6 +211,17 @@ export const buildArtifactVersion = (
 				continue
 			}
 			const bytes = yield* decodeContent(file)
+			if (bytes.byteLength > MAX_INLINE_FILE_BYTES) {
+				return yield* new InvalidArtifactFiles({
+					message: `File "${file.path}" is ${bytes.byteLength} bytes, over the ${MAX_INLINE_FILE_BYTES} a file sent inline may hold; upload it to the artifact and name it by sha256.`,
+				})
+			}
+			inlineBytes += bytes.byteLength
+			if (inlineBytes > MAX_INLINE_TOTAL_BYTES) {
+				return yield* new InvalidArtifactFiles({
+					message: `Files sent inline total more than ${MAX_INLINE_TOTAL_BYTES} bytes; upload the larger ones to the artifact and name them by sha256.`,
+				})
+			}
 			totalBytes += bytes.byteLength
 			const over = overBudget(file.path, bytes.byteLength, totalBytes)
 			if (over !== undefined) {

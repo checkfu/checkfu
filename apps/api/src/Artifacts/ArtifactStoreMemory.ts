@@ -2,6 +2,7 @@ import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { DEFAULT_STORAGE_SCOPE } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import { UNMARKED, makeArtifactOwner } from "./ArtifactOwnership.ts"
@@ -41,6 +42,39 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 	)
 
 	const bucket: ArtifactBucketWriter<never> = {
+		verifyStream: (body, size, sha256) =>
+			Effect.gen(function* () {
+				const bytes = new Uint8Array(
+					yield* Effect.tryPromise({
+						try: () => new Response(body).arrayBuffer(),
+						catch: (cause) => new ArtifactStoreError({ cause }),
+					}),
+				)
+				const digest = yield* Digest.Digest
+				return bytes.byteLength === size &&
+					(yield* digest.digestHex(Digest.sha256, bytes)) === sha256
+					? ("stored" as const)
+					: ("mismatch" as const)
+			}).pipe(Effect.provide(Digest.layerWebCrypto)),
+		putStream: (key, body, size, sha256) =>
+			Effect.gen(function* () {
+				const bytes = new Uint8Array(
+					yield* Effect.tryPromise({
+						try: () => new Response(body).arrayBuffer(),
+						catch: (cause) => new ArtifactStoreError({ cause }),
+					}),
+				)
+				if (bytes.byteLength !== size) {
+					return yield* offline(`expected ${size} bytes, received ${bytes.byteLength}`)
+				}
+				return yield* bucket.put(key, bytes, { sha256 }).pipe(
+					Effect.as("stored" as const),
+					Effect.catchIf(
+						(error) => String(error.cause).includes("does not match its sha256"),
+						() => Effect.succeed("mismatch" as const),
+					),
+				)
+			}),
 		put: (key, body, options) =>
 			Effect.gen(function* () {
 				yield* online
@@ -135,6 +169,27 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 					blobChecks += 1
 					return objects.has(artifactBlobKey(scope, artifactId, sha256))
 				}),
+			blobSize: (artifactId, sha256) =>
+				read(() => {
+					blobChecks += 1
+					return objects.get(artifactBlobKey(scope, artifactId, sha256))?.byteLength ?? null
+				}),
+			blobStream: (artifactId, sha256) =>
+				read(() => {
+					blobReads += 1
+					const bytes = objects.get(artifactBlobKey(scope, artifactId, sha256))
+					return bytes === undefined ? null : Stream.make(bytes)
+				}),
+			putBlob: (artifactId, sha256, body, size) =>
+				Effect.andThen(
+					Effect.suspend(() => beforePut),
+					ownerOf(scope, artifactId).putBlob(
+						artifactId,
+						sha256,
+						Stream.toReadableStream(body),
+						size,
+					),
+				),
 			purge: (artifactId) => ownerOf(scope, artifactId).purge(artifactId),
 			release: (artifactId, reservation) =>
 				ownerOf(scope, artifactId).release(artifactId, reservation),

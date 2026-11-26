@@ -586,6 +586,61 @@ describe("PiSession real Durable Object under workerd", () => {
 		return replies.at(-1)?.content?.[0]?.text ?? ""
 	}
 
+	it("stores uploaded bytes in R2 only when they match their sha256, and serves them raw", async () => {
+		const opened = await apiJson<{ readonly id: string; readonly version: number }>(
+			"/v1/artifacts",
+			{ method: "POST", body: { name: "Bytes" } },
+		)
+		expect(opened.status).toBe(201)
+		expect(opened.body.version).toBe(0)
+		const data = Uint8Array.from({ length: 70_000 }, (_, index) => (index * 31 + 7) % 256)
+		const sha256 = createHash("sha256").update(data).digest("hex")
+		const upload = (hash: string, bytes: Uint8Array<ArrayBuffer> = data) =>
+			fetch(`${baseUrl}/v1/artifacts/${opened.body.id}/blobs/${hash}`, {
+				method: "PUT",
+				headers: {
+					...AUTH_HEADERS,
+					"content-type": "application/octet-stream",
+					"content-length": String(bytes.byteLength),
+				},
+				body: bytes,
+			})
+		expect((await upload("0".repeat(64))).status).toBe(400)
+		const stored = await upload(sha256)
+		expect(stored.status).toBe(200)
+		expect((await upload(sha256)).status).toBe(200)
+		expect(
+			(
+				await upload(
+					sha256,
+					data.map((byte) => 255 - byte),
+				)
+			).status,
+		).toBe(400)
+		const empty = new Uint8Array(0)
+		const emptySha256 = createHash("sha256").update(empty).digest("hex")
+		expect((await upload(emptySha256, empty)).status).toBe(200)
+		const version = await apiJson<{ readonly version: number }>(
+			`/v1/artifacts/${opened.body.id}/versions`,
+			{
+				method: "POST",
+				body: {
+					version: 0,
+					files: [
+						{ path: "data.bin", sha256 },
+						{ path: "empty.txt", sha256: emptySha256 },
+					],
+				},
+			},
+		)
+		expect(version.status).toBe(201)
+		const download = await apiFetch(
+			`/v1/artifacts/${opened.body.id}/versions/1/content?file=data.bin`,
+		)
+		expect(download.status).toBe(200)
+		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
+	}, 60_000)
+
 	it("serves the OpenAPI document as a static asset, without running the Worker", async () => {
 		const res = await fetch(`${baseUrl}/openapi.json`)
 		expect(res.status).toBe(200)

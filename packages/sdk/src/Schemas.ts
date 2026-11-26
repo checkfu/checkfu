@@ -331,16 +331,28 @@ export const AutomationSnapshot = Schema.Struct({
 })
 export type AutomationSnapshot = typeof AutomationSnapshot.Type
 
-export const MAX_ARTIFACT_NAME_LENGTH = 256
-export const MAX_ARTIFACT_FILES = 64
-export const MAX_ARTIFACT_FILE_BYTES = 1024 * 1024
-export const MAX_ARTIFACT_TOTAL_BYTES = 4 * 1024 * 1024
-export const MAX_ARTIFACT_PATH_LENGTH = 512
-export const MAX_ARTIFACT_CONTENT_TYPE_LENGTH = 128
+import {
+	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
+	MAX_ARTIFACT_FILES,
+	MAX_ARTIFACT_NAME_LENGTH,
+	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_INLINE_TOTAL_BYTES,
+} from "./Limits.ts"
+
+export {
+	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
+	MAX_ARTIFACT_FILES,
+	MAX_ARTIFACT_FILE_BYTES,
+	MAX_ARTIFACT_NAME_LENGTH,
+	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_INLINE_FILE_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
+} from "./Limits.ts"
 
 const JSON_ESCAPE_ALLOWANCE = 3
 export const MAX_ARTIFACT_BODY_BYTES =
-	MAX_ARTIFACT_TOTAL_BYTES * JSON_ESCAPE_ALLOWANCE +
+	MAX_INLINE_TOTAL_BYTES * JSON_ESCAPE_ALLOWANCE +
 	MAX_ARTIFACT_FILES * (MAX_ARTIFACT_PATH_LENGTH * 6 + 512) +
 	16 * 1024
 
@@ -418,7 +430,7 @@ export const ArtifactKeptFileInput = Schema.Struct({
 	}),
 	sha256: Sha256Hex.annotate({
 		description:
-			"sha256 of a file in the version being replaced, to keep its bytes without sending them again",
+			"sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}",
 	}),
 	content_type: Schema.optionalKey(
 		ArtifactContentType.annotate({

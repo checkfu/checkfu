@@ -13,6 +13,7 @@ import { AutomationUpdated } from "../Automation/UpdateAutomation.command.ts"
 import { Artifact } from "../Artifact/Artifact.aggregate.ts"
 import { ArtifactCreated } from "../Artifact/CreateArtifact.command.ts"
 import { ArtifactDeleted } from "../Artifact/DeleteArtifact.command.ts"
+import { ArtifactOpened } from "../Artifact/OpenArtifact.command.ts"
 import { EnvironmentArchived } from "../Environment/ArchiveEnvironment.command.ts"
 import { EnvironmentCreated } from "../Environment/CreateEnvironment.command.ts"
 import { EnvironmentDeleted } from "../Environment/DeleteEnvironment.command.ts"
@@ -47,6 +48,7 @@ export class Listing extends Domain.Projection(
 			AutomationUpdated,
 			AutomationArchived,
 			ArtifactCreated,
+			ArtifactOpened,
 			ArtifactDeleted,
 		],
 	},
@@ -84,6 +86,7 @@ const changeOf = ({
 		case "automation.archived":
 			return { kind: "automation", id, created_at, agent_id: null, status: ARCHIVED }
 		case "artifact.created":
+		case "artifact.opened":
 			return { kind: "artifact", id, created_at, agent_id: null, status: LISTED }
 		case "artifact.deleted":
 			return { kind: "artifact", id, created_at, agent_id: null, status: DELETED }

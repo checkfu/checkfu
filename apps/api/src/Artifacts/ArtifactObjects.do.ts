@@ -3,6 +3,7 @@ import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
 import { placedStub, placement, storageScope, storageScopeOf } from "../Placement.ts"
 import type { BuiltArtifactVersion } from "./ArtifactFiles.ts"
 import {
@@ -17,6 +18,7 @@ import {
 	ArtifactStore,
 	ArtifactStoreError,
 	artifactReads,
+	isChecksumMismatch,
 } from "./ArtifactStore.ts"
 
 const LIST_PAGE_SIZE = 1000
@@ -24,6 +26,17 @@ const LIST_PAGE_SIZE = 1000
 const MARKS_KEY = "marks"
 
 const storeError = (cause: unknown) => new ArtifactStoreError({ cause })
+
+declare global {
+	interface Crypto {
+		readonly DigestStream: new (
+			algorithm: string,
+		) => WritableStream<ArrayBufferView> & { readonly digest: Promise<ArrayBuffer> }
+	}
+}
+
+const hexOf = (buffer: ArrayBuffer) =>
+	Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("")
 
 const overWire = <A, R>(effect: Effect.Effect<A, ArtifactStoreError, R>) =>
 	Effect.mapError(effect, (error) => storeError(String(error.cause)))
@@ -50,14 +63,55 @@ const makeWriter = (
 				onFailure: storeError,
 			}),
 		),
+	putStream: (key, body, size, sha256) =>
+		bucket
+			.put(key, Stream.fromReadableStream({ evaluate: () => body, onError: storeError }), {
+				sha256,
+				contentLength: size,
+			})
+			.pipe(
+				Effect.as("stored" as const),
+				Effect.catch((error) =>
+					isChecksumMismatch(error)
+						? Effect.succeed("mismatch" as const)
+						: Effect.fail(storeError(error)),
+				),
+			),
+	verifyStream: (body, size, sha256) =>
+		Effect.tryPromise({
+			try: async () => {
+				const digest = new crypto.DigestStream("SHA-256")
+				let received = 0
+				await body
+					.pipeThrough(
+						new TransformStream<Uint8Array, Uint8Array>({
+							transform: (chunk, controller) => {
+								received += chunk.byteLength
+								controller.enqueue(chunk)
+							},
+						}),
+					)
+					.pipeTo(digest)
+				return received === size && hexOf(await digest.digest) === sha256
+					? ("stored" as const)
+					: ("mismatch" as const)
+			},
+			catch: storeError,
+		}),
 })
 
 interface ArtifactObjectsShape {
 	readonly stage: (
 		artifactId: string,
-		built: BuiltArtifactVersion,
+		built: BuiltArtifactVersion | null,
 		reservation: number | null,
 	) => Effect.Effect<"staged" | "purged" | "stale", ArtifactStoreError, RuntimeContext>
+	readonly putBlob: (
+		artifactId: string,
+		sha256: string,
+		body: ReadableStream<Uint8Array>,
+		size: number,
+	) => Effect.Effect<"stored" | "mismatch" | "purged", ArtifactStoreError, RuntimeContext>
 	readonly release: (
 		artifactId: string,
 		reservation: number,
@@ -103,6 +157,12 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 								}),
 							),
 						),
+					putBlob: (artifactId, sha256, body, size) =>
+						overWire(
+							owner
+								.putBlob(artifactId, sha256, body, size)
+								.pipe(Effect.catchTag("ArtifactPurged", () => Effect.succeed("purged" as const))),
+						),
 					release: (artifactId, reservation) => overWire(owner.release(artifactId, reservation)),
 					purge: (artifactId) => overWire(owner.purge(artifactId)),
 				}
@@ -147,6 +207,15 @@ export const ArtifactStoreR2 = Layer.effect(
 					),
 				),
 			...artifactReads(scope, bucket, run),
+			putBlob: (artifactId, sha256, body, size) =>
+				call(() =>
+					owners(artifactId).putBlob(artifactId, sha256, Stream.toReadableStream(body), size),
+				).pipe(
+					Effect.filterOrFail(
+						(outcome): outcome is "stored" | "mismatch" => outcome !== "purged",
+						() => new ArtifactPurged({ artifact_id: artifactId }),
+					),
+				),
 			purge: (artifactId) => call(() => owners(artifactId).purge(artifactId)),
 			release: (artifactId, reservation) =>
 				call(() => owners(artifactId).release(artifactId, reservation)),

@@ -12,6 +12,8 @@ import {
 
 const PUT_CONCURRENCY = 4
 
+const UPLOAD_SLOTS = 64
+
 export class ArtifactPurged extends Schema.TaggedError<
 	ArtifactPurged,
 	{ readonly brand: unique symbol }
@@ -36,6 +38,17 @@ export interface ArtifactBucketWriter<R> {
 	readonly has: (key: string) => Effect.Effect<boolean, ArtifactStoreError, R>
 	readonly delete: (keys: ReadonlyArray<string>) => Effect.Effect<void, ArtifactStoreError, R>
 	readonly list: (prefix: string) => Effect.Effect<Array<string>, ArtifactStoreError, R>
+	readonly putStream: (
+		key: string,
+		body: ReadableStream<Uint8Array>,
+		size: number,
+		sha256: string,
+	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError, R>
+	readonly verifyStream: (
+		body: ReadableStream<Uint8Array>,
+		size: number,
+		sha256: string,
+	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError, R>
 }
 
 export const ArtifactMarks = Schema.Struct({
@@ -55,13 +68,38 @@ export interface ArtifactOwnerPorts<R> {
 export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 	const { scope, bucket } = ports
 	const lock = Semaphore.makeUnsafe(1)
+	const uploads = Semaphore.makeUnsafe(UPLOAD_SLOTS)
+	const exclusive = <A, E, R2>(effect: Effect.Effect<A, E, R2>) =>
+		uploads.withPermits(UPLOAD_SLOTS)(lock.withPermit(effect))
+	const blobLocks = new Map<string, { readonly lock: Semaphore.Semaphore; holders: number }>()
+	const perBlob = <A, E, R2>(key: string, effect: Effect.Effect<A, E, R2>) =>
+		Effect.acquireUseRelease(
+			Effect.sync(() => {
+				const entry = blobLocks.get(key) ?? { lock: Semaphore.makeUnsafe(1), holders: 0 }
+				entry.holders += 1
+				blobLocks.set(key, entry)
+				return entry
+			}),
+			(entry) => entry.lock.withPermit(effect),
+			(entry) =>
+				Effect.sync(() => {
+					entry.holders -= 1
+					if (entry.holders === 0) {
+						blobLocks.delete(key)
+					}
+				}),
+		)
 
 	const putMissing = (key: string, body: Uint8Array | string, options: ArtifactPutOptions) =>
 		Effect.flatMap(bucket.has(key), (stored) =>
 			stored ? Effect.void : bucket.put(key, body, options),
 		)
 
-	const stage = (artifactId: string, built: BuiltArtifactVersion, reservation: number | null) =>
+	const stage = (
+		artifactId: string,
+		built: BuiltArtifactVersion | null,
+		reservation: number | null,
+	) =>
 		lock.withPermit(
 			Effect.gen(function* () {
 				const marks = yield* ports.marks
@@ -75,6 +113,9 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 					if (reservation > marks.staged) {
 						yield* ports.saveMarks({ ...marks, staged: reservation })
 					}
+				}
+				if (built === null) {
+					return
 				}
 				yield* Effect.forEach(
 					built.blobs,
@@ -95,8 +136,40 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 	const deleteAll = (artifactId: string) =>
 		deleteUntilEmpty(bucket.list(artifactPrefix(scope, artifactId)), bucket.delete)
 
+	const putBlob = (
+		artifactId: string,
+		sha256: string,
+		body: ReadableStream<Uint8Array>,
+		size: number,
+	) =>
+		uploads.withPermits(1)(
+			Effect.gen(function* () {
+				if ((yield* ports.marks).purged) {
+					return yield* new ArtifactPurged({ artifact_id: artifactId })
+				}
+				const key = artifactBlobKey(scope, artifactId, sha256)
+				return yield* perBlob(
+					key,
+					Effect.gen(function* () {
+						if (yield* bucket.has(key)) {
+							return yield* bucket.verifyStream(body, size, sha256)
+						}
+						if (size === 0) {
+							const empty = yield* bucket.verifyStream(body, 0, sha256)
+							if (empty === "mismatch") {
+								return empty
+							}
+							yield* bucket.put(key, new Uint8Array(0), { sha256 })
+							return "stored" as const
+						}
+						return yield* bucket.putStream(key, body, size, sha256)
+					}),
+				)
+			}),
+		)
+
 	const release = (artifactId: string, reservation: number) =>
-		lock.withPermit(
+		exclusive(
 			Effect.gen(function* () {
 				const marks = yield* ports.marks
 				if (marks.purged || reservation <= marks.released) {
@@ -110,7 +183,7 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 		)
 
 	const purge = (artifactId: string) =>
-		lock.withPermit(
+		exclusive(
 			Effect.gen(function* () {
 				const marks = yield* ports.marks
 				if (!marks.purged) {
@@ -120,7 +193,7 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 			}),
 		)
 
-	return { stage, release, purge }
+	return { stage, putBlob, release, purge }
 }
 
 export const UNMARKED: ArtifactMarks = { purged: false, staged: 0, released: 0 }

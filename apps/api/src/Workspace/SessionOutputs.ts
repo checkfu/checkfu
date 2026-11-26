@@ -1,11 +1,6 @@
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import {
-	ArtifactPath,
-	MAX_ARTIFACT_FILES,
-	MAX_ARTIFACT_FILE_BYTES,
-	MAX_ARTIFACT_TOTAL_BYTES,
-} from "../Artifacts/ArtifactFiles.ts"
+import { ArtifactPath } from "../Artifacts/ArtifactFiles.ts"
 import { NonNegativeInt } from "@checkfu/sdk/Schemas"
 
 export const OutputFile = Schema.Struct({
@@ -26,7 +21,10 @@ export type OutputBytes = typeof OutputBytes.Type
 
 export const SESSION_OUTPUTS_PATH = "/mnt/session/outputs"
 
-export const MAX_OUTPUT_ENTRIES = 8 * MAX_ARTIFACT_FILES
+export const MAX_OUTPUT_FILES = 64
+export const MAX_OUTPUT_FILE_BYTES = 1024 * 1024
+export const MAX_OUTPUT_TOTAL_BYTES = 4 * 1024 * 1024
+export const MAX_OUTPUT_ENTRIES = 8 * MAX_OUTPUT_FILES
 
 export interface OutputFiles {
 	readonly list: (
@@ -69,8 +67,8 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 			return refused(`More than ${MAX_OUTPUT_ENTRIES} files and directories.`)
 		}
 		const found = entries.filter((entry) => entry.type === "file").map((entry) => entry.path)
-		if (found.length > MAX_ARTIFACT_FILES) {
-			return refused(`${found.length} files; the limit is ${MAX_ARTIFACT_FILES}.`)
+		if (found.length > MAX_OUTPUT_FILES) {
+			return refused(`${found.length} files; the limit is ${MAX_OUTPUT_FILES}.`)
 		}
 		const paths: Array<string> = []
 		let totalBytes = 0
@@ -80,12 +78,12 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 				return refused(`File path ${JSON.stringify(path)} is not allowed.`)
 			}
 			const size = await files.size(file)
-			if (size > MAX_ARTIFACT_FILE_BYTES) {
-				return refused(`File "${path}" is ${size} bytes; the limit is ${MAX_ARTIFACT_FILE_BYTES}.`)
+			if (size > MAX_OUTPUT_FILE_BYTES) {
+				return refused(`File "${path}" is ${size} bytes; the limit is ${MAX_OUTPUT_FILE_BYTES}.`)
 			}
 			totalBytes += size
-			if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
-				return refused(`Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`)
+			if (totalBytes > MAX_OUTPUT_TOTAL_BYTES) {
+				return refused(`Files total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`)
 			}
 			paths.push(path)
 		}

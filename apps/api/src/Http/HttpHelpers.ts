@@ -23,9 +23,10 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { optionalSecret } from "../Secrets.ts"
-import { MAX_ARTIFACT_BODY_BYTES } from "../Artifacts/ArtifactFiles.ts"
+import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "../Artifacts/ArtifactFiles.ts"
 import {
 	AgentBodyLimit,
+	ArtifactBlobLimit,
 	ArtifactBodyLimit,
 	Authentication,
 	EventBatchBodyLimit,
@@ -346,6 +347,17 @@ export const ArtifactBodyLimitLive = Layer.succeed(ArtifactBodyLimit, (httpEffec
 			isBodyTooLarge(defect) ? reject(413, ARTIFACT_BODY_TOO_LARGE_MESSAGE) : Effect.die(defect),
 		),
 		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_BODY_BYTES)),
+	),
+)
+
+export const ArtifactBlobLimitLive = Layer.succeed(ArtifactBlobLimit, (httpEffect) =>
+	httpEffect.pipe(
+		Effect.catchDefect((defect) =>
+			isBodyTooLarge(defect)
+				? reject(413, `An upload may be at most ${MAX_ARTIFACT_FILE_BYTES} bytes.`)
+				: Effect.die(defect),
+		),
+		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_FILE_BYTES)),
 	),
 )
 

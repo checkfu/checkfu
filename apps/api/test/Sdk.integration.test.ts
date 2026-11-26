@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { ArtifactId } from "@checkfu/sdk/Schemas"
 import {
 	AuthenticationError,
 	Checkfu,
@@ -26,7 +28,17 @@ const makeFetchBridge =
 		>,
 	): typeof globalThis.fetch =>
 	async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-		const request = new Request(input, init)
+		const sent = new Request(input, init)
+		const body = sent.body === null ? null : new Uint8Array(await sent.arrayBuffer())
+		const headers = new Headers(sent.headers)
+		if (body !== null) {
+			headers.set("content-length", String(body.byteLength))
+		}
+		const request = new Request(sent.url, {
+			method: sent.method,
+			headers,
+			...(body === null ? {} : { body }),
+		})
 		const serverResponse = await runEffect(
 			apiFetch.pipe(
 				Effect.provideService(
@@ -490,6 +502,55 @@ describe("@checkfu/sdk live API integration", () => {
 								timeout: "5 seconds",
 							})
 							expect(ready.name).toBe("Eventually Ready Agent")
+						}).pipe(Effect.provide(sdkLayer))
+					}).pipe(Effect.provide(layer))
+				}),
+			),
+		{ timeout: 15_000 },
+	)
+
+	it.live(
+		"uploads raw bytes through the typed SDK client and builds a version from them",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const { layer } = makePiDurableTestLayer(async (model) =>
+						makeAssistantReply(model, null, "ok", 1, 1),
+					)
+					yield* Effect.gen(function* () {
+						const { fetch: apiFetch } = yield* makeApiHandler
+						const runEffect = Effect.runPromiseWith(yield* Effect.context<never>())
+						const sdkLayer = CheckfuClient.layerFetch({
+							apiKey: TEST_API_KEY,
+							baseUrl: "http://localhost:1337",
+							fetch: makeFetchBridge(runEffect, apiFetch),
+							maxRetries: 0,
+						})
+						yield* Effect.gen(function* () {
+							const { raw } = yield* CheckfuClient
+							const created = yield* raw.artifacts.create({
+								headers: {},
+								payload: { name: "Bytes" },
+							})
+							expect(created).toMatchObject({ type: "artifact", version: 0 })
+							const artifact = { id: ArtifactId.make(created.id) }
+							const bytes = Uint8Array.from({ length: 4096 }, (_, index) => index % 251)
+							const sha256 = createHash("sha256").update(bytes).digest("hex")
+							const blob = yield* raw.artifacts.uploadBlob({
+								params: { artifact_id: artifact.id, sha256 },
+								payload: bytes,
+							})
+							expect(blob).toEqual({
+								type: "artifact_blob",
+								artifact_id: artifact.id,
+								sha256,
+								size: 4096,
+							})
+							const version = yield* raw.artifacts.createVersion({
+								params: { artifact_id: artifact.id },
+								payload: { version: 0, files: [{ path: "data.bin", sha256 }] },
+							})
+							expect(version).toMatchObject({ version: 1, file_count: 1, total_bytes: 4096 })
 						}).pipe(Effect.provide(sdkLayer))
 					}).pipe(Effect.provide(layer))
 				}),

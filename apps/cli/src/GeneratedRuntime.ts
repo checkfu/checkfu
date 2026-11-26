@@ -187,9 +187,10 @@ const collectRequestParts = (
 					const val = stdinVal.value
 					if (Array.isArray(val)) {
 						body = { [repeatFlag.wireName]: val }
-					} else if (isPlainRecord(val) && Object.keys(val).some((key) => bodyFields.has(key))) {
-						body = { ...val }
-					} else if (isPlainRecord(val) && !repeatFlag.required && !("type" in val)) {
+					} else if (
+						isPlainRecord(val) &&
+						(Object.keys(val).length === 0 || Object.keys(val).some((key) => bodyFields.has(key)))
+					) {
 						body = { ...val }
 					} else if (isPlainRecord(val)) {
 						body = { [repeatFlag.wireName]: [val] }
