@@ -871,7 +871,7 @@ export const AutomationResource = Schema.Struct({
 		"revision",
 		"upcoming",
 	]),
-	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
+	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
 	initial_events: AutomationInitialEvents,
 	run_count: Schema.Int,
 	upcoming_runs_at: Schema.Array(Schema.DateTimeUtc),
@@ -887,11 +887,8 @@ export const AutomationRunResource = Schema.Struct({
 		Schema.Struct({ type: Schema.Literal("schedule"), scheduled_at: Schema.DateTimeUtc }),
 		Schema.Struct({ type: Schema.Literal("manual") }),
 	]),
-	agent: Schema.NullOr(
-		Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
-	).annotate({
-		description:
-			"The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null for automations created without a pinned version). Null for runs recorded before runs named their agent.",
+	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }).annotate({
+		description: "The agent and version pinned for this run.",
 	}),
 	session_id: Schema.NullOr(Schema.String),
 	error: Schema.NullOr(AutomationRunError),
