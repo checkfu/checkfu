@@ -25,6 +25,8 @@ import { selection } from "../selection.ts"
 import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
+import { sendFailure } from "./tool-call.tsx"
+import type { SendAnswer } from "./tool-call.tsx"
 import { Transcript } from "./transcript.tsx"
 import { useSessionEvents } from "./use-session-events.ts"
 
@@ -207,11 +209,12 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, preview, reconnecting, earlier } = useSessionEvents({
+	const { events, preview, calls, reconnecting, earlier, findingCalls } = useSessionEvents({
 		session,
 		onSnapshotChange: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
 	const { status, turn } = session
+	const waiting = calls.waiting.size
 	const [text, setText] = useState("")
 	const sendKey = useSubmissionKey()
 	const send = useAction(
@@ -221,7 +224,11 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					{ type: "user.message" as const, content: [{ type: "text" as const, text: message }] },
 				],
 			}
-			await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
+			await checkfu.sessions
+				.send(session.id, body, sendKey.keyFor(body))
+				.catch((error: unknown) => {
+					throw sendFailure(error)
+				})
 			sendKey.settle()
 		},
 		{
@@ -248,13 +255,17 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 	)
 	const archived = session.archived_at !== null
 	const open = !archived && status !== "terminated"
+	const canSend = !send.pending && waiting === 0 && text.trim() !== ""
+	const sendAnswer: SendAnswer = async (event, idempotencyKey) => {
+		await checkfu.sessions.send(session.id, { events: [event] }, idempotencyKey)
+	}
 	return (
 		<>
 			<PageHeader
 				title={sessionTitle(session) ?? "Untitled session"}
 				id={session.id}
 				breadcrumb={<Link to="/sessions">Sessions</Link>}
-				accessory={<Status status={archived ? "archived" : status} />}
+				accessory={<Status status={archived ? "archived" : waiting > 0 ? "waiting" : status} />}
 				description={
 					<>
 						<Link
@@ -313,13 +324,43 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					{earlier.error === undefined ? null : <Callout tone="error">{earlier.error}</Callout>}
 				</div>
 			)}
-			<Transcript events={events} preview={preview} />
+			<Transcript
+				events={events}
+				preview={preview}
+				calls={calls.fold}
+				send={open ? sendAnswer : undefined}
+			/>
+			{open && findingCalls !== null ? (
+				findingCalls.error !== undefined ? (
+					<div className="space-y-2">
+						<Callout tone="error">
+							The tool call waiting on you could not be loaded: {findingCalls.error}
+						</Callout>
+						<Button variant="outline" size="sm" onClick={findingCalls.retry}>
+							Retry
+						</Button>
+					</div>
+				) : (
+					<Callout>
+						{findingCalls.pending
+							? "Loading the tool call waiting on you…"
+							: "A tool call is waiting on you, but it is not in this session's history. Interrupt to end the turn."}
+					</Callout>
+				)
+			) : null}
+			{open && waiting > 0 && findingCalls === null ? (
+				<Callout>
+					The agent is waiting on you to answer{" "}
+					{waiting === 1 ? "a tool call" : `${waiting} tool calls`} above. It takes no new message
+					until then; interrupt to end the turn without answering.
+				</Callout>
+			) : null}
 			{open ? (
 				<form
 					className="sticky bottom-0 space-y-2 bg-background pt-2 pb-4"
 					onSubmit={(event) => {
 						event.preventDefault()
-						if (!send.pending && text.trim() !== "") {
+						if (canSend) {
 							send.run(text)
 						}
 					}}
@@ -336,7 +377,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 						}}
 					/>
 					<div className="flex justify-end gap-2">
-						{status === "running" ? (
+						{status === "running" || waiting > 0 ? (
 							<Button
 								variant="outline"
 								disabled={interrupt.pending}
@@ -345,7 +386,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 								Interrupt
 							</Button>
 						) : null}
-						<Button type="submit" disabled={send.pending || text.trim() === ""}>
+						<Button type="submit" disabled={!canSend}>
 							Send
 						</Button>
 					</div>
