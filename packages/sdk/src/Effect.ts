@@ -70,6 +70,7 @@ export {
 	PendingEnvironment,
 	PendingResource,
 	PendingSession,
+	PendingWebhook,
 	REQUEST_ID_HEADER,
 	RequestId,
 	SendSessionEventReceipt,
@@ -97,10 +98,23 @@ export type {
 	Environment,
 	PendingResourceType,
 	Session,
+	Webhook,
+	WebhookCreated,
+	WebhookDeleted,
+	WebhookDelivery,
+	WebhookSecretRotated,
 } from "./Api.ts"
 
 export * from "./Errors.ts"
 export * from "./Schemas.ts"
+export {
+	DEFAULT_WEBHOOK_TOLERANCE_SECONDS,
+	WebhookEventData,
+	WebhookEventEnvelope,
+	unwrapWebhookEvent,
+	verifyWebhookSignature,
+} from "./WebhookVerification.ts"
+export type { VerifyWebhookOptions, WebhookHeaderBag } from "./WebhookVerification.ts"
 export { streamApiSse, streamSessionEvents } from "./Sse.ts"
 export type {
 	ApiSseError,

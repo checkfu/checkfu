@@ -9,6 +9,11 @@ import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.policy.ts"
 import { Automation } from "./Automation/Automation.aggregate.ts"
+import {
+	ArchiveAgentIfCurrentDecision,
+	ArchiveAutomationIfCurrentDecision,
+	ArchiveEnvironmentIfCurrentDecision,
+} from "./Automation/GuardedArchives.ts"
 import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
 import { UpdateAutomationDecision } from "./Automation/UpdateAutomation.decision.ts"
@@ -66,6 +71,10 @@ import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnSt
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
+import {
+	PublishWebhookEvents,
+	PublishWebhookEventsLive,
+} from "./Webhook/PublishWebhookEvents.policy.ts"
 
 export class Checkfu extends Domain.Model("Checkfu", {
 	aggregates: [
@@ -92,6 +101,9 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		SendSystemMessageDecision,
 		ConfirmToolDecision,
 		ReturnCustomToolResultDecision,
+		ArchiveAgentIfCurrentDecision,
+		ArchiveAutomationIfCurrentDecision,
+		ArchiveEnvironmentIfCurrentDecision,
 		WriteMemoryDecision,
 		DeleteMemoryDecision,
 	],
@@ -120,6 +132,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		PublishSessionOutputs,
 		ExpireArtifactReservations,
 		ReleaseArtifactBytes,
+		PublishWebhookEvents,
 	],
 	sagas: [RunTurn],
 	projections: [Listing],
@@ -564,6 +577,7 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	FreeAutomationSlotLive,
 	ExpireArtifactReservationsLive,
 	ReleaseArtifactBytesLive,
+	PublishWebhookEventsLive,
 	ListingLive,
 	ListResourcesLive,
 )

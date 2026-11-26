@@ -52,7 +52,7 @@ describe("Alchemy stack and worker entry", () => {
 				expect(ApiWorker).toBeDefined()
 				expect(API_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
 				expect(ARTIFACT_BUCKET_PROPS).toEqual({ forceDestroy: true })
-				expect("flags" in API_WORKER_PROPS.compatibility).toBe(false)
+				expect(API_WORKER_PROPS.compatibility.flags).toEqual(["global_fetch_strictly_public"])
 				expect(API_WORKER_PROPS.codeUpdateStrategy).toEqual({
 					mode: "deferred",
 					maxDelay: "12 minutes",

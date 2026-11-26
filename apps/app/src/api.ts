@@ -6,10 +6,13 @@ import type {
 	CreateArtifactLinkBody,
 	CreateAutomationBody,
 	CreateEnvironmentBody,
+	CreateMemoryBody,
+	CreateMemoryStoreBody,
 	PublishArtifactBody,
 	SendSessionEventsBody,
 	UpdateAgentBody,
 	UpdateAutomationBody,
+	UpdateMemoryBody,
 } from "@checkfu/sdk/Api"
 import { showsChanges } from "./automation-draft.ts"
 import type {
@@ -17,6 +20,8 @@ import type {
 	JsonArtifact,
 	JsonAutomation,
 	JsonEnvironment,
+	JsonMemory,
+	JsonMemoryStore,
 	JsonSession,
 } from "@checkfu/sdk/client"
 
@@ -123,6 +128,13 @@ const retrieveSession = (session_id: string, signal?: AbortSignal): Promise<Json
 	})
 const withSignal = (signal: AbortSignal | undefined) => (signal === undefined ? {} : { signal })
 
+export type JsonMemoryEntry = FetchResult<"memoryStores.memories.list">["data"][number]
+
+const retrieveMemoryStore = (
+	memory_store_id: string,
+	signal?: AbortSignal,
+): Promise<JsonMemoryStore> =>
+	request("memoryStores.retrieve", { path: { memory_store_id }, ...withSignal(signal) })
 type BodyOf<Op extends JsonOperationId> =
 	FetchInput<Op> extends { readonly body: infer Body } ? Body : never
 
@@ -293,6 +305,60 @@ export const checkfu = {
 				path: { session_id },
 				query: { after, "event_deltas[]": ["agent.message"] },
 			}),
+		rotateToken: (session_id: string, resource_id: string, token: string) =>
+			request("sessions.resources.update", {
+				path: { session_id, resource_id },
+				body: { authorization_token: token },
+			}),
+	},
+	memoryStores: {
+		list: (page?: string, signal?: AbortSignal) =>
+			request("memoryStores.list", {
+				query: { order: "desc", limit: 100, ...(page === undefined ? {} : { page }) },
+				...withSignal(signal),
+			}),
+		retrieve: retrieveMemoryStore,
+		create: async (body: typeof CreateMemoryStoreBody.Type, idempotencyKey: string) =>
+			settled(retrieveMemoryStore, await request("memoryStores.create", { body, idempotencyKey })),
+		archive: async (memory_store_id: string) =>
+			settled(
+				retrieveMemoryStore,
+				await request("memoryStores.archive", { path: { memory_store_id } }),
+				isArchived,
+			),
+		memories: (memory_store_id: string, signal?: AbortSignal) =>
+			request("memoryStores.memories.list", { path: { memory_store_id }, ...withSignal(signal) }),
+		memory: (memory_store_id: string, memory_id: string, signal?: AbortSignal) =>
+			request("memoryStores.memories.retrieve", {
+				path: { memory_store_id, memory_id },
+				...withSignal(signal),
+			}),
+		createMemory: async (memory_store_id: string, body: typeof CreateMemoryBody.Type) =>
+			settled(
+				(memory_id) =>
+					request("memoryStores.memories.retrieve", { path: { memory_store_id, memory_id } }),
+				await request("memoryStores.memories.create", { path: { memory_store_id }, body }),
+			),
+		updateMemory: async (memory_store_id: string, memory: JsonMemory, content: string) => {
+			const body: typeof UpdateMemoryBody.Type = {
+				content,
+				precondition: { type: "content_sha256", content_sha256: memory.content_sha256 },
+			}
+			return settled(
+				(memory_id) =>
+					request("memoryStores.memories.retrieve", { path: { memory_store_id, memory_id } }),
+				await request("memoryStores.memories.update", {
+					path: { memory_store_id, memory_id: memory.id },
+					body,
+				}),
+				(saved) => saved.version > memory.version,
+			)
+		},
+		deleteMemory: (memory_store_id: string, memory: JsonMemory) =>
+			request("memoryStores.memories.delete", {
+				path: { memory_store_id, memory_id: memory.id },
+				query: { expected_content_sha256: memory.content_sha256 },
+			}),
 	},
 	artifacts: {
 		list: (page?: string, signal?: AbortSignal) =>
@@ -325,6 +391,23 @@ export const errorMessage = (error: unknown): string =>
 
 export const isSignedOut = (error: unknown): boolean =>
 	error instanceof CheckfuFetchError && error.status === 401
+
+export const deploymentApiUrl = async (): Promise<string> => {
+	const response = await fetch("/auth/deployment")
+	if (!response.ok) {
+		throw new Error("Could not get this deployment’s API URL for the export.")
+	}
+	const body: unknown = await response.json()
+	if (
+		typeof body !== "object" ||
+		body === null ||
+		!("api_url" in body) ||
+		typeof body.api_url !== "string"
+	) {
+		throw new Error("This deployment did not return its API URL.")
+	}
+	return body.api_url
+}
 
 export const signedIn = async (): Promise<boolean> => {
 	const response = await fetch("/auth/session")

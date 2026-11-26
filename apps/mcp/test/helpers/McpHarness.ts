@@ -10,8 +10,10 @@ import {
 } from "@checkfu/api/Connection/CredentialCustody"
 import { vaultListingQueriesFrom } from "@checkfu/api/Http/Listing"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
+import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as McpClient from "effect/ai/McpClient"
@@ -60,7 +62,11 @@ export const makeTestServer = Effect.gen(function* () {
 			storeRepositoryToken: () => Effect.void,
 		}),
 	)
-	const VaultsLive = Vaults.layer(VaultsHandlersLive.pipe(Layer.provide(ListingStore.memory))).pipe(
+	const listingStore = ListingStore.memory
+	const webhooksTest = makeWebhooksTestSupport(listingStore)
+	const VaultsLive = Vaults.layer(
+		VaultsHandlersLive.pipe(Layer.provide(listingStore), Layer.provide(WebhookEventsNoop)),
+	).pipe(
 		Layer.provideMerge(CredentialSecretsLive),
 		Layer.provide(
 			makeConnectionExecutorLayer({
@@ -73,12 +79,15 @@ export const makeTestServer = Effect.gen(function* () {
 		Layer.provide(Domain.InMemory),
 	)
 	const ApiLayer = Layer.mergeAll(
+		webhooksTest.layer.pipe(Layer.provide(Domain.InMemory)),
 		VaultsLive,
+		vaultListingQueriesFrom(VaultsLive),
 		Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
-				Layer.provide(ListingStore.memory),
+				Layer.provide(listingStore),
+				Layer.provide(WebhookEventsNoop),
 				Layer.provide(HarnessLive),
 			),
 		).pipe(Layer.provide(Domain.InMemory)),
@@ -87,7 +96,6 @@ export const makeTestServer = Effect.gen(function* () {
 		),
 		HarnessLive,
 	).pipe(
-		Layer.provideMerge(vaultListingQueriesFrom(VaultsLive)),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(

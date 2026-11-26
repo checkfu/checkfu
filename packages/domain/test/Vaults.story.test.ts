@@ -64,15 +64,18 @@ import { ListCredentialsLive } from "../src/Vault/ListCredentials.query.ts"
 import { CredentialListingLive } from "../src/Vault/CredentialListing.projection.ts"
 import { VaultListingLive } from "../src/Vault/VaultListing.projection.ts"
 import { Vaults, VaultsHandlersLive } from "../src/Vaults.model.ts"
+import { PublishVaultWebhookEventsLive } from "../src/Vault/PublishVaultWebhookEvents.policy.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 
 const story = Story.make(Vaults, {
-	layer: VaultsHandlersLive.pipe(Layer.provide(ListingStore.memory)),
+	layer: VaultsHandlersLive.pipe(Layer.provide([ListingStore.memory, WebhookEventsNoop])),
 	stub: [CredentialSecrets],
 })
 
 const redeliveryStory = Story.make(Vaults, {
 	layer: Layer.mergeAll(
 		RetireReleasedCredentialsLive,
+		PublishVaultWebhookEventsLive.pipe(Layer.provide(WebhookEventsNoop)),
 		SettleCredentialSecret.toLayer(SettleCredentialSecret, { retry: Schedule.recurs(1) }).pipe(
 			Layer.provide(SettleCredentialSecretLive),
 		),
@@ -143,7 +146,7 @@ describe("Vaults", () => {
 			Layer.build(
 				Vaults.layer(
 					VaultsHandlersLive.pipe(
-						Layer.provide(ListingStore.memory),
+						Layer.provide([ListingStore.memory, WebhookEventsNoop]),
 						Layer.provide(
 							CredentialSecrets.toLayer(
 								Effect.succeed({

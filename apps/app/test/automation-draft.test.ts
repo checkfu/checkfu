@@ -22,6 +22,7 @@ const automation: JsonAutomation = {
 	status: "active",
 	pause_reason: null,
 	run_count: 0,
+	revision: 1,
 	upcoming_runs_at: [],
 	last_run_at: null,
 	created_at: "2026-01-05T12:00:00.000Z",

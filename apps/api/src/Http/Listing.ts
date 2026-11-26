@@ -1,13 +1,17 @@
 import * as Model from "@alchemy.run/domain/Model"
-import type * as Query from "@alchemy.run/domain/Query"
+import * as Query from "@alchemy.run/domain/Query"
 import { ListingEntry, listingCursor } from "@checkfu/domain/Listing/ListingStore"
 import type { ListingFilter, ListingKind, ListingOrder } from "@checkfu/domain/Listing/ListingStore"
 import { ListResources } from "@checkfu/domain/Listing/ListResources.query"
 import { ListCredentials } from "@checkfu/domain/Vault/ListCredentials.query"
 import { ListVaults } from "@checkfu/domain/Vault/ListVaults.query"
+import { ListWebhooks } from "@checkfu/domain/Webhook/ListWebhooks.query"
 import { ERRORS } from "@checkfu/sdk/Api"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -41,6 +45,69 @@ const decodePage = Schema.decodeUnknownEffect(
 	Schema.Struct({ entries: Schema.Array(ListingEntry), cursor: Schema.NullOr(Schema.String) }),
 )
 
+const isConsistencyTimeout = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	"_tag" in error &&
+	error._tag === "ConsistencyTimeout"
+
+export class WebhookListingTimeout extends Data.TaggedError("WebhookListingTimeout")<{
+	readonly receipt: Query.AtLeast
+}> {}
+
+export interface WebhookListingQueryService {
+	readonly page: (
+		order: ListingOrder,
+		options?: Query.RunOptions,
+	) => Effect.Effect<Query.Page<ListingEntry>, WebhookListingTimeout>
+	readonly lookup: (id: string) => Effect.Effect<Query.Page<ListingEntry>, WebhookListingTimeout>
+	readonly waitFor: (receipt: Query.AtLeast) => Effect.Effect<void, WebhookListingTimeout>
+}
+
+export class WebhookListingQuery extends Context.Service<
+	WebhookListingQuery,
+	WebhookListingQueryService
+>()("@checkfu/api/WebhookListingQuery") {}
+
+/**
+ * Captures the `Webhooks` model's `ListWebhooks` query host before it is merged
+ * alongside the `Checkfu` model (whose own `Model.Internals` would otherwise
+ * shadow `Webhooks`'s `Model.Internals`).
+ */
+export const WebhookListingQueryLive = Layer.effect(
+	WebhookListingQuery,
+	Effect.gen(function* () {
+		const query = (yield* Model.Internals).queries.get(ListWebhooks.queryName)
+		if (query === undefined) {
+			return yield* Effect.die(new Error("ListWebhooks is not hosted by the Webhooks model."))
+		}
+		const runQuery = (
+			input: { readonly order: ListingOrder; readonly id?: string | null },
+			options: Query.RunOptions = {},
+		): Effect.Effect<Query.Page<ListingEntry>, WebhookListingTimeout> =>
+			Effect.gen(function* () {
+				const exit = yield* Effect.exit(Effect.orDie(query.run(input, options)))
+				if (Exit.isFailure(exit)) {
+					const error = Cause.squash(exit.cause)
+					if (isConsistencyTimeout(error) && options.atLeast !== undefined) {
+						const [receipt] = Query.receiptsOf(options.atLeast)
+						if (receipt !== undefined) {
+							return yield* new WebhookListingTimeout({ receipt })
+						}
+					}
+					return yield* Effect.failCause(exit.cause)
+				}
+				return yield* decodePage(exit.value).pipe(Effect.orDie)
+			})
+		return {
+			page: (order, options) => runQuery({ order }, options),
+			lookup: (id) => runQuery({ order: "asc", id }, { take: 1 }),
+			waitFor: (receipt) =>
+				Effect.asVoid(runQuery({ order: "asc" }, { take: 1, atLeast: receipt })),
+		}
+	}),
+)
+
 type PageOf<RP> = (
 	filter: ListingFilter,
 	page: Query.PageRequest,
@@ -60,6 +127,52 @@ const ownedByAgent: OwnedBy = (resource, parent) =>
 const ownedByVault: OwnedBy = (resource, parent) =>
 	Predicate.hasProperty(resource, "vault_id") && resource.vault_id === parent
 
+export const hydrateListingPage = <A extends object, E, R>(
+	page: Query.Page<ListingEntry>,
+	input: Pick<ListQuery, "include_archived" | "agent_id">,
+	retrieve: (id: string) => Effect.Effect<A, E, R>,
+	ownedBy: OwnedBy = ownedByAgent,
+) =>
+	Effect.gen(function* () {
+		const include_archived = input.include_archived ?? false
+		const data: Array<A> = []
+		let bytes = 0
+		let handled: ListingEntry | undefined
+		let cut = false
+		yield* Stream.fromIterable(page.entries).pipe(
+			Stream.mapEffect(
+				(entry) =>
+					Effect.exit(
+						retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
+					).pipe(Effect.map((outcome) => ({ entry, outcome }))),
+				{ concurrency: HYDRATE_CONCURRENCY },
+			),
+			Stream.runForEachWhile(({ entry, outcome }) =>
+				Effect.gen(function* () {
+					const resource = yield* outcome
+					const archived =
+						resource !== null && "archived_at" in resource && resource.archived_at !== null
+					const owned =
+						resource !== null && (input.agent_id === undefined || ownedBy(resource, input.agent_id))
+					if (resource !== null && owned && (include_archived || !archived)) {
+						const size = utf8.encode(JSON.stringify(resource)).length
+						const next = pageBytesWith(bytes, data.length, size)
+						if (data.length > 0 && next > LIST_PAGE_BYTES) {
+							cut = true
+							return false
+						}
+						bytes = next
+						data.push(resource)
+					}
+					handled = entry
+					return true
+				}),
+			),
+		)
+		const cursor = cut && handled !== undefined ? listingCursor(handled) : page.cursor
+		return listPage(data, cursor)
+	})
+
 const listWith =
 	<RP>(pageOf: PageOf<RP>, ownedBy: OwnedBy = ownedByAgent) =>
 	<A extends object, E, R>(
@@ -73,43 +186,7 @@ const listWith =
 				{ kind, include_archived, agent_id: input.agent_id ?? null, order: input.order ?? "asc" },
 				{ take: input.limit ?? 50, after: input.page },
 			)
-			const data: Array<A> = []
-			let bytes = 0
-			let handled: ListingEntry | undefined
-			let cut = false
-			yield* Stream.fromIterable(page.entries).pipe(
-				Stream.mapEffect(
-					(entry) =>
-						Effect.exit(
-							retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
-						).pipe(Effect.map((outcome) => ({ entry, outcome }))),
-					{ concurrency: HYDRATE_CONCURRENCY },
-				),
-				Stream.runForEachWhile(({ entry, outcome }) =>
-					Effect.gen(function* () {
-						const resource = yield* outcome
-						const archived =
-							resource !== null && "archived_at" in resource && resource.archived_at !== null
-						const owned =
-							resource !== null &&
-							(input.agent_id === undefined || ownedBy(resource, input.agent_id))
-						if (resource !== null && owned && (include_archived || !archived)) {
-							const size = utf8.encode(JSON.stringify(resource)).length
-							const next = pageBytesWith(bytes, data.length, size)
-							if (data.length > 0 && next > LIST_PAGE_BYTES) {
-								cut = true
-								return false
-							}
-							bytes = next
-							data.push(resource)
-						}
-						handled = entry
-						return true
-					}),
-				),
-			)
-			const cursor = cut && handled !== undefined ? listingCursor(handled) : page.cursor
-			return listPage(data, cursor)
+			return yield* hydrateListingPage(page, input, retrieve, ownedBy)
 		})
 
 export const makeLister = Effect.gen(function* () {

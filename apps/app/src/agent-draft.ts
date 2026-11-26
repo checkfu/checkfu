@@ -1,3 +1,5 @@
+import { canonicalProjectJson } from "@checkfu/authoring/project"
+import { normalizeAgentCreateBody } from "@checkfu/sdk/AgentInput"
 import type { CreateAgentBody } from "@checkfu/sdk/Api"
 import type { JsonAgent } from "@checkfu/sdk/client"
 import { parseJsonObject } from "./json-boundary.ts"
@@ -41,8 +43,8 @@ export interface CustomToolDraft {
 export interface AgentDraft {
 	readonly name: string
 	readonly model: string
-	readonly system: string
-	readonly description: string
+	readonly system: string | null
+	readonly description: string | null
 	readonly servers: ReadonlyArray<ServerDraft>
 	readonly customTools: ReadonlyArray<CustomToolDraft>
 }
@@ -60,13 +62,14 @@ const FIELD_LABELS: Record<(typeof FIELDS)[number], string> = {
 export const emptyDraft: AgentDraft = {
 	name: "",
 	model: "",
-	system: "",
-	description: "",
+	system: null,
+	description: null,
 	servers: [],
 	customTools: [],
 }
 
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+const same = (a: unknown, b: unknown): boolean =>
+	canonicalProjectJson(a) === canonicalProjectJson(b)
 
 const savedRow = (name: string): string => `saved:${name}`
 
@@ -97,30 +100,33 @@ export const withoutServer = (draft: AgentDraft, row: string): AgentDraft => ({
 	servers: draft.servers.filter((server) => server.row !== row),
 })
 
-export const draftOf = (agent: JsonAgent): AgentDraft => ({
-	name: agent.name,
-	model: agent.model.id,
-	system: agent.system ?? "",
-	description: agent.description ?? "",
-	servers: agent.mcp_servers.map(({ name, url }) => {
-		const toolset = agent.tools.flatMap((tool) =>
-			tool.type === "mcp_toolset" && tool.mcp_server_name === name ? [tool] : [],
-		)[0]
-		return { row: savedRow(name), name, url, ...settingsOf(toolset), stored: toolset }
-	}),
-	customTools: agent.tools.flatMap((tool) =>
-		tool.type === "custom"
-			? [
-					{
-						name: tool.name,
-						description: tool.description,
-						schema: schemaText(tool.input_schema),
-						stored: tool,
-					},
-				]
-			: [],
-	),
-})
+export const draftOf = (input: CreateAgentBody): AgentDraft => {
+	const agent = normalizeAgentCreateBody(input)
+	return {
+		name: agent.name,
+		model: agent.model.id,
+		system: agent.system,
+		description: agent.description,
+		servers: (agent.mcp_servers ?? []).map(({ name, url }) => {
+			const toolset = (agent.tools ?? []).flatMap((tool) =>
+				tool.type === "mcp_toolset" && tool.mcp_server_name === name ? [tool] : [],
+			)[0]
+			return { row: savedRow(name), name, url, ...settingsOf(toolset), stored: toolset }
+		}),
+		customTools: (agent.tools ?? []).flatMap((tool) =>
+			tool.type === "custom"
+				? [
+						{
+							name: tool.name,
+							description: tool.description,
+							schema: schemaText(tool.input_schema),
+							stored: tool,
+						},
+					]
+				: [],
+		),
+	}
+}
 
 const SERVER_NAME = /^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$/u
 const CUSTOM_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u
@@ -234,8 +240,8 @@ const toolsOf = (draft: AgentDraft) => [
 export const bodyOf = (draft: AgentDraft) => ({
 	name: draft.name.trim(),
 	model: draft.model.trim(),
-	system: draft.system === "" ? null : draft.system,
-	description: draft.description === "" ? null : draft.description,
+	system: draft.system,
+	description: draft.description,
 	mcp_servers: serversOf(draft),
 	tools: toolsOf(draft),
 })
@@ -252,6 +258,21 @@ export const changesFrom = (from: JsonAgent, draft: AgentDraft) => {
 		...(same(body.mcp_servers, was.mcp_servers) && same(body.tools, was.tools)
 			? {}
 			: { mcp_servers: body.mcp_servers, tools: body.tools }),
+	}
+}
+
+export const changesFromSource = (from: JsonAgent, source: CreateAgentBody) => {
+	const body = normalizeAgentCreateBody(source)
+	const servers = body.mcp_servers ?? []
+	const tools = body.tools ?? []
+	return {
+		...(body.name === from.name ? {} : { name: body.name }),
+		...(body.model.id === from.model.id ? {} : { model: body.model }),
+		...(body.system === from.system ? {} : { system: body.system }),
+		...(body.description === from.description ? {} : { description: body.description }),
+		...(same(servers, from.mcp_servers) && same(tools, from.tools)
+			? {}
+			: { mcp_servers: servers, tools }),
 	}
 }
 

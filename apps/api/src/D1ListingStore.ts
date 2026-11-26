@@ -55,6 +55,8 @@ export const listingPageQuery = (
 		`ORDER BY created_at ${order}, id ${order} LIMIT ?5`,
 	].join(" ")
 
+const SELECT_BY_ID = `SELECT id, created_at FROM listing WHERE kind = ?1 AND id = ?2 AND status = ${LISTED} LIMIT 1`
+
 export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
 	ListingStore.of({
 		record: (changes) =>
@@ -99,6 +101,17 @@ export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
 				},
 			)
 		},
+		get: (kind, id) =>
+			Effect.map(
+				db
+					.prepare(SELECT_BY_ID)
+					.bind(kind, id)
+					.all<{ readonly id: string; readonly created_at: number }>(),
+				({ results }) => {
+					const row = results[0]
+					return row === undefined ? null : { id: row.id, created_at: row.created_at }
+				},
+			),
 	})
 
 export const D1ListingStore = Layer.effect(
