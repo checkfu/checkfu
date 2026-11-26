@@ -5,7 +5,7 @@ import * as Exit from "effect/Exit"
 import type * as JsonSchema from "effect/JsonSchema"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { OPENAPI_DOCUMENT_JSON } from "../src/Http/OpenApiDocument.generated.ts"
+import { readFileSync } from "node:fs"
 import { importOpenApi } from "../src/OpenApi/OpenApiImport.ts"
 import type { OpenApiCatalog } from "../src/OpenApi/OpenApiImport.ts"
 import { buildRequest } from "../src/OpenApi/OpenApiRequest.ts"
@@ -657,12 +657,13 @@ describe("importOpenApi", () => {
 
 	it.effect("imports the Checkfu API's own document", () =>
 		Effect.gen(function* () {
-			const catalog = yield* importOpenApi(OPENAPI_DOCUMENT_JSON)
+			const document = readFileSync(new URL("../public/openapi.json", import.meta.url), "utf8")
+			const catalog = yield* importOpenApi(document)
 			const descriptors = catalog.operations.map(({ name }) => describeTool(catalog, name))
 
 			expect(catalog.title).toBe("Checkfu API")
 			expect(catalog.skipped).toEqual([])
-			expect(descriptors.length).toBe(OPENAPI_DOCUMENT_JSON.split('"operationId"').length - 1)
+			expect(descriptors.length).toBe(document.split('"operationId"').length - 1)
 			expect(descriptors.every((descriptor) => Schema.is(ToolName)(descriptor.name))).toBe(true)
 			expect(JSON.stringify(descriptors)).not.toContain("#/components/")
 			const declarations = renderDeclarations({
