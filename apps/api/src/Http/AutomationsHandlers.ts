@@ -19,7 +19,6 @@ import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.
 import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
 import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
 import { BoundedAgentId, BoundedEnvironmentId } from "@checkfu/domain/Session/AdmitSession.command"
-import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
@@ -93,10 +92,7 @@ const automationRunResource = (
 					type: "schedule" as const,
 					scheduled_at: DateTime.makeUnsafe(entry.event.scheduled_at),
 				},
-	agent:
-		entry.event.agent_id === null
-			? null
-			: { id: entry.event.agent_id, version: entry.event.agent_version },
+	agent: { id: entry.event.agent_id, version: entry.event.agent_version },
 	session_id: entry.event._tag === "automation.run_started" ? entry.event.session_id : null,
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,
@@ -152,7 +148,6 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 	Effect.gen(function* () {
 		const admission = yield* AdmitAutomationDecision
 		const updates = yield* UpdateAutomationDecision
-		const agents = yield* Agent
 		const automations = yield* Automation
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
@@ -266,15 +261,12 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const timeout = yield* AutomationReadWaitTimeout
 					const send = Effect.gen(function* () {
 						const current = yield* currentOf(id)
-						const requestedVersion =
-							agent?.agent_version ??
-							(agent === undefined ? null : (yield* agents.get(agent.agent_id)).version || null)
 						const next = {
 							name: payload.name ?? current.name,
 							description:
 								payload.description === undefined ? current.description : payload.description,
 							agent_id: agent?.agent_id ?? BoundedAgentId.make(current.agent_id),
-							agent_version: agent === undefined ? current.agent_version : requestedVersion,
+							agent_version: agent === undefined ? current.agent_version : agent.agent_version,
 							environment_id: environment_id ?? BoundedEnvironmentId.make(current.environment_id),
 							text: text ?? current.text,
 							schedule: {
@@ -287,12 +279,10 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						if (reschedule && !isUsableSchedule(next.schedule.expression, next.schedule.timezone)) {
 							return yield* new AutomationScheduleUnusable(next.schedule)
 						}
-						const agent_changed =
-							next.agent_id !== current.agent_id || next.agent_version !== current.agent_version
+						const agent_id_changed = next.agent_id !== current.agent_id
 						const environment_changed = next.environment_id !== current.environment_id
 						const changed = [
 							reschedule,
-							agent_changed,
 							environment_changed,
 							next.name !== current.name,
 							next.description !== current.description,
@@ -305,7 +295,8 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 								...next,
 								changed,
 								reschedule,
-								agent_changed,
+								agent_id_changed,
+								previous_agent_version: current.agent_version,
 								environment_changed,
 							}),
 						)

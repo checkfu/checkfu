@@ -42,7 +42,7 @@ describe("editing an automation", () => {
 		})
 	})
 
-	it("clears a blanked description and follows the latest version of a newly chosen agent", () => {
+	it("clears a blanked description and pins the current version of a newly chosen agent", () => {
 		const draft = { ...draftOf(automation), description: "  ", agentId: "agent_2" }
 		expect(changesOf(draftOf(automation), draft)).toEqual({ description: null, agent: "agent_2" })
 	})
@@ -93,9 +93,7 @@ describe("waiting for an update to show", () => {
 	it("checks that the requested agent version was pinned", () => {
 		const pinned = { ...automation, agent: { id: "agent_2", version: 1 } }
 		expect(showsChanges(pinned, { agent: "agent_2" })).toBe(true)
-		expect(
-			showsChanges({ ...pinned, agent: { id: "agent_2", version: null } }, { agent: "agent_2" }),
-		).toBe(false)
+		expect(showsChanges(automation, { agent: "agent_2" })).toBe(false)
 		expect(showsChanges(pinned, { agent: { type: "agent", id: "agent_2", version: 2 } })).toBe(
 			false,
 		)
