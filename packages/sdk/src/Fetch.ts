@@ -187,7 +187,7 @@ const urlOf = (binding: Binding, input: RawInput): string => {
 		const values: ReadonlyArray<unknown> = Array.isArray(value) ? value : [value]
 		return values.map((item) => {
 			if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean") {
-				throw new Error(`Invalid ${name}: must contain only strings, numbers or booleans.`)
+				throw new Error(`Invalid ${name}: must be a string, number or boolean.`)
 			}
 			return [name, String(item)] as const
 		})
