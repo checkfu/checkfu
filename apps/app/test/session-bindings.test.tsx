@@ -224,7 +224,7 @@ describe("session credential bindings", () => {
 			id: "sesn_1",
 			type: "session",
 			status: "idle",
-			agent: { id: agent.id, version: agent.version },
+			agent,
 			environment_id: "env_1",
 			title: null,
 			turn: 0,
