@@ -916,11 +916,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			expect(Object.keys(byType.get(type)?.properties ?? {}).toSorted()).toEqual(
 				[...envelope, ...fields].toSorted(),
 			)
+			expect(byType.get(type)?.required).toContain("processed_at")
 		}
 		expect(byType.get("agent.message")?.required?.toSorted()).toEqual([
 			"content",
 			"created_at",
 			"id",
+			"processed_at",
 			"seq",
 			"type",
 		])
