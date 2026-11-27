@@ -205,24 +205,27 @@ interface MachineRecord {
 }
 
 const COMMAND = `dir=$1; seconds=$2; bytes=$3; lines=$4; call=${CALLS}/$5; root=$6; shift 6
-mkdir -p ${CALLS}; [ -e "$call.stop" ] && { rm -f -- "$call.stop"; echo 0 >&2; exit 143; }
+mkdir -p ${CALLS}; [ -e "$call.stop" ] && { rm -f -- "$call.stop"; echo "0 0" >&2; exit 143; }
 [ "$dir" != "$root" ] || mkdir -p -- "$root" 2>/dev/null
 work=$(mktemp -d); mkfifo "$work/in" "$work/out"
 dd if="$work/in" of="$work/out" bs=65536 2>"$work/total" & copier=$!
 tail -c "$bytes" <"$work/out" >"$work/log" & keeper=$!
-{ cd "$dir" && ${COMMAND_MARK} exec timeout --kill-after=5 "$seconds" "$@"; } >"$work/in" 2>&1 </dev/null &
+{ cd "$dir" && ${COMMAND_MARK} exec timeout --verbose --kill-after=5 "$seconds" bash -c 'exec "$@" 2>&1' bash "$@" 2>"$work/deadline"; } >"$work/in" 2>&1 </dev/null &
 pid=$!; echo "$pid" >"$call"
 [ -e "$call.stop" ] && { kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null; }
-wait "$pid"; code=$?; rm -f -- "$call" "$call.stop"
+wait "$pid" 2>/dev/null; code=$?; rm -f -- "$call" "$call.stop"
 for try in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$copier" 2>/dev/null || break; sleep 0.1; done
 if kill -0 "$copier" 2>/dev/null; then kill -USR1 "$copier"; sleep 0.1; kill -TERM "$copier" 2>/dev/null; fi
-wait "$copier"; wait "$keeper"
-sed -n '$s/ .*//p' "$work/total" >&2; tail -n "$lines" "$work/log"; rm -rf -- "$work"; exit "$code"`
+wait "$copier" "$keeper" 2>/dev/null
+total=$(sed -n '$s/ .*//p' "$work/total"); deadline=0
+[ ! -s "$work/deadline" ] || deadline=1
+printf '%s %s\\n' "\${total:-0}" "$deadline" >&2; tail -n "$lines" "$work/log"; rm -rf -- "$work"; exit "$code"`
 const STOP = `mkdir -p ${CALLS}; call=${CALLS}/$1; : >"$call.stop"
 pid=$(cat "$call" 2>/dev/null) || exit 0
 kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null; exit 0`
 const INTERRUPTED = "[Stopped: the turn was interrupted.]"
 const GRACE_SECONDS = 30
+const KILLED_EXIT_CODE = 137
 
 const IDENTITY = {
 	GIT_AUTHOR_NAME: "Checkfu",
@@ -374,11 +377,13 @@ export const makeWorkspaceMachine = (options: {
 	const inMachine = async <A, E>(
 		call: (sandbox: Sandbox) => Effect.Effect<A, E>,
 		signal?: AbortSignal,
+		access?: { readonly internal?: true },
 	): Promise<A> => {
+		const enter = access?.internal === true ? attach : forCall
 		active += 1
 		options.touched()
 		try {
-			const sandbox = await forCall()
+			const sandbox = await enter()
 			const running = run(call(sandbox), signal)
 			calls.add(running)
 			try {
@@ -387,7 +392,7 @@ export const makeWorkspaceMachine = (options: {
 				calls.delete(running)
 				if (signal?.aborted !== true) {
 					attached = undefined
-					await forCall()
+					await enter()
 				}
 				throw error
 			} finally {
@@ -405,7 +410,7 @@ export const makeWorkspaceMachine = (options: {
 		busy: (): boolean => active > 0,
 		command: async (
 			argv: ReadonlyArray<string>,
-			settings: { readonly cwd: string; readonly seconds: number },
+			settings: { readonly cwd: string; readonly seconds: number; readonly internal?: true },
 			signal: AbortSignal | undefined,
 		): Promise<WorkspaceToolResult> => {
 			const interrupted = (): boolean => signal?.aborted === true
@@ -413,41 +418,49 @@ export const makeWorkspaceMachine = (options: {
 				return { content: [{ type: "text", text: INTERRUPTED }], isError: true }
 			}
 			const name = crypto.randomUUID()
-			const { exitCode, stdout, stderr } = await inMachine((sandbox) => {
-				if (interrupted()) {
-					return Effect.succeed({ exitCode: 143, stdout: "", stderr: "0" })
-				}
-				const stop = (): void => {
-					void run(sandbox.exec(["sh", "-c", STOP, "sh", name])).catch(() => undefined)
-				}
-				signal?.addEventListener("abort", stop, { once: true })
-				return Effect.ensuring(
-					sandbox.exec(
-						[
-							"bash",
-							"-c",
-							COMMAND,
-							"bash",
-							settings.cwd,
-							String(settings.seconds),
-							String(COMMAND_OUTPUT_BYTES),
-							String(COMMAND_OUTPUT_LINES),
-							name,
-							options.directory,
-							...argv,
-						],
-						{ env: IDENTITY, timeout: (settings.seconds + GRACE_SECONDS) * 1000 },
-					),
-					Effect.sync(() => signal?.removeEventListener("abort", stop)),
-				)
-			})
+			const { exitCode, stdout, stderr } = await inMachine(
+				(sandbox) => {
+					if (interrupted()) {
+						return Effect.succeed({ exitCode: 143, stdout: "", stderr: "0 0" })
+					}
+					const stop = (): void => {
+						void run(sandbox.exec(["sh", "-c", STOP, "sh", name])).catch(() => undefined)
+					}
+					signal?.addEventListener("abort", stop, { once: true })
+					return Effect.ensuring(
+						sandbox.exec(
+							[
+								"bash",
+								"-c",
+								COMMAND,
+								"bash",
+								settings.cwd,
+								String(settings.seconds),
+								String(COMMAND_OUTPUT_BYTES),
+								String(COMMAND_OUTPUT_LINES),
+								name,
+								options.directory,
+								...argv,
+							],
+							{ env: IDENTITY, timeout: (settings.seconds + GRACE_SECONDS) * 1000 },
+						),
+						Effect.sync(() => signal?.removeEventListener("abort", stop)),
+					)
+				},
+				undefined,
+				settings,
+			)
 			const cut = Number.parseInt(stderr, 10) - byteLength(stdout)
+			const deadline = /^\d+ ([01])$/mu.exec(stderr.trimEnd())?.[1]
+			const timedOut =
+				(exitCode === TIMED_OUT && deadline !== "0") ||
+				(exitCode === KILLED_EXIT_CODE && deadline === "1")
 			const text = [
 				...(cut > 0 ? [`[The first ${cut} bytes of the output are not shown.]`] : []),
 				...(stdout.trimEnd() === "" ? [] : [stdout.trimEnd()]),
 				...(interrupted()
 					? [INTERRUPTED]
-					: exitCode === TIMED_OUT
+					: timedOut
 						? [`[Stopped after ${settings.seconds} seconds.]`]
 						: exitCode === 0
 							? []

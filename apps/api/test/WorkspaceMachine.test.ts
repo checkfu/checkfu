@@ -439,6 +439,46 @@ describe("workspace machine", () => {
 		expect(state.opened.length).toBe(3)
 	})
 
+	it("keeps the replacement notice after an internal read reattaches", async () => {
+		const { machine, state, content, kill } = makeMachine()
+		await content(machine)
+		state.disk!.content = "saved"
+		await machine.sleep()
+		await content(machine)
+		kill()
+
+		const read = () =>
+			machine.inMachine(
+				(sandbox) => Effect.map(sandbox.readFile("/probe"), () => state.disk?.content),
+				undefined,
+				{ internal: true },
+			)
+		await expect(read()).rejects.toThrow("The machine is not running.")
+		expect(await read()).toBe("saved")
+		await expect(content(machine)).rejects.toThrow(
+			"workspace and outputs were restored from the last sleep",
+		)
+		expect(await content(machine)).toBe("saved")
+	})
+
+	it("runs an internal command on a replacement and leaves the notice for the model", async () => {
+		const { machine, state, content, kill, again } = makeMachine()
+		await content(machine)
+		kill()
+		const replacement = again()
+		state.answer = () => Promise.resolve({ exitCode: 0, stdout: "cloned\n", stderr: "7 0" })
+
+		expect(
+			await replacement.command(
+				["git", "clone"],
+				{ cwd: "/", seconds: 20, internal: true },
+				undefined,
+			),
+		).toEqual({ content: [{ type: "text", text: "cloned" }], isError: false })
+		await expect(content(replacement)).rejects.toThrow("before the first command")
+		expect(await content(replacement)).toBe(SEEDED)
+	})
+
 	it("fills a machine replaced before any save from what the session stored, and says so", async () => {
 		const { state, content, kill, again } = makeMachine()
 		await content(again())
@@ -487,15 +527,15 @@ describe("workspace machine", () => {
 			state.answer = () => Promise.resolve(answer)
 			return machine.command(["bash", "-c", "make"], { cwd: "/workspace", seconds: 5 }, undefined)
 		}
-		expect(await run({ exitCode: 0, stdout: "built\n", stderr: "6" })).toEqual({
+		expect(await run({ exitCode: 0, stdout: "built\n", stderr: "6 0" })).toEqual({
 			content: [{ type: "text", text: "built" }],
 			isError: false,
 		})
-		expect(await run({ exitCode: 0, stdout: "", stderr: "0" })).toEqual({
+		expect(await run({ exitCode: 0, stdout: "", stderr: "0 0" })).toEqual({
 			content: [{ type: "text", text: "(no output)" }],
 			isError: false,
 		})
-		expect(await run({ exitCode: 2, stdout: "tail\n", stderr: "1005" })).toEqual({
+		expect(await run({ exitCode: 2, stdout: "tail\n", stderr: "1005 0" })).toEqual({
 			content: [
 				{
 					type: "text",
@@ -507,6 +547,26 @@ describe("workspace machine", () => {
 		expect(await run({ exitCode: 124, stdout: "", stderr: "Timed out after 35000 ms." })).toEqual({
 			content: [{ type: "text", text: "[Stopped after 5 seconds.]" }],
 			isError: true,
+		})
+		expect(await run({ exitCode: 124, stdout: "", stderr: "0 0" })).toEqual({
+			content: [{ type: "text", text: "[Exit code 124.]" }],
+			isError: true,
+		})
+		expect(await run({ exitCode: 124, stdout: "", stderr: "0 1" })).toEqual({
+			content: [{ type: "text", text: "[Stopped after 5 seconds.]" }],
+			isError: true,
+		})
+		expect(await run({ exitCode: 137, stdout: "", stderr: "0 1" })).toEqual({
+			content: [{ type: "text", text: "[Stopped after 5 seconds.]" }],
+			isError: true,
+		})
+		expect(await run({ exitCode: 143, stdout: "", stderr: "0 1" })).toEqual({
+			content: [{ type: "text", text: "[Exit code 143.]" }],
+			isError: true,
+		})
+		expect(await run({ exitCode: 0, stdout: "", stderr: "0 1" })).toEqual({
+			content: [{ type: "text", text: "(no output)" }],
+			isError: false,
 		})
 		expect(state.commands.at(-1)?.slice(4, 6)).toEqual(["/workspace", "5"])
 		expect(state.commands.at(-1)?.slice(-3)).toEqual(["bash", "-c", "make"])

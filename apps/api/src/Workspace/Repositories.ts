@@ -81,6 +81,7 @@ parent=$(dirname -- "$dir")
 mkdir -p -- "$parent"
 next=$(mktemp -d "$parent/.clone-XXXXXX")
 trap 'rm -rf -- "$next"' EXIT
+trap 'exit 143' TERM INT HUP
 chmod 755 -- "$next"
 if [ "$kind" = default ]; then
 	git clone --quiet --depth 1 -- "$url" "$next"

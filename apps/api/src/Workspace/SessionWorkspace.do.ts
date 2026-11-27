@@ -217,7 +217,9 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 									fs: over.fs,
 									tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs: over.fs } }),
 									outputs: makeSessionOutputs(
-										makeSandboxOutputFiles(SESSION_OUTPUTS_PATH, machine.inMachine),
+										makeSandboxOutputFiles(SESSION_OUTPUTS_PATH, (call) =>
+											machine.inMachine(call, undefined, { internal: true }),
+										),
 									),
 								}
 							}
@@ -332,7 +334,11 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						}
 						await initialize((await workspace()).fs)
 						const cloned = await machine
-							.command(cloneCommand(repository), { cwd: "/", seconds: CLONE_SECONDS }, signal)
+							.command(
+								cloneCommand(repository),
+								{ cwd: "/", seconds: CLONE_SECONDS, internal: true },
+								signal,
+							)
 							.catch((error: unknown) => failed(messageOf(error)))
 						if (signal.aborted) {
 							return INTERRUPTED

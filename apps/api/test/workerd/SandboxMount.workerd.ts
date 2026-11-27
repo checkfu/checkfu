@@ -594,6 +594,8 @@ describe("a session's machine, in a container of its image", () => {
 		expect(long.text.split("\n").length).toBeLessThan(2000)
 		const lines = await run("yes | head -n 100000")
 		expect(lines.text.split("\n").length).toBeLessThan(2000)
+		expect(await run("sh -c 'exit 124'")).toEqual({ text: "[Exit code 124.]", isError: true })
+		expect(await run("kill -TERM 0")).toEqual({ text: "[Exit code 143.]", isError: true })
 
 		const started = Date.now()
 		expect(await run("echo began; sleep 30", 1)).toEqual({
