@@ -12,7 +12,9 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { makeTestServer, TEST_API_KEY } from "../../apps/mcp/test/helpers/McpHarness.ts"
 import { buildCliPackage, buildSdkPackage, repoRoot } from "./Build.ts"
 
-const decodeAgentId = Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ id: Schema.String })))
+const decodeResourceId = Schema.decodeSync(
+	Schema.fromJsonString(Schema.Struct({ id: Schema.String })),
+)
 const buildCredentialSentinel = "ck_packaging_must_never_embed_credentials"
 const execute = promisify(execFile)
 const consumerNode = process.env["CHECKFU_TEST_NODE"] ?? process.execPath
@@ -218,13 +220,13 @@ it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry,
 					join(hostile, "preload.js"),
 					'require("node:fs").writeFileSync("PRELOAD_RAN", "yes")',
 				)
-				const run = (args: ReadonlyArray<string>, extra = {}) => {
+				const run = (args: ReadonlyArray<string>, extra = {}, stdin = "") => {
 					const child = execute(consumerNode, ["--no-experimental-strip-types", cli, ...args], {
 						cwd: hostile,
 						env: env({ CHECKFU_CONFIG_DIR: config, ...extra }),
 						timeout: 20_000,
 					})
-					child.child.stdin?.end()
+					child.child.stdin?.end(stdin)
 					return child
 				}
 				await expect(run(["agents", "list"])).rejects.toMatchObject({
@@ -253,13 +255,38 @@ it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry,
 					"--model",
 					"gpt-4o-mini",
 				])
-				const agent = decodeAgentId(created.stdout)
+				const agent = decodeResourceId(created.stdout)
 				const read = await run(["--format", "json", "agents", "retrieve", "--agent-id", agent.id])
 				expect(JSON.parse(read.stdout)).toMatchObject({
 					id: agent.id,
 					name: "Installed CLI",
 					version: 1,
 				})
+				const environment = decodeResourceId(
+					(await run(["--format", "json", "environments", "create", "--name", "CLI pipes"])).stdout,
+				)
+				const session = decodeResourceId(
+					(
+						await run([
+							"--format",
+							"json",
+							"sessions",
+							"create",
+							"--agent",
+							agent.id,
+							"--environment-id",
+							environment.id,
+						])
+					).stdout,
+				)
+				const connected = await run(
+					["sessions", "connect", session.id],
+					{},
+					"First piped message\nLast message without newline",
+				)
+				expect(connected.stdout).toContain("Echo: First piped message")
+				expect(connected.stdout.trim().endsWith("Last message without newline")).toBe(true)
+				await run(["sessions", "archive", "--session-id", session.id])
 				const sdk = await execute(
 					consumerNode,
 					[
@@ -268,6 +295,7 @@ it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry,
 						url,
 						TEST_API_KEY,
 						agent.id,
+						session.id,
 					],
 					{ cwd: consumer, env: env(), timeout: 30_000 },
 				)

@@ -2,11 +2,26 @@ import assert from "node:assert/strict"
 import Checkfu, { CheckfuClient, NotFoundError } from "@checkfu/sdk"
 import * as Effect from "effect/Effect"
 
-const [baseUrl, apiKey, cliAgentId] = process.argv.slice(2)
+const [baseUrl, apiKey, cliAgentId, cliSessionId] = process.argv.slice(2)
 const client = new Checkfu({ baseUrl, apiKey, maxRetries: 0 })
 const retryClient = new Checkfu({ baseUrl, apiKey, maxRetries: 0 })
 try {
 	assert.equal((await client.agents.retrieve(cliAgentId)).name, "Installed CLI")
+	const piped = await client.sessions.retrieve(cliSessionId)
+	assert.equal(piped.status, "terminated")
+	assert.equal(piped.turn, 2)
+	const pipedEvents = []
+	for await (const event of client.sessions.events.list(cliSessionId, { limit: 2 })) {
+		pipedEvents.push(event)
+	}
+	assert.deepEqual(
+		pipedEvents.flatMap((event) => (event.type === "user.message" ? [event.content[0].text] : [])),
+		["First piped message", "Last message without newline"],
+	)
+	const replies = pipedEvents.filter((event) => event.type === "agent.message")
+	assert.equal(replies.length, 2)
+	assert(replies.at(-1).content[0].text.includes("Last message without newline"))
+	assert.equal(new Set(pipedEvents.map((event) => event.id)).size, pipedEvents.length)
 	const body = { name: "Installed SDK", model: "gpt-4o-mini", system: "Original instructions" }
 	const options = { idempotencyKey: "npm-sdk-create-retry" }
 	const first = await client.waitForPending(await client.agents.create(body, options))
