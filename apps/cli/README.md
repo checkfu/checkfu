@@ -23,7 +23,9 @@ checkfu apply . --dry-run
 checkfu apply . --yes
 ```
 
-Keep `checkfu-lock.json` with the project. It records resource IDs and versions. Remote edits are refused until you explicitly reconcile them. Use `--format json` for scripts, `--transform id` to extract fields, and `--help` on any command to inspect its inputs.
+Keep `checkfu-lock.json` with the project. For one API URL, each settled entry links a project file to its remote resource kind, ID, and configuration fingerprint. By default, apply blocks writes when the remote configuration differs from both the recorded fingerprint and the authored definition. Use `--force` to apply the authored configuration over those remote edits. To pin an agent revision, put a reference such as `agent: { type: agent, id: agent_ID, version: 3 }` in the automation definition.
+
+Use `--format json` for scripts, `--transform id` to extract fields, and `--help` on any command to inspect its inputs.
 
 The npm CLI runs without Bun and ignores `.env` and Bun configuration files in the current directory. It saves connections in the user's Checkfu configuration directory. Use `checkfu logout` to remove a saved connection.
 
