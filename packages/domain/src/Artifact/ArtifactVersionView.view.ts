@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import { Artifact } from "./Artifact.aggregate.ts"
 import { ArtifactId } from "./Artifact.id.ts"
 import { CapabilitiesText } from "./ArtifactCapabilities.ts"
+import { MadeFromText } from "./ArtifactMadeFrom.ts"
 import { ManifestHash, NonNegativeInt, PositiveInt } from "./ArtifactTypes.ts"
 
 export const ArtifactVersionLookupId = Schema.String.check(Schema.isMinLength(1)).pipe(
@@ -23,12 +24,13 @@ export const ArtifactVersionSnapshot = Schema.Struct({
 	file_count: PositiveInt,
 	total_bytes: NonNegativeInt,
 	capabilities: CapabilitiesText,
+	made_from: MadeFromText,
 	created_at: Schema.DateTimeUtc,
 })
 export type ArtifactVersionSnapshot = typeof ArtifactVersionSnapshot.Type
 
 export class ArtifactVersionView extends Domain.View("ArtifactVersionView", {
-	version: 2,
+	version: 3,
 	from: [Artifact],
 	key: ArtifactVersionLookupId,
 	keyOf: {
@@ -50,6 +52,7 @@ export class ArtifactVersionView extends Domain.View("ArtifactVersionView", {
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
 						capabilities: e.capabilities,
+						made_from: e.made_from,
 						created_at: ctx.at,
 					},
 		"artifact.version_added": (state, e, ctx) =>
@@ -63,6 +66,7 @@ export class ArtifactVersionView extends Domain.View("ArtifactVersionView", {
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
 						capabilities: e.capabilities,
+						made_from: e.made_from,
 						created_at: ctx.at,
 					},
 	},

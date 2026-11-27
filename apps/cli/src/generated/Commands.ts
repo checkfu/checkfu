@@ -489,9 +489,17 @@ const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "files",
 			location: "body",
 			kind: "repeat-structured",
-			required: true,
+			required: false,
 			min: 0,
 			max: 1000,
+		},
+		{
+			propName: "madeFrom",
+			flagName: "made-from",
+			wireName: "made_from",
+			location: "body",
+			kind: "structured",
+			required: false,
 		},
 		{
 			propName: "idempotencyKey",
@@ -517,6 +525,13 @@ const artifactsCreateCommand = CommandMake(
 				"File as JSON, YAML, or @file: path with content (and optional encoding), or path with file_id; content_type is optional (repeatable)",
 			),
 			FlagBetween(0, 1000),
+		),
+		madeFrom: FlagString("made-from").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Start the version from another artifact's version, such as a type: its files are copied in, with the capabilities its artifact.json declares, and the files sent here are added beside them. A file sent here may not use a path the source has. The copy is kept even if the source changes or is deleted (JSON, YAML, or @file)",
+			),
+			FlagOptional,
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
@@ -1153,9 +1168,17 @@ const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "files",
 			location: "body",
 			kind: "repeat-structured",
-			required: true,
+			required: false,
 			min: 0,
 			max: 1000,
+		},
+		{
+			propName: "madeFrom",
+			flagName: "made-from",
+			wireName: "made_from",
+			location: "body",
+			kind: "structured",
+			required: false,
 		},
 	],
 }
@@ -1178,6 +1201,13 @@ const artifactsVersionsCreateCommand = CommandMake(
 				"File as JSON, YAML, or @file: path with content (and optional encoding), path with file_id, or path with the sha256 of a file to keep from the version being replaced; content_type is optional (repeatable)",
 			),
 			FlagBetween(0, 1000),
+		),
+		madeFrom: FlagString("made-from").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Start the version from another artifact's version, such as a type: its files are copied in, with the capabilities its artifact.json declares, and the files sent here are added beside them. A file sent here may not use a path the source has. The copy is kept even if the source changes or is deleted (JSON, YAML, or @file)",
+			),
+			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(artifactsVersionsCreateCommandSpec, flags),

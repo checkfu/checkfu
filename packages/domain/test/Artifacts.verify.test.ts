@@ -33,6 +33,8 @@ const STANDING = {
 	"Artifact.AnExplicitGrantIsRecordedAsGiven": "proved",
 	"Artifact.ANewVersionRecordsTheCapabilitiesItWasGiven": "proved",
 	"Artifact.OnlyANewVersionChangesTheCapabilities": "proved",
+	"Artifact.ANewVersionRecordsWhatItWasMadeFrom": "proved",
+	"Artifact.OnlyANewVersionChangesWhatItWasMadeFrom": "proved",
 	"Artifact.ReservationsAreNumberedInOrder": "proved",
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",

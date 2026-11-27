@@ -2197,6 +2197,141 @@ describe("Artifact bytes", () => {
 			}),
 		))
 
+	it("makes an artifact from another artifact's version: its files and declaration, plus the new artifact's own", () =>
+		withApi(({ call }) =>
+			Effect.gen(function* () {
+				const capabilities = { database: { collections: { comments: { visitors: "add" } } } }
+				const typeFiles = (page: string) => [
+					{ path: "index.html", content: page },
+					{ path: "style.css", content: "body{}" },
+					{ path: "artifact.json", content: JSON.stringify({ capabilities }) },
+				]
+				const type = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", { name: "Document type", files: typeFiles("v1") }),
+				)
+				const from = (version: number) => ({ artifact_id: type.id, version })
+				interface Made extends ArtifactBody {
+					readonly capabilities: unknown
+					readonly made_from: unknown
+				}
+				const read = (id: string, version: number, file: string) =>
+					Effect.flatMap(
+						call("GET", `/v1/artifacts/${id}/versions/${version}/content?file=${file}`),
+						(res) => Effect.promise(() => res.text()),
+					)
+
+				const created = yield* call("POST", "/v1/artifacts", {
+					name: "Q3 notes",
+					made_from: from(1),
+					files: [{ path: "content.md", content: "# Q3" }],
+				})
+				expect(created.status).toBe(201)
+				const made = yield* json<Made>(created)
+				expect(made.files.map((file) => file.path)).toEqual([
+					"artifact.json",
+					"content.md",
+					"index.html",
+					"style.css",
+				])
+				expect(made.capabilities).toEqual(capabilities)
+				expect(made.made_from).toEqual(from(1))
+				expect(yield* read(made.id, 1, "index.html")).toBe("v1")
+				expect(yield* read(made.id, 1, "content.md")).toBe("# Q3")
+				expect(
+					(yield* json<Made>(yield* call("GET", `/v1/artifacts/${type.id}`))).made_from,
+				).toBeNull()
+
+				const bare = yield* json<Made>(
+					yield* call("POST", "/v1/artifacts", { name: "Bare", made_from: from(1) }),
+				)
+				expect(bare.files.map((file) => file.path)).toEqual([
+					"artifact.json",
+					"index.html",
+					"style.css",
+				])
+
+				const key = { "idempotency-key": "from-type" }
+				const keyed = { name: "Keyed", made_from: from(1), files: [{ path: "a.md", content: "a" }] }
+				const first = yield* json<Made>(yield* call("POST", "/v1/artifacts", keyed, key))
+				expect((yield* json<Made>(yield* call("POST", "/v1/artifacts", keyed, key))).id).toBe(
+					first.id,
+				)
+
+				const clash = yield* call("POST", "/v1/artifacts", {
+					name: "Clash",
+					made_from: from(1),
+					files: [{ path: "index.html", content: "mine" }],
+				})
+				expect(clash.status).toBe(400)
+				expect((yield* json<ErrorBody>(clash)).error.message).toContain(
+					`index.html comes from artifact ${type.id} and cannot be replaced`,
+				)
+				const status = (body: unknown) =>
+					Effect.map(call("POST", "/v1/artifacts", body), (res) => res.status)
+				expect(yield* status({ name: "X", made_from: from(2) })).toBe(404)
+				expect(
+					yield* status({
+						name: "X",
+						made_from: { artifact_id: "art_000000000000000000000000", version: 1 },
+					}),
+				).toBe(404)
+				expect(yield* status({ name: "X", made_from: { artifact_id: type.id } })).toBe(400)
+				expect(yield* status({ name: "X", made_from: { ...from(1), extra: true } })).toBe(400)
+
+				expect(
+					(yield* call("POST", `/v1/artifacts/${type.id}/versions`, {
+						version: 1,
+						files: typeFiles("v2"),
+					})).status,
+				).toBe(201)
+				expect(yield* read(made.id, 1, "index.html")).toBe("v1")
+
+				const content = made.files.find((file) => file.path === "content.md")?.sha256 ?? ""
+				const adopted = yield* call("POST", `/v1/artifacts/${made.id}/versions`, {
+					version: 1,
+					made_from: from(2),
+					files: [{ path: "content.md", sha256: content }],
+				})
+				expect(adopted.status).toBe(201)
+				expect((yield* json<{ made_from: unknown }>(adopted)).made_from).toEqual(from(2))
+				expect(yield* read(made.id, 2, "index.html")).toBe("v2")
+				expect(yield* read(made.id, 2, "content.md")).toBe("# Q3")
+				const version = (number: number) =>
+					Effect.map(
+						Effect.flatMap(call("GET", `/v1/artifacts/${made.id}/versions/${number}`), (res) =>
+							json<{ made_from: unknown }>(res),
+						),
+						(body) => body.made_from,
+					)
+				expect(yield* version(1)).toEqual(from(1))
+				expect(yield* version(2)).toEqual(from(2))
+
+				expect((yield* call("DELETE", `/v1/artifacts/${type.id}`)).status).toBe(200)
+				expect(yield* read(made.id, 2, "index.html")).toBe("v2")
+				expect(yield* read(made.id, 1, "style.css")).toBe("body{}")
+				expect(yield* status({ name: "Late", made_from: from(2) })).toBe(404)
+
+				const plain = yield* call("POST", `/v1/artifacts/${made.id}/versions`, {
+					version: 2,
+					files: [{ path: "index.html", content: "on its own" }],
+				})
+				expect((yield* json<{ made_from: unknown }>(plain)).made_from).toBeNull()
+				expect(yield* version(2)).toEqual(from(2))
+				expect(
+					(yield* json<Made>(yield* call("GET", `/v1/artifacts/${made.id}`))).made_from,
+				).toBeNull()
+
+				const again = yield* call("POST", `/v1/artifacts/${made.id}/versions`, {
+					version: 3,
+					made_from: { artifact_id: made.id, version: 1 },
+					files: [{ path: "extra.txt", content: "more" }],
+				})
+				expect(again.status).toBe(201)
+				expect(yield* read(made.id, 4, "index.html")).toBe("v1")
+				expect(yield* read(made.id, 4, "extra.txt")).toBe("more")
+			}),
+		))
+
 	it("refuses an artifact with no files", () =>
 		withApi(({ call }) =>
 			Effect.gen(function* () {

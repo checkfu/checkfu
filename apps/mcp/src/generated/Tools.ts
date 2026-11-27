@@ -761,10 +761,28 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							minItems: 1,
 							maxItems: 1000,
 							description:
-								"Every file of version 1. Send a small file's content inline, or name a file by its id",
+								"Every file of version 1, or with made_from the files to add to the source's. Send a small file's content inline, or name a file by its id. Required unless made_from is given",
+						},
+						made_from: {
+							type: "object",
+							properties: {
+								artifact_id: {
+									type: "string",
+									minLength: 1,
+								},
+								version: {
+									type: "integer",
+									minimum: 1,
+									maximum: 9007199254740991,
+								},
+							},
+							required: ["artifact_id", "version"],
+							additionalProperties: false,
+							description:
+								"Start the version from another artifact's version, such as a type: its files are copied in, with the capabilities its artifact.json declares, and the files sent here are added beside them. A file sent here may not use a path the source has. The copy is kept even if the source changes or is deleted",
 						},
 					},
-					required: ["name", "files"],
+					required: ["name"],
 					additionalProperties: false,
 				},
 				idempotency_key: {
@@ -972,10 +990,28 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							minItems: 1,
 							maxItems: 1000,
 							description:
-								"Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256",
+								"Every file of the version, or with made_from the files to add to the source's; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256. Required unless made_from is given",
+						},
+						made_from: {
+							type: "object",
+							properties: {
+								artifact_id: {
+									type: "string",
+									minLength: 1,
+								},
+								version: {
+									type: "integer",
+									minimum: 1,
+									maximum: 9007199254740991,
+								},
+							},
+							required: ["artifact_id", "version"],
+							additionalProperties: false,
+							description:
+								"Start the version from another artifact's version, such as a type: its files are copied in, with the capabilities its artifact.json declares, and the files sent here are added beside them. A file sent here may not use a path the source has. The copy is kept even if the source changes or is deleted",
 						},
 					},
-					required: ["version", "files"],
+					required: ["version"],
 					additionalProperties: false,
 				},
 			},

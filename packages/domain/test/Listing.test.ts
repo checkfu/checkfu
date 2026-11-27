@@ -128,6 +128,7 @@ describe("ListResources", () => {
 					file_count: 1,
 					total_bytes: 1,
 					capabilities: "",
+					made_from: "",
 					reservation: 1,
 				})
 			}

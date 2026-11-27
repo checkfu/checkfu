@@ -630,12 +630,28 @@ const ArtifactFilesField = ArtifactFilesInput.annotate({
 	description: "Every file of the version; a new version replaces the whole set",
 })
 
+export const ArtifactMadeFrom = Schema.Struct({
+	artifact_id: ArtifactId,
+	version: PositiveInt,
+})
+export type ArtifactMadeFrom = typeof ArtifactMadeFrom.Type
+
+const MadeFromField = Schema.optionalKey(
+	ArtifactMadeFrom.annotate({
+		description:
+			"Start the version from another artifact's version, such as a type: its files are copied in, with the capabilities its artifact.json declares, and the files sent here are added beside them. A file sent here may not use a path the source has. The copy is kept even if the source changes or is deleted",
+	}),
+)
+
 export const CreateArtifactBody = Schema.Struct({
 	name: ArtifactName.annotate({ description: "Human-readable artifact name" }),
-	files: ArtifactFilesField.annotate({
-		description:
-			"Every file of version 1. Send a small file's content inline, or name a file by its id",
-	}),
+	files: Schema.optionalKey(
+		ArtifactFilesField.annotate({
+			description:
+				"Every file of version 1, or with made_from the files to add to the source's. Send a small file's content inline, or name a file by its id. Required unless made_from is given",
+		}),
+	),
+	made_from: MadeFromField,
 })
 export type CreateArtifactBody = typeof CreateArtifactBody.Type
 
@@ -643,10 +659,13 @@ export const CreateArtifactVersionBody = Schema.Struct({
 	version: PositiveInt.annotate({
 		description: "Current artifact version for optimistic concurrency",
 	}),
-	files: ArtifactVersionFilesInput.annotate({
-		description:
-			"Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256",
-	}),
+	files: Schema.optionalKey(
+		ArtifactVersionFilesInput.annotate({
+			description:
+				"Every file of the version, or with made_from the files to add to the source's; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256. Required unless made_from is given",
+		}),
+	),
+	made_from: MadeFromField,
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
 
@@ -1181,6 +1200,9 @@ export const ArtifactResource = Schema.Struct({
 	name: Schema.String,
 	version: PositiveInt.annotate({ description: "Current version" }),
 	capabilities: ArtifactCapabilities,
+	made_from: Schema.NullOr(ArtifactMadeFrom).annotate({
+		description: "The artifact version this version's files were started from, or null",
+	}),
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),
@@ -1218,6 +1240,9 @@ export const ArtifactVersionResource = Schema.Struct({
 	artifact_id: Schema.String,
 	version: PositiveInt,
 	capabilities: ArtifactCapabilities,
+	made_from: Schema.NullOr(ArtifactMadeFrom).annotate({
+		description: "The artifact version this version's files were started from, or null",
+	}),
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),

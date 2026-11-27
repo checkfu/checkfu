@@ -20,6 +20,7 @@ const open = async ({ refuse = false, failRefresh = false } = {}) => {
 		name: "Public report",
 		version: 3,
 		capabilities: {},
+		made_from: null,
 		file_count: 0,
 		total_bytes: 0,
 		files: [],
