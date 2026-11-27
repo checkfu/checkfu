@@ -29,7 +29,7 @@ interface PlannedResource {
 	readonly source: ProjectResource
 	readonly current: Resource | null
 	readonly desired: Definition
-	readonly referencesReady: boolean
+	readonly deferredReferences: ProjectResource["references"]
 	readonly pending: PendingCreate | undefined
 }
 
@@ -84,9 +84,11 @@ export const planProject = (
 			const pending = state.pending_creates?.[file]
 			const current = entry === undefined ? null : yield* readRemote(api, entry.kind, entry.id)
 			const replacing = current === null || current.archived_at !== null
-			const ready = source.references.every((reference) => applied.has(reference.target))
+			const deferredReferences = source.references.filter(({ target }) => !applied.has(target))
 			const requested = desiredBody(withReferenceIds(source, (ref) => applied.get(ref.target)))
-			const desired = ready ? yield* pinAutomationAgent(api, requested) : requested
+			const desired = deferredReferences.some(({ field }) => field === "agent")
+				? requested
+				: yield* pinAutomationAgent(api, requested)
 			let row: PlanRow
 			if (entry !== undefined && entry.kind !== definition.kind) {
 				row = {
@@ -113,7 +115,7 @@ export const planProject = (
 							id: entry.id,
 							reason: "Resource was archived or deleted. Use --force to replace it.",
 						}
-			} else if (ready && hashOf(current) === fingerprint(desired)) {
+			} else if (deferredReferences.length === 0 && hashOf(current) === fingerprint(desired)) {
 				row = { file, action: "unchanged", id: current.id }
 			} else if (hashOf(current) !== entry.hash && !options.force) {
 				row = {
@@ -144,7 +146,7 @@ export const planProject = (
 				source,
 				current: replacing ? null : current,
 				desired,
-				referencesReady: ready,
+				deferredReferences,
 				pending,
 			})
 		}
@@ -282,9 +284,14 @@ export const planProject = (
 export type ProjectPlan = Effect.Success<ReturnType<typeof planProject>>
 
 export const detailedPlan = (plan: ProjectPlan) => [
-	...plan.resources.map(({ row, source, current, desired, referencesReady }) => {
+	...plan.resources.map(({ row, source, current, desired, deferredReferences, pending }) => {
+		const deferred = new Set(deferredReferences.map(({ field }) => field))
 		if (row.action === "create") {
-			return { ...row, configuration: source.document }
+			const configuration =
+				pending === undefined && desired.kind === "automation" && !deferred.has("agent")
+					? Object.fromEntries([...Object.entries(source.document), ["agent", desired.body.agent]])
+					: source.document
+			return { ...row, configuration }
 		}
 		if (row.fields !== undefined && current !== null) {
 			const before = new Map<string, unknown>(
@@ -293,7 +300,6 @@ export const detailedPlan = (plan: ProjectPlan) => [
 			const after = new Map<string, unknown>(
 				Object.entries(configurationFields(desired.kind, desired.body)),
 			)
-			const references = new Set(source.references.map((reference) => reference.field))
 			return {
 				...row,
 				changes: Object.fromEntries(
@@ -302,9 +308,7 @@ export const detailedPlan = (plan: ProjectPlan) => [
 						{
 							from: before.get(field),
 							to:
-								!referencesReady &&
-								(field === "agent" || field === "environment_id") &&
-								references.has(field)
+								(field === "agent" || field === "environment_id") && deferred.has(field)
 									? source.document[field]
 									: after.get(field),
 						},

@@ -7,6 +7,8 @@ import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ProjectLockfile } from "@checkfu/authoring/lockfile"
+import type { Automation } from "@checkfu/sdk/Api"
+import { hashOf } from "../src/Project/Plan.ts"
 import { makeTestServer } from "./helpers/CliHarness.ts"
 import type { CliRunOptions, CliRunResult } from "./helpers/CliHarness.ts"
 
@@ -266,6 +268,144 @@ it("sends an automation patch with a revision and preserves a concurrent schedul
 				expect(JSON.parse(current.stdout)).toMatchObject({
 					name: "Morning report",
 					schedule: { expression: "0 10 * * *" },
+				})
+			}),
+		),
+	))
+
+it("uses the literal agent version reviewed during each apply", () =>
+	Effect.runPromise(
+		testProject((project) =>
+			Effect.gen(function* () {
+				const { apply, readLock, run, write } = project
+				yield* standardProject(project)
+				const dependencies = rows(yield* apply([reporter, cloud]))
+				const agentId = idOf(dependencies, reporter)
+				const environmentId = idOf(dependencies, cloud)
+				yield* write(report, reportSource("Report", agentId, environmentId))
+				const id = idOf(rows(yield* apply([report])), report)
+				const before = yield* readLock
+				const expectedAgent = (version: number) => ({ id: agentId, version })
+				const remote = () =>
+					run(["automations", "retrieve", "--automation-id", id]).pipe(
+						Effect.map((result) => JSON.parse(result.stdout) as Automation),
+					)
+				const writes: Array<unknown> = []
+				let agentReads = 0
+				const moveHead = (version: number): CliRunOptions => ({
+					interceptFetch: async (next, request) => {
+						if (request.method === "POST") {
+							writes.push(await request.clone().json())
+						}
+						const response = await next(request)
+						if (
+							request.method === "GET" &&
+							new URL(request.url).pathname === `/v1/agents/${agentId}`
+						) {
+							agentReads += 1
+							if (agentReads === 1) {
+								const headers = new Headers(request.headers)
+								headers.set("content-type", "application/json")
+								const updated = await next(
+									new Request(request.url, {
+										method: "POST",
+										headers,
+										body: JSON.stringify({ version, name: `Agent head ${version + 1}` }),
+									}),
+								)
+								expect(updated.status).toBe(200)
+							}
+						}
+						return response
+					},
+				})
+
+				const unchanged = yield* apply([report], [], moveHead(1))
+				expect(writes).toEqual([])
+				expect(agentReads).toBe(1)
+				expect(rows(unchanged)).toEqual([{ action: "unchanged", file: `./${report}`, id }])
+				expect(yield* readLock).toEqual(before)
+				expect((yield* remote()).agent).toEqual(expectedAgent(1))
+
+				const approval = yield* apply([report], [])
+				expect(approval.exitCode).toBe(1)
+				expect(approval.stderr).toContain("--yes")
+				expect(JSON.parse(approval.stdout)).toMatchObject([{ action: "update", fields: ["agent"] }])
+				yield* write(report, reportSource("Updated report", agentId, environmentId))
+				agentReads = 0
+				const update = yield* apply([report], ["--yes"], moveHead(2))
+				expect(rows(update)).toMatchObject([{ action: "update", fields: ["name", "agent"] }])
+				expect(writes).toEqual([
+					{ name: "Updated report", agent: { type: "agent", ...expectedAgent(2) }, revision: 1 },
+				])
+				expect(agentReads).toBe(1)
+				const confirmed = yield* remote()
+				expect(confirmed.agent).toEqual(expectedAgent(2))
+				expect((yield* readLock).resources[`./${report}`]?.hash).toBe(hashOf(confirmed))
+
+				expect(rows(yield* apply([report]))).toMatchObject([
+					{ action: "update", fields: ["agent"] },
+				])
+				expect((yield* remote()).agent).toEqual(expectedAgent(3))
+				yield* write(
+					report,
+					reportSource(
+						"Updated report",
+						`{type: agent, id: ${agentId}, version: 1}`,
+						environmentId,
+					),
+				)
+				expect(rows(yield* apply([report])).at(0)?.action).toBe("update")
+				expect((yield* remote()).agent).toEqual(expectedAgent(1))
+			}),
+		),
+	))
+
+it("pins a literal agent before applying an environment referenced by path", () =>
+	Effect.runPromise(
+		testProject(({ apply, write }) =>
+			Effect.gen(function* () {
+				yield* write(reporter, agentSource("Reporter"))
+				const agentId = idOf(rows(yield* apply([reporter])), reporter)
+				yield* write(cloud, "name: Cloud\n")
+				yield* write(report, reportSource("Report", agentId))
+				expect(rows(yield* apply([report], ["--dry-run"])).at(-1)).toMatchObject({
+					action: "create",
+					configuration: {
+						agent: { type: "agent", id: agentId, version: 1 },
+						environment_id: "../environments/cloud.yaml",
+					},
+				})
+				let sent: unknown
+				const applied = rows(
+					yield* apply([report], ["--yes"], {
+						interceptFetch: async (next, request) => {
+							const path = new URL(request.url).pathname
+							if (request.method === "POST" && path === "/v1/environments") {
+								const headers = new Headers(request.headers)
+								headers.delete("content-length")
+								headers.delete("idempotency-key")
+								headers.set("content-type", "application/json")
+								const advanced = await next(
+									new Request(new URL(`/v1/agents/${agentId}`, request.url), {
+										method: "POST",
+										headers,
+										body: JSON.stringify({ version: 1, name: "Changed during apply" }),
+									}),
+								)
+								expect(advanced.status).toBe(200)
+							}
+							if (request.method === "POST" && path === "/v1/automations") {
+								sent = await request.clone().json()
+							}
+							return next(request)
+						},
+					}),
+				)
+				expect(applied.map(({ action }) => action)).toEqual(["create", "create"])
+				expect(sent).toMatchObject({
+					agent: { type: "agent", id: agentId, version: 1 },
+					environment_id: idOf(applied, cloud),
 				})
 			}),
 		),
@@ -599,6 +739,10 @@ it("replays the saved automation references before reconciling a newer agent ver
 				})
 				yield* write(reporter, agentSource("New agent version"))
 				expect(rows(yield* apply([reporter]))[0]?.action).toBe("update")
+				expect(rows(yield* apply([report], ["--dry-run"])).at(-1)).toMatchObject({
+					action: "create",
+					configuration: { agent: "../agents/reporter.yaml" },
+				})
 				expect(
 					idOf(
 						rows(

@@ -11,9 +11,7 @@ import {
 	awaitResource,
 	confirmCreateReplay,
 	createResource,
-	desiredBody,
 	fingerprint,
-	pinAutomationAgent,
 	readRemote,
 	resourceRevision,
 	updateResource,
@@ -138,7 +136,14 @@ export const executePlan = (
 
 		const results: Array<PlanRow> = []
 		const applied = new Map<string, AppliedReference & { readonly resource: Resource }>()
-		for (const { row, source, current, pending } of plan.resources) {
+		for (const {
+			row,
+			source,
+			current,
+			desired: planned,
+			deferredReferences,
+			pending,
+		} of plan.resources) {
 			const file = row.file
 			for (const reference of source.references) {
 				const dependency = applied.get(reference.target)
@@ -151,10 +156,13 @@ export const executePlan = (
 					)
 				}
 			}
-			const desired = yield* pinAutomationAgent(
-				api,
-				desiredBody(withReferenceIds(source, (ref) => applied.get(ref.target))),
-			)
+			const desired =
+				deferredReferences.length === 0
+					? planned
+					: withReferenceIds(
+							{ ...source, definition: planned, references: deferredReferences },
+							(ref) => applied.get(ref.target),
+						)
 			const hash = fingerprint(desired)
 			let confirmed: Resource
 			if (row.action === "create") {
@@ -221,7 +229,7 @@ export const executePlan = (
 				if (current === null) {
 					return yield* usageError(`${file}: the plan has no resource to update.`)
 				}
-				confirmed = yield* reconcile(file, desired, current)
+				confirmed = row.action === "unchanged" ? current : yield* reconcile(file, desired, current)
 			}
 			if (resources[file]?.hash !== hash || resources[file]?.id !== confirmed.id) {
 				resources[file] = { kind: confirmed.type, id: confirmed.id, hash: hashOf(confirmed) }

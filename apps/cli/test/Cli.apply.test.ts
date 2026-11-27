@@ -129,16 +129,42 @@ describe("YAML projects", () => {
 					})
 
 					yield* fs.writeFileString(agentFile, agent("Explain your answer."))
-					expect(plan(yield* apply("--dry-run", agentFile))[0]).toMatchObject({
+					const updatePreview = plan(yield* apply("--dry-run", automationFile))
+					expect(updatePreview[0]).toMatchObject({
 						changes: { system: { from: "Answer directly.", to: "Explain your answer." } },
 					})
-					expect(plan(yield* apply("--yes", agentFile))).toEqual([
-						{ file: "./agents/support.md", action: "update", id: agentId, fields: ["system"] },
-					])
-					expect(plan(yield* apply("--yes")).at(-1)).toMatchObject({
+					expect(updatePreview.at(-1)).toMatchObject({
+						changes: { agent: { to: { type: "agent", id: agentId, version: 2 } } },
+					})
+					let automationUpdate: unknown
+					const updatedTogether = plan(
+						yield* cli.run(["apply", "--lock-file", lockFile, "--yes", automationFile], {
+							fileSystem,
+							interceptFetch: async (next, request) => {
+								if (
+									request.method === "POST" &&
+									new URL(request.url).pathname === `/v1/automations/${automationId}`
+								) {
+									automationUpdate = await request.clone().json()
+								}
+								return next(request)
+							},
+						}),
+					)
+					expect(updatedTogether[0]).toEqual({
+						file: "./agents/support.md",
+						action: "update",
+						id: agentId,
+						fields: ["system"],
+					})
+					expect(updatedTogether.at(-1)).toMatchObject({
 						file: "./automations/report.md",
 						action: "update",
 						fields: ["agent"],
+					})
+					expect(automationUpdate).toEqual({
+						agent: { type: "agent", id: agentId, version: 2 },
+						revision: 1,
 					})
 					const repinned = yield* cli.run([
 						"automations",
