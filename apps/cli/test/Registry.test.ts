@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { promisify } from "node:util"
 import { afterEach, expect, it } from "vitest"
 import { sandboxImageTag } from "../scripts/Image.ts"
 import { copySandboxImage } from "../scripts/Registry.ts"
@@ -15,6 +17,7 @@ const target = {
 	authorization: "Basic private_cloudflare_credential",
 }
 const directories: Array<string> = []
+const execute = promisify(execFile)
 afterEach(async () => {
 	for (const root of directories.splice(0)) {
 		await rm(root, { recursive: true, force: true })
@@ -245,4 +248,19 @@ it("changes the image version when any build-context file changes, independently
 	expect(extended).not.toBe(original)
 	await writeFile(join(directory, "tools", "hello.sh"), "echo changed\n")
 	expect(await sandboxImageTag(directory)).not.toBe(extended)
+})
+
+it("runs the image tag entry point from a checkout containing a space and percent sign", async () => {
+	const checkout = await mkdtemp(join(tmpdir(), "checkfu image %-"))
+	directories.push(checkout)
+	const script = join(checkout, "apps", "cli", "scripts", "Image.ts")
+	const image = join(checkout, "apps", "api", "src", "Sandbox", "image")
+	await mkdir(dirname(script), { recursive: true })
+	await mkdir(image, { recursive: true })
+	await copyFile(new URL("../scripts/Image.ts", import.meta.url), script)
+	await writeFile(join(image, "Dockerfile"), "FROM scratch\n")
+	const { stdout, stderr } = await execute("bun", [script], { cwd: checkout })
+	expect(stderr).toBe("")
+	expect(stdout).toBe(`${await sandboxImageTag(image)}\n`)
+	expect(stdout.trim()).toMatch(/^sha256-[0-9a-f]{64}$/u)
 })

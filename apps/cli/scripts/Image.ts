@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 /** Include every build-context file: image changes follow source changes, independently of npm. */
 export const sandboxImageTag = async (directory: string): Promise<string> => {
@@ -30,6 +31,6 @@ export const sandboxImageTag = async (directory: string): Promise<string> => {
 
 if (import.meta.main) {
 	process.stdout.write(
-		`${await sandboxImageTag(new URL("../../api/src/Sandbox/image", import.meta.url).pathname)}\n`,
+		`${await sandboxImageTag(fileURLToPath(new URL("../../api/src/Sandbox/image", import.meta.url)))}\n`,
 	)
 }
