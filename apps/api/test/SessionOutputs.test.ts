@@ -61,7 +61,7 @@ describe("A session's outputs reader", () => {
 			files: [{ path: "report.md", size: 2, sha256: expect.any(String) }],
 			skipped: [
 				{ path: "link", reason: "Not a regular file." },
-				{ path: "bad\u0001name", reason: "This path is not allowed." },
+				{ path: "bad?name", reason: "This path is not allowed." },
 			],
 		})
 		expect(reads).toEqual(["report.md"])
@@ -125,6 +125,36 @@ describe("A session's outputs reader", () => {
 			MAX_OUTPUT_TOTAL_BYTES,
 		)
 		expect(limits).toEqual([...Array(4).fill(MAX_OUTPUT_FILE_BYTES + 1), 1])
+	})
+
+	it("shows a path it cannot allow in a short printable form", async () => {
+		const outputs = makeSessionOutputs({
+			list: async () => [{ path: `\u0000\u0085${"x".repeat(600)}`, type: "file" }],
+			read: async () => new Uint8Array(0),
+		})
+		const result = await outputs.list()
+		expect(result.ok && result.skipped).toEqual([
+			{ path: `??${"x".repeat(126)}`, reason: "This path is not allowed." },
+		])
+	})
+
+	it("reads the files after one that is gone or has changed size", async () => {
+		const outputs = makeSessionOutputs({
+			list: async () => [],
+			read: async (path) =>
+				path === "gone"
+					? Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }))
+					: new Uint8Array(path === "grew" ? 5 : 3),
+		})
+		expect(
+			(
+				await outputs.read([
+					{ path: "gone", size: 3 },
+					{ path: "grew", size: 3 },
+					{ path: "kept", size: 3 },
+				])
+			).map(({ path }) => path),
+		).toEqual(["kept"])
 	})
 
 	it.each([2, 4])("discards a %i-byte reread of a 3-byte file", async (size) => {

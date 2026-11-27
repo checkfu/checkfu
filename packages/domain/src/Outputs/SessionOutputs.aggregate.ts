@@ -63,7 +63,10 @@ export class SessionOutputs extends Domain.Aggregate("SessionOutputs", {
 				[
 					after.turn === before.turn,
 					after.outcome === before.outcome,
+					after.reason === before.reason,
 					after.files === before.files,
+					after.skipped === before.skipped,
+					after.recorded_at === before.recorded_at,
 				].every((ok) => ok),
 			].some((ok) => ok),
 	},

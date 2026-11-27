@@ -1057,7 +1057,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						decodeSavedOutputs(record.files),
 						({ file_id }) =>
 							Effect.map(files.get(file_id), (state) =>
-								state.status === "ready" ? [fileResource(file_id, state)] : [],
+								state.status === "ready" && state.origin_session_id === sessionId
+									? [fileResource(file_id, state)]
+									: [],
 							),
 						{ concurrency: 8 },
 					)

@@ -372,6 +372,45 @@ describe("A session's outputs", () => {
 				}),
 		))
 
+	it("skips the turn rather than drop a name when more outputs are skipped than a record can hold", () =>
+		withSessions((apiFetch, { replyAndSave, workspaceFiles, onTurn, createSession, outputs }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const files = workspaceFiles(session.id)
+				onTurn(() => {
+					for (let index = 0; index < MAX_OUTPUT_FILES; index++) {
+						files.set(`${OUTPUTS}/bad\u0001${index}`, "x")
+					}
+					files.set(`${OUTPUTS}/${"n".repeat(300)}`, "x")
+					files.set(`${OUTPUTS}/fine.txt`, "x")
+				})
+				yield* replyAndSave(session.id, ["Write them."], 1)
+				expect(yield* outputs(session.id)).toMatchObject({
+					turn: 1,
+					status: "skipped",
+					reason: `${MAX_OUTPUT_FILES + 1} outputs could not be saved.`,
+					files: [],
+					skipped: [],
+				})
+
+				onTurn(() => {
+					for (let index = 1; index < MAX_OUTPUT_FILES; index++) {
+						files.delete(`${OUTPUTS}/bad\u0001${index}`)
+					}
+				})
+				yield* replyAndSave(session.id, ["Fewer."], 2)
+				expect(yield* outputs(session.id)).toMatchObject({
+					turn: 2,
+					status: "saved",
+					files: [saved(session.id, 2, "fine.txt", "x", "text/plain")],
+					skipped: [
+						{ path: "bad?0", reason: "This path is not allowed." },
+						{ path: "n".repeat(300), reason: "Its name is too long for a file." },
+					],
+				})
+			}),
+		))
+
 	it("records nothing for a turn that failed, and saves what it left once a turn replies", () =>
 		withSessions(
 			(

@@ -4,7 +4,7 @@ import * as Hex from "effect/encoding/Hex"
 import * as Schema from "effect/Schema"
 import { ArtifactPath } from "../Artifacts/ArtifactFiles.ts"
 import { MAX_OUTPUT_FILES } from "@checkfu/domain/Outputs/OutputsTypes"
-import { MAX_ARTIFACT_PATH_LENGTH } from "@checkfu/sdk/Limits"
+
 import { NonNegativeInt } from "@checkfu/sdk/Schemas"
 
 export { MAX_OUTPUT_FILES }
@@ -98,6 +98,19 @@ export const makeStoredOutputFiles = (workspace: Workspace): OutputFiles => {
 
 const refused = (reason: string): OutputsListing => ({ ok: false, reason })
 
+const SHOWN_PATH_LENGTH = 128
+
+const printable = (character: string): boolean => {
+	const code = character.codePointAt(0) ?? 0
+	return code > 0x1f && (code < 0x7f || code > 0x9f) && code !== 0x20_28 && code !== 0x20_29
+}
+
+const shownPath = (path: string): string =>
+	Array.from(path.toWellFormed())
+		.slice(0, SHOWN_PATH_LENGTH)
+		.map((character) => (printable(character) ? character : "?"))
+		.join("") || "?"
+
 const hasCode = (error: unknown, code: string): boolean =>
 	Predicate.hasProperty(error, "code") && error.code === code
 
@@ -137,10 +150,7 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 				continue
 			}
 			if (!isArtifactPath(entry.path)) {
-				skipped.push({
-					path: Array.from(entry.path).slice(0, MAX_ARTIFACT_PATH_LENGTH).join("") || "?",
-					reason: "This path is not allowed.",
-				})
+				skipped.push({ path: shownPath(entry.path), reason: "This path is not allowed." })
 			} else if (entry.type === "file") {
 				paths.push(entry.path)
 			} else {
@@ -204,10 +214,9 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 				}
 				throw error
 			})
-			if (bytes === null || bytes.byteLength !== size) {
-				return read
+			if (bytes !== null && bytes.byteLength === size) {
+				read.push({ path, bytes })
 			}
-			read.push({ path, bytes })
 		}
 		return read
 	},

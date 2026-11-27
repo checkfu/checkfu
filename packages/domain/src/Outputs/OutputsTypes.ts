@@ -8,7 +8,7 @@ export { NonNegativeInt, PositiveInt } from "../File/FileTypes.ts"
 
 export const MAX_OUTPUT_FILES = 64
 export const MAX_OUTPUT_REASON_LENGTH = 512
-export const MAX_OUTPUTS_TEXT_LENGTH = 128 * 1024
+export const MAX_OUTPUTS_TEXT_LENGTH = 256 * 1024
 
 const OutputPath = Schema.String.check(
 	Schema.isMinLength(1),

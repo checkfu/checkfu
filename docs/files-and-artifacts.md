@@ -105,7 +105,13 @@ The record is its own aggregate, keyed by the session. Its lists travel as bound
 - A saved turn replaces the files; a skipped turn keeps the files saved before.
 - A reason is given exactly when the turn was skipped.
 
-A file's id carries its session, so a session's record can only name files that session produced.
+The record is written only by the save, and a file's id carries its session. The endpoint also leaves out any file whose origin is another session.
+
+Three consequences worth knowing:
+
+- **A deleted output stays deleted.** If a client deletes a saved file and the same content is still at that path, later turns list the path under skipped with that reason instead of saving it again. Changed content at the path is saved as usual.
+- **A skipped turn can leave files behind.** A save that fails or times out partway has already created some files. They are ordinary files with that turn as their origin, the record does not name them, and the next save reuses them.
+- **Skips are never dropped.** If more outputs are skipped than a record can name, the turn is skipped with the count instead.
 
 **Later, on the same foundation:** adding and removing file resources on a running session, and `image` and `document` blocks in a user message that name a `file_id`.
 

@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T13:17:17.726Z",
+			"cut_at": "2026-11-27T13:18:45.956Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -126,10 +126,10 @@
 				"command-reply:Checkfu/CreateFile": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/DeleteFile": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.SessionOutputs": "2192b2a31a271a434f8f36c59221bdbee755e289d3a0f72118d624813f158c83",
-				"event:Checkfu.SessionOutputs/session_outputs.saved": "68ba2b49a78c7aca02ccd3de9a8bbd1137d428669f1401f93b05c2f6c71b3c87",
+				"event:Checkfu.SessionOutputs/session_outputs.saved": "8652347d7e6e20392d8e7ad7e9576eca9342826095bdab527860bae4ded5c119",
 				"event:Checkfu.SessionOutputs/session_outputs.skipped": "f94b8eff594ca81d2c9a425dfd6fa277ab2bcf2affb1f3e7749616ccce294e92",
 				"command-reply:Checkfu/RecordSessionOutputs": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"scheduled-command:Checkfu.SessionOutputs/RecordSessionOutputs": "0a51d3bc3b4895aabee4509bd81c9d8d36801873dddbc29290f0c8949aea6601",
+				"scheduled-command:Checkfu.SessionOutputs/RecordSessionOutputs": "51c39afa2d0fbca9e4023bf519ce35a6d9cbca9d8b514a6f41c944579daf6d6c",
 				"command-reply:Checkfu/SkipSessionOutputs": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"scheduled-command:Checkfu.SessionOutputs/SkipSessionOutputs": "cc7ce9b8f982d4207616d90b99ed9bc32897cd772e5e94cea800eeaa5fb9c9f2",
 				"state:Checkfu.MemoryStore": "7c0d30165b992eca2802e6bcc8a00b771ea03b5fe279275ef65061e7a13adc47",

@@ -191,6 +191,7 @@ describe("Files", () => {
 		const two = encodeSavedOutputs([report, notes]) ?? ""
 		const tooLarge = encodeSkippedOutputs([{ path: "video.mp4", reason: "Too large." }]) ?? ""
 		const none = encodeSkippedOutputs([]) ?? ""
+		expect([one, two, tooLarge, none].every((text) => text !== "")).toBe(true)
 		const record = (turn: number, files: string, skipped: string) =>
 			new RecordSessionOutputs({ session_id: session, turn, files, skipped })
 		return story(

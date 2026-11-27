@@ -2,6 +2,7 @@ import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
 import {
 	MAX_OUTPUT_FILES,
+	MAX_OUTPUT_REASON_LENGTH,
 	encodeSavedOutputs,
 	encodeSkippedOutputs,
 } from "@checkfu/domain/Outputs/OutputsTypes"
@@ -121,7 +122,11 @@ export const makeOutputsSaver = Effect.gen(function* () {
 		}
 		if (!listing.ok) {
 			yield* outputs.send(
-				new SkipSessionOutputs({ session_id: sessionId, turn, reason: listing.reason }),
+				new SkipSessionOutputs({
+					session_id: sessionId,
+					turn,
+					reason: listing.reason.slice(0, MAX_OUTPUT_REASON_LENGTH),
+				}),
 			)
 			return
 		}
@@ -149,6 +154,14 @@ export const makeOutputsSaver = Effect.gen(function* () {
 			} else {
 				wanted.push({ ...file, id })
 			}
+		}
+		const skip = (reason: string) =>
+			outputs.send(new SkipSessionOutputs({ session_id: sessionId, turn, reason }))
+		const tooManySkipped = Effect.suspend(() =>
+			skip(`${skipped.length} outputs could not be saved.`),
+		)
+		if (skipped.length > MAX_OUTPUT_FILES) {
+			return yield* tooManySkipped
 		}
 		const read = yield* readBytes(sessionId, turn, wanted)
 		for (const file of wanted) {
@@ -184,10 +197,13 @@ export const makeOutputsSaver = Effect.gen(function* () {
 				content_type,
 			})
 		}
+		if (skipped.length > MAX_OUTPUT_FILES) {
+			return yield* tooManySkipped
+		}
 		const filesText = encodeSavedOutputs(saved.toSorted(byPath))
-		const skippedText = encodeSkippedOutputs(skipped.toSorted(byPath).slice(0, MAX_OUTPUT_FILES))
+		const skippedText = encodeSkippedOutputs(skipped.toSorted(byPath))
 		if (filesText === undefined || skippedText === undefined) {
-			return yield* new OutputsNotSaved({ cause: "The outputs record is too large." })
+			return yield* skip("The outputs are too many to record.")
 		}
 		yield* outputs.send(
 			new RecordSessionOutputs({
@@ -217,14 +233,9 @@ export const makeOutputsSaver = Effect.gen(function* () {
 						orElse: () => skip(TIMED_OUT),
 					}),
 					Effect.catchCause((cause) =>
-						Cause.hasInterruptsOnly(cause)
+						Cause.hasInterrupts(cause)
 							? Effect.interrupt
 							: Effect.andThen(Effect.logError("Outputs not saved", cause), skip(FAILED)),
-					),
-					Effect.catchCause((cause) =>
-						Cause.hasInterruptsOnly(cause)
-							? Effect.interrupt
-							: Effect.logError("Outputs outcome not recorded", cause),
 					),
 					Effect.annotateLogs({ sessionId: session_id, turn }),
 				)

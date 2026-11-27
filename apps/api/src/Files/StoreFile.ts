@@ -95,7 +95,7 @@ export const makeStoreFile = Effect.gen(function* () {
 					Effect.catchTags({
 						FileReservationLapsed: () => Effect.succeed(busy),
 						FileAlreadyExists: () => Effect.succeed(null),
-						FileOriginIncomplete: () => Effect.succeed(taken),
+						FileOriginIncomplete: (refused) => Effect.die(refused),
 					}),
 				)
 			if (created !== null) {
