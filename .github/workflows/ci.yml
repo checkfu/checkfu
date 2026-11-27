@@ -66,9 +66,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: test
-      # Each package already uses Vitest workers. Competing package runners can
-      # starve large-payload and streaming checks on this runner.
-      - run: bun x turbo run test --continue --filter='!@checkfu/domain' --concurrency=1
+      - run: bun x turbo run test --continue --filter='!@checkfu/domain'
       - if: ${{ !cancelled() }}
         run: bun run test:bun
       - if: ${{ !cancelled() }}
