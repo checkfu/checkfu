@@ -4,13 +4,12 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
-	API_WORKER_BUDGET,
-	EAGER_BYTES_HELP,
 	describeEager,
+	describeMeasured,
 	HARNESS_SOURCES_HELP,
-	CONTENT_WORKER_BUDGET,
-	PI_HARNESS_WORKER_BUDGET,
 	STARTUP_HELP,
+	TOTAL_BYTES_HELP,
+	WORKER_LIMITS,
 	measureBundle,
 } from "./BundleBudget.ts"
 import type { FakeGitHubServer } from "./FakeGitHubServer.ts"
@@ -805,25 +804,21 @@ describe("PiSession real Durable Object under workerd", () => {
 		}
 	}, 30_000)
 
-	it("keeps the code every isolate loads at start-up inside its budget", async () => {
-		for (const [worker, budget] of [
-			["ApiWorker", API_WORKER_BUDGET],
-			["ContentWorker", CONTENT_WORKER_BUDGET],
-			["PiHarnessWorker", PI_HARNESS_WORKER_BUDGET],
-		] as const) {
+	it("keeps every Worker's start-up and size well inside Cloudflare's limits", async () => {
+		for (const worker of ["ApiWorker", "ContentWorker", "PiHarnessWorker"] as const) {
 			const measured = await measureBundle(
 				join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-${worker}`),
 				`${worker}.js`,
 			)
-			const found = `${worker} measured ${JSON.stringify(measured)}`
+			process.stdout.write(`${describeMeasured(worker, measured)}\n`)
 			expect(
-				measured.eagerBytes,
-				`${EAGER_BYTES_HELP}\n${describeEager(worker, measured)}`,
-			).toBeLessThanOrEqual(budget.eagerBytes)
-			expect(measured.totalBytes, found).toBeLessThanOrEqual(budget.totalBytes)
-			expect(measured.startupCpuMs, `${STARTUP_HELP} ${found}`).toBeLessThanOrEqual(
-				budget.startupCpuMs,
-			)
+				measured.startupCpuMs,
+				`${STARTUP_HELP}\n${describeEager(worker, measured)}`,
+			).toBeLessThanOrEqual(WORKER_LIMITS.startupCpuMs)
+			expect(
+				measured.totalBytes,
+				`${TOTAL_BYTES_HELP} ${describeMeasured(worker, measured)}`,
+			).toBeLessThanOrEqual(WORKER_LIMITS.totalBytes)
 			if (worker === "PiHarnessWorker") {
 				expect(measured.harnessSources.length).toBeGreaterThan(0)
 			} else {
