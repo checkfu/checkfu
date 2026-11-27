@@ -500,6 +500,14 @@ export const boundResult = <R extends Stored>(
 ): R => {
 	const original = separate(result.output, limits)
 	const bounded = boundResultDiagnostics(result.diagnostics, DIAGNOSTIC_BUDGET_BYTES)
+	if (
+		original === result.output &&
+		bounded === result.diagnostics &&
+		imageBytes(original ?? []) + serializedBytes(result.details) <= RESULT_BUDGET_BYTES &&
+		storedRowBytes(result, limits, call) <= STORAGE_ROW_BYTES
+	) {
+		return result
+	}
 	const textual = original?.filter((item) => item.type !== "image")
 	const base =
 		storedRowBytes(

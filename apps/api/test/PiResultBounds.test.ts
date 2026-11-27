@@ -337,6 +337,39 @@ describe("Bounding what a tool result keeps", () => {
 		expect(boundResult(few)).toBe(few)
 	})
 
+	it("keeps the same result when an omitted image adds a note near the row limit", () => {
+		const png = (size: number) => ({
+			type: "image" as const,
+			data: "A".repeat(size),
+			mimeType: "image/png",
+		})
+		const result: Bounded = {
+			output: [{ type: "text", text: "a".repeat(300_000) }, png(69_406), png(0), png(1_559_136)],
+			details: {
+				calls: Array.from({ length: 2140 }, (_, id) => ({
+					id,
+					name: "read",
+					args: "a\n".repeat(231),
+				})),
+			},
+			diagnostics: [
+				{ severity: "info", message: "漢".repeat(27) },
+				{ severity: "info", message: "😀".repeat(101) },
+				{ severity: "info", message: "\u0001".repeat(173) },
+				{ severity: "error", message: "a".repeat(23) },
+				{ severity: "info", message: "漢".repeat(199) },
+				{ severity: "info", message: "a".repeat(18) },
+				{ severity: "error", message: '"'.repeat(341) },
+			],
+		}
+		const bounded = boundResult(result, READ_LIMITS)
+		expect(
+			bounded.output?.some((item) => item.type === "text" && item.text.includes("image of")),
+		).toBe(true)
+		expect(serializedBytes(rowOf(bounded, READ_LIMITS))).toBeLessThanOrEqual(STORAGE_ROW_BYTES)
+		expect(boundResult(bounded, READ_LIMITS)).toBe(bounded)
+	})
+
 	it("holds a result of any shape to its row under its tool's limits, and leaves alone one that already fits", () => {
 		fc.assert(
 			fc.property(anyResult, limitSets, (result, limits) => {
