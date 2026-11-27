@@ -1,3 +1,4 @@
+import { version } from "../package.json"
 import * as CliError from "effect/cli/CliError"
 import * as CliOutput from "effect/cli/CliOutput"
 import * as Command from "effect/cli/Command"
@@ -17,7 +18,7 @@ import { buildGeneratedResourceCommands } from "./generated/Commands.ts"
 import { RootCommand } from "./RootCommand.ts"
 import { escapeTerminalControlCharacters, writeStderrLine } from "./TerminalOutput.ts"
 
-export const CLI_VERSION = "0.0.0"
+export const CLI_VERSION = version
 
 export const CheckfuCli = RootCommand.pipe(
 	Command.withSubcommands([

@@ -917,7 +917,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		}
 	}
 
-	it("takes a YAML project through the compiled CLI and an independent MCP client without losing history or competing edits", async () => {
+	it("takes a YAML project through the installed npm CLI and an independent MCP client without losing history or competing edits", async () => {
 		const deadline = Date.now() + 15_000
 		let mcpUrl: string | undefined
 		while (mcpUrl === undefined && Date.now() < deadline) {
@@ -943,7 +943,6 @@ describe("PiSession real Durable Object under workerd", () => {
 		)
 		try {
 			await authoredProjectJourney({
-				repoRoot: REPO_ROOT,
 				baseUrl,
 				mcpUrl: `${mcpUrl}/mcp`,
 				apiKey: TEST_API_KEY,

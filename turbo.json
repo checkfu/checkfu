@@ -27,6 +27,10 @@
 		"@checkfu/cli#test": {
 			"dependsOn": ["^typecheck"],
 			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json", "$TURBO_ROOT$/bunfig.toml"]
+		},
+		"@checkfu/release#test": {
+			"dependsOn": ["^typecheck"],
+			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json", "$TURBO_ROOT$/LICENSE"]
 		}
 	}
 }

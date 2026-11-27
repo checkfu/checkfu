@@ -1,0 +1,19 @@
+{
+	"name": "@checkfu/release",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"devDependencies": {
+		"@checkfu/cli": "workspace:*",
+		"@checkfu/mcp": "workspace:*",
+		"@checkfu/sdk": "workspace:*",
+		"@effect/platform-node": "catalog:",
+		"@types/node": "catalog:",
+		"effect": "catalog:",
+		"vitest": "catalog:"
+	}
+}

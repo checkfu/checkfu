@@ -95,7 +95,7 @@
     },
     "apps/cli": {
       "name": "@checkfu/cli",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "@alchemy.run/cloudflare": "catalog:",
         "@checkfu/authoring": "workspace:*",
@@ -170,7 +170,7 @@
     },
     "packages/sdk": {
       "name": "@checkfu/sdk",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "effect": "catalog:",
       },
@@ -225,6 +225,19 @@
       "devDependencies": {
         "@effect/vitest": "catalog:",
         "@types/node": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "tools/release": {
+      "name": "@checkfu/release",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@checkfu/cli": "workspace:*",
+        "@checkfu/mcp": "workspace:*",
+        "@checkfu/sdk": "workspace:*",
+        "@effect/platform-node": "catalog:",
+        "@types/node": "catalog:",
+        "effect": "catalog:",
         "vitest": "catalog:",
       },
     },
@@ -392,6 +405,8 @@
     "@checkfu/mcp": ["@checkfu/mcp@workspace:apps/mcp"],
 
     "@checkfu/pi-providers": ["@checkfu/pi-providers@workspace:packages/pi-providers"],
+
+    "@checkfu/release": ["@checkfu/release@workspace:tools/release"],
 
     "@checkfu/sdk": ["@checkfu/sdk@workspace:packages/sdk"],
 

@@ -11,6 +11,15 @@
 
 Built on Cloudflare Workers, Durable Objects, [Pi Durable](https://github.com/earendil-works), [Alchemy](https://alchemy.run), and [Effect](https://effect.website), with one API across HTTP, TypeScript, CLI, MCP, and a web dashboard.
 
+## npm clients
+
+```sh
+npm install -g checkfu
+checkfu --base-url https://your-api.workers.dev login
+```
+
+The npm CLI requires Node.js 22 or later. Install `@checkfu/sdk` for the JavaScript/TypeScript client. See the [CLI guide](apps/cli/README.md) and [SDK guide](packages/sdk/README.md). Server deployment still uses a source checkout and Bun, as described below.
+
 ## Quickstart
 
 Requires [Bun](https://bun.sh) 1.4+, Node.js 22.18+, a Cloudflare account (Workers Paid, R2 enabled), and a model provider API key.

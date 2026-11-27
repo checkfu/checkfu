@@ -10,6 +10,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { CallToolRequestParams } from "@modelcontextprotocol/client"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
+import { buildCliPackage } from "../../../../tools/release/Build.ts"
 import { cliProcessEnv } from "../../../cli/test/helpers/ProcessEnv.ts"
 
 const execute = promisify(execFile)
@@ -36,14 +37,14 @@ const resourceId = (rows: ReadonlyArray<PlanRow>, file: string) => {
 }
 
 export const authoredProjectJourney = async (options: {
-	readonly repoRoot: string
 	readonly baseUrl: string
 	readonly mcpUrl: string
 	readonly apiKey: string
 }) => {
 	const scratch = await mkdtemp(join(tmpdir(), "checkfu-user-journey-"))
 	const project = join(scratch, "project")
-	const binary = join(scratch, "checkfu")
+	const consumer = join(scratch, "installed")
+	const binary = join(consumer, "node_modules", "checkfu", "bin", "checkfu.mjs")
 	const config = join(scratch, "config")
 	const env = cliProcessEnv({ CHECKFU_CONFIG_DIR: config })
 	const sdk = new Checkfu({ baseUrl: options.baseUrl, apiKey: options.apiKey, maxRetries: 0 })
@@ -52,7 +53,7 @@ export const authoredProjectJourney = async (options: {
 		{ versionNegotiation: { mode: "auto" } },
 	)
 	const cli = async <T>(...args: ReadonlyArray<string>): Promise<T> => {
-		const running = execute(binary, ["--format", "json", ...args], {
+		const running = execute(process.execPath, [binary, "--format", "json", ...args], {
 			cwd: project,
 			env,
 			timeout: 30_000,
@@ -73,11 +74,30 @@ export const authoredProjectJourney = async (options: {
 			JSON.stringify({ url: options.baseUrl, api_key: options.apiKey }),
 			{ mode: 0o600 },
 		)
-		await execute("bun", ["run", "checkfu:build", "--outfile", binary], {
-			cwd: options.repoRoot,
-			env,
-			timeout: 60_000,
-		})
+		const distribution = await buildCliPackage(join(scratch, "distribution"))
+		const packed = await execute(
+			"npm",
+			["pack", distribution, "--pack-destination", scratch, "--ignore-scripts", "--json"],
+			{ cwd: scratch, timeout: 30_000 },
+		)
+		const [{ filename }] = Schema.decodeSync(
+			Schema.fromJsonString(Schema.Tuple([Schema.Struct({ filename: Schema.String })])),
+		)(packed.stdout)
+		await mkdir(consumer)
+		await writeFile(join(consumer, "package.json"), '{"name":"installed-cli-user","private":true}')
+		await execute(
+			"npm",
+			[
+				"install",
+				join(scratch, filename),
+				"--ignore-scripts",
+				"--offline",
+				"--no-audit",
+				"--no-fund",
+			],
+			{ cwd: consumer, timeout: 30_000 },
+		)
+
 		for (const dir of ["agents", "environments", "automations"]) {
 			await mkdir(join(project, dir), { recursive: true })
 		}

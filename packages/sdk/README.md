@@ -1,5 +1,11 @@
 # `@checkfu/sdk`
 
+```sh
+npm install @checkfu/sdk
+```
+
+Requires Node.js 22 or later. The published package contains JavaScript and TypeScript declarations; it does not require Bun or a TypeScript runtime loader.
+
 Effect-native TypeScript SDK for the Checkfu API, with a thin Promise / `AsyncIterable` client built on top of the same core.
 
 Create an agent and an environment, then create a session that references both. Use `client.sessions.events` to send a `user.message` event, list the session's event history, or follow its live event stream.
@@ -85,7 +91,7 @@ const { data, status, requestId } = yield* client.agents.retrieve(agent.id, {
 import Checkfu from "@checkfu/sdk"
 
 const client = new Checkfu({
-	// Reads CHECKFU_API_KEY and CHECKFU_BASE_URL / CHECKFU_API_URL / CHECKFU_URL by default
+	// Reads CHECKFU_API_KEY and CHECKFU_BASE_URL by default
 	apiKey: process.env.CHECKFU_API_KEY,
 	baseUrl: "http://localhost:1337",
 })
