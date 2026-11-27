@@ -104,6 +104,24 @@ jobs:
         env:
           RESULT: ${{ needs.test-packages.result }}
 
+  trial-budget:
+    name: budget (${{ matrix.file }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        file: [ReplayBudget, SessionsBudget]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun x vitest run test/tmp/${{ matrix.file }}.verify.test.ts --disable-console-intercept
+        working-directory: packages/domain
+        env:
+          CHECKFU_PROVE: "1"
+
   # Long Z3 proofs get their own runners. The other domain files share one, in parallel.
   domain-proofs:
     name: domain (${{ matrix.shard.name }})
