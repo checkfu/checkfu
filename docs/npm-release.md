@@ -1,5 +1,7 @@
 # Preparing the npm clients
 
+The first CLI (`checkfu`) and SDK (`@checkfu/sdk`) release is **0.0.1**.
+
 The source workspace stays private. `release:build` produces the two public packages in `dist/npm/checkfu` and `dist/npm/sdk`, with explicit file allowlists and npm-compatible dependency versions. No publish command runs during build or verification.
 
 ```sh

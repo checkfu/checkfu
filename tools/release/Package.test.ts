@@ -138,7 +138,7 @@ it("installs independently of the checkout and exposes working JavaScript and Ty
 		env: env(),
 		timeout: 10_000,
 	})
-	expect(stdout.trim()).toBe("checkfu v0.1.0")
+	expect(stdout.trim()).toBe("checkfu v0.0.1")
 }, 45_000)
 
 it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry, history, errors and event streams against the domain backend", async () => {

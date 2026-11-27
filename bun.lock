@@ -95,7 +95,7 @@
     },
     "apps/cli": {
       "name": "@checkfu/cli",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
         "@alchemy.run/cloudflare": "catalog:",
         "@checkfu/authoring": "workspace:*",
@@ -170,7 +170,7 @@
     },
     "packages/sdk": {
       "name": "@checkfu/sdk",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
         "effect": "catalog:",
       },
