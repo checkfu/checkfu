@@ -10,6 +10,7 @@ import {
 	ArtifactVersionConflict,
 } from "../src/Artifact/AddArtifactVersion.command.ts"
 import { Artifact } from "../src/Artifact/Artifact.aggregate.ts"
+import { ArtifactBytes, ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { ArtifactNotFound } from "../src/Artifact/ArtifactNotFound.rejection.ts"
 import {
 	ArtifactVersionView,
@@ -27,6 +28,7 @@ import {
 import { ArtifactReservationLapsed } from "../src/Artifact/ArtifactReservationLapsed.rejection.ts"
 import { ArtifactDeleted, DeleteArtifact } from "../src/Artifact/DeleteArtifact.command.ts"
 import {
+	ARTIFACT_RESERVATION_TTL,
 	ArtifactReservationExpired,
 	ExpireArtifactReservation,
 } from "../src/Artifact/ExpireArtifactReservation.command.ts"
@@ -41,9 +43,9 @@ import {
 	ArtifactUnpublished,
 	UnpublishArtifact,
 } from "../src/Artifact/UnpublishArtifact.command.ts"
-import { Artifacts } from "../src/Artifacts.model.ts"
+import { Artifacts, ArtifactsHandlersLive } from "../src/Artifacts.model.ts"
 
-const story = Story.make(Artifacts)
+const story = Story.make(Artifacts, { layer: ArtifactsHandlersLive, stub: [ArtifactBytes] })
 
 const t0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
 const t1 = DateTime.makeUnsafe("2026-01-01T00:05:00.000Z")
@@ -55,7 +57,9 @@ const manifestC = "c".repeat(64)
 
 describe("Artifacts", () => {
 	it.effect("is well defined", () =>
-		Effect.scoped(Layer.build(Artifacts.layer(Layer.empty))).pipe(Effect.provide(Domain.InMemory)),
+		Effect.scoped(Layer.build(Artifacts.layer(ArtifactsHandlersLive))).pipe(
+			Effect.provide([Domain.InMemory, ArtifactBytesKept]),
+		),
 	)
 
 	it.effect(
@@ -356,6 +360,8 @@ describe("Artifacts", () => {
 			Story.clock(t2),
 			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact, new ArtifactDeleted()),
+			Story.call(ArtifactBytes.purge, { artifact_id: artifact.id }),
+			Story.succeed(ArtifactBytes.purge, undefined),
 			Story.state(artifact, {
 				status: "deleted",
 				version: 2,
@@ -437,8 +443,10 @@ describe("Artifacts", () => {
 				Story.when(expire(1)),
 				Story.then(artifact),
 				Story.state(artifact, { status: "", reservations: 2, open_reservation: 2 }),
-				Story.when(expire(2)),
+				Story.advance(ARTIFACT_RESERVATION_TTL),
 				Story.then(artifact, new ArtifactReservationExpired({ reservation: 2 })),
+				Story.call(ArtifactBytes.release, { artifact_id: artifact.id, reservation: 2 }),
+				Story.succeed(ArtifactBytes.release, undefined),
 				Story.state(artifact, { status: "", reservations: 2, open_reservation: 0 }),
 				Story.when(create(2)),
 				Story.rejected(lapsed),
@@ -525,6 +533,8 @@ describe("Artifacts", () => {
 			}),
 			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact, new ArtifactDeleted()),
+			Story.call(ArtifactBytes.purge, { artifact_id: artifact.id }),
+			Story.succeed(ArtifactBytes.purge, undefined),
 			Story.state(artifact, {
 				status: "deleted",
 				publication_token: "",
@@ -571,6 +581,8 @@ describe("Artifacts", () => {
 				Story.then(artifact, new ArtifactIdempotencyKeyClaimed({ fingerprint: "fp_b" })),
 				Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 				Story.then(artifact, new ArtifactDeleted()),
+				Story.call(ArtifactBytes.purge, { artifact_id: artifact.id }),
+				Story.succeed(ArtifactBytes.purge, undefined),
 				Story.when(claim("fp_c"), { commandId: "publication:key-3" }),
 				Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
 			)

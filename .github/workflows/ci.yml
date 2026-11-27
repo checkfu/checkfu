@@ -75,8 +75,7 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
-  # The Z3 proofs in packages/domain take minutes. Each Sessions proof gets a runner of its own,
-  # and the other domain files share one, serially, so concurrent Z3 work cannot starve a proof.
+  # Long Z3 proofs get their own runners. The other domain files run serially on one runner.
   domain-proofs:
     name: domain (${{ matrix.shard.name }})
     runs-on: ubuntu-latest
@@ -86,11 +85,13 @@ jobs:
       matrix:
         shard:
           - name: rest
-            args: --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --no-file-parallelism
+            args: --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --exclude test/AutomationRuns.verify.test.ts --no-file-parallelism
           - name: sessions
             args: test/Sessions.verify.test.ts
           - name: sessions-replay
             args: test/Sessions.replay.verify.test.ts
+          - name: automation-runs
+            args: test/AutomationRuns.verify.test.ts
     steps:
       - uses: actions/checkout@v5
         with:

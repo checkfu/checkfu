@@ -1,0 +1,90 @@
+import * as Domain from "@alchemy.run/domain"
+import * as Layer from "effect/Layer"
+import { Agent } from "./Agent/Agent.aggregate.ts"
+import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
+import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
+import { Automation } from "./Automation/Automation.aggregate.ts"
+import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
+import { AutomationRunView } from "./Automation/AutomationRunView.view.ts"
+import { AutomationView } from "./Automation/AutomationView.view.ts"
+import {
+	FreeAutomationSlot,
+	FreeAutomationSlotLive,
+} from "./Automation/FreeAutomationSlot.policy.ts"
+import { OpenAutomationSessionDecision } from "./Automation/OpenAutomationSession.decision.ts"
+import { AutomationRunSetup } from "./AutomationRuns/AutomationRunSetup.aggregate.ts"
+import {
+	PrepareAutomationRunFixture,
+	PrepareAutomationRunFixtureLive,
+} from "./AutomationRuns/PrepareAutomationRunFixture.policy.ts"
+import {
+	StartAutomationRun,
+	StartAutomationRunLive,
+} from "./Automation/StartAutomationRun.policy.ts"
+import { Environment } from "./Environment/Environment.aggregate.ts"
+import { Session } from "./Session/Session.aggregate.ts"
+
+export class AutomationRuns extends Domain.Model("AutomationRuns", {
+	aggregates: [AutomationRunSetup, Agent, Environment, Session, Automation, AutomationCapacity],
+	decisions: [CreateAgentDecision, AdmitAutomationDecision, OpenAutomationSessionDecision],
+	views: [AutomationView, AutomationRunView],
+	policies: [PrepareAutomationRunFixture, StartAutomationRun, FreeAutomationSlot],
+	invariants: {
+		ReservedSlotsCoverLiveAutomations: (m) => {
+			const live = m.Automation.filter((a) =>
+				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
+			).length
+			return [
+				[m.AutomationCapacity.length === 0, live === 0].every((ok) => ok),
+				m.AutomationCapacity.some((c) => c.state.reserved >= live),
+			].some((ok) => ok)
+		},
+	},
+	eventually: {
+		EveryFiredRunIsReported: (m) =>
+			m.Automation.every((a) => {
+				const ledger = m.AutomationRunView.find((v) => v.id === a.id)
+				return [
+					a.state.reported === a.state.runs,
+					(ledger === undefined ? 0 : ledger.state.recorded) === a.state.reported,
+				].every((ok) => ok)
+			}),
+		ReservedSlotsEqualLiveAutomations: (m) => {
+			const live = m.Automation.filter((a) =>
+				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
+			).length
+			return [
+				[m.AutomationCapacity.length === 0, live === 0].every((ok) => ok),
+				m.AutomationCapacity.some((c) => c.state.reserved === live),
+			].some((ok) => ok)
+		},
+	},
+	sometimes: {
+		AStartedRunIsReported: (m) =>
+			[
+				m.Automation.some((a) => a.state.reported >= 1),
+				m.Session.some((s) => s.state._tag === "Running"),
+			].every((ok) => ok),
+		AFailedRunPausesTheAutomation: (m) =>
+			m.Automation.some((a) =>
+				[a.state.status === "paused", a.state.reported >= 1].every((ok) => ok),
+			),
+		AnArchivedAutomationFreesItsSlot: (m) =>
+			[
+				m.Automation.some((a) => a.state.status === "archived"),
+				m.AutomationCapacity.some((c) => c.state.reserved === 0),
+			].every((ok) => ok),
+	},
+}) {}
+
+export class AutomationRunsApi extends Domain.Api("AutomationRunsApi", {
+	model: AutomationRuns,
+	commands: ["PrepareAutomationRun", "RunAutomation", "ArchiveAgent", "ArchiveAutomation"],
+	views: ["AutomationView", "AutomationRunView"],
+}) {}
+
+export const AutomationRunsHandlersLive = Layer.mergeAll(
+	PrepareAutomationRunFixtureLive,
+	StartAutomationRunLive,
+	FreeAutomationSlotLive,
+)

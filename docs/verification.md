@@ -48,16 +48,17 @@ bun run test:bun
 bun run test:workerd
 ```
 
-The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. `Sessions.verify` and `Sessions.replay.verify` each run on a runner of their own and share a 20-minute test deadline (`SESSIONS_PROOF_DEADLINE_MS`). Each shard job has a 25-minute limit, including setup. The other domain files run serially on one more runner so concurrent Z3 work does not starve a proof. The required `domain` check passes only when all three shards pass. Investigate what grew when a proof approaches its deadline and record the reason for any increase.
+The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. `Sessions.verify` and `Sessions.replay.verify` each run on a runner of their own and share a 20-minute test deadline (`SESSIONS_PROOF_DEADLINE_MS`). `AutomationRuns.verify` also has its own runner and a 20-minute test deadline. A fixture creates an environment and agent and admits an automation with a valid cron expression through the production handlers. The search exhausts sequences of up to four caller commands and samples longer sequences. It checks successful and failed run reporting and slot reclamation. Each shard job has a 25-minute limit, including setup. The other domain files run serially on one more runner so concurrent Z3 work does not starve a proof. The required `domain` check passes only when all shards pass. Investigate what grew when a proof approaches its deadline and record the reason for any increase.
 
 Main's active CI run finishes while newer pushes replace the pending run. This lets the proof jobs complete and save their content-based task results even when main advances frequently. The next run reuses results only for unchanged inputs. PR updates cancel their older run.
 
 On a local machine, run the heavy proof groups separately to avoid solver contention:
 
 ```sh
-CHECKFU_PROVE=1 bun run --cwd packages/domain test --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --no-file-parallelism
+CHECKFU_PROVE=1 bun run --cwd packages/domain test --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --exclude test/AutomationRuns.verify.test.ts --no-file-parallelism
 CHECKFU_PROVE=1 bun run --cwd packages/domain test test/Sessions.verify.test.ts
 CHECKFU_PROVE=1 bun run --cwd packages/domain test test/Sessions.replay.verify.test.ts
+CHECKFU_PROVE=1 bun run --cwd packages/domain test test/AutomationRuns.verify.test.ts
 CHECKFU_PROVE=1 bun run --cwd packages/domain test test/Checkfu.verify.test.ts
 ```
 

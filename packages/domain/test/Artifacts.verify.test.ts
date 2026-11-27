@@ -3,9 +3,10 @@ import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { Artifacts, ArtifactsApi } from "../src/Artifacts.model.ts"
+import { ArtifactBytes } from "../src/Artifact/ArtifactBytes.external.ts"
+import { Artifacts, ArtifactsApi, ArtifactsHandlersLive } from "../src/Artifacts.model.ts"
 
-const story = Story.make(Artifacts)
+const story = Story.make(Artifacts, { layer: ArtifactsHandlersLive, stub: [ArtifactBytes] })
 
 const STANDING = {
 	"Artifact.StatusIsKnown": "proved",
@@ -31,6 +32,7 @@ const STANDING = {
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Artifacts.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
 	"Artifacts.EveryArtifactVersionIsRecorded": "checked",
+	"Artifacts.NoReservationStaysOpen": "checked",
 	"Artifacts.AnArtifactGainsASecondVersion": "reached",
 	"Artifacts.AnArtifactIsDeleted": "reached",
 	"Artifacts.AnArtifactIsPublished": "reached",
@@ -58,7 +60,10 @@ describe("Artifacts Z3 formal verification", () => {
 				)
 				expect(report.undone).toEqual([])
 				yield* Effect.logInfo(Verify.render(report))
-				expect(report.explored.followed).toEqual([])
+				expect(report.explored.followed.toSorted()).toEqual([
+					"ExpireArtifactReservations",
+					"ReleaseArtifactBytes",
+				])
 				expect(report.explored.idle).toEqual([])
 				expect(report.explored.sagas).toEqual([])
 				expect(report.explored.unstarted).toEqual([])

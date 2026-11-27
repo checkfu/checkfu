@@ -1,0 +1,383 @@
+{
+	"version": 1,
+	"rules": {
+		"AutomationRuns": {
+			"Agent.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"active\", s.status === \"archived\"].some((ok) => ok)"
+			},
+			"Agent.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\ts.status === \"\",\n\t\t\t\t\ts.version === 0,\n\t\t\t\t\ts.current_version_id === \"\",\n\t\t\t\t\ts.name === \"\",\n\t\t\t\t\ts.model_id === \"\",\n\t\t\t\t\t!s.has_system,\n\t\t\t\t\ts.system === \"\",\n\t\t\t\t\t!s.has_description,\n\t\t\t\t\ts.description === \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.status !== \"\",\n\t\t\t\t\ts.version >= 1,\n\t\t\t\t\ts.current_version_id !== \"\",\n\t\t\t\t\ts.name !== \"\",\n\t\t\t\t\ts.model_id !== \"\",\n\t\t\t\t\t[s.has_system, s.system === \"\"].some((ok) => ok),\n\t\t\t\t\t[s.has_description, s.description === \"\"].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.ConfigurationIsStableWithinAVersion": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tafter.version !== before.version,\n\t\t\t\t[\n\t\t\t\t\tafter.current_version_id === before.current_version_id,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t\tafter.mcp_servers === before.mcp_servers,\n\t\t\t\t\tafter.tools === before.tools,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.CreatedAgentNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Agent.ArchivedAgentStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"archived\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"archived\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.current_version_id === before.current_version_id,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"archived\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.version === 0, s.name === \"\"].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.version >= 1, s.name !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.ConfiguredExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.description === null, s.config === null].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.config !== null].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.UpdateKeepsWhatItDoesNotName": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"UpdateEnvironment\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (after.config === null || before.config === null) {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\tconst kept = after.config.networking\n\t\t\tconst asked =\n\t\t\t\tcommand.changes.config === undefined\n\t\t\t\t\t? before.config.networking\n\t\t\t\t\t: command.changes.config.networking\n\t\t\treturn [\n\t\t\t\tafter.name === (command.changes.name === undefined ? before.name : command.changes.name),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.changes.description === undefined\n\t\t\t\t\t\t? before.description\n\t\t\t\t\t\t: command.changes.description),\n\t\t\t\tkept.type === asked.type,\n\t\t\t\tkept.type !== \"limited\" ||\n\t\t\t\t\tasked.type !== \"limited\" ||\n\t\t\t\t\t(kept.allow_mcp_servers === asked.allow_mcp_servers &&\n\t\t\t\t\t\tkept.allow_package_managers === asked.allow_package_managers),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"Environment.CreatedEnvironmentNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Environment.ArchivedNeverReactivates": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"archived\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"archived\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"deleted\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tbefore.status === \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.status === \"\", after.version === 0].every((ok) => ok),\n\t\t\t\t\t\t[after.status === \"active\", after.version === 1].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.status !== \"\",\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.version === before.version, after.name === before.name].every((ok) => ok),\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Session.RunningTurnIsPositive": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || s.turn >= 1"
+			},
+			"Session.IdleTurnIsNonNegative": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Idle\" || s.turn >= 0"
+			},
+			"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Idle\" ||\n\t\t\ts.initial_messages_remaining === undefined ||\n\t\t\t(s.turn === 0 &&\n\t\t\t\ts.initial_messages_remaining >= 0 &&\n\t\t\t\ts.initial_messages_remaining <= MAX_SESSION_INITIAL_EVENTS)"
+			},
+			"Session.ModelRequestsStartedNonNegative": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
+			},
+			"Session.PendingUserMessagesWithinBounds": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8)"
+			},
+			"Session.OpenModelRequestRequiresStartedCount": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || s.open_model_request_id === null || s.model_requests_started >= 1"
+			},
+			"Session.APausedTurnHoldsNoModelRequest": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || !s.paused || s.open_model_request_id === null"
+			},
+			"Session.APausedTurnWaitsOnACall": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || !s.paused || s.awaiting_calls >= 1"
+			},
+			"Session.APausedTurnAskedWhatItWaitsOn": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || !s.paused || s.asked_calls >= 1"
+			},
+			"Session.AnInterruptedTurnIsNotPaused": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || !s.interrupted || !s.paused"
+			},
+			"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === command.remaining)"
+			},
+			"Session.OnlyTheLastInitialMessageStartsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\t!events.some((e) => e._tag === \"session.status_running\") ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === 1)"
+			},
+			"Session.TerminatedSessionStaysTerminated": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" || after._tag === \"Terminated\""
+			},
+			"Session.ArchivedSessionStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" ||\n\t\t\t!before.archived ||\n\t\t\t(after._tag === \"Terminated\" && after.archived)"
+			},
+			"Session.CreatedSessionNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag === \"Uninitialized\" || after._tag !== \"Uninitialized\""
+			},
+			"Session.TurnNeverDecreases": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.turn >= before.turn"
+			},
+			"Session.TurnAdvancesByAtMostOne": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.turn <= before.turn + 1"
+			},
+			"Session.ModelRequestsStartedNeverDecreasesWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started >= before.model_requests_started"
+			},
+			"Session.ModelRequestsStartedGrowsByAtMostOneWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started <= before.model_requests_started + 1"
+			},
+			"Session.PendingUserMessagesGrowsByAtMostOneWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.pending_user_messages <= before.pending_user_messages + 1"
+			},
+			"Session.OnlySendUserMessageAddsPendingMessages": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.pending_user_messages <= before.pending_user_messages ||\n\t\t\tcommand._tag === \"SendUserMessage\""
+			},
+			"Session.OnlyArchiveSessionSetsArchivedFlag": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tafter._tag !== \"Terminated\" ||\n\t\t\t!after.archived ||\n\t\t\t(before._tag === \"Terminated\" && before.archived) ||\n\t\t\tcommand._tag === \"ArchiveSession\""
+			},
+			"Session.IdleSessionStartsTheNextTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Idle\" || after._tag !== \"Running\" || after.turn === before.turn + 1"
+			},
+			"Session.StatusRunningCarriesStartedTurn": {
+				"kind": "transition",
+				"source": "({ after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_running\" ||\n\t\t\t\t\t(after._tag === \"Running\" && event.turn === after.turn),\n\t\t\t)"
+			},
+			"Session.StatusIdleCarriesEndedTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\")),\n\t\t\t)"
+			},
+			"Session.AbandonedTurnEnds": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.abandoned\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"Session.AgentMessageEndsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"Session.OpenModelRequestClosedBeforeLeavingRunning": {
+				"kind": "transition",
+				"source": "({ before, after, events }) => {\n\t\t\tif (\n\t\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t\tbefore.open_model_request_id === null ||\n\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn)\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tconst endIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"span.model_request_end\" &&\n\t\t\t\t\tevent.model_request_start_id === before.open_model_request_id,\n\t\t\t)\n\t\t\tconst leaveIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.status_idle\" || event._tag === \"session.status_terminated\",\n\t\t\t)\n\t\t\treturn endIndex >= 0 && (leaveIndex < 0 || endIndex < leaveIndex)\n\t\t}"
+			},
+			"Session.OnlyAPauseMakesATurnWait": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\t!after.paused ||\n\t\t\t(before._tag === \"Running\" && before.turn === after.turn && before.paused) ||\n\t\t\tevents.some((event) => event._tag === \"turn.awaiting\")"
+			},
+			"Session.APausedTurnTakesNoUserMessage": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tevents.every((event) => event._tag !== \"user.message\")"
+			},
+			"Session.APausedTurnIsNotAbandoned": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tevents.every((event) => event._tag !== \"turn.abandoned\")"
+			},
+			"Session.APauseKeepsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.awaiting\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tafter._tag === \"Running\" &&\n\t\t\t\t\t\tafter.turn === before.turn &&\n\t\t\t\t\t\tafter.paused),\n\t\t\t)"
+			},
+			"Session.AContinuationKeepsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.continued\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tafter._tag === \"Running\" &&\n\t\t\t\t\t\tafter.turn === before.turn &&\n\t\t\t\t\t\t!after.paused),\n\t\t\t)"
+			},
+			"Session.APausedTurnGoesOnOnceAnswered": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.awaiting_calls >= 1 ||\n\t\t\t(!after.paused && events.some((event) => event._tag === \"turn.continued\"))"
+			},
+			"Session.AnInterruptEndsAPausedTurn": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tcommand._tag !== \"SendUserInterrupt\" ||\n\t\t\tafter._tag === \"Idle\" ||\n\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1)"
+			},
+			"Session.AnInterruptedTurnNeitherWaitsNorGoesOn": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.interrupted ||\n\t\t\tevents.every((event) => event._tag !== \"turn.awaiting\" && event._tag !== \"turn.continued\")"
+			},
+			"Session.AnInterruptedTurnStaysInterrupted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.interrupted ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.interrupted"
+			},
+			"Session.ADeadlineAbandonsOnlyItsOwnSegment": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"AbandonTurn\" ||\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tevents.length === 0 ||\n\t\t\tcommand.segment ===\n\t\t\t\t(before.open_model_request_id === null && !before.paused\n\t\t\t\t\t? before.model_requests_started + 1\n\t\t\t\t\t: before.model_requests_started)"
+			},
+			"Session.AnEndedTurnStartsTheQueuedOne": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tbefore.pending_user_messages === 0 ||\n\t\t\tafter._tag !== \"Idle\" ||\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" ||\n\t\t\t\t\t(event.stop_reason.type !== \"end_turn\" &&\n\t\t\t\t\t\tevent.stop_reason.type !== \"retries_exhausted\" &&\n\t\t\t\t\t\tevent.stop_reason.type !== \"interrupted\"),\n\t\t\t)"
+			},
+			"Session.AStopNamesTheUnansweredCalls": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\t(event._tag !== \"session.status_idle\" && event._tag !== \"session.status_terminated\") ||\n\t\t\t\t\tevent.event_ids === (before._tag === \"Running\" ? before.awaiting_ids : NO_TOOL_USE_IDS),\n\t\t\t)"
+			},
+			"Automation.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"active\", s.status === \"paused\", s.status === \"archived\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Automation.NothingRunsBeforeCreation": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status !== \"\",\n\t\t\t\t[s.runs === 0, s.reported === 0, s.last_scheduled_at === 0, s.activation === 0].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.ReportedNeverExceedsRuns": {
+				"kind": "invariant",
+				"source": "(s) => s.reported <= s.runs"
+			},
+			"Automation.RevisedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.revision === 0].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.revision > 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.CreatedAutomationNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Automation.ArchivedAutomationStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.status === \"archived\"].some((ok) => ok)"
+			},
+			"Automation.ArchivedAutomationNeverFires": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.runs === before.runs].some((ok) => ok)"
+			},
+			"Automation.OnlyUnpauseResumesAPausedAutomation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"paused\",\n\t\t\t\tafter.status !== \"active\",\n\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.RunsGrowByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[after.runs === before.runs, after.runs === before.runs + 1].some((ok) => ok)"
+			},
+			"Automation.OnlyRunAndFireStartRuns": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tcommand._tag === \"RunAutomation\",\n\t\t\t\tcommand._tag === \"FireAutomation\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.ScheduledFiringNeedsAnActiveAutomationAndALaterInstant": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"FireAutomation\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\tcommand.activation === before.activation,\n\t\t\t\tcommand.scheduled_at > before.last_scheduled_at,\n\t\t\t\tafter.runs === before.runs + 1,\n\t\t\t\tafter.last_scheduled_at === command.scheduled_at,\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"Automation.OnlyAResumeOrAnUpdateStartsANewActivation": {
+				"kind": "transition",
+				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.EveryResumeStartsANewActivation": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"automation.unpaused\" || after.activation === before.activation + 1,\n\t\t\t)"
+			},
+			"Automation.ScheduledInstantNeverGoesBack": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tafter.last_scheduled_at >= before.last_scheduled_at"
+			},
+			"Automation.FiredCarriesTheNewRun": {
+				"kind": "transition",
+				"source": "({ after, events }) =>\n\t\t\tevents.every((event) => event._tag !== \"automation.fired\" || event.run === after.runs)"
+			},
+			"Automation.RunsAreReportedInOrder": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[after.reported === before.reported, after.reported === before.reported + 1].some((ok) => ok)"
+			},
+			"Automation.OnlyCreationOrAnUpdateRevisesIt": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\t[\n\t\t\t\tafter.revision === before.revision,\n\t\t\t\t[before.status === \"\", after.revision === 1].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tafter.revision === before.revision + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.AnUpdateLeavesRunsAlone": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every((event) => event._tag !== \"automation.updated\") ||\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tafter.reported === before.reported,\n\t\t\t\tafter.last_scheduled_at === before.last_scheduled_at,\n\t\t\t].every((ok) => ok)"
+			},
+			"Automation.AFailedRunPausesOnlyAnActiveAutomation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"RecordAutomationRunFailed\",\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.status === \"active\", after.status === \"paused\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.AFailedRunPausesOnlyWhenUnrecoverableAtTheCurrentRevision": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordAutomationRunFailed\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[command.unrecoverable, command.revision === before.revision].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"AutomationCapacity.ReservedSlotsStayWithinTheLimit": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.reserved >= 0, s.reserved <= MAX_LIVE_AUTOMATIONS].every((ok) => ok)"
+			},
+			"AutomationCapacity.SlotsChangeOneAtATime": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.reserved === before.reserved,\n\t\t\t\tafter.reserved === before.reserved + 1,\n\t\t\t\tafter.reserved === before.reserved - 1,\n\t\t\t].some((ok) => ok)"
+			},
+			"CreateAgent.NewAgentStartsAtVersionOne": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"\",\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === 1,\n\t\t\t\tafter.agent.current_version_id === command.version_id,\n\t\t\t].every((ok) => ok)"
+			},
+			"CreateAgent.NewAgentKeepsItsDeclaredServers": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.mcp_servers === command.mcp_servers"
+			},
+			"CreateAgent.NewAgentKeepsItsDeclaredTools": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.tools === command.tools"
+			},
+			"AdmitAutomation.OnlyActiveAgentAndEnvironmentAdmitAutomation": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t\tbefore.automation.status === \"\",\n\t\t\t\tafter.automation.status === \"active\",\n\t\t\t].every((ok) => ok)"
+			},
+			"AdmitAutomation.PinnedVersionWithinAgentHead": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tcommand.agent_version === null || command.agent_version <= before.agent.version"
+			},
+			"AdmitAutomation.AdmissionTakesOneSlotWithinTheLimit": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.capacity.reserved < MAX_LIVE_AUTOMATIONS,\n\t\t\t\tafter.capacity.reserved === before.capacity.reserved + 1,\n\t\t\t].every((ok) => ok)"
+			},
+			"AdmitAutomation.AdmissionLeavesAgentAndEnvironmentUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t].every((ok) => ok)"
+			},
+			"OpenAutomationSession.OnlyActiveAgentAndEnvironmentOpenAnAutomationSession": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t\tbefore.session._tag === \"Uninitialized\",\n\t\t\t\tafter.session._tag === \"Running\",\n\t\t\t].every((ok) => ok)"
+			},
+			"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": {
+				"kind": "transition",
+				"source": "({ after, events }) =>\n\t\t\tafter.session._tag === \"Running\" &&\n\t\t\tafter.session.turn === 1 &&\n\t\t\tafter.session.pending_user_messages === 0 &&\n\t\t\tevents.length === 3"
+			},
+			"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tcommand.agent_version === null || command.agent_version <= before.agent.version"
+			},
+			"OpenAutomationSession.FirstTurnAdmissionKeepsGivenCredentials": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" &&\n\t\t\t\t\tevent.mcp_server_credentials === command.mcp_server_credentials,\n\t\t\t)"
+			},
+			"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t].every((ok) => ok)"
+			},
+			"AutomationRuns.ReservedSlotsCoverLiveAutomations": {
+				"kind": "model invariant",
+				"source": "(m) => {\n\t\t\tconst live = m.Automation.filter((a) =>\n\t\t\t\t[a.state.status === \"active\", a.state.status === \"paused\"].some((ok) => ok),\n\t\t\t).length\n\t\t\treturn [\n\t\t\t\t[m.AutomationCapacity.length === 0, live === 0].every((ok) => ok),\n\t\t\t\tm.AutomationCapacity.some((c) => c.state.reserved >= live),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"AutomationRuns.EveryFiredRunIsReported": {
+				"kind": "eventually",
+				"source": "(m) =>\n\t\t\tm.Automation.every((a) => {\n\t\t\t\tconst ledger = m.AutomationRunView.find((v) => v.id === a.id)\n\t\t\t\treturn [\n\t\t\t\t\ta.state.reported === a.state.runs,\n\t\t\t\t\t(ledger === undefined ? 0 : ledger.state.recorded) === a.state.reported,\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
+			},
+			"AutomationRuns.ReservedSlotsEqualLiveAutomations": {
+				"kind": "eventually",
+				"source": "(m) => {\n\t\t\tconst live = m.Automation.filter((a) =>\n\t\t\t\t[a.state.status === \"active\", a.state.status === \"paused\"].some((ok) => ok),\n\t\t\t).length\n\t\t\treturn [\n\t\t\t\t[m.AutomationCapacity.length === 0, live === 0].every((ok) => ok),\n\t\t\t\tm.AutomationCapacity.some((c) => c.state.reserved === live),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"AutomationRuns.AStartedRunIsReported": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Automation.some((a) => a.state.reported >= 1),\n\t\t\t\tm.Session.some((s) => s.state._tag === \"Running\"),\n\t\t\t].every((ok) => ok)"
+			},
+			"AutomationRuns.AFailedRunPausesTheAutomation": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Automation.some((a) =>\n\t\t\t\t[a.state.status === \"paused\", a.state.reported >= 1].every((ok) => ok),\n\t\t\t)"
+			},
+			"AutomationRuns.AnArchivedAutomationFreesItsSlot": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Automation.some((a) => a.state.status === \"archived\"),\n\t\t\t\tm.AutomationCapacity.some((c) => c.state.reserved === 0),\n\t\t\t].every((ok) => ok)"
+			}
+		}
+	}
+}

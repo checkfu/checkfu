@@ -105,6 +105,10 @@
 			"Artifact.ADeletedArtifactIsNotPublished": {
 				"kind": "invariant",
 				"source": "(s) =>\n\t\t\t[s.status !== \"deleted\", s.publication_token === \"\"].some((ok) => ok)"
+			},
+			"Artifacts.NoReservationStaysOpen": {
+				"kind": "eventually",
+				"source": "(m) => m.Artifact.every((a) => a.state.open_reservation === 0)"
 			}
 		}
 	}
