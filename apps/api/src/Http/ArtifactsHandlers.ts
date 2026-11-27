@@ -263,6 +263,36 @@ const declaredBy = (bytes: Uint8Array) => {
 	return Result.isFailure(read) ? unusableDeclaration(read.failure) : Effect.succeed(read.success)
 }
 
+export const startedFrom = (from: ArtifactId, manifest: ArtifactManifest, own: ResolvedFiles) =>
+	Effect.gen(function* () {
+		if (own.files.some((file) => file.path === ARTIFACT_DECLARATION_FILE)) {
+			return yield* reject(
+				400,
+				`${ARTIFACT_DECLARATION_FILE} is supplied by the source version. Leave it out when using made_from.`,
+			)
+		}
+		const taken = new Set(manifest.files.map((file) => file.path))
+		const clash = own.files.find((file) => taken.has(file.path))
+		if (clash !== undefined) {
+			return yield* reject(
+				400,
+				`${clash.path} comes from artifact ${from} and cannot be replaced. Leave it out, or make the version without made_from.`,
+			)
+		}
+		const sources = new Map(own.sources)
+		for (const file of manifest.files) {
+			if (!sources.has(file.sha256)) {
+				sources.set(file.sha256, { artifact_id: from, size: file.size })
+			}
+		}
+		const merged: ResolvedFiles = {
+			files: [...manifest.files, ...own.files],
+			sources,
+			unavailable: own.unavailable,
+		}
+		return merged
+	})
+
 export const artifactWrites = Effect.gen(function* () {
 	const store = yield* ArtifactStore
 	const files = yield* File
@@ -454,7 +484,7 @@ export const artifactWrites = Effect.gen(function* () {
 				: yield* declaredBy(sent)
 		})
 
-	return { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf }
+	return { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf, loadManifest }
 })
 
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
@@ -552,33 +582,10 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							)
 						: { ...own, made_from: "" }
 				}
-				if (own.files.some((file) => file.path === ARTIFACT_DECLARATION_FILE)) {
-					return yield* reject(
-						400,
-						`${ARTIFACT_DECLARATION_FILE} is supplied by the source version. Leave it out when using made_from.`,
-					)
-				}
 				const from = source.artifact_id
 				const found = yield* locateVersion(from, yield* requireActive(from), source.version)
-				const manifest = yield* loadManifest(from, found.manifest)
-				const taken = new Set(manifest.files.map((file) => file.path))
-				const clash = own.files.find((file) => taken.has(file.path))
-				if (clash !== undefined) {
-					return yield* reject(
-						400,
-						`${clash.path} comes from artifact ${from} and cannot be replaced. Leave it out, or make the version without made_from.`,
-					)
-				}
-				const sources = new Map(own.sources)
-				for (const file of manifest.files) {
-					if (!sources.has(file.sha256)) {
-						sources.set(file.sha256, { artifact_id: from, size: file.size })
-					}
-				}
 				return {
-					files: [...manifest.files, ...own.files],
-					sources,
-					unavailable: own.unavailable,
+					...(yield* startedFrom(from, yield* loadManifest(from, found.manifest), own)),
 					made_from: encodeMadeFrom(source),
 				}
 			})
