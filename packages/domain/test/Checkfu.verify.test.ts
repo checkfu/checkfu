@@ -471,9 +471,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"RecordInitialMessages",
 			"StartTurn",
 			"SaveSessionOutputs",
-			"EnsureTurnStopped",
 		])
 		expect(report.explored.idle).toEqual([
+			"EnsureTurnStopped",
 			"ArmAutomation",
 			"StartAutomationRun",
 			"FreeAutomationSlot",
