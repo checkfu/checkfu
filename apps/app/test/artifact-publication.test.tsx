@@ -19,6 +19,7 @@ const open = async ({ refuse = false, failRefresh = false } = {}) => {
 		type: "artifact",
 		name: "Public report",
 		version: 3,
+		capabilities: {},
 		file_count: 0,
 		total_bytes: 0,
 		files: [],

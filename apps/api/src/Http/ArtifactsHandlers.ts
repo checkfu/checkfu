@@ -26,8 +26,18 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
-import { PublicationAddress } from "@checkfu/sdk/Schemas"
-import { MAX_INLINE_FILE_BYTES, buildArtifactVersion } from "../Artifacts/ArtifactFiles.ts"
+import {
+	ARTIFACT_DECLARATION_FILE,
+	MAX_ARTIFACT_DECLARATION_BYTES,
+	PublicationAddress,
+} from "@checkfu/sdk/Schemas"
+import { decodeCapabilities } from "@checkfu/domain/Artifact/ArtifactCapabilities"
+import * as Result from "effect/Result"
+import {
+	MAX_INLINE_FILE_BYTES,
+	buildArtifactVersion,
+	readDeclaration,
+} from "../Artifacts/ArtifactFiles.ts"
 import type {
 	ArtifactManifest,
 	ArtifactVersionEntry,
@@ -92,6 +102,7 @@ export const stored = <A, E extends { readonly _tag: string }, R>(
 interface LocatedVersion {
 	readonly version: number
 	readonly manifest: string
+	readonly capabilities: string
 	readonly created_at: DateTime.Utc
 }
 
@@ -118,6 +129,7 @@ const artifactResource = (
 	type: "artifact" as const,
 	name: state.name,
 	version: state.version,
+	capabilities: decodeCapabilities(state.capabilities),
 	...filesOf(manifest),
 	publication,
 	created_at: DateTime.makeUnsafe(state.created_at),
@@ -133,6 +145,7 @@ const artifactSummary = (
 	type: "artifact" as const,
 	name: state.name,
 	version: state.version,
+	capabilities: decodeCapabilities(state.capabilities),
 	file_count: state.file_count,
 	total_bytes: state.total_bytes,
 	publication,
@@ -144,6 +157,7 @@ const versionResource = (id: ArtifactId, found: LocatedVersion, manifest: Artifa
 	type: "artifact_version" as const,
 	artifact_id: id,
 	version: found.version,
+	capabilities: decodeCapabilities(found.capabilities),
 	...filesOf(manifest),
 	created_at: found.created_at,
 })
@@ -213,6 +227,9 @@ interface FileSource {
 	readonly file_id: FileId
 	readonly size: number
 }
+
+const unusableDeclaration = (why: string) =>
+	reject(400, `${ARTIFACT_DECLARATION_FILE} cannot be used: ${why}.`)
 
 export const artifactWrites = Effect.gen(function* () {
 	const store = yield* ArtifactStore
@@ -346,7 +363,47 @@ export const artifactWrites = Effect.gen(function* () {
 			return kept
 		})
 
-	return { build, fromFiles, copyIn, stage, keptIn }
+	const capabilitiesOf = (
+		id: ArtifactId,
+		built: BuiltArtifactVersion,
+		sources: ReadonlyMap<string, FileSource>,
+	) =>
+		Effect.gen(function* () {
+			const declared = built.manifest.files.find((file) => file.path === ARTIFACT_DECLARATION_FILE)
+			if (declared === undefined) {
+				return ""
+			}
+			if (declared.size > MAX_ARTIFACT_DECLARATION_BYTES) {
+				return yield* unusableDeclaration(
+					`it is larger than ${MAX_ARTIFACT_DECLARATION_BYTES} bytes`,
+				)
+			}
+			const inline = built.blobs.find((blob) => blob.sha256 === declared.sha256)?.bytes
+			const source = sources.get(declared.sha256)
+			const bytes =
+				inline ??
+				(declared.size === 0
+					? new Uint8Array()
+					: source === undefined
+						? yield* stored(store.getBlob(id, declared.sha256))
+						: yield* fileStore
+								.read(source.file_id, { offset: 0, length: declared.size })
+								.pipe(
+									Effect.catchTag("FileStoreError", (error) =>
+										Effect.andThen(
+											Effect.logError("File storage failed", error),
+											reject(503, "File storage is unavailable. Retry the request."),
+										),
+									),
+								))
+			if (bytes === null) {
+				return yield* reject(404, `${ARTIFACT_DECLARATION_FILE} could not be read.`)
+			}
+			const read = readDeclaration(bytes)
+			return Result.isFailure(read) ? yield* unusableDeclaration(read.failure) : read.success
+		})
+
+	return { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf }
 })
 
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
@@ -361,7 +418,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		const { requireActive, missingBytes, loadManifest, publicationOf, readArtifact, retrieve } =
 			yield* artifactReads
 
-		const { build, fromFiles, copyIn, stage, keptIn } = yield* artifactWrites
+		const { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf } = yield* artifactWrites
 
 		const manifestOf = (id: ArtifactId, hash: string, built?: BuiltArtifactVersion) =>
 			built !== undefined && built.manifest_hash === hash
@@ -411,6 +468,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const head: LocatedVersion = {
 						version,
 						manifest: state.manifest,
+						capabilities: state.capabilities,
 						created_at: DateTime.makeUnsafe(state.updated_at),
 					}
 					return head
@@ -452,6 +510,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					} else {
 						id = ArtifactId.make(yield* randomId(random, "art"))
 					}
+					const capabilities = yield* capabilitiesOf(id, built, resolved.sources)
 					let reservation = 0
 					if ((yield* artifacts.get(id)).status === "") {
 						reservation = yield* artifacts.send(new ReserveArtifact({ artifact_id: id })).pipe(
@@ -472,6 +531,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 								manifest: built.manifest_hash,
 								file_count: built.file_count,
 								total_bytes: built.total_bytes,
+								capabilities,
 								reservation,
 							}),
 							sendOptions ?? { commandId: `create-artifact:${id}` },
@@ -589,6 +649,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						resolved.files,
 						yield* keptIn(id, payload.files, state.manifest),
 					)
+					const capabilities = yield* capabilitiesOf(id, built, resolved.sources)
 					yield* copyIn(id, resolved, null)
 					yield* stage(id, built, null)
 					const receipt = yield* artifacts.send(
@@ -598,6 +659,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							manifest: built.manifest_hash,
 							file_count: built.file_count,
 							total_bytes: built.total_bytes,
+							capabilities,
 						}),
 						{
 							commandId: yield* idempotentCommandId(digest, "add-artifact-version", [

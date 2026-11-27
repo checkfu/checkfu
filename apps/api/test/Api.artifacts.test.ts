@@ -2026,6 +2026,121 @@ describe("Artifact bytes", () => {
 			}),
 		))
 
+	it("records what a version's artifact.json declares, and shows it on the artifact and each version", () =>
+		withApi(({ call, uploadFile }) =>
+			Effect.gen(function* () {
+				const capabilities = {
+					database: {
+						collections: { responses: { visitors: "add" }, settings: { visitors: "read" } },
+					},
+				}
+				const declaration = JSON.stringify({ capabilities })
+				const page = { path: "index.html", content: "<h1>Form</h1>" }
+				const created = yield* call("POST", "/v1/artifacts", {
+					name: "Form",
+					files: [page, { path: "artifact.json", content: declaration }],
+				})
+				expect(created.status).toBe(201)
+				const artifact = yield* json<ArtifactBody & { capabilities: unknown }>(created)
+				expect(artifact.capabilities).toEqual(capabilities)
+				const path = `/v1/artifacts/${artifact.id}`
+				const shown = (suffix: string) =>
+					Effect.map(
+						Effect.flatMap(call("GET", `${path}${suffix}`), (res) =>
+							json<{ capabilities: unknown }>(res),
+						),
+						(body) => body.capabilities,
+					)
+				expect(yield* shown("")).toEqual(capabilities)
+				expect(yield* shown("/versions/1")).toEqual(capabilities)
+
+				const kept = artifact.files.find((file) => file.path === "artifact.json")?.sha256 ?? ""
+				const second = yield* call("POST", `${path}/versions`, {
+					version: 1,
+					files: [
+						{ path: "index.html", content: "<h1>Form, improved</h1>" },
+						{ path: "artifact.json", sha256: kept },
+					],
+				})
+				expect((yield* json<{ capabilities: unknown }>(second)).capabilities).toEqual(capabilities)
+
+				const third = yield* call("POST", `${path}/versions`, { version: 2, files: [page] })
+				expect((yield* json<{ capabilities: unknown }>(third)).capabilities).toEqual({})
+				expect(yield* shown("")).toEqual({})
+				expect(yield* shown("/versions/2")).toEqual(capabilities)
+				expect(yield* shown("/versions/3")).toEqual({})
+
+				const uploaded = yield* json<{ id: string }>(
+					yield* uploadFile("artifact.json", new TextEncoder().encode(declaration)),
+				)
+				const fromFile = yield* call("POST", "/v1/artifacts", {
+					name: "From a file",
+					files: [page, { path: "artifact.json", file_id: uploaded.id }],
+				})
+				expect((yield* json<{ capabilities: unknown }>(fromFile)).capabilities).toEqual(
+					capabilities,
+				)
+				const plain = yield* call("POST", "/v1/artifacts", {
+					name: "Nothing declared",
+					files: [page, { path: "artifact.json", content: "{}" }],
+				})
+				expect((yield* json<{ capabilities: unknown }>(plain)).capabilities).toEqual({})
+			}),
+		))
+
+	it("refuses a version whose artifact.json cannot be used, or that holds files under the reserved directory", () =>
+		withApi(({ call, statusForKey }) =>
+			Effect.gen(function* () {
+				const refusal = (files: ReadonlyArray<unknown>, key: string) =>
+					Effect.flatMap(
+						call("POST", "/v1/artifacts", { name: "Bad", files }, { "idempotency-key": key }),
+						(res) =>
+							Effect.map(json<ErrorBody>(res), ({ error }) => [res.status, error.message] as const),
+					)
+				const declared = (declaration: unknown) => [
+					{ path: "index.html", content: "x" },
+					{
+						path: "artifact.json",
+						content: typeof declaration === "string" ? declaration : JSON.stringify(declaration),
+					},
+				]
+				const database = (collections: unknown) => ({ capabilities: { database: { collections } } })
+				const cases: ReadonlyArray<readonly [string, unknown, string]> = [
+					["not-json", "{", "it is not JSON"],
+					["unknown-capability", { capabilities: { email: {} } }, "it may hold only"],
+					["unknown-key", { capabilities: {}, theme: "dark" }, "it may hold only"],
+					["bad-name", database({ Responses: { visitors: "add" } }), "it may hold only"],
+					["bad-access", database({ responses: { visitors: "all" } }), "it may hold only"],
+					[
+						"too-many",
+						database(
+							Object.fromEntries(
+								Array.from({ length: 17 }, (_, index) => [`c${index}`, { visitors: "read" }]),
+							),
+						),
+						"it may hold only",
+					],
+				]
+				for (const [key, declaration, reason] of cases) {
+					const [status, message] = yield* refusal(declared(declaration), key)
+					expect([key, status]).toEqual([key, 400])
+					expect(message).toContain(`artifact.json cannot be used: ${reason}`)
+					expect(yield* statusForKey(key)).toBe("")
+				}
+				for (const path of ["_/data.js", "_/data/responses", "_"]) {
+					const [status, message] = yield* refusal([{ path, content: "x" }], `reserved-${path}`)
+					expect([path, status]).toEqual([path, 400])
+					expect(message).toContain("is reserved")
+				}
+				expect(
+					(yield* call("POST", "/v1/artifacts", {
+						name: "Fine",
+						files: [{ path: "_private/notes.txt", content: "x" }],
+					})).status,
+				).toBe(201)
+			}),
+		))
+
 	it("refuses an artifact with no files", () =>
 		withApi(({ call }) =>
 			Effect.gen(function* () {

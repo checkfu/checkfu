@@ -34,6 +34,7 @@ export const ArtifactState = Schema.Struct({
 	version: NonNegativeInt,
 	name: Schema.String,
 	manifest: Schema.String,
+	capabilities: Schema.String,
 	replaced_manifest: Schema.String,
 	file_count: NonNegativeInt,
 	total_bytes: NonNegativeInt,
@@ -62,6 +63,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		version: 0,
 		name: "",
 		manifest: "",
+		capabilities: "",
 		replaced_manifest: "",
 		file_count: 0,
 		total_bytes: 0,
@@ -156,6 +158,18 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				),
 			].some((ok) => ok)
 		},
+		ANewVersionRecordsTheCapabilitiesItWasGiven: ({ after, command, events }) => {
+			if (command._tag !== "CreateArtifact" && command._tag !== "AddArtifactVersion") {
+				return true
+			}
+			return [events.length === 0, after.capabilities === command.capabilities].some((ok) => ok)
+		},
+		OnlyANewVersionChangesTheCapabilities: ({ before, after, command }) =>
+			[
+				command._tag === "CreateArtifact",
+				command._tag === "AddArtifactVersion",
+				after.capabilities === before.capabilities,
+			].some((ok) => ok),
 		ReservationsAreNumberedInOrder: ({ before, after, command }) =>
 			[
 				after.reservations === before.reservations,
@@ -250,6 +264,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					version: 1,
 					name: cmd.name,
 					manifest: cmd.manifest,
+					capabilities: cmd.capabilities,
 					file_count: cmd.file_count,
 					total_bytes: cmd.total_bytes,
 				}),
@@ -270,6 +285,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				new ArtifactVersionAdded({
 					version: state.version + 1,
 					manifest: cmd.manifest,
+					capabilities: cmd.capabilities,
 					file_count: cmd.file_count,
 					total_bytes: cmd.total_bytes,
 				}),
@@ -332,6 +348,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						version: e.version,
 						name: e.name,
 						manifest: e.manifest,
+						capabilities: e.capabilities,
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
 						created_at: DateTime.toEpochMillis(envelope.at),
@@ -344,6 +361,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						...state,
 						version: e.version,
 						manifest: e.manifest,
+						capabilities: e.capabilities,
 						replaced_manifest: state.manifest,
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
