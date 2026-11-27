@@ -14,7 +14,10 @@ import { customToolFaults } from "./PiToolSchema.ts"
 
 export const PI_HARNESS_WORKER_PROPS = {
 	main: import.meta.url,
-	compatibility: { date: COMPATIBILITY_DATE },
+	compatibility: {
+		date: COMPATIBILITY_DATE,
+		flags: ["global_fetch_strictly_public"],
+	},
 	workersDev: false,
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	observability: {

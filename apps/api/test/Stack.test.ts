@@ -62,6 +62,9 @@ describe("Alchemy stack and worker entry", () => {
 					issues: { enabled: true },
 				})
 				expect(PI_HARNESS_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
+				expect(PI_HARNESS_WORKER_PROPS.compatibility.flags).toEqual([
+					"global_fetch_strictly_public",
+				])
 				expect(PI_HARNESS_WORKER_PROPS.codeUpdateStrategy).toEqual({
 					mode: "deferred",
 					maxDelay: "12 minutes",
