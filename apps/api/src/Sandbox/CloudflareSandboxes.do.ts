@@ -107,6 +107,10 @@ export class SessionSandbox extends Cloudflare.DurableObject<SessionSandbox>()(
 		({ machine, state, idle }) =>
 			Effect.gen(function* () {
 				const { storage } = state.raw
+				const sandbox = state.raw.id.name
+				if (sandbox === undefined) {
+					return yield* Effect.die(new Error("SessionSandbox must be addressed by its session id."))
+				}
 				const commands = yield* Semaphore.make(EVERY_PERMIT)
 				const alone = Semaphore.withPermits(commands, EVERY_PERMIT)
 				const keepAlive = machine.setInactivityTimeout(Duration.toMillis(idle) + SAVE_HEADROOM_MS)
@@ -124,7 +128,7 @@ export class SessionSandbox extends Cloudflare.DurableObject<SessionSandbox>()(
 						enableInternet: false,
 						instance: "standard-1",
 					})
-					const egress = yield* entrypoint({ props: { sandbox: state.raw.id.name ?? "" } })
+					const egress = yield* entrypoint({ props: { sandbox } })
 					yield* machine.interceptAllOutboundHttp(egress)
 					yield* machine.interceptOutboundHttps("*", egress)
 					const set = yield* run(machine, TRUST_EGRESS)
