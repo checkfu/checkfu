@@ -1595,7 +1595,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_unpublishArtifact",
 		title: "Unpublish an artifact",
 		description:
-			"Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+			"Take down an artifact's public address and keep the artifact. Supply if_current to revoke a specific address. The request returns 409 if that address is no longer current. Retrying the same request with the same Idempotency-Key preserves any later publication.",
 		method: "DELETE",
 		path: "/v1/artifacts/{artifact_id}/publication",
 		readOnly: false,
@@ -1615,6 +1615,18 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						},
 					},
 					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						if_current: {
+							type: "string",
+							pattern: "^a[0-9a-f]{1,32}-[0-9a-z]{25}$",
+							description: "The public address to revoke",
+						},
+					},
+					required: [],
 					additionalProperties: false,
 				},
 				idempotency_key: {

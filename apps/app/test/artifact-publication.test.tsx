@@ -152,7 +152,14 @@ const open = async ({
 			artifact = { ...artifact, publication: { ...publication, version, ...approved } }
 			return { body: artifact }
 		}
-		if (path === publicationPath && method === "DELETE") {
+		if (path.startsWith(`${publicationPath}?`) && method === "DELETE") {
+			const expected = new URL(path, "https://example.test").searchParams.get("if_current")
+			if (expected !== artifact.publication?.address) {
+				return {
+					status: 409,
+					body: { error: { type: "conflict_error", message: "The publication changed." } },
+				}
+			}
 			artifact = { ...artifact, publication: null }
 			return { body: artifact }
 		}
@@ -160,7 +167,7 @@ const open = async ({
 	})
 	const respond = globalThis.fetch
 	vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-		if (input === publicationPath) {
+		if (typeof input === "string" && input.split("?")[0] === publicationPath) {
 			const method = init?.method ?? "GET"
 			started.push(method)
 			await (method === "POST" ? completePublish.promise : completeUnpublish.promise)
@@ -200,7 +207,7 @@ const open = async ({
 			sent.filter(({ path, method }) => path === artifactPath && method === "DELETE").length,
 		changes: () =>
 			sent
-				.filter(({ path }) => path === publicationPath)
+				.filter(({ path }) => path.split("?")[0] === publicationPath)
 				.map(({ method, body }) => ({ method, body })),
 	}
 }
@@ -255,6 +262,29 @@ it.each([
 		{ method: "POST", body: { version: target, if_current: samePost } },
 		{ method: "DELETE", body: undefined },
 	])
+})
+
+it("refreshes a stale unpublish confirmation and leaves the replacement public address", async () => {
+	const page = await open()
+	await click(button(page.container, "Unpublish"))
+	const replacement = `a1-${"b".repeat(25)}`
+	const replacementUrl = `https://example.test/p/${replacement}/`
+	page.setServerPublication({
+		...listed,
+		address: replacement,
+		url: replacementUrl,
+		published_at: at,
+	})
+	await click(button(page.container, "Unpublish"))
+	await waitFor(() => expect(page.started).toEqual(["DELETE"]))
+	await act(async () => page.completeUnpublish())
+	await waitFor(() => expect(page.container.textContent).toContain(replacementUrl))
+	expect(page.container.textContent).not.toContain("Its address stops working")
+	const sent = page.sent.find(
+		({ method, path }) => method === "DELETE" && path.startsWith(publicationPath),
+	)
+	expect(sent?.path).toBe(`${publicationPath}?if_current=${encodeURIComponent(address)}`)
+	expect(sent?.headers.get("idempotency-key")).toBeTruthy()
 })
 
 it("keeps the prior publication and restores every control after a failed change", async () => {

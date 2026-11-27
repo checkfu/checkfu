@@ -147,7 +147,7 @@ export interface CheckfuOperations {
 	>
 	readonly "artifacts.unpublish": OperationShape<
 		EndpointParams<"artifacts", "unpublish">,
-		EndpointQuery<"artifacts", "unpublish">,
+		RelaxOptionalProps<EndpointQuery<"artifacts", "unpublish">>,
 		EndpointBody<"artifacts", "unpublish">,
 		EndpointSuccess<"artifacts", "unpublish">,
 		EndpointJsonSuccess<"artifacts", "unpublish">,
@@ -1939,23 +1939,34 @@ export class EffectArtifactsResource {
 		)
 	}
 
-	/** Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409 */
+	/** Take down an artifact's public address and keep the artifact. Supply if_current to revoke a specific address. The request returns 409 if that address is no longer current. Retrying the same request with the same Idempotency-Key preserves any later publication. */
 	unpublish(
 		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"artifacts", "unpublish">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "unpublish">>, CheckfuSdkError>
 	unpublish(
 		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "unpublish">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "unpublish">>, CheckfuSdkError>
+	unpublish(
+		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "unpublish">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"artifacts", "unpublish">, CheckfuSdkError>
 	unpublish(
 		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "unpublish">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"artifacts", "unpublish">
 		| WithResponse<EndpointSuccess<"artifacts", "unpublish">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "unpublish", { artifact_id: artifactId }),
@@ -1969,6 +1980,10 @@ export class EffectArtifactsResource {
 							() =>
 								this.#runtime.raw.artifacts.unpublish({
 									params: pathParams,
+									query:
+										params?.["if_current"] === undefined
+											? {}
+											: { if_current: params?.["if_current"] },
 									headers: key === undefined ? {} : { "idempotency-key": key },
 									responseMode: "decoded-and-response",
 								}),
@@ -5826,13 +5841,14 @@ export class ArtifactsResource {
 		)
 	}
 
-	/** Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409 */
+	/** Take down an artifact's public address and keep the artifact. Supply if_current to revoke a specific address. The request returns 409 if that address is no longer current. Retrying the same request with the same Idempotency-Key preserves any later publication. */
 	unpublish(
 		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "unpublish">> & PromiseRequestOptions,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "unpublish">> {
-		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
-			new EffectArtifactsResource(effectRuntime).unpublish(artifactId, {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectArtifactsResource(effectRuntime).unpublish(artifactId, params, {
 				...effectOpts,
 				withResponse: true,
 			}),

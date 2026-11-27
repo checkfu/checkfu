@@ -715,6 +715,8 @@ function PublicationDetails({
 	)
 }
 
+type PublicationChange = number | "latest" | { readonly address: string }
+
 function PublicationSection({
 	artifact,
 	version,
@@ -740,14 +742,20 @@ function PublicationSection({
 	const publishKey = useSubmissionKey()
 	const unpublishKey = useSubmissionKey()
 	const change = useAction(
-		async (target: number | "latest" | "unpublish", level?: ArtifactAccessLevel) => {
+		async (target: PublicationChange, level?: ArtifactAccessLevel) => {
 			const { queryKey } = artifactQuery(artifact.id)
 			let updated: JsonArtifact
-			if (target === "unpublish") {
-				updated = await checkfu.artifacts.unpublish(
-					artifact.id,
-					unpublishKey.keyFor({ publication }),
-				)
+			if (typeof target === "object") {
+				updated = await checkfu.artifacts
+					.unpublish(artifact.id, target.address, unpublishKey.keyFor(target))
+					.catch(async (error: unknown) => {
+						if (error instanceof ApiError && error.status === 409) {
+							setConfirmation(null)
+							unpublishKey.settle()
+							await queryClient.invalidateQueries({ queryKey, exact: true })
+						}
+						throw error
+					})
 				unpublishKey.settle()
 				setConfirmation(null)
 				setServe("latest")
@@ -779,7 +787,7 @@ function PublicationSection({
 		},
 		{ mutationKey, invalidates: [["artifacts"]] },
 	)
-	const run = (target: number | "latest" | "unpublish", level?: ArtifactAccessLevel) => {
+	const run = (target: PublicationChange, level?: ArtifactAccessLevel) => {
 		if (queryClient.isMutating(filter) === 0) {
 			setNotice("")
 			change.run(target, level)
@@ -822,8 +830,9 @@ function PublicationSection({
 							label="Unpublish"
 							pending={pending}
 							onConfirm={() => {
-								if (confirmation.current === publication.address) {
-									run("unpublish")
+								const address = confirmation.current
+								if (address === publication.address) {
+									run({ address })
 								}
 							}}
 							onCancel={() => {

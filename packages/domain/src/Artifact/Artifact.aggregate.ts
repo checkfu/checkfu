@@ -291,6 +291,15 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				].every((ok) => ok),
 			].some((ok) => ok)
 		},
+		ARevokedPublicationMatchesItsCondition: ({ before, after, command }) => {
+			if (command._tag !== "UnpublishArtifact" || command.if_current === undefined) {
+				return true
+			}
+			return [
+				after.publication_token === before.publication_token,
+				before.publication_token === command.if_current,
+			].some((ok) => ok)
+		},
 		APublicationStartsAtViewUnlessGranted: ({ before, after, command }) => {
 			if (command._tag !== "PublishArtifact") {
 				return true
@@ -446,9 +455,12 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						}),
 					]
 		},
-		UnpublishArtifact: (state, _cmd, ctx) => {
+		UnpublishArtifact: (state, cmd, ctx) => {
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
+			}
+			if (cmd.if_current !== undefined && state.publication_token !== cmd.if_current) {
+				return new ArtifactPublicationConflict({ artifact_id: ctx.id })
 			}
 			return state.publication_token === "" ? [] : [new ArtifactUnpublished()]
 		},

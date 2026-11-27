@@ -516,7 +516,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						readonly access: string
 						readonly if_current?: PublicationCondition
 				  }
-				| { readonly operation: "unpublish" },
+				| { readonly operation: "unpublish"; readonly if_current?: string },
 		) =>
 			Effect.gen(function* () {
 				if (idempotencyKey === undefined) {
@@ -773,13 +773,23 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					return yield* readArtifact(id, yield* requireActive(id))
 				}).pipe(handled),
 			)
-			.handle("unpublish", ({ params, headers }) =>
+			.handle("unpublish", ({ params, query, headers }) =>
 				Effect.gen(function* () {
 					const id = params.artifact_id
+					const expected = query.if_current
+					const address = expected === undefined ? undefined : parsePublicationAddress(expected)
+					if (expected !== undefined && address?.artifactId !== id) {
+						return yield* new ArtifactPublicationConflict({ artifact_id: id })
+					}
+					const condition = address ? { if_current: address.token } : {}
 					const sendOptions = yield* sentWith(id, headers["idempotency-key"], {
 						operation: "unpublish",
+						...condition,
 					})
-					yield* artifacts.send(new UnpublishArtifact({ artifact_id: id }), sendOptions)
+					yield* artifacts.send(
+						new UnpublishArtifact({ artifact_id: id, ...condition }),
+						sendOptions,
+					)
 					return yield* readArtifact(id, yield* requireActive(id))
 				}).pipe(handled),
 			)

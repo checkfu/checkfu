@@ -782,6 +782,14 @@ const artifactsUnpublishCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
+			propName: "ifCurrent",
+			flagName: "if-current",
+			wireName: "if_current",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -799,6 +807,10 @@ const artifactsUnpublishCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact ID"),
 		),
+		ifCurrent: FlagString("if-current").pipe(
+			FlagWithDescription("The public address to revoke"),
+			FlagOptional,
+		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
 			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
@@ -808,7 +820,7 @@ const artifactsUnpublishCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsUnpublishCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+		"Take down an artifact's public address and keep the artifact. Supply if_current to revoke a specific address. The request returns 409 if that address is no longer current. Retrying the same request with the same Idempotency-Key preserves any later publication.",
 	),
 )
 

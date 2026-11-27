@@ -3218,6 +3218,11 @@ const Artifacts = HttpApiGroup.make("artifacts")
 	.add(
 		HttpApiEndpoint.delete("unpublish", "/v1/artifacts/:artifact_id/publication", {
 			params: artifactParams,
+			query: {
+				if_current: Schema.optionalKey(
+					PublicationAddress.annotate({ description: "The public address to revoke" }),
+				),
+			},
 			headers: IdempotencyHeaders,
 			success: ArtifactResource,
 			error: HandlerErrors,
@@ -3225,7 +3230,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 			.annotate(OpenApi.Summary, "Unpublish an artifact")
 			.annotate(
 				OpenApi.Description,
-				"Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+				"Take down an artifact's public address and keep the artifact. Supply if_current to revoke a specific address. The request returns 409 if that address is no longer current. Retrying the same request with the same Idempotency-Key preserves any later publication.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts",

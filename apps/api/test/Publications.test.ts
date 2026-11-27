@@ -712,6 +712,37 @@ describe("Publishing an artifact", () => {
 			}),
 		))
 
+	it("revokes only the expected public address and replays a committed revocation", () =>
+		withPublishing(({ api, open }) =>
+			Effect.gen(function* () {
+				const id = yield* createArtifact(api, "one")
+				const path = `/v1/artifacts/${id}/publication`
+				const revoke = (address: string, key: string) =>
+					api("DELETE", `${path}?if_current=${encodeURIComponent(address)}`, undefined, {
+						"idempotency-key": key,
+					})
+				const first = yield* publish(api, id)
+				expect((yield* api("DELETE", path)).status).toBe(200)
+				expect((yield* revoke(first.address, "missing")).status).toBe(409)
+				const second = yield* publish(api, id)
+				expect(second.address).not.toBe(first.address)
+				expect((yield* revoke(first.address, "stale")).status).toBe(409)
+				expect(yield* text(yield* open(second.url))).toBe("one")
+
+				const removed = yield* revoke(second.address, "confirmed")
+				expect(removed.status).toBe(200)
+				expect(yield* json<ArtifactBody>(removed)).toMatchObject({ publication: null })
+				expect((yield* open(second.url)).status).toBe(404)
+
+				const third = yield* publish(api, id)
+				const replayed = yield* revoke(second.address, "confirmed")
+				expect(replayed.status).toBe(200)
+				expect(yield* json<ArtifactBody>(replayed)).toMatchObject({ publication: third })
+				expect((yield* revoke(third.address, "confirmed")).status).toBe(409)
+				expect(yield* text(yield* open(third.url))).toBe("one")
+			}),
+		))
+
 	it("applies a keyed publish or unpublish once, so a retry never undoes a later call", () =>
 		withPublishing(({ api, open }) =>
 			Effect.gen(function* () {

@@ -1,5 +1,6 @@
 import { CheckfuFetchError, createFetchClient, operationUrl } from "@checkfu/sdk/fetch"
 import type { FetchInput, FetchResult, JsonOperationId } from "@checkfu/sdk/fetch"
+import { PublicationAddress } from "@checkfu/sdk/Schemas"
 import type {
 	CreateAgentBody,
 	CreateArtifactLinkBody,
@@ -401,8 +402,12 @@ export const checkfu = {
 			body: NonNullable<FetchInput<"artifacts.publish">["body"]>,
 			idempotencyKey: string,
 		) => request("artifacts.publish", { path: { artifact_id }, body, idempotencyKey }),
-		unpublish: (artifact_id: string, idempotencyKey: string) =>
-			request("artifacts.unpublish", { path: { artifact_id }, idempotencyKey }),
+		unpublish: (artifact_id: string, address: string, idempotencyKey: string) =>
+			request("artifacts.unpublish", {
+				path: { artifact_id },
+				query: { if_current: PublicationAddress.make(address) },
+				idempotencyKey,
+			}),
 		delete: (artifact_id: string) => request("artifacts.delete", { path: { artifact_id } }),
 	},
 }
