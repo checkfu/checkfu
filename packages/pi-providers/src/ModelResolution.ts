@@ -124,6 +124,49 @@ export const findLegacyOpenAIModelLimits = (
 	return undefined
 }
 
+// Exact catalog entries are resolved before this check. Retired OpenAI families
+// have no reliable Day-1 defaults, including snapshots and fine-tuned copies.
+const isHistoricalOpenAIModel = (id: string): boolean => {
+	const base = id.startsWith("ft:") ? (id.split(":")[1] ?? "") : (id.split(":")[0] ?? "")
+	return /^(?:gpt-3\.5-turbo|gpt-4|computer-use-preview|o1)(?:-|$)/u.test(base)
+}
+
+// These IDs lost their catalog descriptors in Pi 1.7. Exact, derived and explicitly
+// declared models are resolved before the generic unlisted fallback.
+const OPENAI_MODELS_WITHOUT_CATALOG_LIMITS = new Set([
+	"gpt-4.1-nano",
+	"gpt-4o-2024-05-13",
+	"gpt-5-chat-latest",
+	"gpt-5.3-codex-spark",
+	"o3-mini",
+	"o4-mini",
+])
+const OPENROUTER_MODELS_WITHOUT_CATALOG_LIMITS = new Set([
+	"dots-studio/dots-3-note-preview:free",
+	"inclusionai/ling-3.2-flash:free",
+	"meituan/longcat-2.0",
+	"mistralai/mistral-medium-3",
+	"mistralai/mistral-medium-3.1",
+	"moonshotai/kimi-k2-thinking",
+	"tencent/hy3-preview",
+	"unbiased/pareto-26.10",
+	"unbiased/pareto-26.10-preview",
+	"unbiased/pareto-26.9",
+	"xiaomi/mimo-v2.5",
+	"xiaomi/mimo-v2.5-pro",
+	"~unbiased/pareto-latest",
+])
+const WORKERS_AI_MODELS_WITHOUT_CATALOG_LIMITS = new Set([
+	"@cf/deepseek-ai/deepseek-v4-flash-0731",
+	"@cf/deepseek-ai/deepseek-v4-pro-0813",
+	"@cf/moonshotai/kimi-k2.6",
+	"@cf/moonshotai/kimi-k2.7-code",
+	"@cf/nvidia/nemotron-3-120b-a12b",
+	"@cf/qwen/qwen3-30b-a3b-fp8",
+	"@cf/zai-org/glm-5.2",
+	"@cf/zai-org/glm-5.3-flash",
+])
+
 const OPENAI_NON_CHAT_PREFIXES = [
 	"text-embedding-",
 	"text-davinci-",
@@ -458,6 +501,43 @@ const isProviderQualifiedGatewayCompatTarget = (modelId: string): boolean => {
 	return slashIndex > 0 && slashIndex < modelId.length - 1 && modelId[slashIndex + 1] !== "/"
 }
 
+const lacksCatalogLimits = (provider: string, modelId: string): boolean => {
+	const openRouterId =
+		provider === "openrouter"
+			? modelId
+			: provider === "cloudflare-ai-gateway" && modelId.startsWith("openrouter/")
+				? modelId.slice("openrouter/".length)
+				: undefined
+	if (
+		openRouterId !== undefined &&
+		(OPENROUTER_MODELS_WITHOUT_CATALOG_LIMITS.has(openRouterId) ||
+			OPENROUTER_MODELS_WITHOUT_CATALOG_LIMITS.has(stripVariantSuffix(openRouterId)))
+	) {
+		return true
+	}
+	if (
+		(provider === "cloudflare-workers-ai" || provider === "cloudflare-ai-gateway") &&
+		WORKERS_AI_MODELS_WITHOUT_CATALOG_LIMITS.has(modelId.replace(/^workers-ai\//u, ""))
+	) {
+		return true
+	}
+	const routedId = openRouterId === undefined ? modelId : stripVariantSuffix(openRouterId)
+	const openAIId =
+		provider === "openai" || (provider === "cloudflare-ai-gateway" && !routedId.includes("/"))
+			? routedId
+			: routedId.startsWith("openai/") &&
+				  (openRouterId !== undefined || provider === "cloudflare-ai-gateway")
+				? routedId.slice("openai/".length)
+				: undefined
+	return (
+		openAIId !== undefined &&
+		(isHistoricalOpenAIModel(openAIId) ||
+			openAIModelFamilyCandidates(openAIId).some((id) =>
+				OPENAI_MODELS_WITHOUT_CATALOG_LIMITS.has(id),
+			))
+	)
+}
+
 const resolveDeclaredOrUnlisted = (
 	spec: ProviderSpec,
 	modelId: string,
@@ -467,7 +547,10 @@ const resolveDeclaredOrUnlisted = (
 	minContextWindow: number,
 ): ResolvedProviderModelPlan | undefined => {
 	const declared = ownProperty(spec.models, modelId)
-	if (declared === undefined && spec.allowUnlistedModels === false) {
+	if (
+		declared === undefined &&
+		(spec.allowUnlistedModels === false || lacksCatalogLimits(spec.id, modelId))
+	) {
 		return undefined
 	}
 	const defaults = mergeModelDefaults(spec.modelDefaults, declared)

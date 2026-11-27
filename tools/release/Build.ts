@@ -95,8 +95,8 @@ const bundleNotices = async (directory: string, metafile: string) => {
 		const candidates = ["LICENSE", "LICENSE.md", "LICENSE.txt", "license", "LICENCE"].map((name) =>
 			join(root, name),
 		)
-		if (dependency.name === "@earendil-works/pi-ai" && dependency.version === "1.6.0") {
-			candidates.push(join(repoRoot, "tools/release/licenses/pi-ai-1.6.0.LICENSE"))
+		if (dependency.name === "@earendil-works/pi-ai") {
+			candidates.push(join(repoRoot, `tools/release/licenses/pi-ai-${dependency.version}.LICENSE`))
 		}
 		const license = candidates.find(existsSync)
 		if (license === undefined) {

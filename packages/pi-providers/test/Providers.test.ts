@@ -95,6 +95,19 @@ describe("@checkfu/pi-providers catalog & registry", () => {
 		})
 		expect(resolveModelSpecifier("gpt-4")).toBeNull()
 		expect(resolveModelSpecifier("openai/gpt-4")).toBeNull()
+		for (const model of [
+			"openai/gpt-4.1-nano",
+			"openai/gpt-5-chat-latest",
+			"openrouter/openai/o3-mini",
+			"openrouter/openai/o3-mini:nitro",
+			"openrouter/moonshotai/kimi-k2-thinking:nitro",
+			"cloudflare-ai-gateway/openrouter/moonshotai/kimi-k2-thinking",
+			"cloudflare-workers-ai/@cf/qwen/qwen3-30b-a3b-fp8",
+			"cloudflare-ai-gateway/workers-ai/@cf/qwen/qwen3-30b-a3b-fp8",
+		]) {
+			expect(resolveModelSpecifier(model), model).toBeNull()
+		}
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/o3-mini")?.cataloged).toBe(true)
 		expect(resolveModelSpecifier("openai/computer-use-preview")).toBeNull()
 		expect(resolveModelSpecifier("openai/computer-use-preview-2025-03-11")).toBeNull()
 		expect(
@@ -1239,23 +1252,11 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-image-1")).toBeUndefined()
 		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-image-1-2025-04-23")).toBeUndefined()
 
-		// Dated snapshots on Gateway routes inherit Gateway/base limits and refuse undersized bases.
+		// Dated snapshots inherit verified base limits when the base is available.
 		expect(
 			httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-4-turbo-2024-04-09"),
-		).toMatchObject({
-			id: "gpt-4-turbo-2024-04-09",
-			api: "openai-responses",
-			reasoning: false,
-			contextWindow: 128_000,
-			maxTokens: 4096,
-		})
-		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-4-turbo-2024-04-09")).toMatchObject({
-			id: "gpt-4-turbo-2024-04-09",
-			api: "openai-responses",
-			reasoning: false,
-			contextWindow: 128_000,
-			maxTokens: 4096,
-		})
+		).toBeUndefined()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-4-turbo-2024-04-09")).toBeUndefined()
 		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-5-2025-08-07")).toMatchObject({
 			id: "gpt-5-2025-08-07",
 			api: "openai-responses",
@@ -1779,16 +1780,24 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 		// Upstream-only OpenRouter matches (with or without a :variant suffix, including Claude
 		// fallbacks) preserve upstream capabilities while reporting cataloged: false and honoring
 		// allowUnlistedModels: false on both direct OpenRouter and Gateway routes.
-		expect(getOpenRouterCatalogEntry("openai/o1")).toBeUndefined()
+		for (const model of [
+			"openrouter/openai/o1",
+			"openrouter/openai/o1:nitro",
+			"cloudflare-ai-gateway/openrouter/openai/o1",
+			"cloudflare-ai-gateway/openrouter/openai/o1:nitro",
+		]) {
+			expect(resolveModelSpecifier(model), model).toBeNull()
+		}
+		expect(getOpenRouterCatalogEntry("openai/chat-latest")).toBeUndefined()
 		expect(getOpenRouterCatalogEntry("anthropic/claude-sonnet-4-5")).toBeUndefined()
-		expect(resolveModelSpecifier("openrouter/openai/o1")).toEqual({
+		expect(resolveModelSpecifier("openrouter/openai/chat-latest")).toEqual({
 			provider: "openrouter",
-			modelId: "openai/o1",
+			modelId: "openai/chat-latest",
 			cataloged: false,
 		})
-		expect(resolveModelSpecifier("openrouter/openai/o1:nitro")).toEqual({
+		expect(resolveModelSpecifier("openrouter/openai/chat-latest:nitro")).toEqual({
 			provider: "openrouter",
-			modelId: "openai/o1:nitro",
+			modelId: "openai/chat-latest:nitro",
 			cataloged: false,
 		})
 		expect(resolveModelSpecifier("openrouter/anthropic/claude-sonnet-4-5")).toEqual({
@@ -1796,20 +1805,22 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			modelId: "anthropic/claude-sonnet-4-5",
 			cataloged: false,
 		})
-		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/openai/o1")).toEqual({
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/openai/chat-latest")).toEqual({
 			provider: "cloudflare-ai-gateway",
-			modelId: "openrouter/openai/o1",
+			modelId: "openrouter/openai/chat-latest",
 			cataloged: false,
 		})
-		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/openai/o1:nitro")).toEqual({
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openrouter/openai/chat-latest:nitro"),
+		).toEqual({
 			provider: "cloudflare-ai-gateway",
-			modelId: "openrouter/openai/o1:nitro",
+			modelId: "openrouter/openai/chat-latest:nitro",
 			cataloged: false,
 		})
-		const orO1 = orSessionA.getModel("openrouter", "openai/o1")
-		expect(orO1).toMatchObject({
-			id: "openai/o1",
-			contextWindow: 200_000,
+		const orUpstream = orSessionA.getModel("openrouter", "openai/chat-latest")
+		expect(orUpstream).toMatchObject({
+			id: "openai/chat-latest",
+			contextWindow: 400_000,
 			reasoning: true,
 		})
 		const lockedOpenRouter = createProviderModels({ env: { OPENROUTER_API_KEY: "sk-or-lock" } })
@@ -1820,8 +1831,8 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			),
 		)
 		expect(lockedOpenRouter.getModel("openrouter", "anthropic/claude-sonnet-5.5")).toBeDefined()
-		expect(lockedOpenRouter.getModel("openrouter", "openai/o1")).toBeUndefined()
-		expect(lockedOpenRouter.getModel("openrouter", "openai/o1:nitro")).toBeUndefined()
+		expect(lockedOpenRouter.getModel("openrouter", "openai/chat-latest")).toBeUndefined()
+		expect(lockedOpenRouter.getModel("openrouter", "openai/chat-latest:nitro")).toBeUndefined()
 		expect(lockedOpenRouter.getModel("openrouter", "anthropic/claude-sonnet-4-5")).toBeUndefined()
 		const gwSpec = BUILTIN_PROVIDERS.find((provider) => provider.id === "cloudflare-ai-gateway")!
 		const lockedGw = createProviderModels({
@@ -1843,8 +1854,12 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 				},
 			),
 		)
-		expect(lockedGw.getModel("cloudflare-ai-gateway", "openrouter/openai/o1")).toBeUndefined()
-		expect(lockedGw.getModel("cloudflare-ai-gateway", "openrouter/openai/o1:nitro")).toBeUndefined()
+		expect(
+			lockedGw.getModel("cloudflare-ai-gateway", "openrouter/openai/chat-latest"),
+		).toBeUndefined()
+		expect(
+			lockedGw.getModel("cloudflare-ai-gateway", "openrouter/openai/chat-latest:nitro"),
+		).toBeUndefined()
 
 		// Cloudflare AI Gateway (HTTPS + binding) and Workers AI resolve configured secretHeaders,
 		// fail auth when a required secret header is missing, and preserve Cloudflare auth-header precedence.
@@ -2701,20 +2716,23 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})
 		expect(gwFreeGemini?.cost.tiers).toBeUndefined()
-		const freeUpstreamO1 = workersFallbackDefault.getModel("openrouter", "openai/o1:free")
-		const gwFreeUpstreamO1 = workersFallbackDefault.getModel(
-			"cloudflare-ai-gateway",
-			"openrouter/openai/o1:free",
+		const freeUpstreamChat = workersFallbackDefault.getModel(
+			"openrouter",
+			"openai/chat-latest:free",
 		)
-		expect(freeUpstreamO1).toMatchObject({
-			id: "openai/o1:free",
-			contextWindow: 200_000,
+		const gwFreeUpstreamChat = workersFallbackDefault.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/openai/chat-latest:free",
+		)
+		expect(freeUpstreamChat).toMatchObject({
+			id: "openai/chat-latest:free",
+			contextWindow: 400_000,
 			reasoning: true,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})
-		expect(gwFreeUpstreamO1).toMatchObject({
-			id: "openrouter/openai/o1:free",
-			contextWindow: 200_000,
+		expect(gwFreeUpstreamChat).toMatchObject({
+			id: "openrouter/openai/chat-latest:free",
+			contextWindow: 400_000,
 			reasoning: true,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		})
@@ -2844,16 +2862,8 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			modelId: "ft:gpt-4o-mini:org:pilot:id",
 			cataloged: false,
 		})
-		expect(resolveModelSpecifier("openai/gpt-4-turbo-2024-04-09")).toEqual({
-			provider: "openai",
-			modelId: "gpt-4-turbo-2024-04-09",
-			cataloged: false,
-		})
-		expect(resolveModelSpecifier("openai/gpt-4-0125-preview")).toEqual({
-			provider: "openai",
-			modelId: "gpt-4-0125-preview",
-			cataloged: false,
-		})
+		expect(resolveModelSpecifier("openai/gpt-4-turbo-2024-04-09")).toBeNull()
+		expect(resolveModelSpecifier("openai/gpt-4-0125-preview")).toBeNull()
 		expect(resolveModelSpecifier("anthropic/claude-sonnet-4-6-20260301")).toEqual({
 			provider: "anthropic",
 			modelId: "claude-sonnet-4-6-20260301",
@@ -2870,19 +2880,8 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 		expect(lockedModels.getModel("openai", "gpt-4-0613")).toBeUndefined()
 		expect(lockedModels.getModel("openai", "gpt-4-32k-0613")).toBeUndefined()
 		expect(lockedModels.getModel("openai", "gpt-3.5-turbo-0125")).toBeUndefined()
-		const gpt4TurboSnapshot = lockedModels.getModel("openai", "gpt-4-turbo-2024-04-09")
-		expect(gpt4TurboSnapshot).toMatchObject({
-			id: "gpt-4-turbo-2024-04-09",
-			reasoning: false,
-			contextWindow: 128_000,
-			maxTokens: 4096,
-		})
-		expect(lockedModels.getModel("openai", "gpt-4-0125-preview")).toMatchObject({
-			id: "gpt-4-0125-preview",
-			reasoning: false,
-			contextWindow: 128_000,
-			maxTokens: 4096,
-		})
+		expect(lockedModels.getModel("openai", "gpt-4-turbo-2024-04-09")).toBeUndefined()
+		expect(lockedModels.getModel("openai", "gpt-4-0125-preview")).toBeUndefined()
 		const sonnetBase = lockedModels.getModel("anthropic", "claude-sonnet-4-6")!
 		const sonnetSnapshot = lockedModels.getModel("anthropic", "claude-sonnet-4-6-20260301")
 		expect(sonnetSnapshot).toMatchObject({
@@ -2894,7 +2893,7 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 
 		let snapshotRequestBody: object | undefined
 		const openAIModels = createProviderModels({ env: { OPENAI_API_KEY: "sk-test" } })
-		const snapshotWireModel = openAIModels.getModel("openai", "gpt-4-turbo-2024-04-09")!
+		const snapshotWireModel = openAIModels.getModel("openai", "gpt-4o-mini-2024-07-18")!
 		await openAIModels.completeSimple(
 			snapshotWireModel,
 			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
@@ -2927,13 +2926,13 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 				},
 			},
 		)
-		expect(snapshotRequestBody).toMatchObject({ model: "gpt-4-turbo-2024-04-09" })
+		expect(snapshotRequestBody).toMatchObject({ model: "gpt-4o-mini-2024-07-18" })
 		expect(snapshotRequestBody).not.toHaveProperty("reasoning")
 		expect(
 			snapshotRequestBody !== undefined &&
 				"max_output_tokens" in snapshotRequestBody &&
 				typeof snapshotRequestBody.max_output_tokens === "number" &&
-				snapshotRequestBody.max_output_tokens <= 4096,
+				snapshotRequestBody.max_output_tokens <= 16_384,
 		).toBe(true)
 
 		const protoNamed = defineProvider({
