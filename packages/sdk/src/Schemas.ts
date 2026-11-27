@@ -586,6 +586,27 @@ export const ArtifactMount = Schema.Struct({
 })
 export type ArtifactMount = typeof ArtifactMount.Type
 
+export const MAX_SESSION_FILES = 32
+export const FILE_MOUNT_ROOT = "/mnt/session/uploads"
+
+export const FileMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/session\/uploads\/.+$/u, {
+		expected: `a path inside ${FILE_MOUNT_ROOT}`,
+	}),
+)
+
+export const fileMountPath = (relative: string): string => `${FILE_MOUNT_ROOT}/${relative}`
+
+export const FileMount = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("file"),
+	file_id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_IDENTIFIER_LENGTH)),
+	size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	sha256: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+	mount_path: FileMountPath,
+})
+export type FileMount = typeof FileMount.Type
+
 export const MAX_SESSION_SKILLS = 16
 export const MAX_SKILL_NAME_LENGTH = 64
 export const MAX_SKILL_DESCRIPTION_LENGTH = 1024
@@ -639,6 +660,7 @@ export const SessionMount = Schema.Union([
 	MemoryStoreResource,
 	ArtifactMount,
 	SkillMount,
+	FileMount,
 ])
 export type SessionMount = typeof SessionMount.Type
 
@@ -657,6 +679,9 @@ export const artifactsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArr
 
 export const skillsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<SkillMount> =>
 	resources.filter((resource) => resource.type === "skill")
+
+export const filesOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<FileMount> =>
+	resources.filter((resource) => resource.type === "file")
 
 export const mountsOverlap = (a: string, b: string): boolean =>
 	a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
@@ -680,7 +705,8 @@ const areWithinLimits = (resources: ReadonlyArray<SessionMount>): boolean =>
 	repositoriesOf(resources).length <= MAX_SESSION_REPOSITORIES &&
 	memoryStoresOf(resources).length <= MAX_SESSION_MEMORY_STORES &&
 	artifactsOf(resources).length <= MAX_SESSION_ARTIFACTS &&
-	skillsOf(resources).length <= MAX_SESSION_SKILLS
+	skillsOf(resources).length <= MAX_SESSION_SKILLS &&
+	filesOf(resources).length <= MAX_SESSION_FILES
 
 const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
 	const stores = memoryStoresOf(resources).map((resource) => resource.memory_store_id)
@@ -688,12 +714,16 @@ const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean =>
 }
 
 export const MAX_SESSION_RESOURCES =
-	MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES + MAX_SESSION_ARTIFACTS + MAX_SESSION_SKILLS
+	MAX_SESSION_REPOSITORIES +
+	MAX_SESSION_MEMORY_STORES +
+	MAX_SESSION_ARTIFACTS +
+	MAX_SESSION_SKILLS +
+	MAX_SESSION_FILES
 
 export const SessionMounts = Schema.Array(SessionMount).check(
 	Schema.isMaxLength(MAX_SESSION_RESOURCES),
 	Schema.makeFilter(areWithinLimits, {
-		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories, ${MAX_SESSION_MEMORY_STORES} memory stores, ${MAX_SESSION_ARTIFACTS} artifacts and ${MAX_SESSION_SKILLS} skills`,
+		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories, ${MAX_SESSION_MEMORY_STORES} memory stores, ${MAX_SESSION_ARTIFACTS} artifacts, ${MAX_SESSION_SKILLS} skills and ${MAX_SESSION_FILES} files`,
 	}),
 	Schema.makeFilter(attachEachStoreOnce, { expected: "each memory store attached once" }),
 	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),

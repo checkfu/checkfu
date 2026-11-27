@@ -8725,6 +8725,62 @@
 															"updated_at"
 														],
 														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["file"]
+															},
+															"file_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"size": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"sha256": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"file_id",
+															"size",
+															"sha256",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
 													}
 												]
 											}
@@ -9496,11 +9552,34 @@
 													},
 													"required": ["type", "artifact_id"],
 													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["file"]
+														},
+														"file_id": {
+															"type": "string",
+															"minLength": 1,
+															"description": "File to place in the session's uploads directory, read-only"
+														},
+														"mount_path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"description": "Path relative to /mnt/session/uploads, up to 1003 UTF-16 code units. Defaults to the file's name."
+														}
+													},
+													"required": ["type", "file_id"],
+													"additionalProperties": false
 												}
 											]
 										},
-										"maxItems": 40,
-										"description": "Repositories, memory stores, artifacts and skills to mount in the session's workspace"
+										"maxItems": 72,
+										"description": "Repositories, memory stores, artifacts, skills and files to mount in the session's workspace"
 									}
 								},
 								"required": ["agent", "environment_id"],
@@ -10172,6 +10251,62 @@
 																		"name",
 																		"mount_path",
 																		"description",
+																		"created_at",
+																		"updated_at"
+																	],
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"id": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256
+																		},
+																		"type": {
+																			"type": "string",
+																			"enum": ["file"]
+																		},
+																		"file_id": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256
+																		},
+																		"size": {
+																			"type": "integer",
+																			"minimum": 0,
+																			"maximum": 9007199254740991
+																		},
+																		"sha256": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 64
+																		},
+																		"mount_path": {
+																			"type": "string",
+																			"maxLength": 1024,
+																			"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																			"allOf": [
+																				{
+																					"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+																				}
+																			]
+																		},
+																		"created_at": {
+																			"type": "string"
+																		},
+																		"updated_at": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"id",
+																		"type",
+																		"file_id",
+																		"size",
+																		"sha256",
+																		"mount_path",
 																		"created_at",
 																		"updated_at"
 																	],
@@ -11173,6 +11308,62 @@
 															"updated_at"
 														],
 														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["file"]
+															},
+															"file_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"size": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"sha256": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"file_id",
+															"size",
+															"sha256",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
 													}
 												]
 											}
@@ -12141,6 +12332,62 @@
 															"name",
 															"mount_path",
 															"description",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["file"]
+															},
+															"file_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"size": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"sha256": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"file_id",
+															"size",
+															"sha256",
+															"mount_path",
 															"created_at",
 															"updated_at"
 														],
@@ -15129,6 +15376,62 @@
 															"updated_at"
 														],
 														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["file"]
+															},
+															"file_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"size": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"sha256": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"file_id",
+															"size",
+															"sha256",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
 													}
 												]
 											}
@@ -15817,6 +16120,62 @@
 												"updated_at"
 											],
 											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"type": {
+													"type": "string",
+													"enum": ["file"]
+												},
+												"file_id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"size": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991
+												},
+												"sha256": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												},
+												"mount_path": {
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+													"allOf": [
+														{
+															"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+														}
+													]
+												},
+												"created_at": {
+													"type": "string"
+												},
+												"updated_at": {
+													"type": "string"
+												}
+											},
+											"required": [
+												"id",
+												"type",
+												"file_id",
+												"size",
+												"sha256",
+												"mount_path",
+												"created_at",
+												"updated_at"
+											],
+											"additionalProperties": false
 										}
 									]
 								}
@@ -16491,6 +16850,62 @@
 												"name",
 												"mount_path",
 												"description",
+												"created_at",
+												"updated_at"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"type": {
+													"type": "string",
+													"enum": ["file"]
+												},
+												"file_id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"size": {
+													"type": "integer",
+													"minimum": 0,
+													"maximum": 9007199254740991
+												},
+												"sha256": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												},
+												"mount_path": {
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+													"allOf": [
+														{
+															"pattern": "^\\/mnt\\/session\\/uploads\\/.+$"
+														}
+													]
+												},
+												"created_at": {
+													"type": "string"
+												},
+												"updated_at": {
+													"type": "string"
+												}
+											},
+											"required": [
+												"id",
+												"type",
+												"file_id",
+												"size",
+												"sha256",
+												"mount_path",
 												"created_at",
 												"updated_at"
 											],

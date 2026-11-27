@@ -108,6 +108,14 @@ export const makeFileStoreMemory = (options?: { readonly scope?: string }) => {
 					return bytes === undefined ? null : Stream.make(bytes)
 				}),
 			),
+		read: (fileId, range) =>
+			Effect.andThen(
+				online,
+				Effect.sync(() => {
+					const bytes = objects.get(fileContentKey(scope, fileId))
+					return bytes === undefined ? null : bytes.slice(range.offset, range.offset + range.length)
+				}),
+			),
 		purge: (fileId) => owning(fileId).purge,
 		release: (fileId, reservation) => owning(fileId).release(reservation),
 	})

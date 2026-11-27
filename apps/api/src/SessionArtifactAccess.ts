@@ -1,14 +1,26 @@
-import { artifactsOf, skillsOf } from "@checkfu/domain/Session/SessionResource"
-import type { ArtifactMount } from "@checkfu/domain/Session/SessionResource"
+import { File } from "@checkfu/domain/File/File.aggregate"
+import { FileId } from "@checkfu/domain/File/File.id"
+import {
+	FILE_MOUNT_ROOT,
+	artifactsOf,
+	filesOf,
+	skillsOf,
+} from "@checkfu/domain/Session/SessionResource"
+import type { ArtifactMount, FileMount } from "@checkfu/domain/Session/SessionResource"
 import * as Effect from "effect/Effect"
 import { PinnedArtifact } from "./Artifacts/PinnedArtifact.ts"
+import { FileStore } from "./Files/FileStore.ts"
 import { SessionResources } from "./SessionResources.ts"
 import type { ArtifactFileInfo } from "./Workspace/SessionArtifacts.ts"
 
 type Pinned = Pick<ArtifactMount, "artifact_id" | "manifest" | "mount_path">
 
+const uploadPath = (file: FileMount) => file.mount_path.slice(FILE_MOUNT_ROOT.length + 1)
+
 export const SessionArtifactAccess = Effect.gen(function* () {
 	const pinned = yield* PinnedArtifact
+	const files = yield* File
+	const fileStore = yield* FileStore
 	const resourcesOf = yield* SessionResources
 
 	const pinnedBy = (sessionId: string) =>
@@ -20,18 +32,42 @@ export const SessionArtifactAccess = Effect.gen(function* () {
 				),
 		)
 
-	const filesOf = (pin: Pinned) =>
+	const uploadsOf = (sessionId: string) => Effect.map(resourcesOf(sessionId), filesOf)
+
+	const filesOfPin = (pin: Pinned) =>
 		Effect.map(pinned.manifest(pin.artifact_id, pin.manifest), (manifest) => manifest?.files ?? [])
+
+	const readUpload = (file: FileMount, offset: number, length: number) =>
+		Effect.gen(function* () {
+			if ((yield* files.get(FileId.make(file.file_id))).status !== "ready") {
+				return null
+			}
+			const available = Math.min(length, file.size - offset)
+			return available <= 0
+				? new Uint8Array()
+				: yield* fileStore.read(file.file_id, { offset, length: available })
+		})
 
 	return {
 		artifactMounts: (sessionId: string) =>
-			Effect.map(pinnedBy(sessionId), (pins) => [...pins.keys()]),
+			Effect.map(resourcesOf(sessionId), (resources) => {
+				const mounts = [...artifactsOf(resources), ...skillsOf(resources)].map(
+					(pin) => pin.mount_path,
+				)
+				return filesOf(resources).length === 0 ? mounts : [...mounts, FILE_MOUNT_ROOT]
+			}),
 		artifactFiles: (sessionId: string, mountPath: string) =>
 			Effect.gen(function* () {
+				if (mountPath === FILE_MOUNT_ROOT) {
+					return (yield* uploadsOf(sessionId)).map((file): ArtifactFileInfo => ({
+						path: uploadPath(file),
+						size: file.size,
+					}))
+				}
 				const pin = (yield* pinnedBy(sessionId)).get(mountPath)
 				return pin === undefined
 					? []
-					: (yield* filesOf(pin)).map(({ path, size }): ArtifactFileInfo => ({ path, size }))
+					: (yield* filesOfPin(pin)).map(({ path, size }): ArtifactFileInfo => ({ path, size }))
 			}),
 		artifactRead: (
 			sessionId: string,
@@ -41,11 +77,15 @@ export const SessionArtifactAccess = Effect.gen(function* () {
 			length: number,
 		) =>
 			Effect.gen(function* () {
+				if (mountPath === FILE_MOUNT_ROOT) {
+					const file = (yield* uploadsOf(sessionId)).find((entry) => uploadPath(entry) === path)
+					return file === undefined ? null : yield* readUpload(file, offset, length)
+				}
 				const pin = (yield* pinnedBy(sessionId)).get(mountPath)
 				if (pin === undefined) {
 					return null
 				}
-				const file = (yield* filesOf(pin)).find((entry) => entry.path === path)
+				const file = (yield* filesOfPin(pin)).find((entry) => entry.path === path)
 				if (file === undefined) {
 					return null
 				}

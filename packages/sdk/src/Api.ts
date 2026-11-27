@@ -29,6 +29,9 @@ import {
 	ArtifactId,
 	ArtifactMount,
 	SkillMount,
+	FileMount,
+	FILE_MOUNT_ROOT,
+	MAX_MOUNT_PATH_LENGTH,
 	ArtifactName,
 	ArtifactPath,
 	ArtifactContentType,
@@ -745,11 +748,26 @@ export const SkillMountParams = Schema.Struct({
 	),
 })
 
+const MAX_FILE_MOUNT_RELATIVE_LENGTH = MAX_MOUNT_PATH_LENGTH - FILE_MOUNT_ROOT.length - 1
+
+export const FileMountParams = Schema.Struct({
+	type: Schema.Literal("file"),
+	file_id: FileId.annotate({
+		description: "File to place in the session's uploads directory, read-only",
+	}),
+	mount_path: Schema.optionalKey(
+		ArtifactPath.check(Schema.isMaxLength(MAX_FILE_MOUNT_RELATIVE_LENGTH)).annotate({
+			description: `Path relative to ${FILE_MOUNT_ROOT}, up to ${MAX_FILE_MOUNT_RELATIVE_LENGTH} UTF-16 code units. Defaults to the file's name.`,
+		}),
+	),
+})
+
 const CreateSessionResource = Schema.Union([
 	GitHubRepositoryParams,
 	MemoryStoreParams,
 	ArtifactMountParams,
 	SkillMountParams,
+	FileMountParams,
 ])
 export type CreateSessionResource = typeof CreateSessionResource.Type
 
@@ -802,7 +820,7 @@ export const CreateSessionBody = Schema.Struct({
 	resources: Schema.optionalKey(
 		CreateSessionResources.annotate({
 			description:
-				"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
+				"Repositories, memory stores, artifacts, skills and files to mount in the session's workspace",
 		}),
 	),
 })
@@ -1050,6 +1068,7 @@ export const SessionResourceItem = Schema.Union([
 	Schema.Struct({ ...MemoryStoreResource.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...ArtifactMount.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...SkillMount.fields, ...resourceTimestamps }),
+	Schema.Struct({ ...FileMount.fields, ...resourceTimestamps }),
 ])
 export type SessionResourceItem = typeof SessionResourceItem.Type
 

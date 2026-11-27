@@ -3155,11 +3155,36 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										required: ["type", "artifact_id"],
 										additionalProperties: false,
 									},
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["file"],
+											},
+											file_id: {
+												type: "string",
+												minLength: 1,
+												description: "File to place in the session's uploads directory, read-only",
+											},
+											mount_path: {
+												type: "string",
+												minLength: 1,
+												maxLength: 512,
+												pattern:
+													"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+												description:
+													"Path relative to /mnt/session/uploads, up to 1003 UTF-16 code units. Defaults to the file's name.",
+											},
+										},
+										required: ["type", "file_id"],
+										additionalProperties: false,
+									},
 								],
 							},
-							maxItems: 40,
+							maxItems: 72,
 							description:
-								"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
+								"Repositories, memory stores, artifacts, skills and files to mount in the session's workspace",
 						},
 					},
 					required: ["agent", "environment_id"],

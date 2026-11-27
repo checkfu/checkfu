@@ -174,5 +174,11 @@ export const describeResource = (resource: SessionResourceItem): ResourceSummary
 				name: resource.name,
 				detail: `v${resource.version}`,
 			}
+		case "file":
+			return {
+				label: "File",
+				name: resource.mount_path,
+				detail: `${resource.size.toLocaleString("en-US")} bytes`,
+			}
 	}
 }

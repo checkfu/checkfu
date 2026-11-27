@@ -37,6 +37,10 @@ export interface FileStoreService {
 	readonly content: (
 		fileId: string,
 	) => Effect.Effect<Stream.Stream<Uint8Array, FileStoreError> | null, FileStoreError>
+	readonly read: (
+		fileId: string,
+		range: { readonly offset: number; readonly length: number },
+	) => Effect.Effect<Uint8Array | null, FileStoreError>
 	readonly purge: (fileId: string) => Effect.Effect<void, FileStoreError>
 	readonly release: (fileId: string, reservation: number) => Effect.Effect<void, FileStoreError>
 }
@@ -64,5 +68,20 @@ export const fileContent =
 						: object.body.pipe(Stream.mapError((cause) => new FileStoreError({ cause }))),
 				onFailure: (cause) => new FileStoreError({ cause }),
 			}),
+			Effect.provideService(RuntimeContext, runtime),
+		)
+
+export const fileRange =
+	(
+		scope: string,
+		bucket: Pick<Cloudflare.R2.ReadBucketClient, "get">,
+		runtime: RuntimeContext["Service"],
+	): FileStoreService["read"] =>
+	(fileId, range) =>
+		Effect.gen(function* () {
+			const object = yield* bucket.get(fileContentKey(scope, fileId), { range })
+			return object === null ? null : yield* object.bytes()
+		}).pipe(
+			Effect.mapError((cause) => new FileStoreError({ cause })),
 			Effect.provideService(RuntimeContext, runtime),
 		)

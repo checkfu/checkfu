@@ -42,6 +42,7 @@ export const makeArtifactMount = (
 	root: string,
 	artifacts: SessionArtifacts,
 	walkLimit: number,
+	verifyEmptyReads = false,
 ): PassthroughMount => {
 	const mounted = async () =>
 		(await artifacts.mounts())
@@ -112,6 +113,13 @@ export const makeArtifactMount = (
 			const offset = Math.min(options?.range?.offset ?? 0, file.size)
 			const end = offset + Math.min(options?.range?.length ?? file.size, file.size - offset)
 			const mountPath = `${root}/${at.name}`
+			if (
+				verifyEmptyReads &&
+				offset === end &&
+				(await artifacts.read(mountPath, at.path, offset, 0)) === null
+			) {
+				return null
+			}
 			let next = offset
 			return {
 				stat: fileStat(file.size),
@@ -134,5 +142,25 @@ export const makeArtifactMount = (
 				offset,
 			}
 		},
+	}
+}
+
+/** One mount whose own directory holds the files, rather than a directory of mounts. */
+export const makeFilesMount = (
+	mountPath: string,
+	artifacts: SessionArtifacts,
+	walkLimit: number,
+): PassthroughMount => {
+	const at = mountPath.lastIndexOf("/")
+	const name = mountPath.slice(at + 1)
+	const inner = makeArtifactMount(mountPath.slice(0, at), artifacts, walkLimit, true)
+	const inside = (rel: string) => (rel === "" ? name : `${name}/${rel}`)
+	return {
+		...inner,
+		kind: "checkfu-files",
+		stat: async (rel) => (await inner.stat(inside(rel))) ?? (rel === "" ? DIR : null),
+		readdir: async (rel, options) =>
+			(await inner.readdir(inside(rel), options)) ?? (rel === "" ? [] : null),
+		readFile: (rel, options) => inner.readFile(inside(rel), options),
 	}
 }

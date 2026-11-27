@@ -18,8 +18,12 @@ import {
 	withRepositoryCredentials,
 } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
-import { ARTIFACT_MOUNT_ROOT, SKILL_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
-import { makeArtifactMount } from "./ArtifactMount.ts"
+import {
+	ARTIFACT_MOUNT_ROOT,
+	FILE_MOUNT_ROOT,
+	SKILL_MOUNT_ROOT,
+} from "@checkfu/domain/Session/SessionResource"
+import { makeArtifactMount, makeFilesMount } from "./ArtifactMount.ts"
 import { makeSandboxMount, makeSandboxOutputFiles } from "./SandboxMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
@@ -191,6 +195,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						[MEMORY_ROOT]: makeMemoryMount(memory),
 						[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts, walkLimit),
 						[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
+						[FILE_MOUNT_ROOT]: makeFilesMount(FILE_MOUNT_ROOT, artifacts, walkLimit),
 					})
 					const local = new Workspace({ storage, mounts: mounts(PASSTHROUGH_WALK_LIMIT) })
 					const { fs } = local

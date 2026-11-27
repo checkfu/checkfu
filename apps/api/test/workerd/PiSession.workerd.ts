@@ -1793,6 +1793,67 @@ describe("PiSession real Durable Object under workerd", () => {
 		})
 	}, 240_000)
 
+	const uploadText = async (filename: string, text: string) => {
+		const response = await uploadFile(`filename=${filename}`, new TextEncoder().encode(text))
+		expect(response.status, await response.clone().text()).toBe(201)
+		return (await response.json()) as { readonly id: string }
+	}
+
+	it("places uploaded files in the uploads directory, where the model can read them and cannot change them", async () => {
+		const sales = await uploadText("sales.csv", "region,total\nEMEA,4217\n")
+		const notes = await uploadText("notes.md", "Totals are in thousands.")
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{ type: "file", file_id: sales.id, mount_path: "data/q3.csv" },
+				{ type: "file", file_id: notes.id },
+			],
+		})
+		const uploads = "/mnt/session/uploads"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"What did EMEA sell?": [
+					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/data/q3.csv` } },
+				],
+				"Fix the total.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${uploads}/data/q3.csv`, content: "EMEA,0" },
+					},
+					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/notes.md` } },
+				],
+				"What is there?": [
+					{ kind: "tool_call", name: "find", arguments: { pattern: "**/*", path: uploads } },
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
+		const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
+		expect(refused).toContain(`read-only mount at ${uploads}: cannot modify`)
+		expect(refused).toContain("Totals are in thousands.")
+		const found = await replyAfterTurn(session.id, "What is there?", 3)
+		expect(found).toContain("data/q3.csv")
+		expect(found).toContain("notes.md")
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain(`- ${uploads}/data/q3.csv (23 bytes)`)
+		expect(systemText).toContain(`- ${uploads}/notes.md (24 bytes)`)
+	}, 180_000)
+
 	it("mounts an artifact version as read-only files the model can read and cannot change", async () => {
 		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
 			name: "Q3 Data",
