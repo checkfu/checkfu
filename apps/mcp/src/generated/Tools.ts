@@ -1211,7 +1211,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "automationRuns_retrieve",
 		title: "Retrieve an automation run by ID",
-		description: "Retrieve a run by the ID returned in run results and webhook events.",
+		description:
+			"Get a run by ID. Returns 404 if unknown or unissued, or retryable 503 if no result appears after a brief wait.",
 		method: "GET",
 		path: "/v1/automation_runs/{automation_run_id}",
 		readOnly: true,
@@ -1465,8 +1466,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "automations_getRun",
 		title: "Retrieve an automation run",
-		description:
-			"Retrieve one run of an automation by its run number, once it has started or failed",
+		description: "Get a run by number. Returns 404 immediately until its result appears.",
 		method: "GET",
 		path: "/v1/automations/{automation_id}/runs/{run}",
 		readOnly: true,
@@ -1642,7 +1642,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_runAutomation",
 		title: "Run an automation now",
 		description:
-			"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run.",
+			"Trigger a run, including while paused. Check the result by the queued run ID. If the run starts, it uses the returned session ID. Retrying with the same Idempotency-Key returns the same run.",
 		method: "POST",
 		path: "/v1/automations/{automation_id}/run",
 		readOnly: false,

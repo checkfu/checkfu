@@ -159,6 +159,12 @@ its current result. If your wait ends while the receipt still says `erasing`,
 report that erasure is still in progress. Use `waitForPending` for resources
 returned with `pending: true`.
 
+## Checking a queued automation run
+
+`automations.run` returns the queued run's `id`, `run` number, and the `session_id` it will use if it starts. To check the outcome, pass that `id` to `automationRuns.retrieve`. If the run result has yet to appear, this lookup waits briefly and can return `ServiceUnavailableError` (HTTP 503). Retry the GET. An unknown automation or a run it has never issued returns HTTP 404.
+
+`automations.runs.retrieve` looks up a settled run by automation ID and run number. It returns HTTP 404 immediately until a run record appears. Both lookups return the same record after session creation succeeds or fails.
+
 ## Operation type helpers
 
 ```ts

@@ -11,13 +11,17 @@ import * as InMemory from "@alchemy.run/domain/InMemory"
 import type { RuntimeContext } from "alchemy/RuntimeContext"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
+import * as Fiber from "effect/Fiber"
 import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
+import * as TestClock from "effect/testing/TestClock"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { AutomationReadWaitTimeout } from "../src/Http/AutomationsHandlers.ts"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
 import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
@@ -551,6 +555,84 @@ describe("Automations API", () => {
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
 				expect(fetched.body.run_count).toBe(2)
 				expect(fetched.body.last_run_at).not.toBeNull()
+			}),
+		))
+
+	it("distinguishes immediate numbered lookup from waiting by a queued run ID", () =>
+		run(() =>
+			Effect.gen(function* () {
+				const view = yield* AutomationRunView
+				const waiting = yield* Deferred.make<void>()
+				let lag = true
+				let waits = 0
+				let reads = 0
+				const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+					Effect.provideService(AutomationReadWaitTimeout, "50 millis"),
+					Effect.provideService(AutomationRunView, {
+						...view,
+						list: (ref, options) => {
+							reads += 1
+							return view
+								.list(ref, options)
+								.pipe(Effect.map((page) => (lag ? { ...page, entries: [] } : page)))
+						},
+						waitFor: (ref, where, options) => {
+							waits += 1
+							if (!lag) {
+								return view.waitFor(ref, where, options)
+							}
+							expect(where).toEqual({ recorded: { gte: 1 } })
+							expect(options?.timeout).toBe("50 millis")
+							return Deferred.succeed(waiting, undefined).pipe(
+								Effect.andThen(Effect.sleep("50 millis")),
+								Effect.andThen(
+									Effect.fail(new Domain.WaitTimeout({ view: "AutomationRunView", key: ref.id })),
+								),
+							)
+						},
+					}),
+				)
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const numbered = (automation: string, run: number) =>
+					`/v1/automations/${automation}/runs/${run}`
+				const byId = (run: string) => `/v1/automation_runs/${run}`
+				const lookup = <B>(path: string) => call<B>(apiFetch, "GET", path)
+				for (const path of [
+					numbered("auto_missing", 1),
+					byId("arun_auto_missing_1"),
+					numbered(id, 2),
+					byId(`arun_${id}_2`),
+				]) {
+					expect((yield* lookup<ErrorBody>(path)).status, path).toBe(404)
+				}
+				expect([waits, reads]).toEqual([0, 1])
+				const queued = yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
+				expect(queued.body).toMatchObject({ status: "queued", run: 1, session_id: `sess_${id}_1` })
+				expect((yield* lookup<ErrorBody>(numbered(id, queued.body.run))).status).toBe(404)
+				expect([waits, reads]).toEqual([0, 2])
+				const pending = yield* Effect.gen(function* () {
+					const result = yield* Effect.forkChild(lookup<ErrorBody>(byId(queued.body.id)))
+					yield* Deferred.await(waiting)
+					yield* TestClock.adjust("50 millis")
+					return yield* Fiber.join(result)
+				}).pipe(Effect.provide(TestClock.layer()))
+				expect([pending.status, waits, reads]).toEqual([503, 1, 2])
+				expect(pending.body.error.message).toContain("is still starting")
+				lag = false
+				const started = yield* lookup<RunBody>(byId(queued.body.id))
+				expect(started.body).toMatchObject({
+					status: "started",
+					session_id: queued.body.session_id,
+				})
+				expect(yield* lookup<RunBody>(numbered(id, queued.body.run))).toEqual(started)
 			}),
 		))
 
@@ -1228,7 +1310,7 @@ describe("Automations API", () => {
 				})
 				const id = created.body.id
 				yield* call(apiFetch, "POST", `/v1/agents/${agentId}/archive`)
-				yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
+				const queued = yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
 
 				const runs = yield* settledRuns(apiFetch, id, 1)
 				expect(runs.body.data[0]).toMatchObject({
@@ -1238,6 +1320,13 @@ describe("Automations API", () => {
 					session_id: null,
 					error: { type: "agent_unavailable" },
 				})
+				for (const path of [
+					`/v1/automation_runs/${queued.body.id}`,
+					`/v1/automations/${id}/runs/${queued.body.run}`,
+				]) {
+					const failed = yield* call<RunBody>(apiFetch, "GET", path)
+					expect([failed.status, failed.body]).toEqual([200, runs.body.data[0]])
+				}
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
 				expect(fetched.body).toMatchObject({
 					status: "paused",

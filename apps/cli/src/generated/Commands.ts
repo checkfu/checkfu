@@ -1013,7 +1013,9 @@ const automationRunsRetrieveCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(automationRunsRetrieveCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Retrieve a run by the ID returned in run results and webhook events."),
+	CommandWithDescription(
+		"Get a run by ID. Returns 404 if unknown or unissued, or retryable 503 if no result appears after a brief wait.",
+	),
 )
 
 const automationsArchiveCommandSpec: GeneratedOperationDescriptor = {
@@ -1369,7 +1371,7 @@ const automationsRunCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(automationsRunCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run.",
+		"Trigger a run, including while paused. Check the result by the queued run ID. If the run starts, it uses the returned session ID. Retrying with the same Idempotency-Key returns the same run.",
 	),
 )
 
@@ -1643,9 +1645,7 @@ const automationsRunsRetrieveCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(automationsRunsRetrieveCommandSpec, flags),
 ).pipe(
-	CommandWithDescription(
-		"Retrieve one run of an automation by its run number, once it has started or failed",
-	),
+	CommandWithDescription("Get a run by number. Returns 404 immediately until its result appears."),
 )
 
 const environmentsArchiveCommandSpec: GeneratedOperationDescriptor = {
