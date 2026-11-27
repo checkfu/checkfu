@@ -66,7 +66,13 @@ export const SessionArtifactToolCalls = {
 		result: SavedSessionFile,
 	},
 	sessionArtifactSave: {
-		args: Schema.Tuple([Session, Turn, Schema.String, Schema.Array(SessionArtifactEntry)]),
+		args: Schema.Tuple([
+			Session,
+			Turn,
+			Schema.String,
+			Schema.Array(SessionArtifactEntry),
+			Schema.String,
+		]),
 		result: SavedSessionArtifact,
 	},
 	sessionArtifactData: {

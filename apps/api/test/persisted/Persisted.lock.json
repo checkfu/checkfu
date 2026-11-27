@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "disjoint-cache-usage",
-			"cut_at": "2026-11-27T20:00:09.816Z",
+			"label": "pre-release",
+			"cut_at": "2026-11-27T20:22:45.529Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -358,7 +358,7 @@
 				"api-call:Api.artifactRead/result": "f214bbedb0a7063b9d2f4ee91e509ebea6cdfd1453854f0170c721de7681ec3c",
 				"api-call:Api.sessionFileSave/args": "6a66c561a71d417886ff0bbd0317525d61df1bae2c1f5fdaae13af96429ea87a",
 				"api-call:Api.sessionFileSave/result": "5202d677d6d59fe97ce65457968dd7b6729c47c2db5e846dc9956cdf74968ea5",
-				"api-call:Api.sessionArtifactSave/args": "409457eef36d9784817a886ee43bf6346d4f5070b69612d8ee5e1996615c7bd3",
+				"api-call:Api.sessionArtifactSave/args": "e1d6c53bf6513ee9abdc5fd2bacddda4d0ee9441194d0cf06d40b1a97494b5d7",
 				"api-call:Api.sessionArtifactSave/result": "2ca6647ffdcd0a316b8320cac832fcd24bb9da67620dd674adda4718917724e3",
 				"api-call:Api.sessionArtifactData/args": "620a96a3952343d62cd4cd12b0cc3e6efbd11d54a2ce5fedd14c9ba2be27f304",
 				"api-call:Api.sessionArtifactData/result": "157f75be7cddb83282080c39c19b9388e0de2bb03a6927b1a4c321ec11c77b60"
@@ -20038,7 +20038,8 @@
 								"path": "9o_HDF",
 								"file_id": "[-VY"
 							}
-						]
+						],
+						""
 					],
 					[
 						"\t",
@@ -20081,7 +20082,8 @@
 								"path": "",
 								"file_id": ""
 							}
-						]
+						],
+						"-1"
 					],
 					[
 						"%a@",
@@ -20128,19 +20130,22 @@
 								"path": "\udc00",
 								"file_id": "toString"
 							}
-						]
+						],
+						" "
 					],
 					[
 						"tA+K!3nZ6",
 						2,
 						"=3pdv0rT~u",
-						[]
+						[],
+						"T!~RumK`"
 					],
 					[
 						"",
 						7,
 						"prototype",
-						[]
+						[],
+						"20yWh|5n"
 					],
 					[
 						"-1",
@@ -20187,7 +20192,8 @@
 								"path": "",
 								"file_id": "d"
 							}
-						]
+						],
+						"Yj\"NrtFjRr"
 					],
 					[
 						"😀",
@@ -20198,7 +20204,8 @@
 								"path": "K1?mj_p_7O",
 								"file_id": "\ud800"
 							}
-						]
+						],
+						"c"
 					],
 					[
 						"-1",
@@ -20245,7 +20252,8 @@
 								"path": "g]1NBz]gly",
 								"file_id": "NN\"#q.[skF"
 							}
-						]
+						],
+						"KC,kX\\"
 					]
 				],
 				"api-call:Api.sessionArtifactSave/result": [

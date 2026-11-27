@@ -46,7 +46,15 @@ const withSessions = async (
 			| "fileStore"
 		> & {
 			readonly createSession: Effect.Effect<{ readonly id: string }>
-			readonly save: (sessionId: string, name: string, directory: string) => Effect.Effect<string>
+			readonly createSessionWith: (
+				resources: ReadonlyArray<AttachedArtifact>,
+			) => Effect.Effect<{ readonly id: string }>
+			readonly save: (
+				sessionId: string,
+				name: string,
+				directory: string,
+				madeFrom?: string,
+			) => Effect.Effect<string>
 		},
 	) => Effect.Effect<void>,
 ) => {
@@ -76,13 +84,13 @@ const withSessions = async (
 				const environment = yield* json<{ id: string }>(
 					yield* request(apiFetch, "POST", "/v1/environments", { name: "Env" }),
 				)
-				yield* run(apiFetch, {
-					...world,
-					createSession: Effect.gen(function* () {
+				const started = (resources: ReadonlyArray<AttachedArtifact>) =>
+					Effect.gen(function* () {
 						const session = yield* json<{ id: string }>(
 							yield* request(apiFetch, "POST", "/v1/sessions", {
 								agent: agent.id,
 								environment_id: environment.id,
+								...(resources.length === 0 ? {} : { resources }),
 							}),
 						)
 						const posted = yield* request(apiFetch, "POST", `/v1/sessions/${session.id}/events`, {
@@ -92,10 +100,16 @@ const withSessions = async (
 						})
 						expect(posted.status).toBe(200)
 						return session
-					}),
-					save: (sessionId, name, directory) =>
+					})
+				yield* run(apiFetch, {
+					...world,
+					createSession: started([]),
+					createSessionWith: started,
+					save: (sessionId, name, directory, madeFrom) =>
 						Effect.map(
-							Effect.promise(() => world.saveSessionArtifact(sessionId, 1, name, directory)),
+							Effect.promise(() =>
+								world.saveSessionArtifact(sessionId, 1, name, directory, madeFrom),
+							),
 							(result) =>
 								result.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
 						),
@@ -106,6 +120,13 @@ const withSessions = async (
 		pending.resolve()
 		await closeAll()
 	}
+}
+
+interface AttachedArtifact {
+	readonly type: "artifact"
+	readonly artifact_id: string
+	readonly version?: number
+	readonly mount_path?: string
 }
 
 interface ToolReply {
@@ -205,9 +226,13 @@ describe("An artifact the agent saves", () => {
 					)
 					expect(stolen.ok).toBe(true)
 					const refused = yield* run(
-						saves.sessionArtifactSave(mine.id, 1, "Report", [
-							{ path: "secret.txt", file_id: stolen.ok ? stolen.file_id : "" },
-						]),
+						saves.sessionArtifactSave(
+							mine.id,
+							1,
+							"Report",
+							[{ path: "secret.txt", file_id: stolen.ok ? stolen.file_id : "" }],
+							"",
+						),
 					)
 					expect(refused).toEqual({
 						ok: false,
@@ -215,15 +240,19 @@ describe("An artifact the agent saves", () => {
 					})
 					expect(
 						yield* run(
-							saves.sessionArtifactSave(mine.id, 1, "Report", [
-								{ path: "x.txt", file_id: "file_missing" },
-							]),
+							saves.sessionArtifactSave(
+								mine.id,
+								1,
+								"Report",
+								[{ path: "x.txt", file_id: "file_missing" }],
+								"",
+							),
 						),
 					).toEqual({ ok: false, message: "x.txt is not a file this session saved." })
 					expect(
 						yield* run(saves.sessionFileSave(mine.id, 1, "../up.txt", new Uint8Array(1))),
 					).toMatchObject({ ok: false })
-					expect(yield* run(saves.sessionArtifactSave(mine.id, 1, "", []))).toMatchObject({
+					expect(yield* run(saves.sessionArtifactSave(mine.id, 1, "", [], ""))).toMatchObject({
 						ok: false,
 					})
 				}),
@@ -673,6 +702,100 @@ describe("An artifact the agent saves", () => {
 				}),
 		))
 
+	it("makes an artifact from a type attached to the session, adding only the directory's content", () =>
+		withSessions((apiFetch, { workspaceFiles, createSessionWith, save }) =>
+			Effect.gen(function* () {
+				const typeFiles = (page: string) => [
+					{ path: "index.html", content: page },
+					{ path: "README.md", content: "Put the text in content.md." },
+					{
+						path: "artifact.json",
+						content: JSON.stringify({
+							capabilities: { database: { collections: { comments: { visitors: "add" } } } },
+						}),
+					},
+				]
+				const type = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/artifacts", {
+						name: "document",
+						files: typeFiles("page v1"),
+					}),
+				)
+				const session = yield* createSessionWith([{ type: "artifact", artifact_id: type.id }])
+				const files = workspaceFiles(session.id)
+				files.set("/workspace/notes/content.md", "# Q3")
+
+				const mount = "/mnt/artifacts/document"
+				const first = yield* save(session.id, "Q3 notes", "/workspace/notes", `${mount}/`)
+				const id = idIn(first)
+				expect(first).toBe(`Saved "Q3 notes" as artifact ${id}, version 1, with 1 file.`)
+				const made = yield* json<{
+					files: ReadonlyArray<{ path: string }>
+					capabilities: unknown
+					made_from: unknown
+				}>(yield* request(apiFetch, "GET", `/v1/artifacts/${id}`))
+				expect(made.files.map((file) => file.path)).toEqual([
+					"README.md",
+					"artifact.json",
+					"content.md",
+					"index.html",
+				])
+				expect(made.made_from).toEqual({ artifact_id: type.id, version: 1 })
+				expect(made.capabilities).toEqual({
+					database: { collections: { comments: { visitors: "add" } } },
+				})
+				const page = yield* request(
+					apiFetch,
+					"GET",
+					`/v1/artifacts/${id}/versions/1/content?file=index.html`,
+				)
+				expect(yield* Effect.promise(() => page.text())).toBe("page v1")
+				expect(yield* save(session.id, "Q3 notes", "/workspace/notes", mount)).toContain(
+					"is unchanged",
+				)
+
+				yield* request(apiFetch, "POST", `/v1/artifacts/${type.id}/versions`, {
+					version: 1,
+					files: typeFiles("page v2"),
+				})
+				files.set("/workspace/notes/content.md", "# Q3, revised")
+				expect(yield* save(session.id, "Q3 notes", "/workspace/notes", mount)).toContain(
+					"version 2",
+				)
+				const second = yield* request(
+					apiFetch,
+					"GET",
+					`/v1/artifacts/${id}/versions/2/content?file=index.html`,
+				)
+				expect(yield* Effect.promise(() => second.text())).toBe("page v1")
+
+				files.set("/workspace/clash/index.html", "<h1>mine</h1>")
+				expect(yield* save(session.id, "Clash", "/workspace/clash", mount)).toContain(
+					`index.html comes from artifact ${type.id} and cannot be replaced`,
+				)
+				files.set("/workspace/declares/artifact.json", "{}")
+				expect(yield* save(session.id, "Declares", "/workspace/declares", mount)).toContain(
+					"artifact.json is supplied by the source version",
+				)
+				expect(yield* save(session.id, "Other", "/workspace/notes", "/mnt/artifacts/slides")).toBe(
+					"/mnt/artifacts/slides is not an artifact attached to this session. made_from takes the mount path of one, such as /mnt/artifacts/document.",
+				)
+				expect(yield* save(session.id, "Other", "/workspace/notes", "document")).toBe(
+					"made_from must be the mount path of an attached artifact, for example /mnt/artifacts/document.",
+				)
+				expect(yield* save(session.id, "Plain", "/workspace/notes")).toContain("version 1")
+				expect(
+					(yield* json<{ made_from: unknown }>(
+						yield* request(
+							apiFetch,
+							"GET",
+							`/v1/artifacts/${idIn(yield* save(session.id, "Plain", "/workspace/notes"))}`,
+						),
+					)).made_from,
+				).toBeNull()
+			}),
+		))
+
 	it("refuses to save once the artifact was deleted or the session has ended", () =>
 		withSessions(
 			(apiFetch, { workspaceFiles, sessionArtifactSaves, runInWorld, createSession, save }) =>
@@ -698,9 +821,13 @@ describe("An artifact the agent saves", () => {
 					expect(
 						yield* Effect.promise(() =>
 							runInWorld(
-								saves.sessionArtifactSave(session.id, 1, "Other", [
-									{ path: "b.txt", file_id: "file_any" },
-								]),
+								saves.sessionArtifactSave(
+									session.id,
+									1,
+									"Other",
+									[{ path: "b.txt", file_id: "file_any" }],
+									"",
+								),
 							),
 						),
 					).toEqual(ended)
