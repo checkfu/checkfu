@@ -30,6 +30,7 @@ export const DataCall = Schema.Struct({
 	page: Schema.String,
 	limit: Schema.String,
 	idempotency_key: Schema.String,
+	caller: Schema.String,
 })
 export type DataCall = typeof DataCall.Type
 

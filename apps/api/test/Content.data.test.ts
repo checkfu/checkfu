@@ -9,6 +9,10 @@ import * as Effect from "effect/Effect"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
+import {
+	DATA_CALLS_PER_MINUTE_PER_ARTIFACT,
+	DATA_CALLS_PER_MINUTE_PER_CALLER,
+} from "../src/ArtifactData/DataThrottle.ts"
 import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "../src/Artifacts/ResolvePublication.ts"
@@ -373,6 +377,61 @@ describe("A page reaching its artifact's data", () => {
 				expect(yield* status("http://content.test/a/not-a-link/_/data/board")).toBe(404)
 				expect((yield* page(`${root}index.html`, { method: "OPTIONS" })).status).toBe(204)
 				expect(yield* status(`${root}index.html`)).toBe(200)
+			}),
+		))
+
+	it("slows a caller that sends too much, and counts only calls the address allows", () =>
+		withPages(({ page, artifact, link }) =>
+			Effect.gen(function* () {
+				const id = yield* artifact(COLLECTIONS)
+				const root = yield* link(id, "write")
+				const from = (caller: string, collection = "board") =>
+					page(`${root}_/data/${collection}`, { headers: { "cf-connecting-ip": caller } })
+				const statuses = (caller: string, calls: number, collection?: string) =>
+					Effect.map(
+						Effect.forEach(Array.from({ length: calls }), () => from(caller, collection)),
+						(responses) => [...new Set(responses.map((response) => response.status))],
+					)
+
+				expect(yield* statuses("203.0.113.1", DATA_CALLS_PER_MINUTE_PER_CALLER)).toEqual([200])
+				const slowed = yield* from("203.0.113.1")
+				expect(slowed.status).toBe(429)
+				expect(slowed.headers.get("retry-after")).toBe("60")
+				expect(slowed.headers.get("content-type")).toBe("application/json")
+				expect(yield* json(slowed)).toEqual({
+					error: { message: "Too many requests. Try again in a minute." },
+				})
+				expect((yield* from("203.0.113.2")).status).toBe(200)
+
+				expect(
+					yield* statuses("203.0.113.3", 2 * DATA_CALLS_PER_MINUTE_PER_CALLER, "hidden"),
+				).toEqual([403])
+				expect((yield* from("203.0.113.3")).status).toBe(200)
+				expect(
+					(yield* page("http://content.test/a/not-a-link/_/data/board", {
+						headers: { "cf-connecting-ip": "203.0.113.1" },
+					})).status,
+				).toBe(404)
+
+				const used = DATA_CALLS_PER_MINUTE_PER_CALLER + 2
+				const callers = Math.ceil(
+					(DATA_CALLS_PER_MINUTE_PER_ARTIFACT - used) / DATA_CALLS_PER_MINUTE_PER_CALLER,
+				)
+				let left = DATA_CALLS_PER_MINUTE_PER_ARTIFACT - used
+				for (let caller = 0; caller < callers; caller += 1) {
+					const calls = Math.min(left, DATA_CALLS_PER_MINUTE_PER_CALLER)
+					expect(yield* statuses(`198.51.100.${caller}`, calls)).toEqual([200])
+					left -= calls
+				}
+				expect((yield* from("192.0.2.1")).status).toBe(429)
+
+				const other = yield* artifact(COLLECTIONS)
+				const elsewhere = yield* link(other, "write")
+				expect(
+					(yield* page(`${elsewhere}_/data/board`, {
+						headers: { "cf-connecting-ip": "203.0.113.1" },
+					})).status,
+				).toBe(200)
 			}),
 		))
 
