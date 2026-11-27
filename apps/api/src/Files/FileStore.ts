@@ -24,13 +24,16 @@ export interface StoredBytes {
 export interface FileStoreService {
 	readonly put: (
 		fileId: string,
-		reservation: number | null,
+		reservation: number,
 		body: Stream.Stream<Uint8Array, FileStoreError>,
 		size: number,
 	) => Effect.Effect<
 		StoredBytes,
 		FileStoreError | FileSizeMismatch | BytesPurged | ReservationStale
 	>
+	readonly measure: (
+		body: Stream.Stream<Uint8Array, FileStoreError>,
+	) => Effect.Effect<StoredBytes, FileStoreError>
 	readonly content: (
 		fileId: string,
 	) => Effect.Effect<Stream.Stream<Uint8Array, FileStoreError> | null, FileStoreError>

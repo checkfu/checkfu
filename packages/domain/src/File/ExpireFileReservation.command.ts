@@ -2,7 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { FileId } from "./File.id.ts"
 import { PositiveInt } from "./FileTypes.ts"
 
-export const FILE_RESERVATION_TTL = "15 minutes"
+export const FILE_RESERVATION_TTL = "1 hour"
 
 export class FileReservationExpired extends Domain.Event("file.reservation_expired", {
 	reservation: PositiveInt,

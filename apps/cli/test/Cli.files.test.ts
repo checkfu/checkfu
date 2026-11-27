@@ -90,6 +90,37 @@ describe("CLI files", () => {
 					expect(again.exitCode).toBe(1)
 					expect(again.errorMessage).toContain("already exists")
 
+					const cut = yield* cli.run(
+						["files", "download", "--file-id", file.id, "--output", path.join(root, "cut.csv")],
+						{
+							fileSystem: NodeFileSystem.layer,
+							interceptFetch: async (next, request) => {
+								const response = await next(request)
+								if (!request.url.endsWith("/content")) {
+									return response
+								}
+								const reader = response.body?.getReader()
+								let sent = false
+								return new Response(
+									new ReadableStream<Uint8Array>({
+										pull: async (controller) => {
+											if (sent) {
+												controller.error(new Error("connection lost"))
+												return
+											}
+											sent = true
+											const chunk = await reader?.read()
+											controller.enqueue(chunk?.value?.slice(0, 10) ?? new Uint8Array(1))
+										},
+									}),
+									{ status: response.status, headers: response.headers },
+								)
+							},
+						},
+					)
+					expect(cut.exitCode).not.toBe(0)
+					expect(yield* fs.readDirectory(root)).toEqual(["copy.csv", "report.csv"])
+
 					const missing = yield* run("files", "upload", path.join(root, "absent.txt"))
 					expect(missing.exitCode).toBe(1)
 					expect(missing.errorMessage).toContain("no such file")

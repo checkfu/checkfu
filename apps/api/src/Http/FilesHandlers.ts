@@ -51,6 +51,13 @@ const interrupted = reject(503, "The upload took too long; retry the request.")
 
 const encodeFile = Schema.encodeEffect(FileResource)
 
+const attachmentNamed = (filename: string) =>
+	`attachment; filename*=UTF-8''${encodeURIComponent(filename)
+		.replaceAll("'", "%27")
+		.replaceAll("(", "%28")
+		.replaceAll(")", "%29")
+		.replaceAll("*", "%2A")}`
+
 const fileResource = (id: FileId, state: FileState) => ({
 	id,
 	type: "file" as const,
@@ -113,16 +120,14 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 									Effect.map((reserved): number | null => reserved.reply.reservation),
 									Effect.catchTag("FileAlreadyExists", () => Effect.succeed(null)),
 								)
+					const body = request.stream.pipe(
+						Stream.mapError((cause) => new FileStoreError({ cause })),
+					)
 					const bytes = yield* stored(
-						store.put(
-							id,
-							reservation,
-							request.stream.pipe(Stream.mapError((cause) => new FileStoreError({ cause }))),
-							size,
-						),
+						reservation === null ? store.measure(body) : store.put(id, reservation, body, size),
 					).pipe(
 						Effect.catchTags({
-							BytesPurged: () => (reservation === null ? reusedKey : interrupted),
+							BytesPurged: () => interrupted,
 							ReservationStale: () => interrupted,
 							FileSizeMismatch: (mismatch) =>
 								reject(
@@ -147,7 +152,7 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 							.pipe(
 								Effect.catchTags({
 									FileReservationLapsed: () => interrupted,
-									FileAlreadyExists: () => reusedKey,
+									FileAlreadyExists: () => Effect.void,
 								}),
 							)
 					}
@@ -192,7 +197,7 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 						contentType: state.content_type,
 						contentLength: state.size,
 						headers: {
-							"content-disposition": "attachment",
+							"content-disposition": attachmentNamed(state.filename),
 							"content-security-policy": "sandbox",
 							"x-content-type-options": "nosniff",
 						},

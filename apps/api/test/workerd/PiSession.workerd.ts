@@ -696,7 +696,9 @@ describe("PiSession real Durable Object under workerd", () => {
 		const download = await apiFetch(`/v1/files/${file.id}/content`)
 		expect(download.status).toBe(200)
 		expect(download.headers.get("content-type")).toBe("application/pdf")
-		expect(download.headers.get("content-disposition")).toBe("attachment")
+		expect(download.headers.get("content-disposition")).toBe(
+			"attachment; filename*=UTF-8''report.pdf",
+		)
 		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
 
 		const empty = await uploadFile("filename=empty.txt", new Uint8Array(0))

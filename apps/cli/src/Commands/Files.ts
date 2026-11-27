@@ -2,10 +2,13 @@ import { FileId, FileName, MAX_FILE_BYTES } from "@checkfu/sdk/Schemas"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
+import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
@@ -101,18 +104,22 @@ const downloadCommand = Command.make(
 				.get({ params: { file_id } })
 				.pipe(Effect.mapError(formatClientError))
 			const target = Option.getOrElse(input.output, () => file.filename)
+			const unwritable = (error: PlatformError.PlatformError) =>
+				usageError(`${target}: ${error.message}`)
+			if (yield* Effect.mapError(fs.exists(target), unwritable)) {
+				return yield* usageError(`${target} already exists; pass --output to write somewhere else.`)
+			}
 			const body = yield* client.api.files
 				.content({ params: { file_id } })
 				.pipe(Effect.mapError(formatClientError))
+			const random = yield* SecureRandom.SecureRandom
+			const partial = `${target}.${Hex.encode(yield* random.randomBytes(6))}.tmp`
 			yield* Stream.run(
 				Stream.mapError(body, (error) => formatClientError(error)),
-				Sink.mapError(fs.sink(target, { flag: "wx" }), (error) =>
-					usageError(
-						error.reason._tag === "AlreadyExists"
-							? `${target} already exists; pass --output to write somewhere else.`
-							: `${target}: ${error.message}`,
-					),
-				),
+				Sink.mapError(fs.sink(partial, { flag: "wx" }), unwritable),
+			).pipe(
+				Effect.andThen(Effect.mapError(fs.rename(partial, target), unwritable)),
+				Effect.onError(() => Effect.ignore(fs.remove(partial))),
 			)
 			yield* renderOutput({ id: file.id, path: target, size: file.size })
 		}),

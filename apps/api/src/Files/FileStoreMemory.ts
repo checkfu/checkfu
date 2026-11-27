@@ -26,13 +26,21 @@ const collect = (body: Stream.Stream<Uint8Array, FileStoreError>) =>
 		return bytes
 	})
 
+const hashed = (body: Stream.Stream<Uint8Array, FileStoreError>) =>
+	Effect.gen(function* () {
+		const digest = yield* Digest.Digest
+		const bytes = yield* collect(body)
+		return { bytes, sha256: yield* digest.digestHex(Digest.sha256, bytes) }
+	}).pipe(Effect.provide(Digest.layerWebCrypto))
+
 export const makeFileStoreMemory = (options?: { readonly scope?: string }) => {
 	const scope = options?.scope ?? DEFAULT_STORAGE_SCOPE
 	const objects = new Map<string, Uint8Array>()
 	const marks = new Map<string, OwnerMarks>()
 	const owners = new Map<string, ReturnType<typeof ownerOf>>()
 	let failing = false
-	let beforeStore: Effect.Effect<void> = Effect.void
+	let beforeStore: Effect.Effect<void, FileStoreError> = Effect.void
+	let afterPut: Effect.Effect<void> = Effect.void
 	let writes = 0
 
 	const online = Effect.suspend(() => (failing ? Effect.fail(offline()) : Effect.void))
@@ -72,38 +80,26 @@ export const makeFileStoreMemory = (options?: { readonly scope?: string }) => {
 	const layer = Layer.succeed(FileStore, {
 		put: (fileId, reservation, body, size) => {
 			const key = fileContentKey(scope, fileId)
-			const owner = owning(fileId)
-			const measured = Effect.gen(function* () {
-				yield* online
-				const digest = yield* Digest.Digest
-				const bytes = yield* collect(body)
-				return { bytes, sha256: yield* digest.digestHex(Digest.sha256, bytes) }
-			})
-			const written =
-				reservation === null
-					? owner.write(
-							null,
-							Effect.map(measured, ({ bytes, sha256 }) => ({ sha256, size: bytes.byteLength })),
-						)
-					: owner.writeAlone(
-							reservation,
-							Effect.gen(function* () {
-								const { bytes, sha256 } = yield* measured
-								if (bytes.byteLength !== size) {
-									objects.delete(key)
-									return yield* new FileSizeMismatch({
-										declared: size,
-										received: bytes.byteLength,
-									})
-								}
-								yield* Effect.suspend(() => beforeStore)
-								objects.set(key, bytes)
-								writes += 1
-								return { sha256, size: bytes.byteLength }
-							}),
-						)
-			return written.pipe(Effect.provide(Digest.layerWebCrypto))
+			return owning(fileId)
+				.writeAlone(
+					reservation,
+					Effect.gen(function* () {
+						yield* online
+						const { bytes, sha256 } = yield* hashed(body)
+						if (bytes.byteLength !== size) {
+							objects.delete(key)
+							return yield* new FileSizeMismatch({ declared: size, received: bytes.byteLength })
+						}
+						yield* Effect.suspend(() => beforeStore)
+						objects.set(key, bytes)
+						writes += 1
+						return { sha256, size: bytes.byteLength }
+					}),
+				)
+				.pipe(Effect.tap(() => Effect.suspend(() => afterPut)))
 		},
+		measure: (body) =>
+			Effect.map(hashed(body), ({ bytes, sha256 }) => ({ sha256, size: bytes.byteLength })),
 		content: (fileId) =>
 			Effect.andThen(
 				online,
@@ -124,8 +120,11 @@ export const makeFileStoreMemory = (options?: { readonly scope?: string }) => {
 		setFailing: (value: boolean) => {
 			failing = value
 		},
-		setBeforeStore: (effect: Effect.Effect<void>) => {
+		setBeforeStore: (effect: Effect.Effect<void, FileStoreError>) => {
 			beforeStore = effect
+		},
+		setAfterPut: (effect: Effect.Effect<void>) => {
+			afterPut = effect
 		},
 	}
 }

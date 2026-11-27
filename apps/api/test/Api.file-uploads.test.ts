@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
+import { FileStoreError } from "../src/Files/FileStore.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { DEFAULT_STORAGE_SCOPE as SCOPE } from "../src/Placement.ts"
 import {
@@ -115,7 +116,9 @@ describe("Files API", () => {
 				expect(download.status).toBe(200)
 				expect(download.headers.get("content-type")).toBe("application/pdf")
 				expect(download.headers.get("content-length")).toBe("70000")
-				expect(download.headers.get("content-disposition")).toBe("attachment")
+				expect(download.headers.get("content-disposition")).toBe(
+					"attachment; filename*=UTF-8''report.pdf",
+				)
 				expect(new Uint8Array(yield* Effect.promise(() => download.arrayBuffer()))).toEqual(data)
 
 				const deleted = yield* call("DELETE", `/v1/files/${file.id}`)
@@ -142,6 +145,20 @@ describe("Files API", () => {
 				expect(yield* typeOf("filename=notes.md")).toBe("text/markdown")
 				expect(yield* typeOf("filename=notes.md&content_type=text%2Fplain")).toBe("text/plain")
 				expect(yield* typeOf("filename=data")).toBe("application/octet-stream")
+			}),
+		))
+
+	it("names the download after the file, however the name is spelled", () =>
+		withFiles(({ call, upload }) =>
+			Effect.gen(function* () {
+				const file = yield* json<FileBody>(
+					yield* upload(`filename=${encodeURIComponent("résumé (final)'s.pdf")}`, bytesOf(4)),
+				)
+				expect(file.filename).toBe("résumé (final)'s.pdf")
+				const download = yield* call("GET", `/v1/files/${file.id}/content`)
+				expect(download.headers.get("content-disposition")).toBe(
+					"attachment; filename*=UTF-8''r%C3%A9sum%C3%A9%20%28final%29%27s.pdf",
+				)
 			}),
 		))
 
@@ -231,6 +248,52 @@ describe("Files API", () => {
 			}),
 		))
 
+	it("answers an upload that finished after its retry created the file with that file", () =>
+		withFiles(({ upload, store }) =>
+			Effect.gen(function* () {
+				const key = { "idempotency-key": "overtaken" }
+				const data = bytesOf(4000, 3)
+				const stored = yield* Deferred.make<void>()
+				const proceed = yield* Deferred.make<void>()
+				store.setAfterPut(
+					Effect.andThen(Deferred.succeed(stored, undefined), Deferred.await(proceed)),
+				)
+				const first = yield* Effect.forkChild(upload("filename=a.bin", data, key))
+				yield* Deferred.await(stored)
+				store.setAfterPut(Effect.void)
+				const retry = yield* upload("filename=a.bin", data, key)
+				expect(retry.status).toBe(201)
+				yield* Deferred.succeed(proceed, undefined)
+				const overtaken = yield* Fiber.join(first)
+				expect(overtaken.status).toBe(201)
+				expect(yield* json(overtaken)).toEqual(yield* json(retry))
+			}),
+		))
+
+	it("refuses an upload that finished after other bytes took its key", () =>
+		withFiles(({ call, upload, store }) =>
+			Effect.gen(function* () {
+				const key = { "idempotency-key": "taken" }
+				const mine = bytesOf(4000, 5)
+				const theirs = bytesOf(4000, 6)
+				const stored = yield* Deferred.make<void>()
+				const proceed = yield* Deferred.make<void>()
+				store.setAfterPut(
+					Effect.andThen(Deferred.succeed(stored, undefined), Deferred.await(proceed)),
+				)
+				const first = yield* Effect.forkChild(upload("filename=a.bin", mine, key))
+				yield* Deferred.await(stored)
+				store.setAfterPut(Effect.void)
+				const other = yield* upload("filename=a.bin", theirs, key)
+				expect(other.status).toBe(201)
+				const file = yield* json<FileBody>(other)
+				yield* Deferred.succeed(proceed, undefined)
+				expect((yield* Fiber.join(first)).status).toBe(409)
+				const download = yield* call("GET", `/v1/files/${file.id}/content`)
+				expect(new Uint8Array(yield* Effect.promise(() => download.arrayBuffer()))).toEqual(theirs)
+			}),
+		))
+
 	it("answers 503 and keeps nothing when storage fails, and stores the file on a retry", () =>
 		withFiles(({ call, upload, store }) =>
 			Effect.gen(function* () {
@@ -243,6 +306,10 @@ describe("Files API", () => {
 					(yield* json<{ data: ReadonlyArray<FileBody> }>(yield* call("GET", "/v1/files"))).data,
 				).toEqual([])
 				store.setFailing(false)
+				store.setBeforeStore(Effect.fail(new FileStoreError({ cause: "write failed" })))
+				expect((yield* upload("filename=a.bin", data, key)).status).toBe(503)
+				expect(store.objects.size).toBe(0)
+				store.setBeforeStore(Effect.void)
 				const retried = yield* upload("filename=a.bin", data, key)
 				expect(retried.status).toBe(201)
 				expect((yield* json<FileBody>(retried)).sha256).toBe(sha256(data))

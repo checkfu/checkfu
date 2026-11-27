@@ -37,17 +37,22 @@ const measuring = () => {
 	const sink = new crypto.DigestStream("SHA-256")
 	const writer = sink.getWriter()
 	let size = 0
+	let ended = false
 	const through = new TransformStream<Uint8Array, Uint8Array>({
 		transform: async (chunk, controller) => {
 			size += chunk.byteLength
 			await writer.write(chunk)
 			controller.enqueue(chunk)
 		},
-		flush: () => writer.close(),
+		flush: () => {
+			ended = true
+			return writer.close()
+		},
 	})
 	return {
 		through,
 		received: () => size,
+		ended: () => ended,
 		stored: async (): Promise<StoredBytes> => ({
 			sha256: Hex.encode(new Uint8Array(await sink.digest)),
 			size,
@@ -70,7 +75,7 @@ type PutOutcome = StoredBytes | "purged" | "stale" | { readonly received: number
 interface FileObjectsShape {
 	readonly put: (
 		fileId: string,
-		reservation: number | null,
+		reservation: number,
 		body: ReadableStream<Uint8Array>,
 		size: number,
 	) => Effect.Effect<PutOutcome, FileStoreError, RuntimeContext>
@@ -137,9 +142,10 @@ export const FileObjectsLive = FileObjects.make(
 							{ contentLength: size },
 						),
 					)
-					if (measured.received() !== size) {
+					const received = measured.received()
+					if (received > size || (measured.ended() && received < size)) {
 						yield* bucket.delete(key).pipe(Effect.mapError(storeError))
-						return { received: measured.received() }
+						return { received }
 					}
 					if (written._tag === "Failure") {
 						return yield* storeError(Cause.squash(written.cause))
@@ -153,15 +159,11 @@ export const FileObjectsLive = FileObjects.make(
 				return {
 					put: (fileId, reservation, body, size) => {
 						const key = fileContentKey(scope, fileId)
-						const owner = owning(fileId)
 						const written: Effect.Effect<
 							PutOutcome,
 							FileStoreError | BytesPurged | ReservationStale,
 							RuntimeContext
-						> =
-							reservation === null
-								? owner.write(null, measure(body))
-								: owner.writeAlone(reservation, store(key, body, size))
+						> = owning(fileId).writeAlone(reservation, store(key, body, size))
 						return overWire(
 							written.pipe(
 								Effect.catchTags({
@@ -208,7 +210,7 @@ export const FileStoreR2 = Layer.effect(
 							outcome === "purged"
 								? Effect.fail(new BytesPurged())
 								: outcome === "stale"
-									? Effect.fail(new ReservationStale({ reservation: reservation ?? 0 }))
+									? Effect.fail(new ReservationStale({ reservation }))
 									: "received" in outcome
 										? Effect.fail(
 												new FileSizeMismatch({ declared: size, received: outcome.received }),
@@ -216,6 +218,7 @@ export const FileStoreR2 = Layer.effect(
 										: Effect.succeed(outcome),
 					),
 				),
+			measure: (body) => measure(Stream.toReadableStream(body)),
 			content: fileContent(scope, bucket, runtime),
 			purge: (fileId) => call(() => owners(fileId).purge(fileId)),
 			release: (fileId, reservation) => call(() => owners(fileId).release(fileId, reservation)),
