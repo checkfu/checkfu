@@ -34,11 +34,11 @@ const firings = Option.liftThrowable(
 	},
 )
 
-const UTC = DateTime.zoneMakeNamedUnsafe("UTC")
+const utc = (): DateTime.TimeZone.Named => DateTime.zoneMakeNamedUnsafe("UTC")
 
 const hasADate = (expression: string): boolean =>
-	Option.getSuccess(Cron.parse(expression, UTC)).pipe(
-		Option.flatMap((cron) => firings(cron, UTC, 0, 1)),
+	Option.getSuccess(Cron.parse(expression, utc())).pipe(
+		Option.flatMap((cron) => firings(cron, utc(), 0, 1)),
 		Option.isSome,
 	)
 
@@ -66,7 +66,7 @@ const parseInZone = (
 	DateTime.zoneMakeNamed(timezone).pipe(
 		Option.filter((zone) => !isOffset(zone)),
 		Option.flatMap((zone) =>
-			Option.getSuccess(Cron.parse(expression, UTC)).pipe(
+			Option.getSuccess(Cron.parse(expression, utc())).pipe(
 				Option.map((cron) => [cron, zone] as const),
 			),
 		),
