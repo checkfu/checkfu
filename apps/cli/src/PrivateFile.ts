@@ -1,4 +1,5 @@
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Hex from "effect/encoding/Hex"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import type * as Option from "effect/Option"
@@ -52,9 +53,7 @@ export const writePrivate = (
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
 		const random = yield* SecureRandom.SecureRandom
-		const suffix = Array.from(yield* random.randomBytes(6), (byte) =>
-			byte.toString(16).padStart(2, "0"),
-		).join("")
+		const suffix = Hex.encode(yield* random.randomBytes(6))
 		const temporary = `${file}.${suffix}.tmp`
 		yield* Effect.gen(function* () {
 			yield* fs.makeDirectory(path.dirname(file), { recursive: true, mode: 0o700 })

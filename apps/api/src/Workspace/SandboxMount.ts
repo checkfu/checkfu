@@ -1,4 +1,6 @@
 import { MAX_ARTIFACT_PATH_LENGTH } from "@checkfu/sdk/Limits"
+import * as Base64 from "effect/encoding/Base64"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { OutputEntry } from "./SessionOutputs.ts"
 import type { OutputFiles } from "./SessionOutputs.ts"
@@ -55,8 +57,13 @@ const byteLength = (text: string): number => new TextEncoder().encode(text).byte
 const bytesOf = async (body: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
 	new Uint8Array(await new Response(body).arrayBuffer())
 
-const fromBase64 = (text: string): Uint8Array<ArrayBuffer> =>
-	Uint8Array.from(atob(text), (character) => character.charCodeAt(0))
+const fromBase64 = (text: string): Uint8Array<ArrayBuffer> => {
+	const decoded = Base64.decode(text)
+	if (Result.isFailure(decoded)) {
+		throw failure("EIO", "The machine returned invalid base64 file contents.")
+	}
+	return new Uint8Array(decoded.success)
+}
 
 const atRoot = (rel: string, script: string): string =>
 	rel === "" ? `mkdir -p -- "$1" 2>/dev/null; ${script}` : script

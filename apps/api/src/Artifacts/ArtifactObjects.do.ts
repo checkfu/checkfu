@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
+import * as Hex from "effect/encoding/Hex"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
@@ -35,8 +36,7 @@ declare global {
 	}
 }
 
-const hexOf = (buffer: ArrayBuffer) =>
-	Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("")
+const hexOf = (buffer: ArrayBuffer) => Hex.encode(new Uint8Array(buffer))
 
 const overWire = <A, R>(effect: Effect.Effect<A, ArtifactStoreError, R>) =>
 	Effect.mapError(effect, (error) => storeError(String(error.cause)))

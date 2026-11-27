@@ -8,7 +8,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { WEBHOOK_MAX_ERROR_LENGTH } from "./WebhookDeliveryEngine.ts"
+import { truncateError } from "./WebhookDeliveryEngine.ts"
 import type { WebhookHttpResult, WebhookHttpSender } from "./WebhookDeliveryEngine.ts"
 import {
 	WEBHOOK_EGRESS_TARGET_HEADER,
@@ -48,11 +48,6 @@ const EgressEnvelopeSchema = Schema.Union([
 ])
 
 const decodeEgressEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(EgressEnvelopeSchema))
-
-const truncateError = (message: string): string =>
-	message.length <= WEBHOOK_MAX_ERROR_LENGTH
-		? message
-		: `${message.slice(0, WEBHOOK_MAX_ERROR_LENGTH - 1)}…`
 
 const cancelResponseBody = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<void> =>
 	Effect.ignore(

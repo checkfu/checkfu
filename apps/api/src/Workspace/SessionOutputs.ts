@@ -1,5 +1,6 @@
 import type { Workspace } from "@cloudflare/computer"
 import * as Predicate from "effect/Predicate"
+import * as Hex from "effect/encoding/Hex"
 import * as Schema from "effect/Schema"
 import { ArtifactPath } from "../Artifacts/ArtifactFiles.ts"
 import { NonNegativeInt } from "@checkfu/sdk/Schemas"
@@ -94,9 +95,7 @@ const changedDuringCapture = (error: unknown): boolean =>
 	["ENOENT", "ENOTDIR", "EAGAIN"].some((code) => hasCode(error, code))
 
 const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
-	Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
-		byte.toString(16).padStart(2, "0"),
-	).join("")
+	Hex.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
 
 export const makeSessionOutputs = (files: OutputFiles) => ({
 	list: async (): Promise<OutputsListing> => {

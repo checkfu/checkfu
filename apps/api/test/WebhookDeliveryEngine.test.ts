@@ -76,6 +76,27 @@ const activeEndpoint = (overrides: Partial<WebhookEndpointState> = {}): WebhookE
 const CryptoLive = Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCrypto))
 
 describe("WebhookDeliveryEngine (real SQLite)", () => {
+	it.each(["status", "attempt_count"] as const)("rejects a malformed stored %s", (column) => {
+		const db = new DatabaseSync(":memory:")
+		try {
+			const engine = new WebhookDeliveryEngine(WebhookId.make("whe_invalid"), sqliteStorage(db))
+			engine.enqueue(
+				{
+					delivery_id: WebhookDeliveryId.make("wdel_1"),
+					event_id: WebhookEventId.make("evt_1"),
+					event_type: "session.status_idle",
+					dedupe_key: "evt_1",
+					payload_json: "{}",
+				},
+				T0,
+			)
+			db.exec(`UPDATE webhook_deliveries SET ${column} = 'invalid'`)
+			expect(() => engine.listDeliveries({})).toThrow(column)
+		} finally {
+			db.close()
+		}
+	})
+
 	it.effect(
 		"deduplicates enqueues, delivers signed payloads with zero health writes when healthy, supports dual-secret rotation, and schedules idle 14d retention cleanup",
 		() =>

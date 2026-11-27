@@ -16,6 +16,7 @@ import {
 } from "@checkfu/pi-providers/catalog"
 import type { ProviderSpec } from "@checkfu/pi-providers/catalog"
 import * as Command from "effect/cli/Command"
+import * as Hex from "effect/encoding/Hex"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
 import * as Config from "effect/Config"
@@ -393,7 +394,7 @@ const resolveTarget = (
 
 const generateApiKey = Effect.map(
 	Effect.flatMap(SecureRandom.SecureRandom, (random) => random.randomBytes(32)),
-	(bytes) => `ck_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`,
+	(bytes) => `ck_${Hex.encode(bytes)}`,
 )
 
 const promptForProviderKey = (retry: string) =>

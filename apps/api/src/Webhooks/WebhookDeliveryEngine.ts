@@ -8,7 +8,7 @@ import type {
 	DeliveryLifecycle,
 } from "@checkfu/domain/Webhook/WebhookDeliveryLifecycle"
 import type { WebhookEndpointState } from "@checkfu/domain/Webhook/WebhookEndpoint.aggregate"
-import type { WebhookOutcomeKind } from "@checkfu/domain/Webhook/WebhookTypes"
+import { WebhookOutcomeKind } from "@checkfu/domain/Webhook/WebhookTypes"
 import { parsePublicHttpsWebhookUrl } from "@checkfu/domain/Webhook/WebhookUrl"
 import {
 	WebhookDeliveryId,
@@ -20,6 +20,7 @@ import type { WebhookId } from "@checkfu/sdk/Schemas"
 import * as Clock from "effect/Clock"
 import type * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type {
 	EnqueueWebhookDeliveryInput,
@@ -40,7 +41,7 @@ export const WEBHOOK_DELIVERY_TIMEOUT_MS = 10_000
 export const WEBHOOK_MAX_STORED_DELIVERIES = 500
 export const WEBHOOK_MAX_PENDING_DELIVERIES = 1000
 export const WEBHOOK_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
-export const WEBHOOK_MAX_ERROR_LENGTH = 512
+const WEBHOOK_MAX_ERROR_LENGTH = 512
 export const WEBHOOK_BATCH_PER_ALARM = 25
 export const WEBHOOK_USER_AGENT = "Checkfu-Webhooks/1.0"
 
@@ -118,7 +119,7 @@ export interface WebhookHttpSender {
 	readonly send: (request: WebhookHttpRequest) => Effect.Effect<WebhookHttpResult>
 }
 
-const truncateError = (message: string): string =>
+export const truncateError = (message: string): string =>
 	message.length <= WEBHOOK_MAX_ERROR_LENGTH
 		? message
 		: `${message.slice(0, WEBHOOK_MAX_ERROR_LENGTH - 1)}…`
@@ -135,24 +136,25 @@ export const retryDelayMsForAttempt = (
 	return Math.max(1000, Math.round(base * (1 + clampedJitter)))
 }
 
-interface StoredRow {
-	readonly delivery_id: string
-	readonly event_id: string
-	readonly event_type: string
-	readonly dedupe_key: string
-	readonly payload_json: string
-	readonly status: WebhookDeliveryStatus
-	readonly attempt_count: number
-	readonly max_attempts: number
-	readonly next_attempt_at: number | null
-	readonly last_attempt_at: number | null
-	readonly last_http_status: number | null
-	readonly last_outcome: WebhookDeliveryOutcome | null
-	readonly last_error: string | null
-	readonly created_at: number
-	readonly updated_at: number
-	readonly completed_at: number | null
-}
+const StoredDelivery = Schema.Struct({
+	delivery_id: Schema.String,
+	event_id: Schema.String,
+	event_type: Schema.String,
+	dedupe_key: Schema.String,
+	payload_json: Schema.String,
+	status: WebhookDeliveryStatus,
+	attempt_count: Schema.Int,
+	max_attempts: Schema.Int,
+	next_attempt_at: Schema.NullOr(Schema.Int),
+	last_attempt_at: Schema.NullOr(Schema.Int),
+	last_http_status: Schema.NullOr(Schema.Int),
+	last_outcome: Schema.NullOr(WebhookDeliveryOutcome),
+	last_error: Schema.NullOr(Schema.String),
+	created_at: Schema.Int,
+	updated_at: Schema.Int,
+	completed_at: Schema.NullOr(Schema.Int),
+})
+type StoredRow = typeof StoredDelivery.Type
 
 const lifecycleOf = (row: StoredRow): DeliveryLifecycle => ({
 	status: row.status,
@@ -162,81 +164,22 @@ const lifecycleOf = (row: StoredRow): DeliveryLifecycle => ({
 	completed_at: row.completed_at,
 })
 
-interface StoredHealthOutcome {
-	readonly outcome_id: string
-	readonly definition_revision: number
-	readonly outcome: WebhookOutcomeKind
-	readonly observed_at: number
-	readonly created_at: number
-}
+const StoredHealthOutcome = Schema.Struct({
+	outcome_id: Schema.String,
+	definition_revision: Schema.Int,
+	outcome: WebhookOutcomeKind,
+	observed_at: Schema.Int,
+	created_at: Schema.Int,
+})
+type StoredHealthOutcome = typeof StoredHealthOutcome.Type
 
-const isDeliveryStatus = Schema.is(WebhookDeliveryStatus)
-const isDeliveryOutcome = Schema.is(WebhookDeliveryOutcome)
-
-const asString = (value: WebhookSqlValue | undefined): string =>
-	typeof value === "string" ? value : String(value ?? "")
 const asNumber = (value: WebhookSqlValue | undefined): number =>
 	typeof value === "number" ? value : Number(value ?? 0)
 const asNullableNumber = (value: WebhookSqlValue | undefined): number | null =>
 	value === null || value === undefined ? null : asNumber(value)
-const asNullableString = (value: WebhookSqlValue | undefined): string | null =>
-	value === null || value === undefined ? null : asString(value)
 
-const parseDeliveryStatus = (value: WebhookSqlValue | undefined): WebhookDeliveryStatus => {
-	const raw = asString(value)
-	if (isDeliveryStatus(raw)) {
-		return raw
-	}
-	throw new Error(`Invalid stored webhook delivery status: ${raw}`)
-}
-
-const parseDeliveryOutcome = (
-	value: WebhookSqlValue | undefined,
-): WebhookDeliveryOutcome | null => {
-	const raw = asNullableString(value)
-	if (raw === null) {
-		return null
-	}
-	if (isDeliveryOutcome(raw)) {
-		return raw
-	}
-	throw new Error(`Invalid stored webhook delivery outcome: ${raw}`)
-}
-
-const parseHealthOutcomeKind = (value: WebhookSqlValue | undefined): WebhookOutcomeKind => {
-	const raw = asString(value)
-	if (raw === "delivered" || raw === "failed" || raw === "redirect") {
-		return raw
-	}
-	throw new Error(`Invalid stored webhook health outcome: ${raw}`)
-}
-
-const rowFromRaw = (raw: WebhookSqlRow): StoredRow => ({
-	delivery_id: asString(raw.delivery_id),
-	event_id: asString(raw.event_id),
-	event_type: asString(raw.event_type),
-	dedupe_key: asString(raw.dedupe_key),
-	payload_json: asString(raw.payload_json),
-	status: parseDeliveryStatus(raw.status),
-	attempt_count: asNumber(raw.attempt_count),
-	max_attempts: asNumber(raw.max_attempts),
-	next_attempt_at: asNullableNumber(raw.next_attempt_at),
-	last_attempt_at: asNullableNumber(raw.last_attempt_at),
-	last_http_status: asNullableNumber(raw.last_http_status),
-	last_outcome: parseDeliveryOutcome(raw.last_outcome),
-	last_error: asNullableString(raw.last_error),
-	created_at: asNumber(raw.created_at),
-	updated_at: asNumber(raw.updated_at),
-	completed_at: asNullableNumber(raw.completed_at),
-})
-
-const healthOutcomeFromRaw = (raw: WebhookSqlRow): StoredHealthOutcome => ({
-	outcome_id: asString(raw.outcome_id),
-	definition_revision: asNumber(raw.definition_revision),
-	outcome: parseHealthOutcomeKind(raw.outcome),
-	observed_at: asNumber(raw.observed_at),
-	created_at: asNumber(raw.created_at),
-})
+const rowFromRaw = Schema.decodeUnknownSync(StoredDelivery)
+const healthOutcomeFromRaw = Schema.decodeUnknownSync(StoredHealthOutcome)
 
 const toRecord = (webhookId: WebhookId, row: StoredRow): WebhookDeliveryRecord => ({
 	id: WebhookDeliveryId.make(row.delivery_id),
@@ -256,23 +199,24 @@ const toRecord = (webhookId: WebhookId, row: StoredRow): WebhookDeliveryRecord =
 	completed_at: row.completed_at,
 })
 
-const formatCursor = (row: Pick<StoredRow, "created_at" | "delivery_id">): string =>
-	`${row.created_at}:${row.delivery_id}`
+const DeliveryCursor = Schema.TemplateLiteralParser([
+	Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	":",
+	Schema.NonEmptyString,
+])
+const encodeCursor = Schema.encodeSync(DeliveryCursor)
+const decodeCursor = Schema.decodeUnknownOption(DeliveryCursor)
 
-const parseCursor = (
-	cursor: string,
-): { readonly created_at: number; readonly delivery_id: string } | null => {
-	const colon = cursor.indexOf(":")
-	if (colon <= 0) {
-		return null
-	}
-	const createdAt = Number(cursor.slice(0, colon))
-	const deliveryId = cursor.slice(colon + 1)
-	if (!Number.isInteger(createdAt) || createdAt < 0 || deliveryId.length === 0) {
-		return null
-	}
-	return { created_at: createdAt, delivery_id: deliveryId }
-}
+const formatCursor = (row: Pick<StoredRow, "created_at" | "delivery_id">): string =>
+	encodeCursor([row.created_at, ":", row.delivery_id])
+
+const parseCursor = (cursor: string) =>
+	Option.getOrNull(
+		Option.map(decodeCursor(cursor), ([created_at, , delivery_id]) => ({
+			created_at,
+			delivery_id,
+		})),
+	)
 
 const SELECT_COLUMNS =
 	"delivery_id, event_id, event_type, dedupe_key, payload_json, status, attempt_count, max_attempts, " +
@@ -568,7 +512,7 @@ export class WebhookDeliveryEngine {
 							limit + 1,
 						)
 						.toArray()
-		const rows = rawRows.map(rowFromRaw)
+		const rows = rawRows.map((row) => rowFromRaw(row))
 		const page = rows.slice(0, limit)
 		const hasMore = rows.length > limit
 		const last = page.at(-1)
@@ -662,7 +606,7 @@ export class WebhookDeliveryEngine {
 					"FROM webhook_health_outcomes ORDER BY created_at ASC, outcome_id ASC",
 			)
 			.toArray()
-			.map(healthOutcomeFromRaw)
+			.map((row) => healthOutcomeFromRaw(row))
 	}
 
 	#deletePendingHealthOutcome(outcomeId: string): void {
@@ -789,7 +733,7 @@ export class WebhookDeliveryEngine {
 					batchSize,
 				)
 				.toArray()
-				.map(rowFromRaw)
+				.map((row) => rowFromRaw(row))
 			if (dueRows.length === 0) {
 				self.prune(nowMillis)
 				return { processed: 0, purged: false, nextAlarmAt: self.nextAlarmAt() }
