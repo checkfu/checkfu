@@ -42,6 +42,10 @@ import { encodeToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
+import {
+	SessionTurnCompletion,
+	sessionTurnKey,
+} from "@checkfu/domain/Session/SessionTurnCompletion.view"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { MAX_SESSION_INITIAL_MESSAGES_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
 import {
@@ -52,8 +56,10 @@ import {
 import { describe, expect, it } from "@effect/vitest"
 import * as Arbitrary from "effect/Arbitrary"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
@@ -2449,6 +2455,210 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				}).pipe(Effect.provide(layer)),
 			)
 		} finally {
+			await closeAll()
+		}
+	})
+
+	it("shares completed turn lookups within a REST page and an SSE connection", async () => {
+		const secondStarted = Promise.withResolvers<void>()
+		const releaseSecond = Promise.withResolvers<void>()
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context, signal) => {
+			if (extractLastUserText(context) === "second turn") {
+				secondStarted.resolve()
+				await Promise.race([
+					releaseSecond.promise,
+					new Promise<void>((resolve) => {
+						if (signal?.aborted) {
+							resolve()
+						} else {
+							signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					}),
+				])
+			}
+			const reply = makeAssistantReply(model, null, "ok", 1, 1)
+			return signal?.aborted ? { ...reply, stopReason: "aborted" } : reply
+		})
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const completions = yield* SessionTurnCompletion
+					const counts = new Map<string, number>()
+					const first = DateTime.makeUnsafe("2026-01-01T12:01:00Z")
+					const second = DateTime.makeUnsafe("2026-01-01T12:02:00Z")
+					const missedLiveTurn = yield* Deferred.make<void>()
+					let missingKey: string | undefined
+					let failFirst = false
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(SessionTurnCompletion, {
+							...completions,
+							get: (key) =>
+								Effect.gen(function* () {
+									const count = (counts.get(key) ?? 0) + 1
+									counts.set(key, count)
+									yield* Effect.sleep("1 millis")
+									if (count === 1 && failFirst) {
+										return yield* Effect.die(new Error("Completion lookup unavailable"))
+									}
+									if (count === 1 && key === missingKey) {
+										if (key.endsWith(":2")) {
+											yield* Deferred.succeed(missedLiveTurn, undefined)
+										}
+										return Option.none()
+									}
+									return Option.some(key.endsWith(":1") ? first : second)
+								}),
+						}),
+					)
+					const existing = yield* createIdleSession(apiFetch)
+					const existingResponse = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${existing.id}`,
+						headers: AUTH_HEADERS,
+					})
+					const { agent } = yield* Schema.decodeUnknownEffect(
+						Schema.Struct({ agent: Schema.Struct({ id: Schema.String }) }),
+					)(yield* Effect.promise(() => existingResponse.json()))
+					const session = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: {
+							agent: agent.id,
+							environment_id: existing.environment_id,
+							initial_events: asInitialEvents(
+								Array.from(
+									{ length: MAX_SESSION_INITIAL_EVENTS },
+									(_, index) => `initial-${index}`,
+								),
+							),
+						},
+					})
+					expect(session.status).toBe(201)
+					const { id } = yield* Schema.decodeUnknownEffect(Schema.Struct({ id: Schema.String }))(
+						yield* Effect.promise(() => session.json()),
+					)
+					const path = `/v1/sessions/${id}/events`
+					const key1 = sessionTurnKey(id, 1)
+					const key2 = sessionTurnKey(id, 2)
+					const open = (after?: number) =>
+						sendRequest(apiFetch, {
+							method: "GET",
+							path: after === undefined ? `${path}/stream` : `${path}/stream?after=${after}`,
+							headers: AUTH_HEADERS,
+						})
+					const read = (response: Response, through: number) =>
+						Effect.promise(() =>
+							readSseUntil(
+								response,
+								(event) => event.type === "session.status_idle" && event.turn === through,
+							),
+						)
+					const initial = yield* read(yield* open(), 1)
+					const head = initial.at(-1)?.data.seq
+					if (typeof head !== "number") {
+						return yield* Effect.die(new Error("The first turn has no last event sequence"))
+					}
+					counts.clear()
+					missingKey = key2
+					const live = yield* open(head)
+					const reading = yield* Effect.forkChild(read(live, 2), { startImmediately: true })
+					const sent = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path,
+						headers: AUTH_HEADERS,
+						body: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "second turn" }] }],
+						},
+					})
+					expect(sent.status).toBe(200)
+					yield* Effect.promise(() => secondStarted.promise)
+					yield* Deferred.await(missedLiveTurn)
+					const interrupted = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path,
+						headers: AUTH_HEADERS,
+						body: { events: [{ type: "user.interrupt" }] },
+					})
+					expect(interrupted.status).toBe(200)
+					releaseSecond.resolve()
+					const liveEvents = yield* Fiber.join(reading)
+					expect(
+						liveEvents.flatMap(({ data }) =>
+							data.type === "user.message" || data.type === "user.interrupt"
+								? [[data.type, data.processed_at]]
+								: [],
+						),
+					).toEqual([
+						["user.message", null],
+						["user.interrupt", DateTime.formatIso(second)],
+					])
+					expect(counts.get(key2)).toBe(2)
+					missingKey = undefined
+
+					const page = (query: string) =>
+						sendRequest(apiFetch, {
+							method: "GET",
+							path: `${path}?${query}`,
+							headers: AUTH_HEADERS,
+						})
+					counts.clear()
+					failFirst = true
+					expect((yield* page("limit=100&types=user.message")).status).toBe(500)
+					failFirst = false
+					counts.clear()
+					const decodePage = Schema.decodeUnknownEffect(
+						Schema.Struct({
+							data: Schema.Array(
+								Schema.Struct({
+									id: Schema.String,
+									seq: Schema.Int,
+									processed_at: Schema.NullOr(Schema.String),
+								}),
+							),
+							next_page: Schema.NullOr(Schema.String),
+						}),
+					)
+					const listed = yield* page("limit=50&types=user.message")
+					const one = yield* decodePage(yield* Effect.promise(() => listed.json()))
+					expect(one.data).toHaveLength(MAX_SESSION_INITIAL_EVENTS)
+					expect(one.data.map((event) => event.processed_at)).toEqual(
+						Array.from({ length: MAX_SESSION_INITIAL_EVENTS }, () => DateTime.formatIso(first)),
+					)
+					expect([...counts]).toEqual([[key1, 1]])
+					const next = yield* page(`limit=50&types=user.message&page=${one.next_page}`)
+					const two = yield* decodePage(yield* Effect.promise(() => next.json()))
+					expect(two.data.map((event) => event.processed_at)).toEqual([DateTime.formatIso(second)])
+					expect([...counts]).toEqual([
+						[key1, 1],
+						[key2, 1],
+					])
+
+					counts.clear()
+					const replay = yield* read(yield* open(), 2)
+					const replayUsers = replay.filter(({ data }) => data.type === "user.message")
+					expect(replayUsers.map(({ data }) => [data.id, data.seq, data.processed_at])).toEqual(
+						[...one.data, ...two.data].map((event) => [event.id, event.seq, event.processed_at]),
+					)
+					expect([...counts]).toEqual([
+						[key1, 1],
+						[key2, 1],
+					])
+
+					counts.clear()
+					missingKey = key1
+					const catchingUp = yield* read(yield* open(), 2)
+					const recovering = catchingUp.filter(({ data }) => data.type === "user.message")
+					expect(recovering[0]?.data.processed_at).toBeNull()
+					expect(recovering[1]?.data.processed_at).toBe(DateTime.formatIso(first))
+					expect([...counts]).toEqual([
+						[key1, 2],
+						[key2, 1],
+					])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			releaseSecond.resolve()
 			await closeAll()
 		}
 	})

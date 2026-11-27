@@ -67,6 +67,7 @@ import * as DateTime from "effect/DateTime"
 import * as Cache from "effect/Cache"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Sse from "effect/encoding/Sse"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
@@ -489,16 +490,28 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const skills = yield* SkillReader
 		const harness = yield* Harness
 		const completions = yield* SessionTurnCompletion
-		const publishedEvent = (entry: SessionEventEntry) => {
-			const event = entry.event
-			const turn =
-				event._tag === "user.message" || event._tag === "user.interrupt" ? event.turn : undefined
-			return turn === null || turn === undefined
-				? Effect.succeed(serializeSessionEvent(entry))
-				: Effect.map(completions.get(sessionTurnKey(entry.envelope.id, turn)), (finished) =>
-						serializeSessionEvent(entry, Option.getOrNull(finished)),
-					)
-		}
+		const publishedEvents = (capacity: number, live: boolean) =>
+			Effect.map(
+				Cache.makeWith((key: ReturnType<typeof sessionTurnKey>) => completions.get(key), {
+					capacity,
+					timeToLive: (exit) =>
+						Exit.isSuccess(exit) && (!live || Option.getOrNull(exit.value) !== null)
+							? Duration.infinity
+							: Duration.zero,
+				}),
+				(cache) => (entry: SessionEventEntry) => {
+					const event = entry.event
+					const turn =
+						event._tag === "user.message" || event._tag === "user.interrupt"
+							? event.turn
+							: undefined
+					return turn === null || turn === undefined
+						? Effect.succeed(serializeSessionEvent(entry))
+						: Effect.map(Cache.get(cache, sessionTurnKey(entry.envelope.id, turn)), (finished) =>
+								serializeSessionEvent(entry, Option.getOrNull(finished)),
+							)
+				},
+			)
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
@@ -1438,6 +1451,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							? {}
 							: { where: { OR: query.types.map((type) => eventTypeFilters[type]) } }),
 					})
+					const publishedEvent = yield* publishedEvents(page.entries.length, false)
 					return listPage(
 						yield* Effect.forEach(page.entries, publishedEvent, { concurrency: 8 }),
 						page.cursor,
@@ -1544,6 +1558,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										),
 									)
 								})
+					const publishedEvent = yield* publishedEvents(SSE_CATCHUP_PAGE_SIZE, true)
 					const frames = Stream.concat(
 						catchUp.pipe(
 							Stream.onEnd(
