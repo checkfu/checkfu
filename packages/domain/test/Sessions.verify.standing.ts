@@ -1,3 +1,5 @@
+export const SESSIONS_PROOF_DEADLINE_MS = 1_200_000
+
 export const STANDING = {
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",

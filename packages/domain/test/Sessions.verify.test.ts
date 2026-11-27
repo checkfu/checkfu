@@ -10,7 +10,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi } from "../src/Sessions.model.ts"
-import { PROVED, STANDING } from "./Sessions.verify.standing.ts"
+import { PROVED, SESSIONS_PROOF_DEADLINE_MS, STANDING } from "./Sessions.verify.standing.ts"
 
 describe("Sessions Z3 formal verification", () => {
 	it.live(
@@ -64,6 +64,6 @@ describe("Sessions Z3 formal verification", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		1_200_000,
+		SESSIONS_PROOF_DEADLINE_MS,
 	)
 })

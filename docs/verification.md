@@ -48,7 +48,7 @@ bun run test:bun
 bun run test:workerd
 ```
 
-The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. `Sessions.verify` and `Sessions.replay.verify` each run on a runner of their own, and the other domain files run serially on one more, so concurrent Z3 work does not starve a proof. The required `domain` check passes only when all three pass. This changes scheduling, not proof requirements or coverage.
+The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. `Sessions.verify` and `Sessions.replay.verify` each run on a runner of their own and share a 20-minute test deadline (`SESSIONS_PROOF_DEADLINE_MS`). Each shard job has a 25-minute limit, including setup. The other domain files run serially on one more runner so concurrent Z3 work does not starve a proof. The required `domain` check passes only when all three shards pass. Investigate what grew when a proof approaches its deadline and record the reason for any increase.
 
 Main's active CI run finishes while newer pushes replace the pending run. This lets the proof jobs complete and save their content-based task results even when main advances frequently. The next run reuses results only for unchanged inputs. PR updates cancel their older run.
 

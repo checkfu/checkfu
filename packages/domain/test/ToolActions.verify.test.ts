@@ -11,25 +11,40 @@ it.each([
 		name: "tool confirmation",
 		decision: ConfirmToolDecision,
 		source: "./src/Session/ConfirmTool.decision.ts",
+		expected: [
+			"AnAnswerKeepsTheTurn",
+			"AnAnswerMatchesItsSessionAndCall",
+			"OnlyAPendingCallOfTheRunningTurnIsConfirmed",
+		],
 	},
 	{
 		name: "custom tool result",
 		decision: ReturnCustomToolResultDecision,
 		source: "./src/Session/ReturnCustomToolResult.decision.ts",
+		expected: [
+			"AResultKeepsTheTurn",
+			"AResultMatchesItsSessionAndCall",
+			"OnlyAPendingCallOfTheRunningTurnGetsAResult",
+		],
 	},
 ] as const)(
 	"proves $name answers only its own session and call",
-	async ({ decision, source }) => {
+	async ({ decision, source, expected }) => {
 		const report = await Effect.runPromise(
 			Prove.decisionReport(decision, { source, opaque: [addToolUseId, removeToolUseId] }).pipe(
 				Effect.provide(NodeServices.layer),
 			),
 		)
 		const evidence = Prove.renderDecision(report)
+		expect(Prove.decisionProved(report), evidence).toBe(true)
 		expect(report.accepted, evidence).toBe(true)
-		for (const { verdict } of report.rules) {
-			expect(verdict._tag, evidence).toBe("Proved")
-		}
+		expect(
+			report.rules
+				.filter((rule) => rule.kind === "decision")
+				.map((rule) => rule.name)
+				.toSorted(),
+			evidence,
+		).toEqual(expected)
 	},
 	60_000,
 )

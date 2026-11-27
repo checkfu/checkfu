@@ -17,6 +17,7 @@ import {
 	PROVED,
 	REQUIRED_REPLAY_OUTCOMES,
 	REQUIRED_REPLAY_RULES,
+	SESSIONS_PROOF_DEADLINE_MS,
 	STANDING,
 } from "./Sessions.verify.standing.ts"
 
@@ -97,6 +98,6 @@ describe("Sessions Z3 formal verification, replayed", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		600_000,
+		SESSIONS_PROOF_DEADLINE_MS,
 	)
 })
