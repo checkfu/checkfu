@@ -2060,6 +2060,7 @@ describe("PiSession real Durable Object under workerd", () => {
 						name: "write",
 						arguments: { path: `${uploads}/data/q3.csv`, content: "EMEA,0" },
 					},
+					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/data/q3.csv` } },
 					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/notes.md` } },
 				],
 				"What is there?": [
@@ -2079,6 +2080,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
 		const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
 		expect(refused).toContain(`read-only mount at ${uploads}: cannot modify`)
+		expect(refused).toContain("EMEA,4217")
 		expect(refused).toContain("Totals are in thousands.")
 		const found = await replyAfterTurn(session.id, "What is there?", 3)
 		expect(found).toContain("data/q3.csv")

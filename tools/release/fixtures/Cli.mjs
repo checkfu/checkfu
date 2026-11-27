@@ -9,7 +9,11 @@ const [cli, baseUrl, apiKey, project] = process.argv.slice(2)
 const execute = promisify(execFile)
 const covered = new Set()
 const raw = async (args, stdin = "") => {
-	covered.add(args.slice(0, 2).join(" "))
+	const command = args.slice(0, 2).join(" ")
+	covered.add(command)
+	// Keep the last attempted user action visible if the outer process deadline fires.
+	// Arguments and stdin can contain secrets; trace only the command name.
+	process.stderr.write(`[CLI journey] ${command}\n`)
 	const child = execute(
 		process.execPath,
 		["--no-experimental-strip-types", cli, "--format", "json", ...args],
