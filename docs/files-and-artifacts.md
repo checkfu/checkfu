@@ -1,6 +1,6 @@
 # Files and artifacts: the domain
 
-Status: steps 1 (Files), 3 (outputs saved as files) and 4 (artifact versions from files) are built; the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
+Status: steps 1 to 4 are built (files, files as session inputs, outputs saved as files, artifact versions from files); the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
 
 ## The problem
 
@@ -87,7 +87,14 @@ CLI: `checkfu files upload <path>`, `list`, `retrieve`, `download --file-id <id>
 
 ## Sessions and files
 
-**Input.** A session resource `{type: "file", file_id, mount_path?}` places the file read-only at `/mnt/session/uploads/<mount_path>`, defaulting to its filename. The admission decision reads the File aggregate, so "a session is admitted only with files that exist" becomes a proved rule instead of a handler check. When the session's machine starts, mounted inputs are copied in read-only, so programs run in bash can read them.
+**Input.** A session resource `{type: "file", file_id, mount_path?}` places the file read-only at `/mnt/session/uploads/<mount_path>`, defaulting to its filename. Creating the session refuses a file that is missing or deleted, a path taken twice or inside another, and more than 32 files. The resource records the file's size and sha256, and the agent is told each path and size.
+
+The file is read from file storage in ranges as the agent reads it, through the same read-only mount that serves artifact files. A file deleted after the session started stops being readable; the session's turns carry on.
+
+Two things this does not do yet:
+
+- **Reading from a shell.** The uploads directory is served to the agent's file tools. A session that runs commands on a machine needs the files copied into it, which is a separate change for every read-only mount.
+- **A proved admission rule.** Whether the files exist is checked when the session is created, as it is for artifacts. A decision reads a fixed set of aggregates, so it cannot read a list of files.
 
 **Output.** After each turn that ends with a reply, a policy saves the outputs folder:
 
@@ -155,7 +162,7 @@ A skill becomes its own resource: `POST /v1/skills` with files, versions as full
 | Step | Change | Depends on |
 |---|---|---|
 | 1 (built) | File aggregate, shared byte owner, `/v1/files`, CLI commands, proofs | |
-| 2 | `file` session resource, admission rule, copy into the machine | 1 |
+| 2 (built) | `file` session resource under `/mnt/session/uploads`. Copying into the machine follows | 1 |
 | 3 (built) | Outputs saved as Files; the session outputs record; remove the outputs publisher | 1 |
 | 4 (built) | Artifact versions from file ids; remove empty artifacts and blob upload | 1 |
 | 5 | Skill resource, attached to agents | 4 |

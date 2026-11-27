@@ -81,7 +81,10 @@ import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.t
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
 import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
 import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
-import { makeArtifactMount } from "../../src/Workspace/ArtifactMount.ts"
+import { makeArtifactMount, makeFilesMount } from "../../src/Workspace/ArtifactMount.ts"
+import type { SessionArtifacts } from "../../src/Workspace/SessionArtifacts.ts"
+import { FILE_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
+import type { PassthroughMount } from "@cloudflare/computer"
 import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
 import { makeSessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type {
@@ -264,6 +267,21 @@ export const checkfuWithHarness = <E, R>(
 
 const memoryRel = (path: string) => path.slice("/mnt/memory/".length)
 const repositoryKey = (sessionId: string, resourceId: string) => `${sessionId}/${resourceId}`
+
+const filesIn = (mount: PassthroughMount, root: string) => ({
+	list: async () =>
+		((await mount.readdir("", { recursive: true })) ?? [])
+			.filter((entry) => entry.type === "file")
+			.map((entry) => `${root}/${entry.name}`)
+			.toSorted(),
+	read: async (path: string, range?: { readonly offset: number; readonly length: number }) => {
+		const read = await mount.readFile(
+			path.slice(root.length + 1),
+			range === undefined ? undefined : { range },
+		)
+		return read === null ? null : await new Response(read.body).text()
+	},
+})
 
 export const makePiDurableTestLayer = (
 	handler: (
@@ -572,37 +590,19 @@ export const makePiDurableTestLayer = (
 	const run = <A, E>(
 		effect: (access: Effect.Success<typeof SessionMemoryAccess>) => Effect.Effect<A, E>,
 	) => built().run(Effect.orDie(effect(built().access)))
-	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") => {
-		const mount = makeArtifactMount(
-			root,
-			{
-				mounts: () => built().run(Effect.orDie(built().artifacts.artifactMounts(sessionId))),
-				files: (mountPath) =>
-					built().run(Effect.orDie(built().artifacts.artifactFiles(sessionId, mountPath))),
-				read: (mountPath, path, offset, length) =>
-					built().run(
-						Effect.orDie(
-							built().artifacts.artifactRead(sessionId, mountPath, path, offset, length),
-						),
-					),
-			},
-			100_000,
-		)
-		return {
-			list: async () =>
-				((await mount.readdir("", { recursive: true })) ?? [])
-					.filter((entry) => entry.type === "file")
-					.map((entry) => `${root}/${entry.name}`)
-					.toSorted(),
-			read: async (path: string, range?: { readonly offset: number; readonly length: number }) => {
-				const read = await mount.readFile(
-					path.slice(root.length + 1),
-					range === undefined ? undefined : { range },
-				)
-				return read === null ? null : await new Response(read.body).text()
-			},
-		}
-	}
+	const sessionArtifacts = (sessionId: string): SessionArtifacts => ({
+		mounts: () => built().run(Effect.orDie(built().artifacts.artifactMounts(sessionId))),
+		files: (mountPath) =>
+			built().run(Effect.orDie(built().artifacts.artifactFiles(sessionId, mountPath))),
+		read: (mountPath, path, offset, length) =>
+			built().run(
+				Effect.orDie(built().artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
+			),
+	})
+	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") =>
+		filesIn(makeArtifactMount(root, sessionArtifacts(sessionId), 100_000), root)
+	const uploadedFiles = (sessionId: string) =>
+		filesIn(makeFilesMount(FILE_MOUNT_ROOT, sessionArtifacts(sessionId), 100_000), FILE_MOUNT_ROOT)
 	const heldReceipts = new Map<string, PendingReceipts>()
 	const receiptsOf = (sessionId: string): PendingReceiptStore => ({
 		get: () => heldReceipts.get(sessionId),
@@ -929,6 +929,7 @@ export const makePiDurableTestLayer = (
 		memoryFiles,
 		sessionMemoryCalls,
 		artifactFiles,
+		uploadedFiles,
 	}
 }
 

@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T13:57:58.832Z",
+			"cut_at": "2026-11-27T14:18:53.745Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -22,7 +22,7 @@
 				"command-reply:Checkfu/ArchiveEnvironment": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/DeleteEnvironment": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.Session": "e8fe51aeeae8ffa028d2100607d3e29474e2682031b45c049f67915b82efd72b",
-				"event:Checkfu.Session/session.created": "cf9fbd4e865c5a01e1f1909ca429140ee521ea29e2b947be59a1cf1a72761815",
+				"event:Checkfu.Session/session.created": "5911bf46b83cac531b4f9ba85206e704aab6cc2a86168230c90d46bb05afbabb",
 				"event:Checkfu.Session/user.message": "392eb57e6d20edc9d791ae142ff1fdc840d5023ee6aa308555ada5ccf4c95ecc",
 				"event:Checkfu.Session/session.status_running": "e21faf22832d22a1f53bf056047e7854d74c78473edf4420e7713b1f23eab41c",
 				"event:Checkfu.Session/user.interrupt": "5095a65a285c0b731ad562c6360a3fc23cc816c5bec2b1abe997a34697a42987",
@@ -163,17 +163,17 @@
 				"view:Checkfu.AgentView@v3": "118a2b6d8066032e89c7e47e1fc19a8e83c089f39cd5b063d9f682491f82329f",
 				"view:Checkfu.AgentVersionByNumberView@v4": "c0116151c98a3a04e724bac074a1757ca57cdaecba68f2439156c7fb54d06bf5",
 				"view:Checkfu.EnvironmentView@v0": "0347b87a4b5a89e6dbaad3339fa6322eabc86ad4d28ba6f48721955efd8d58b7",
-				"view:Checkfu.SessionView@v6": "c843d84e8bd8049d5857c4392f7ac7153ee40f7f200fdfcaf38530c507a0ac81",
+				"view:Checkfu.SessionView@v6": "9c10740bc8e34bb3a295b3e013e6ce2126f162cbb3b2b92008613dc75d772701",
 				"view:Checkfu.SessionTurnCompletion@v1": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
-				"view:Checkfu.TurnInput@v6": "730ea040ed93ceaf3bd40a4df26764e730a30976633259ce4f25dd547fbbbb2f",
+				"view:Checkfu.TurnInput@v6": "e4b190fb3bc4618a8a24363434ddf5cb6b65ce720974f8ccbfd873878e62413a",
 				"view:Checkfu.AutomationView@v5": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"view:Checkfu.AutomationRunView@v1": "9ff80023b8cad6cc0d152e39941175de90e124d4bf705b5e1edfdbc476045ec1",
 				"view:Checkfu.ArtifactVersionView@v1": "cf637979987d13f9694e748e4a58f8881169a073c7a0c7d08bc80b214fe35896",
 				"view:Checkfu.MemoryStoreView@v1": "1a413cb8461d4b06191b81fd9177cd20637d37134764a5b52af45ecd379d0b8c",
 				"view:Checkfu.MemoryView@v1": "91f90bea5f24bb78c97ee9c5ec3825652172d4cec5fb35637d1a0f907988ac72",
 				"view:Checkfu.MemoryIndex@v1": "ba2280164859cd2bfc80e0ac47a1d95b65755bb503f630b8eb08f1df359c7081",
-				"policy-delivery:Checkfu.RecordInitialMessages/Session": "d533466fda6682ca4fd6971262a41714529878b7853021fdc83e46d45c9464b6",
-				"policy-delivery:Checkfu.StartTurn/TurnInput": "730ea040ed93ceaf3bd40a4df26764e730a30976633259ce4f25dd547fbbbb2f",
+				"policy-delivery:Checkfu.RecordInitialMessages/Session": "c5d1ba0d12c1dcf9a30b265da1c4834b0090323baa05eaf2f8d01bc1b44bbe46",
+				"policy-delivery:Checkfu.StartTurn/TurnInput": "e4b190fb3bc4618a8a24363434ddf5cb6b65ce720974f8ccbfd873878e62413a",
 				"policy-delivery:Checkfu.EnsureTurnStarted/Session": "50972129f5a82f0c6addbdd70138b0109343d0d440e79a9808c21e20f0d7c094",
 				"policy-delivery:Checkfu.EnsureTurnStopped/Session": "911b839d3899639da37f5bcf3c7ed546b53b02bfab24fd197879d4fce48fdb8c",
 				"policy-delivery:Checkfu.ArmAutomation/AutomationView": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
@@ -190,7 +190,7 @@
 				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
 				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
 				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
-				"saga-input:Checkfu.RunTurn": "1a0bcf1a8a50ea7f088641cd2ae7e8f25fd7c1bdfef74188748ded4892cdb441",
+				"saga-input:Checkfu.RunTurn": "be6d5b2bc9abaad51b588b72f00272ade393111e2ff0c907edbb1deb761b84d7",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "42513e12ece950579289bf9adcc879b8311c0c23eeaa1e49b2ed254ea30df2bb",
 				"event:Webhooks.WebhookEndpoint/webhook.created": "ee7244fa3a25a8a99d7ca1fd1b7d92271c78d6aaefe0c7f1dbf92f76d0c780c8",
@@ -9170,6 +9170,31 @@
 					},
 					{
 						"_tag": "session.created",
+						"agent_id": "\ud800",
+						"agent_version": 97,
+						"environment_id": "\t",
+						"automation_id": "a)0)D{l",
+						"title": "__proto__",
+						"mcp_server_credentials": ">%(",
+						"resources": [
+							{
+								"id": "r",
+								"type": "memory_store",
+								"memory_store_id": "B}oXFAdYO\\",
+								"access": "read_write",
+								"instructions": null,
+								"name": "",
+								"description": "*zkN",
+								"mount_path": "/mnt/memory/v"
+							}
+						],
+						"initial_messages": {
+							"count": 16,
+							"messages": "😀"
+						}
+					},
+					{
+						"_tag": "session.created",
 						"agent_id": "Olh]3PR{H#",
 						"agent_version": 25,
 						"environment_id": "4294967295",
@@ -9193,22 +9218,40 @@
 						"automation_id": "\n",
 						"title": "/w=oGM\\w.S",
 						"resources": []
-					},
-					{
-						"_tag": "session.created",
-						"agent_id": "D&@`\\ukX",
-						"agent_version": 7,
-						"environment_id": "t_hsp",
-						"title": null,
-						"resources": [],
-						"initial_messages": {
-							"count": 36,
-							"messages": "!{~`JxZf"
-						}
 					}
 				],
 				"policy-delivery:Checkfu.StartTurn/TurnInput": [
-					null,
+					{
+						"agent_id": "KRdrD|zs",
+						"agent_version": 4,
+						"environment_id": "Ah>DQ$,X}u",
+						"resources": [
+							{
+								"id": "\n",
+								"type": "file",
+								"file_id": "4294967295",
+								"size": 50,
+								"sha256": "😀",
+								"mount_path": "/mnt/session/uploads/l"
+							}
+						],
+						"turn": 51,
+						"input": [
+							"\t",
+							"\t",
+							"-1",
+							"w",
+							"\u0000",
+							"\n",
+							"yvinx),Za'",
+							"6xBC",
+							"iP]mu&",
+							"\t"
+						],
+						"unsent": [],
+						"last_reply_turn": 5,
+						"segment": 43
+					},
 					null,
 					null,
 					null,
@@ -10382,6 +10425,27 @@
 				],
 				"saga-input:Checkfu.RunTurn": [
 					{
+						"key": "4294967295",
+						"session_id": "-1",
+						"agent_id": "\u0000",
+						"agent_version": 4,
+						"environment_id": "toString",
+						"resources": [
+							{
+								"id": "=6!r",
+								"type": "file",
+								"file_id": "wrCi5^[@|<",
+								"size": 64,
+								"sha256": "hZ",
+								"mount_path": "/mnt/session/uploads/#"
+							}
+						],
+						"turn": 7,
+						"input": [],
+						"last_reply_turn": 1,
+						"segment": 101
+					},
+					{
 						"key": " ",
 						"session_id": ">",
 						"agent_id": "co",
@@ -10439,6 +10503,37 @@
 						"segment": 97
 					},
 					{
+						"key": "i{<,j[aq.+",
+						"session_id": "-1",
+						"agent_id": "{",
+						"agent_version": 101,
+						"environment_id": "ooegrf/|z",
+						"resources": [
+							{
+								"id": "tD'%M@WIX2",
+								"type": "file",
+								"file_id": "😀",
+								"size": 49,
+								"sha256": "f,{",
+								"mount_path": "/mnt/session/uploads/a"
+							},
+							{
+								"id": "prototype",
+								"type": "memory_store",
+								"memory_store_id": "-1",
+								"access": "read_write",
+								"instructions": null,
+								"name": "9@W,`9",
+								"description": "\n",
+								"mount_path": "/mnt/memory/❔"
+							}
+						],
+						"turn": 2,
+						"input": [],
+						"last_reply_turn": 5,
+						"segment": 30
+					},
+					{
 						"key": "__proto__",
 						"session_id": "😀",
 						"agent_id": "H",
@@ -10473,76 +10568,70 @@
 						"segment": 6
 					},
 					{
-						"key": "\ud800",
-						"session_id": "[ztJ`_@o",
-						"agent_id": "v",
-						"agent_version": 4,
-						"environment_id": "Bq|U:M",
-						"resources": [],
-						"turn": 77,
-						"input": [],
-						"last_reply_turn": 11,
-						"segment": 43
-					},
-					{
-						"key": "\udc00",
-						"session_id": "5",
-						"agent_id": "-8R 5?'Mti",
-						"agent_version": 47,
-						"environment_id": "e/vg.tL&][",
+						"key": "wF7|",
+						"session_id": "\n",
+						"agent_id": "R~?#",
+						"agent_version": 5,
+						"environment_id": "%PP{8'Qo",
 						"resources": [
 							{
-								"id": "p",
-								"type": "memory_store",
-								"memory_store_id": "\n",
-								"access": "read_only",
-								"instructions": null,
-								"name": "",
-								"description": "7`MyUR",
-								"mount_path": "/mnt/memory/덈"
+								"id": "5",
+								"type": "file",
+								"file_id": "DVa]zf.}tD",
+								"size": 51,
+								"sha256": "6",
+								"mount_path": "/mnt/session/uploads/`"
 							}
 						],
-						"turn": 82,
+						"turn": 18,
 						"input": [
-							"a",
-							"Ny&90]lE]0",
-							"&sa(u1rit",
-							"~",
-							"\u0000"
+							"u*bv",
+							"wdS$",
+							"\ud800",
+							"]{iimN*mk/",
+							"0tD<U|Q?d{",
+							"Y)SPGPJ?]l",
+							"p"
 						],
-						"last_reply_turn": 97,
-						"segment": 1
+						"last_reply_turn": 91,
+						"segment": 96
 					},
 					{
-						"key": "\t",
-						"session_id": "😀",
-						"agent_id": "rPg",
-						"agent_version": 1,
-						"environment_id": "X+SJi",
-						"resources": [],
-						"turn": 39,
-						"input": [],
-						"last_reply_turn": 26,
-						"segment": 97
-					},
-					{
-						"key": "toString",
-						"session_id": "\udc00",
-						"agent_id": "6:R*S",
-						"agent_version": 101,
-						"environment_id": "-1",
-						"resources": [],
-						"turn": 26,
-						"input": [
-							"p)wm|-KMIG",
-							"z*+]`:",
-							"JWV5Q_w",
-							"uZI$",
-							"|",
-							"G}V~\\bo3'_"
+						"key": " ",
+						"session_id": "Q",
+						"agent_id": "toString",
+						"agent_version": 22,
+						"environment_id": "1",
+						"resources": [
+							{
+								"id": "Q1<wsdjjPF",
+								"type": "github_repository",
+								"url": "https://github.com/1/t",
+								"mount_path": "/workspace/꯷",
+								"checkout": {
+									"type": "commit",
+									"sha": "e69b17c0595894b97872d5b10ff8d86104e0c8b4"
+								},
+								"access": "read_write"
+							},
+							{
+								"id": "i>s",
+								"type": "file",
+								"file_id": "?0~@`ZxHP)",
+								"size": 5,
+								"sha256": "e",
+								"mount_path": "/mnt/session/uploads/\""
+							}
 						],
-						"last_reply_turn": 2,
-						"segment": 60
+						"turn": 76,
+						"input": [
+							"x",
+							"prototype",
+							"K",
+							"prototype"
+						],
+						"last_reply_turn": 95,
+						"segment": 7
 					}
 				],
 				"saga-result:Checkfu.RunTurn": [

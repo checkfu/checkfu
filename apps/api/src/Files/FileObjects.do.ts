@@ -15,6 +15,7 @@ import {
 	FileStoreError,
 	fileContent,
 	fileContentKey,
+	fileRange,
 	filePrefix,
 } from "./FileStore.ts"
 import type { StoredBytes } from "./FileStore.ts"
@@ -220,6 +221,7 @@ export const FileStoreR2 = Layer.effect(
 				),
 			measure: (body) => measure(Stream.toReadableStream(body)),
 			content: fileContent(scope, bucket, runtime),
+			read: fileRange(scope, bucket, runtime),
 			purge: (fileId) => call(() => owners(fileId).purge(fileId)),
 			release: (fileId, reservation) => call(() => owners(fileId).release(fileId, reservation)),
 		}

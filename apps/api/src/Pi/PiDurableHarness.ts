@@ -28,12 +28,14 @@ import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
 import * as Cause from "effect/Cause"
 import {
 	artifactsOf,
+	filesOf,
 	memoryStoresOf,
 	repositoriesOf,
 	skillsOf,
 } from "@checkfu/domain/Session/SessionResource"
 import type {
 	ArtifactMount,
+	FileMount,
 	MemoryStoreResource,
 	SkillMount,
 } from "@checkfu/domain/Session/SessionResource"
@@ -238,6 +240,7 @@ export const describeMounts = (
 	stores: ReadonlyArray<MemoryStoreResource> = [],
 	artifacts: ReadonlyArray<ArtifactMount> = [],
 	skills: ReadonlyArray<SkillMount> = [],
+	files: ReadonlyArray<FileMount> = [],
 ): string | null => {
 	const sections = [
 		...(system === null || system.length === 0 ? [] : [system]),
@@ -271,6 +274,14 @@ export const describeMounts = (
 						),
 					].join("\n"),
 				]),
+		...(files.length === 0
+			? []
+			: [
+					[
+						"Files the user gave you, read-only. Read them with the read tool:",
+						...files.map((file) => `- ${file.mount_path} (${file.size} bytes)`),
+					].join("\n"),
+				]),
 		...(skills.length === 0
 			? []
 			: [
@@ -282,7 +293,7 @@ export const describeMounts = (
 					].join("\n"),
 				]),
 	]
-	return repositories.length + stores.length + artifacts.length + skills.length === 0
+	return repositories.length + stores.length + artifacts.length + skills.length + files.length === 0
 		? system
 		: sections.join("\n\n")
 }
@@ -507,7 +518,14 @@ export const PiDurableHarnessLive = boundedHarness(
 						})
 					}
 					const skills = skillsOf(args.resources)
-					const system = describeMounts(version.system, repositories, stores, artifacts, skills)
+					const system = describeMounts(
+						version.system,
+						repositories,
+						stores,
+						artifacts,
+						skills,
+						filesOf(args.resources),
+					)
 
 					const mcp =
 						version.mcp_servers.length === 0 ||

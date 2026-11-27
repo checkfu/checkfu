@@ -47,6 +47,8 @@ import {
 import {
 	SessionResources,
 	artifactMountPath,
+	fileMountPath,
+	FileMountPath,
 	memoryMountPath,
 	skillMountPath,
 } from "@checkfu/domain/Session/SessionResource"
@@ -450,6 +452,12 @@ const askedResource = (resource: CreateSessionResource) => {
 				access: resource.access ?? "read_write",
 				instructions: resource.instructions ?? null,
 			}
+		case "file":
+			return {
+				type: resource.type,
+				file_id: resource.file_id,
+				mount_path: resource.mount_path ?? null,
+			}
 		default:
 			return {
 				type: resource.type,
@@ -458,6 +466,8 @@ const askedResource = (resource: CreateSessionResource) => {
 			}
 	}
 }
+
+const isFileMountPath = Schema.is(FileMountPath)
 
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
@@ -760,6 +770,26 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						...resource,
 						artifact_id: ArtifactId.make(resource.artifact_id),
 					})),
+				}
+			}
+			if (resource.type === "file") {
+				const file = yield* files.get(resource.file_id)
+				if (file.status !== "ready") {
+					return yield* reject(404, `File ${resource.file_id} not found.`)
+				}
+				const mount_path = fileMountPath(resource.mount_path ?? file.filename)
+				if (!isFileMountPath(mount_path)) {
+					return yield* reject(
+						400,
+						`File ${resource.file_id} cannot be placed at ${mount_path}; give it a mount_path.`,
+					)
+				}
+				return {
+					type: resource.type,
+					file_id: resource.file_id,
+					size: file.size,
+					sha256: file.sha256,
+					mount_path,
 				}
 			}
 			if (resource.type === "skill") {

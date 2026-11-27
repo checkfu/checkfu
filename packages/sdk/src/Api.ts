@@ -29,6 +29,8 @@ import {
 	ArtifactId,
 	ArtifactMount,
 	SkillMount,
+	FileMount,
+	FILE_MOUNT_ROOT,
 	ArtifactName,
 	ArtifactPath,
 	ArtifactContentType,
@@ -745,11 +747,24 @@ export const SkillMountParams = Schema.Struct({
 	),
 })
 
+export const FileMountParams = Schema.Struct({
+	type: Schema.Literal("file"),
+	file_id: FileId.annotate({
+		description: "File to place in the session's uploads directory, read-only",
+	}),
+	mount_path: Schema.optionalKey(
+		ArtifactPath.annotate({
+			description: `Where to place it, relative to ${FILE_MOUNT_ROOT} (default: the file's name)`,
+		}),
+	),
+})
+
 const CreateSessionResource = Schema.Union([
 	GitHubRepositoryParams,
 	MemoryStoreParams,
 	ArtifactMountParams,
 	SkillMountParams,
+	FileMountParams,
 ])
 export type CreateSessionResource = typeof CreateSessionResource.Type
 
@@ -1050,6 +1065,7 @@ export const SessionResourceItem = Schema.Union([
 	Schema.Struct({ ...MemoryStoreResource.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...ArtifactMount.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...SkillMount.fields, ...resourceTimestamps }),
+	Schema.Struct({ ...FileMount.fields, ...resourceTimestamps }),
 ])
 export type SessionResourceItem = typeof SessionResourceItem.Type
 
