@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { MAX_ARTIFACT_DECLARATION_BYTES } from "@checkfu/sdk/Schemas"
 import {
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
@@ -185,6 +186,88 @@ describe("the save_artifact tool", () => {
 		expect(full.saved).toEqual([])
 		expect(full.reads).toEqual([])
 		expect(full.artifacts).toEqual([])
+	})
+
+	it.each([
+		{ path: "_/platform.js", size: 1, message: "is under _/, which is reserved" },
+		{ path: "_", size: 1, message: "is under _/, which is reserved" },
+		{
+			path: "artifact.json",
+			size: MAX_ARTIFACT_DECLARATION_BYTES + 1,
+			message: `it is larger than ${MAX_ARTIFACT_DECLARATION_BYTES} bytes`,
+		},
+		{
+			path: "artifact.json",
+			size: 1,
+			madeFrom: "/mnt/artifacts/base",
+			message: "is supplied by the source version",
+		},
+	])("rejects an ineligible $path before reading or saving siblings", async (fixture) => {
+		const tool = workspace(
+			new Map([
+				["/workspace/0.txt", 1],
+				[`/workspace/${fixture.path}`, fixture.size],
+			]),
+		)
+		const result = await saveArtifact(
+			{
+				name: "Site",
+				directory: "/workspace",
+				...("madeFrom" in fixture ? { made_from: fixture.madeFrom } : {}),
+			},
+			tool.ports,
+		)
+		expect(result.isError).toBe(true)
+		expect(textOf(result)).toContain(fixture.message)
+		expect([tool.reads, tool.saved, tool.artifacts]).toEqual([[], [], []])
+	})
+
+	it("accepts an empty reserved directory, neighboring names, and a declaration at the limit", async () => {
+		const { ports, saved } = workspace(
+			new Map([
+				["/workspace/_suffix", 1],
+				["/workspace/artifact.json", MAX_ARTIFACT_DECLARATION_BYTES],
+				["/workspace/assets/_/data", 2],
+				["/workspace/assets/artifact.json", MAX_ARTIFACT_DECLARATION_BYTES + 1],
+			]),
+		)
+		const capture: ArtifactToolPorts["capture"] = (directory) => {
+			const files = ports.capture(directory)
+			return {
+				...files,
+				list: async (limit) => [{ path: "_", size: 0, type: "dir" }, ...(await files.list(limit))],
+			}
+		}
+		const result = await saveArtifact(
+			{ name: "Site", directory: "/workspace" },
+			{ ...ports, capture },
+		)
+		expect(result.isError).toBe(false)
+		expect(saved).toEqual(["_suffix", "artifact.json", "assets/_/data", "assets/artifact.json"])
+	})
+
+	it("declines a declaration that grew since listing before uploading siblings", async () => {
+		const { ports, saved, artifacts } = workspace(
+			new Map([
+				["/workspace/0.txt", 1],
+				["/workspace/artifact.json", 1],
+			]),
+		)
+		const capture: ArtifactToolPorts["capture"] = (directory) => ({
+			...ports.capture(directory),
+			read: async (path, limit) => {
+				expect(path).toBe("artifact.json")
+				expect(limit).toBe(MAX_ARTIFACT_DECLARATION_BYTES + 1)
+				return new Uint8Array(limit)
+			},
+		})
+		const result = await saveArtifact(
+			{ name: "Site", directory: "/workspace" },
+			{ ...ports, capture },
+		)
+		expect(result.isError).toBe(true)
+		expect(textOf(result)).toContain(`it is larger than ${MAX_ARTIFACT_DECLARATION_BYTES} bytes`)
+		expect([saved, artifacts]).toEqual([[], []])
 	})
 
 	it("stops before starting any more writes when the turn is canceled", async () => {

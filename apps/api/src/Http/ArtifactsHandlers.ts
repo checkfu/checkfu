@@ -50,6 +50,7 @@ import {
 	MAX_INLINE_FILE_BYTES,
 	buildArtifactVersion,
 	readDeclaration,
+	SOURCE_ARTIFACT_DECLARATION_MESSAGE,
 } from "../Artifacts/ArtifactFiles.ts"
 import type {
 	ArtifactManifest,
@@ -266,10 +267,7 @@ const declaredBy = (bytes: Uint8Array) => {
 export const startedFrom = (from: ArtifactId, manifest: ArtifactManifest, own: ResolvedFiles) =>
 	Effect.gen(function* () {
 		if (own.files.some((file) => file.path === ARTIFACT_DECLARATION_FILE)) {
-			return yield* reject(
-				400,
-				`${ARTIFACT_DECLARATION_FILE} is supplied by the source version. Leave it out when using made_from.`,
-			)
+			return yield* reject(400, SOURCE_ARTIFACT_DECLARATION_MESSAGE)
 		}
 		const taken = new Set(manifest.files.map((file) => file.path))
 		const clash = own.files.find((file) => taken.has(file.path))
