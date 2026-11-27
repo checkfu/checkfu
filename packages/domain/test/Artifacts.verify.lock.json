@@ -133,6 +133,22 @@
 			"Artifact.AnExplicitGrantIsRecordedAsGiven": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\" || command.access === \"\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tcommand.pinned_version > before.version,\n\t\t\t\t[\n\t\t\t\t\tafter.public_access === command.access,\n\t\t\t\t\t[command.access === \"view\", after.public_grant === command.grant].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.ANewVersionRecordsWhatItWasMadeFrom": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"CreateArtifact\" && command._tag !== \"AddArtifactVersion\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [after.version === before.version, after.made_from === command.made_from].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)\n\t\t}"
+			},
+			"Artifact.OnlyANewVersionChangesWhatItWasMadeFrom": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[after.version !== before.version, after.made_from === before.made_from].some((ok) => ok)"
+			},
+			"Artifact.AWriteRecordsItsRequest": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag === \"CreateArtifact\") {\n\t\t\t\treturn [after.version === before.version, after.creation_request === command.request].some(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t)\n\t\t\t}\n\t\t\tif (command._tag === \"AddArtifactVersion\") {\n\t\t\t\treturn [after.version === before.version, after.version_request === command.request].some(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t)\n\t\t\t}\n\t\t\treturn true\n\t\t}"
+			},
+			"Artifact.ACommittedCreationKeepsItsRequest": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.version === 0, before.creation_request === after.creation_request].some((ok) => ok)"
 			}
 		}
 	}

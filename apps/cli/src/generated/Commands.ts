@@ -489,9 +489,17 @@ const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "files",
 			location: "body",
 			kind: "repeat-structured",
-			required: true,
+			required: false,
 			min: 0,
 			max: 1000,
+		},
+		{
+			propName: "madeFrom",
+			flagName: "made-from",
+			wireName: "made_from",
+			location: "body",
+			kind: "structured",
+			required: false,
 		},
 		{
 			propName: "idempotencyKey",
@@ -518,6 +526,13 @@ const artifactsCreateCommand = CommandMake(
 			),
 			FlagBetween(0, 1000),
 		),
+		madeFrom: FlagString("made-from").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
 			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
@@ -527,7 +542,7 @@ const artifactsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. (accepts flags and/or JSON/YAML on stdin)",
+		"Create an artifact from a set of files (version 1). An Idempotency-Key retries the same request, including the source version and file descriptors when supplied. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{
@@ -1153,9 +1168,17 @@ const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "files",
 			location: "body",
 			kind: "repeat-structured",
-			required: true,
+			required: false,
 			min: 0,
 			max: 1000,
+		},
+		{
+			propName: "madeFrom",
+			flagName: "made-from",
+			wireName: "made_from",
+			location: "body",
+			kind: "structured",
+			required: false,
 		},
 	],
 }
@@ -1179,11 +1202,18 @@ const artifactsVersionsCreateCommand = CommandMake(
 			),
 			FlagBetween(0, 1000),
 		),
+		madeFrom: FlagString("made-from").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
 	},
 	(flags) => invokeGeneratedOperation(artifactsVersionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. (accepts flags and/or JSON/YAML on stdin)",
+		"Add a new immutable version to an artifact. If the artifact is still on the version the request added, resending the same request returns that version. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. (accepts flags and/or JSON/YAML on stdin)",
 	),
 )
 

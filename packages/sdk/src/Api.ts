@@ -630,12 +630,28 @@ const ArtifactFilesField = ArtifactFilesInput.annotate({
 	description: "Every file of the version; a new version replaces the whole set",
 })
 
+export const ArtifactMadeFrom = Schema.Struct({
+	artifact_id: ArtifactId,
+	version: PositiveInt,
+})
+export type ArtifactMadeFrom = typeof ArtifactMadeFrom.Type
+
+const MadeFromField = Schema.optionalKey(
+	ArtifactMadeFrom.annotate({
+		description:
+			"Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source",
+	}),
+)
+
 export const CreateArtifactBody = Schema.Struct({
 	name: ArtifactName.annotate({ description: "Human-readable artifact name" }),
-	files: ArtifactFilesField.annotate({
-		description:
-			"Every file of version 1. Send a small file's content inline, or name a file by its id",
-	}),
+	files: Schema.optionalKey(
+		ArtifactFilesField.annotate({
+			description:
+				"Every file of version 1, or with made_from the files to add to the source's. Send a small file's content inline, or name a file by its id. Required unless made_from is given",
+		}),
+	),
+	made_from: MadeFromField,
 })
 export type CreateArtifactBody = typeof CreateArtifactBody.Type
 
@@ -643,10 +659,13 @@ export const CreateArtifactVersionBody = Schema.Struct({
 	version: PositiveInt.annotate({
 		description: "Current artifact version for optimistic concurrency",
 	}),
-	files: ArtifactVersionFilesInput.annotate({
-		description:
-			"Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256",
-	}),
+	files: Schema.optionalKey(
+		ArtifactVersionFilesInput.annotate({
+			description:
+				"Every file of the version, or with made_from the files to add to the source's; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256. Required unless made_from is given",
+		}),
+	),
+	made_from: MadeFromField,
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
 
@@ -1181,6 +1200,9 @@ export const ArtifactResource = Schema.Struct({
 	name: Schema.String,
 	version: PositiveInt.annotate({ description: "Current version" }),
 	capabilities: ArtifactCapabilities,
+	made_from: Schema.NullOr(ArtifactMadeFrom).annotate({
+		description: "The artifact version this version's files were started from, or null",
+	}),
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),
@@ -1218,6 +1240,9 @@ export const ArtifactVersionResource = Schema.Struct({
 	artifact_id: Schema.String,
 	version: PositiveInt,
 	capabilities: ArtifactCapabilities,
+	made_from: Schema.NullOr(ArtifactMadeFrom).annotate({
+		description: "The artifact version this version's files were started from, or null",
+	}),
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),
@@ -2930,7 +2955,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 			.annotate(OpenApi.Summary, "Create an artifact")
 			.annotate(
 				OpenApi.Description,
-				`Create an artifact from a set of files (version 1). ${ARTIFACT_UPLOAD_LIMIT}`,
+				`Create an artifact from a set of files (version 1). An Idempotency-Key retries the same request, including the source version and file descriptors when supplied. ${ARTIFACT_UPLOAD_LIMIT}`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts",
@@ -3015,7 +3040,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 			.annotate(OpenApi.Summary, "Create an artifact version")
 			.annotate(
 				OpenApi.Description,
-				`Add a new immutable version to an artifact. ${ARTIFACT_UPLOAD_LIMIT}`,
+				`Add a new immutable version to an artifact. If the artifact is still on the version the request added, resending the same request returns that version. ${ARTIFACT_UPLOAD_LIMIT}`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts.versions",

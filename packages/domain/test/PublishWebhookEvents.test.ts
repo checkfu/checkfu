@@ -133,6 +133,8 @@ describe("PublishWebhookEvents policy", () => {
 					file_count: 1,
 					total_bytes: 12,
 					capabilities: "",
+					made_from: "",
+					request: "",
 					reservation: 1,
 				})
 				yield* domain.PublishArtifact({
@@ -150,6 +152,8 @@ describe("PublishWebhookEvents policy", () => {
 					file_count: 1,
 					total_bytes: 12,
 					capabilities: "",
+					made_from: "",
+					request: "",
 					reservation: 1,
 				})
 				yield* domain.AddArtifactVersion({
@@ -159,6 +163,8 @@ describe("PublishWebhookEvents policy", () => {
 					file_count: 1,
 					total_bytes: 5,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				})
 				yield* domain.AdmitAutomation({
 					automation_id: automationId,

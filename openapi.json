@@ -24133,6 +24133,30 @@
 											"additionalProperties": false,
 											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 										},
+										"made_from": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														}
+													},
+													"required": ["artifact_id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact version this version's files were started from, or null"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -24245,6 +24269,7 @@
 										"name",
 										"version",
 										"capabilities",
+										"made_from",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -24715,7 +24740,7 @@
 						}
 					}
 				},
-				"description": "Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
+				"description": "Create an artifact from a set of files (version 1). An Idempotency-Key retries the same request, including the source version and file descriptors when supplied. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
 				"summary": "Create an artifact",
 				"requestBody": {
 					"content": {
@@ -24793,10 +24818,27 @@
 										},
 										"minItems": 1,
 										"maxItems": 1000,
-										"description": "Every file of version 1. Send a small file's content inline, or name a file by its id"
+										"description": "Every file of version 1, or with made_from the files to add to the source's. Send a small file's content inline, or name a file by its id. Required unless made_from is given"
+									},
+									"made_from": {
+										"type": "object",
+										"properties": {
+											"artifact_id": {
+												"type": "string",
+												"minLength": 1
+											},
+											"version": {
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 9007199254740991
+											}
+										},
+										"required": ["artifact_id", "version"],
+										"additionalProperties": false,
+										"description": "Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source"
 									}
 								},
-								"required": ["name", "files"],
+								"required": ["name"],
 								"additionalProperties": false
 							}
 						}
@@ -24933,6 +24975,30 @@
 														"additionalProperties": false,
 														"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 													},
+													"made_from": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"artifact_id": {
+																		"type": "string",
+																		"minLength": 1
+																	},
+																	"version": {
+																		"type": "integer",
+																		"minimum": 1,
+																		"maximum": 9007199254740991
+																	}
+																},
+																"required": ["artifact_id", "version"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														],
+														"description": "The artifact version this version's files were started from, or null"
+													},
 													"file_count": {
 														"type": "integer",
 														"minimum": 0,
@@ -25017,6 +25083,7 @@
 													"name",
 													"version",
 													"capabilities",
+													"made_from",
 													"file_count",
 													"total_bytes",
 													"publication",
@@ -25484,6 +25551,30 @@
 											"additionalProperties": false,
 											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 										},
+										"made_from": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														}
+													},
+													"required": ["artifact_id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact version this version's files were started from, or null"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -25596,6 +25687,7 @@
 										"name",
 										"version",
 										"capabilities",
+										"made_from",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -26428,6 +26520,30 @@
 											"additionalProperties": false,
 											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 										},
+										"made_from": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														}
+													},
+													"required": ["artifact_id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact version this version's files were started from, or null"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -26475,6 +26591,7 @@
 										"artifact_id",
 										"version",
 										"capabilities",
+										"made_from",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -26948,7 +27065,7 @@
 						}
 					}
 				},
-				"description": "Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
+				"description": "Add a new immutable version to an artifact. If the artifact is still on the version the request added, resending the same request returns that version. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
 				"summary": "Create an artifact version",
 				"requestBody": {
 					"content": {
@@ -27052,10 +27169,27 @@
 										},
 										"minItems": 1,
 										"maxItems": 1000,
-										"description": "Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256"
+										"description": "Every file of the version, or with made_from the files to add to the source's; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256. Required unless made_from is given"
+									},
+									"made_from": {
+										"type": "object",
+										"properties": {
+											"artifact_id": {
+												"type": "string",
+												"minLength": 1
+											},
+											"version": {
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 9007199254740991
+											}
+										},
+										"required": ["artifact_id", "version"],
+										"additionalProperties": false,
+										"description": "Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source"
 									}
 								},
-								"required": ["version", "files"],
+								"required": ["version"],
 								"additionalProperties": false
 							}
 						}
@@ -27169,6 +27303,30 @@
 											"additionalProperties": false,
 											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 										},
+										"made_from": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														}
+													},
+													"required": ["artifact_id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact version this version's files were started from, or null"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -27216,6 +27374,7 @@
 										"artifact_id",
 										"version",
 										"capabilities",
+										"made_from",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -29074,6 +29233,30 @@
 											"additionalProperties": false,
 											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 										},
+										"made_from": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														}
+													},
+													"required": ["artifact_id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact version this version's files were started from, or null"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -29186,6 +29369,7 @@
 										"name",
 										"version",
 										"capabilities",
+										"made_from",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -29775,6 +29959,30 @@
 											"additionalProperties": false,
 											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
 										},
+										"made_from": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														}
+													},
+													"required": ["artifact_id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact version this version's files were started from, or null"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -29887,6 +30095,7 @@
 										"name",
 										"version",
 										"capabilities",
+										"made_from",
 										"file_count",
 										"total_bytes",
 										"files",

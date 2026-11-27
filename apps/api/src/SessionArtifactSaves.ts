@@ -413,6 +413,8 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 									file_count: built.file_count,
 									total_bytes: built.total_bytes,
 									capabilities,
+									made_from: "",
+									request: "",
 								}),
 							)
 							return saved(added.reply.version, true)
@@ -437,6 +439,8 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 								file_count: built.file_count,
 								total_bytes: built.total_bytes,
 								capabilities,
+								made_from: "",
+								request: "",
 								reservation,
 							}),
 						)

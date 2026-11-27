@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "prerelease-vault-recovery",
-			"cut_at": "2026-11-27T19:05:31.553Z",
+			"label": "prerelease-artifact-lineage",
+			"cut_at": "2026-11-27T19:16:00.188Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -95,11 +95,11 @@
 				"event:Checkfu.AutomationCapacity/automation_slot.reserved": "39920032495cad1bccecba6ec60e6058a40d44d90628c597a95d00dc311cebb6",
 				"command-reply:Checkfu/ReleaseAutomationSlot": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"scheduled-command:Checkfu.AutomationCapacity/ReleaseAutomationSlot": "48ee02b65cdaba75bd67fd865baaf7ea712318bb32511a60f5ba12ca7c97a7ea",
-				"state:Checkfu.Artifact": "8baa1bdb46a38cc9af3129a981ce43bb47eec0c93be1a915047cb1e345fe3b20",
+				"state:Checkfu.Artifact": "e3a4d502df294c9067bd7de440e6a2935e4d94e9ed24a8015694991dfd961e46",
 				"event:Checkfu.Artifact/artifact.reserved": "16f16f1e5b5ab058e69385c48e5ff64a16d5cc9f64e8fda43649847f0e0121d8",
 				"event:Checkfu.Artifact/artifact.reservation_expired": "6d072406d5ea6f667ccb30dd90aec786586f9d364cc16661968e3d5fa713fd4a",
-				"event:Checkfu.Artifact/artifact.created": "5b2b812e3fcc1e5d5ed419ea55b974d9723d1bce298135837b0dc74d91d3737c",
-				"event:Checkfu.Artifact/artifact.version_added": "e59c86834c9c0ca9d1a39a1a0e83601bc591990391c0e7f12f281c6149de9784",
+				"event:Checkfu.Artifact/artifact.created": "d1c258555120270c1af01370a9c738fe7a7be01f4c8eece62416519aa5fefe23",
+				"event:Checkfu.Artifact/artifact.version_added": "bcc511df3e1d0b3f4c2491cbdf4e9ec3c7d8d49a082586bd7ba4086845e9c1f1",
 				"event:Checkfu.Artifact/artifact.deleted": "f4a9b59a11486240383562ecc29249179066687f46e5b2c3eb2b1fb45c4a9e2b",
 				"event:Checkfu.Artifact/artifact.published": "dd472dd15025c30b690e51bd3fe9450a04d5f6e794ef8dcb29b9a552c7e1721e",
 				"event:Checkfu.Artifact/artifact.unpublished": "f1d07cfebc7f8378d2e47b1cc56401ee44d8f74b67a5710f6c3895d564fd2c2e",
@@ -168,7 +168,7 @@
 				"view:Checkfu.TurnInput@v6": "e4b190fb3bc4618a8a24363434ddf5cb6b65ce720974f8ccbfd873878e62413a",
 				"view:Checkfu.AutomationView@v5": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"view:Checkfu.AutomationRunView@v1": "9ff80023b8cad6cc0d152e39941175de90e124d4bf705b5e1edfdbc476045ec1",
-				"view:Checkfu.ArtifactVersionView@v2": "06f5a7343095a247bb226f0e30858ff05efbfb710bd362a6e2ebd3bd93928a25",
+				"view:Checkfu.ArtifactVersionView@v3": "004176d152111d1dd6465baf5ac7786eb8ab6ac8cc4edd74457bada157f151f7",
 				"view:Checkfu.MemoryStoreView@v1": "1a413cb8461d4b06191b81fd9177cd20637d37134764a5b52af45ecd379d0b8c",
 				"view:Checkfu.MemoryView@v1": "91f90bea5f24bb78c97ee9c5ec3825652172d4cec5fb35637d1a0f907988ac72",
 				"view:Checkfu.MemoryIndex@v1": "ba2280164859cd2bfc80e0ac47a1d95b65755bb503f630b8eb08f1df359c7081",
@@ -184,12 +184,12 @@
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
 				"policy-delivery:Checkfu.ExpireFileReservations/File": "d951fbd467e214195ff7deae09aa0b6f98712dd79d1c84ce4eeecf0ffadb932d",
 				"policy-delivery:Checkfu.ReleaseFileBytes/File": "961c35cf6b9d19dcd8802f695f23e10c0892d5678bcd9df446d57ebba4e1842e",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "1876bbd519e4716649643c64387f5a7e856393eee1b19eb374564da767e68ab3",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "1876bbd519e4716649643c64387f5a7e856393eee1b19eb374564da767e68ab3",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "1876bbd519e4716649643c64387f5a7e856393eee1b19eb374564da767e68ab3",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "1876bbd519e4716649643c64387f5a7e856393eee1b19eb374564da767e68ab3",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "1876bbd519e4716649643c64387f5a7e856393eee1b19eb374564da767e68ab3",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "1876bbd519e4716649643c64387f5a7e856393eee1b19eb374564da767e68ab3",
 				"saga-input:Checkfu.RunTurn": "be6d5b2bc9abaad51b588b72f00272ade393111e2ff0c907edbb1deb761b84d7",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "42513e12ece950579289bf9adcc879b8311c0c23eeaa1e49b2ed254ea30df2bb",
@@ -5478,18 +5478,20 @@
 							"name": "",
 							"manifest": "\ud800",
 							"capabilities": "1f 3",
-							"replaced_manifest": "]R.JU'",
+							"made_from": "]R.JU'",
+							"creation_request": "0",
+							"version_request": "\t",
 							"file_count": 2,
-							"total_bytes": 1,
-							"reservations": 2,
-							"open_reservation": 99,
-							"created_at": 47,
-							"updated_at": 89,
-							"publication_token": "4294967295",
-							"pinned_version": 24,
-							"published_at": 27,
+							"total_bytes": 0,
+							"reservations": 83,
+							"open_reservation": 47,
+							"created_at": 89,
+							"updated_at": 5,
+							"publication_token": "__proto__",
+							"pinned_version": 1,
+							"published_at": 11,
 							"public_access": "view",
-							"public_grant": "toString"
+							"public_grant": ""
 						}
 					},
 					{
@@ -5500,18 +5502,20 @@
 							"name": " zEg9CY@fo",
 							"manifest": "prototype",
 							"capabilities": "toString",
-							"replaced_manifest": "msTSY}KPs",
-							"file_count": 6,
-							"total_bytes": 6,
-							"reservations": 9,
-							"open_reservation": 6,
-							"created_at": 97,
-							"updated_at": 5,
-							"publication_token": "^<+NShhAr/",
-							"pinned_version": 91,
-							"published_at": 48,
-							"public_access": "write",
-							"public_grant": "-dqS E`RY3"
+							"made_from": "msTSY}KPs",
+							"creation_request": "\u0000",
+							"version_request": "s~)4DxU{9V",
+							"file_count": 57,
+							"total_bytes": 98,
+							"reservations": 3,
+							"open_reservation": 76,
+							"created_at": 35,
+							"updated_at": 16,
+							"publication_token": "Mqx;H",
+							"pinned_version": 99,
+							"published_at": 0,
+							"public_access": "view",
+							"public_grant": "3KG%l@"
 						}
 					},
 					{
@@ -5522,18 +5526,20 @@
 							"name": "\t",
 							"manifest": "",
 							"capabilities": "__proto__",
-							"replaced_manifest": "0",
-							"file_count": 33,
-							"total_bytes": 1,
-							"reservations": 18,
-							"open_reservation": 67,
-							"created_at": 48,
-							"updated_at": 95,
-							"publication_token": "\ud800",
-							"pinned_version": 6,
-							"published_at": 93,
-							"public_access": "write",
-							"public_grant": "\t"
+							"made_from": "0",
+							"creation_request": "",
+							"version_request": "1]_zM+m7&o",
+							"file_count": 6,
+							"total_bytes": 93,
+							"reservations": 2,
+							"open_reservation": 5,
+							"created_at": 90,
+							"updated_at": 7,
+							"publication_token": "prototype",
+							"pinned_version": 4,
+							"published_at": 69,
+							"public_access": "read",
+							"public_grant": ""
 						}
 					},
 					{
@@ -5544,18 +5550,20 @@
 							"name": "",
 							"manifest": "prototype",
 							"capabilities": "",
-							"replaced_manifest": " ",
-							"file_count": 2,
-							"total_bytes": 6,
-							"reservations": 99,
-							"open_reservation": 32,
-							"created_at": 53,
-							"updated_at": 96,
-							"publication_token": "\n",
-							"pinned_version": 6,
-							"published_at": 27,
-							"public_access": "view",
-							"public_grant": "\n"
+							"made_from": " ",
+							"creation_request": "",
+							"version_request": " ",
+							"file_count": 94,
+							"total_bytes": 78,
+							"reservations": 32,
+							"open_reservation": 53,
+							"created_at": 96,
+							"updated_at": 0,
+							"publication_token": ":HB7o/5J",
+							"pinned_version": 66,
+							"published_at": 70,
+							"public_access": "write",
+							"public_grant": "0`Q["
 						}
 					},
 					{
@@ -5566,18 +5574,20 @@
 							"name": "0hRD?-g}u+",
 							"manifest": "toString",
 							"capabilities": "-1",
-							"replaced_manifest": "\udc00",
-							"file_count": 1,
-							"total_bytes": 13,
-							"reservations": 3,
-							"open_reservation": 43,
-							"created_at": 56,
-							"updated_at": 60,
-							"publication_token": "\ud800",
+							"made_from": "\udc00",
+							"creation_request": "4294967295",
+							"version_request": "toString",
+							"file_count": 4,
+							"total_bytes": 85,
+							"reservations": 97,
+							"open_reservation": 60,
+							"created_at": 95,
+							"updated_at": 3,
+							"publication_token": "\t",
 							"pinned_version": 94,
-							"published_at": 0,
-							"public_access": "write",
-							"public_grant": "😀"
+							"published_at": 27,
+							"public_access": "read",
+							"public_grant": "V"
 						}
 					},
 					{
@@ -5588,18 +5598,20 @@
 							"name": "toString",
 							"manifest": "\\t'biD3KaM",
 							"capabilities": "",
-							"replaced_manifest": "-1",
-							"file_count": 34,
-							"total_bytes": 87,
-							"reservations": 57,
-							"open_reservation": 100,
-							"created_at": 50,
-							"updated_at": 1,
-							"publication_token": "toString",
-							"pinned_version": 10,
+							"made_from": "-1",
+							"creation_request": "",
+							"version_request": "(}qoOG",
+							"file_count": 0,
+							"total_bytes": 63,
+							"reservations": 5,
+							"open_reservation": 38,
+							"created_at": 81,
+							"updated_at": 92,
+							"publication_token": "",
+							"pinned_version": 54,
 							"published_at": 97,
-							"public_access": "view",
-							"public_grant": "v0\"zS,|"
+							"public_access": "read",
+							"public_grant": ""
 						}
 					},
 					{
@@ -5610,16 +5622,18 @@
 							"name": "\ud800",
 							"manifest": "toString",
 							"capabilities": "-1",
-							"replaced_manifest": "PH2n|#uvdS",
+							"made_from": "PH2n|#uvdS",
+							"creation_request": "__proto__",
+							"version_request": "__proto__",
 							"file_count": 2,
-							"total_bytes": 47,
-							"reservations": 35,
-							"open_reservation": 58,
-							"created_at": 95,
-							"updated_at": 55,
-							"publication_token": "T>N",
-							"pinned_version": 2,
-							"published_at": 65,
+							"total_bytes": 58,
+							"reservations": 95,
+							"open_reservation": 55,
+							"created_at": 65,
+							"updated_at": 2,
+							"publication_token": "\u0000",
+							"pinned_version": 3,
+							"published_at": 4,
 							"public_access": "",
 							"public_grant": "\t"
 						}
@@ -5632,18 +5646,20 @@
 							"name": "A)j",
 							"manifest": "SLz{",
 							"capabilities": "o(h",
-							"replaced_manifest": "__proto__",
-							"file_count": 100,
-							"total_bytes": 97,
-							"reservations": 100,
+							"made_from": "__proto__",
+							"creation_request": "prototype",
+							"version_request": "",
+							"file_count": 6,
+							"total_bytes": 46,
+							"reservations": 99,
 							"open_reservation": 5,
-							"created_at": 31,
-							"updated_at": 98,
-							"publication_token": "__proto__",
-							"pinned_version": 5,
-							"published_at": 21,
+							"created_at": 32,
+							"updated_at": 4,
+							"publication_token": "4igZC=e",
+							"pinned_version": 4,
+							"published_at": 2,
 							"public_access": "write",
-							"public_grant": "=e84"
+							"public_grant": ""
 						}
 					}
 				],
@@ -5723,7 +5739,9 @@
 						"manifest": "-1",
 						"file_count": 101,
 						"total_bytes": 5,
-						"capabilities": "qesXX"
+						"capabilities": "qesXX",
+						"made_from": "4294967295",
+						"request": "😀"
 					},
 					{
 						"_tag": "artifact.created",
@@ -5732,7 +5750,9 @@
 						"manifest": "\u0000",
 						"file_count": 40,
 						"total_bytes": 100,
-						"capabilities": "\u0000"
+						"capabilities": "\u0000",
+						"made_from": "",
+						"request": "prototype"
 					},
 					{
 						"_tag": "artifact.created",
@@ -5741,7 +5761,9 @@
 						"manifest": "\u0000",
 						"file_count": 1,
 						"total_bytes": 1,
-						"capabilities": ""
+						"capabilities": "",
+						"made_from": "",
+						"request": "qz"
 					},
 					{
 						"_tag": "artifact.created",
@@ -5750,7 +5772,9 @@
 						"manifest": "$",
 						"file_count": 1,
 						"total_bytes": 97,
-						"capabilities": "\udc00"
+						"capabilities": "\udc00",
+						"made_from": "",
+						"request": "4C[=:wVtj+"
 					},
 					{
 						"_tag": "artifact.created",
@@ -5759,7 +5783,9 @@
 						"manifest": "\n",
 						"file_count": 1,
 						"total_bytes": 95,
-						"capabilities": ""
+						"capabilities": "",
+						"made_from": "toString",
+						"request": "ipSoR:"
 					},
 					{
 						"_tag": "artifact.created",
@@ -5768,7 +5794,9 @@
 						"manifest": " ",
 						"file_count": 79,
 						"total_bytes": 4,
-						"capabilities": "\n"
+						"capabilities": "\n",
+						"made_from": "sT=FVw",
+						"request": ""
 					},
 					{
 						"_tag": "artifact.created",
@@ -5777,7 +5805,9 @@
 						"manifest": "\n",
 						"file_count": 14,
 						"total_bytes": 4,
-						"capabilities": "prototype"
+						"capabilities": "prototype",
+						"made_from": "8i8`q5%`jE",
+						"request": "kAlP9ZWaW"
 					},
 					{
 						"_tag": "artifact.created",
@@ -5786,7 +5816,9 @@
 						"manifest": "j",
 						"file_count": 75,
 						"total_bytes": 60,
-						"capabilities": ""
+						"capabilities": "",
+						"made_from": "",
+						"request": "toString"
 					}
 				],
 				"event:Checkfu.Artifact/artifact.version_added": [
@@ -5796,7 +5828,9 @@
 						"manifest": "'>JnGx",
 						"file_count": 79,
 						"total_bytes": 0,
-						"capabilities": " "
+						"capabilities": " ",
+						"made_from": "QLj",
+						"request": "JA<e?u%\\X;"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5804,7 +5838,9 @@
 						"manifest": "4294967295",
 						"file_count": 97,
 						"total_bytes": 95,
-						"capabilities": "q=f8fBz`)\""
+						"capabilities": "q=f8fBz`)\"",
+						"made_from": "(\\nT2",
+						"request": "\udc00"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5812,7 +5848,9 @@
 						"manifest": "LY]}z?",
 						"file_count": 32,
 						"total_bytes": 49,
-						"capabilities": "__proto__"
+						"capabilities": "__proto__",
+						"made_from": "",
+						"request": "prototype"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5820,7 +5858,9 @@
 						"manifest": "B",
 						"file_count": 97,
 						"total_bytes": 4,
-						"capabilities": "0"
+						"capabilities": "0",
+						"made_from": "\udc00",
+						"request": "Zu8,RTe4`;"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5828,7 +5868,9 @@
 						"manifest": "\n",
 						"file_count": 68,
 						"total_bytes": 59,
-						"capabilities": "@`J"
+						"capabilities": "@`J",
+						"made_from": "4294967295",
+						"request": "\udc00"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5836,7 +5878,9 @@
 						"manifest": "J",
 						"file_count": 75,
 						"total_bytes": 97,
-						"capabilities": "4294967295"
+						"capabilities": "4294967295",
+						"made_from": "0",
+						"request": "-1"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5844,7 +5888,9 @@
 						"manifest": ":Tw<B_5;-J",
 						"file_count": 94,
 						"total_bytes": 62,
-						"capabilities": ""
+						"capabilities": "",
+						"made_from": "",
+						"request": "5/D{fv@yMW"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -5852,7 +5898,9 @@
 						"manifest": "0",
 						"file_count": 100,
 						"total_bytes": 100,
-						"capabilities": ""
+						"capabilities": "",
+						"made_from": "Aa.e\"*Aj]b",
+						"request": ""
 					}
 				],
 				"event:Checkfu.Artifact/artifact.deleted": [
@@ -8735,41 +8783,44 @@
 						"recorded": 83
 					}
 				],
-				"view:Checkfu.ArtifactVersionView@v2": [
-					null,
+				"view:Checkfu.ArtifactVersionView@v3": [
 					{
-						"artifact_id": "prototype",
+						"artifact_id": "toString",
 						"type": "artifact_version",
-						"version": 4,
-						"manifest": "\n",
-						"file_count": 6,
-						"total_bytes": 39,
-						"capabilities": "",
-						"created_at": "1970-01-01T00:00:00.002Z"
-					},
-					null,
-					null,
-					{
-						"artifact_id": " ",
-						"type": "artifact_version",
-						"version": 99,
-						"manifest": "a87WtKAA00",
-						"file_count": 6,
+						"version": 7,
+						"manifest": "\u0000",
+						"file_count": 5,
 						"total_bytes": 4,
-						"capabilities": "l{h{-l=wWM",
-						"created_at": "1969-12-31T23:59:59.966Z"
+						"capabilities": "toString",
+						"made_from": "",
+						"created_at": "1969-12-31T23:59:59.986Z"
+					},
+					{
+						"artifact_id": "<zi (4BTYR",
+						"type": "artifact_version",
+						"version": 2,
+						"manifest": "__proto__",
+						"file_count": 4,
+						"total_bytes": 7,
+						"capabilities": "\n",
+						"made_from": "\ud800",
+						"created_at": "+275760-09-12T23:59:59.994Z"
 					},
 					null,
 					{
-						"artifact_id": "\udc00",
+						"artifact_id": "\n",
 						"type": "artifact_version",
-						"version": 27,
-						"manifest": "c",
-						"file_count": 50,
-						"total_bytes": 37,
-						"capabilities": "m$9N#%Zb)O",
-						"created_at": "1969-12-31T23:59:59.966Z"
+						"version": 5,
+						"manifest": "prototype",
+						"file_count": 91,
+						"total_bytes": 98,
+						"capabilities": ";&~*/.J+I",
+						"made_from": "",
+						"created_at": "-112130-05-27T03:35:13.457Z"
 					},
+					null,
+					null,
+					null,
 					null
 				],
 				"view:Checkfu.MemoryStoreView@v1": [
@@ -10249,7 +10300,9 @@
 						"manifest": "w}qBPrLFKL",
 						"file_count": 98,
 						"total_bytes": 74,
-						"capabilities": ""
+						"capabilities": "",
+						"made_from": "😀",
+						"request": "M>7r]0lV9c"
 					}
 				],
 				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": [
@@ -10378,7 +10431,9 @@
 						"manifest": "4294967295",
 						"file_count": 100,
 						"total_bytes": 98,
-						"capabilities": "o"
+						"capabilities": "o",
+						"made_from": "|O+0R;/y5H",
+						"request": "toString"
 					},
 					{
 						"_tag": "environment.updated",
@@ -10490,7 +10545,9 @@
 						"manifest": "\n",
 						"file_count": 1,
 						"total_bytes": 3,
-						"capabilities": "O7~r>E7"
+						"capabilities": "O7~r>E7",
+						"made_from": "G]f(f%'g,F",
+						"request": ""
 					},
 					{
 						"_tag": "automation.created",
@@ -10512,7 +10569,9 @@
 						"manifest": "-1",
 						"file_count": 89,
 						"total_bytes": 1,
-						"capabilities": "\udc00"
+						"capabilities": "\udc00",
+						"made_from": "`szF)l~01w",
+						"request": "4294967295"
 					}
 				],
 				"saga-input:Checkfu.RunTurn": [

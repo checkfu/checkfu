@@ -13,7 +13,7 @@ import {
 	ArtifactIdempotencyKeyClaimed,
 	ClaimArtifactIdempotencyKey,
 } from "./ClaimArtifactIdempotencyKey.command.ts"
-import { NonNegativeInt } from "./ArtifactTypes.ts"
+import { ArtifactWriteRequest, NonNegativeInt } from "./ArtifactTypes.ts"
 import { ArtifactAlreadyExists, ArtifactCreated, CreateArtifact } from "./CreateArtifact.command.ts"
 import { ArtifactReservationLapsed } from "./ArtifactReservationLapsed.rejection.ts"
 import { ArtifactDeleted, DeleteArtifact } from "./DeleteArtifact.command.ts"
@@ -35,7 +35,9 @@ export const ArtifactState = Schema.Struct({
 	name: Schema.String,
 	manifest: Schema.String,
 	capabilities: Schema.String,
-	replaced_manifest: Schema.String,
+	made_from: Schema.String,
+	creation_request: ArtifactWriteRequest,
+	version_request: ArtifactWriteRequest,
 	file_count: NonNegativeInt,
 	total_bytes: NonNegativeInt,
 	reservations: NonNegativeInt,
@@ -66,7 +68,9 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		name: "",
 		manifest: "",
 		capabilities: "",
-		replaced_manifest: "",
+		made_from: "",
+		creation_request: "",
+		version_request: "",
 		file_count: 0,
 		total_bytes: 0,
 		reservations: 0,
@@ -124,6 +128,21 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			[s.open_reservation === 0, s.open_reservation === s.reservations].some((ok) => ok),
 	},
 	transitions: {
+		AWriteRecordsItsRequest: ({ before, after, command }) => {
+			if (command._tag === "CreateArtifact") {
+				return [after.version === before.version, after.creation_request === command.request].some(
+					(ok) => ok,
+				)
+			}
+			if (command._tag === "AddArtifactVersion") {
+				return [after.version === before.version, after.version_request === command.request].some(
+					(ok) => ok,
+				)
+			}
+			return true
+		},
+		ACommittedCreationKeepsItsRequest: ({ before, after }) =>
+			[before.version === 0, before.creation_request === after.creation_request].some((ok) => ok),
 		CreatedArtifactNeverReturnsToUninitialized: ({ before, after }) =>
 			[before.status === "", after.status !== ""].some((ok) => ok),
 		DeletedStaysDeleted: ({ before, after }) =>
@@ -185,6 +204,16 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				command._tag === "AddArtifactVersion",
 				after.capabilities === before.capabilities,
 			].some((ok) => ok),
+		ANewVersionRecordsWhatItWasMadeFrom: ({ before, after, command }) => {
+			if (command._tag !== "CreateArtifact" && command._tag !== "AddArtifactVersion") {
+				return true
+			}
+			return [after.version === before.version, after.made_from === command.made_from].some(
+				(ok) => ok,
+			)
+		},
+		OnlyANewVersionChangesWhatItWasMadeFrom: ({ before, after }) =>
+			[after.version !== before.version, after.made_from === before.made_from].some((ok) => ok),
 		ReservationsAreNumberedInOrder: ({ before, after, command }) =>
 			[
 				after.reservations === before.reservations,
@@ -319,6 +348,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					name: cmd.name,
 					manifest: cmd.manifest,
 					capabilities: cmd.capabilities,
+					made_from: cmd.made_from,
+					request: cmd.request,
 					file_count: cmd.file_count,
 					total_bytes: cmd.total_bytes,
 				}),
@@ -340,6 +371,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					version: state.version + 1,
 					manifest: cmd.manifest,
 					capabilities: cmd.capabilities,
+					made_from: cmd.made_from,
+					request: cmd.request,
 					file_count: cmd.file_count,
 					total_bytes: cmd.total_bytes,
 				}),
@@ -411,6 +444,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						name: e.name,
 						manifest: e.manifest,
 						capabilities: e.capabilities,
+						made_from: e.made_from,
+						creation_request: e.request,
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
 						created_at: DateTime.toEpochMillis(envelope.at),
@@ -424,7 +459,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						version: e.version,
 						manifest: e.manifest,
 						capabilities: e.capabilities,
-						replaced_manifest: state.manifest,
+						made_from: e.made_from,
+						version_request: e.request,
 						file_count: e.file_count,
 						total_bytes: e.total_bytes,
 						updated_at: DateTime.toEpochMillis(envelope.at),

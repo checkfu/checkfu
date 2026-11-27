@@ -96,6 +96,49 @@ const withData = <A>(
 }
 
 describe("An artifact's data API", () => {
+	it("keeps the source's documents and public grants out of a derived artifact", () =>
+		withData(({ call }) =>
+			Effect.gen(function* () {
+				const capabilities = { database: { collections: { votes: { visitors: "write" } } } }
+				const source = yield* call("POST", "/v1/artifacts", {
+					name: "Source",
+					files: [
+						{ path: "index.html", content: "<h1>Poll</h1>" },
+						{ path: "artifact.json", content: JSON.stringify({ capabilities }) },
+					],
+				})
+				expect(source.status).toBe(201)
+				const { id } = yield* json<{ id: string }>(source)
+				const sourceVotes = `/v1/artifacts/${id}/data/votes`
+				expect((yield* call("PUT", `${sourceVotes}/current`, { data: "source" })).status).toBe(200)
+				const published = yield* call("POST", `/v1/artifacts/${id}/publication`, {
+					access: "write",
+				})
+				expect(published.status).toBe(200)
+				expect(yield* json(published)).toMatchObject({
+					publication: { grants: { votes: "write" } },
+				})
+
+				const derived = yield* call("POST", "/v1/artifacts", {
+					name: "Derived",
+					made_from: { artifact_id: id, version: 1 },
+				})
+				expect(derived.status).toBe(201)
+				const copy = yield* json<{ id: string; publication: unknown; capabilities: unknown }>(
+					derived,
+				)
+				expect(copy).toMatchObject({ publication: null, capabilities })
+				const derivedVotes = `/v1/artifacts/${copy.id}/data/votes`
+				expect(yield* json(yield* call("GET", derivedVotes))).toEqual({ data: [], next_page: null })
+				expect((yield* call("PUT", `${derivedVotes}/current`, { data: "derived" })).status).toBe(
+					200,
+				)
+				expect(yield* json(yield* call("GET", `${sourceVotes}/current`))).toMatchObject({
+					data: "source",
+				})
+			}),
+		))
+
 	it("adds, lists, retrieves, replaces and deletes documents, and describes what the database holds", () =>
 		withData(({ call, artifact }) =>
 			Effect.gen(function* () {

@@ -159,11 +159,21 @@ One SQLite-backed Durable Object owns each artifact’s database. It applies eac
 
 A document, a slide deck and a dashboard are all artifacts. What differs is the page that shows the content. A type is that page, made once and reused.
 
-- **A type is an artifact** marked as one. Its files are a page and its `artifact.json`.
-- **An artifact made from a type** names an accessible type version and supplies its own content as a data file or documents in its database.
-- **Opening it** serves the pinned template over the artifact’s content and database. The page’s capability declarations come from that template. Instance content cannot replace template paths, including the entry page and `artifact.json`. Grants come from the derived artifact’s own viewing link or publication.
+- **A type is an artifact.** Its files are a page and its `artifact.json`. Nothing else marks it: any version of any artifact can be the start of another.
+- **An artifact made from a type** names the type's version and supplies its own content as files, or as documents in its database.
+- **Opening it** serves the type's page over the artifact's content and database. The page's capability declarations come from the type. The artifact's own files cannot replace the type's paths, including the entry page and `artifact.json`. Grants come from the derived artifact's own viewing link or publication.
 
-The derived version keeps the template files and effective declaration it was built with. Publishing a new type version or deleting the source type does not remove those files. Adopting a newer template creates a new version of the derived artifact.
+In the API, creating an artifact or adding a version takes `made_from`:
+
+```json
+{ "name": "Q3 notes",
+  "made_from": { "artifact_id": "art_…", "version": 3 },
+  "files": [{ "path": "content.md", "content": "# Q3" }] }
+```
+
+The type's files are copied into the new version when it is made, and `files` are added beside them. Leave out paths supplied by the type and the declaration file. With `made_from`, `files` may be left out. The version records what it was made from, and the artifact and version resources show it.
+
+The derived version keeps the type's files and declaration as they were when it was made. A new version of the type, or deleting the type, changes nothing in it. Adopting a newer type version is a new version of the derived artifact, made with `made_from` again and its own files kept by their sha256.
 
 "Document", "slides" and "dashboard" are the first three types. Adding a kind of artifact then means publishing a type, not changing the platform.
 
@@ -178,7 +188,7 @@ These are to be proved or checked when each part is built, in the same way as th
 - Adding a version or changing a publication changes no data.
 - Deletion revokes access, eventually erases the data, and prevents delayed writes from recreating it.
 - The same page can call its capability route from a signed link, a public path, or a public hostname, including when the page is in a subdirectory. Preflight does not grant access.
-- An artifact made from a type records the type and the version, and they never change for that version.
+- An artifact made from a type records the type and the version, and they never change for that version. Proved: a new version records what it was made from, and nothing but a new version changes it.
 
 ## Order of work
 
@@ -190,7 +200,7 @@ These are to be proved or checked when each part is built, in the same way as th
 | C2 (built) | The page's `_/data` calls through the content Worker | B, C1 |
 | C3 (built) | Rate limits per caller and per artifact | C2 |
 | D (built) | A tool for the agent to read and write an artifact's data | B |
-| E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C2 |
+| E (built) | Types: making an artifact from another artifact's version | A, C2 |
 | F | The document, slides and dashboard types | E |
 
 

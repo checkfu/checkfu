@@ -1506,7 +1506,7 @@ export class EffectArtifactsVersionsResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
+	/** Add a new immutable version to an artifact. If the artifact is still on the version the request added, resending the same request returns that version. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
@@ -1703,7 +1703,7 @@ export class EffectArtifactsResource {
 		this.versions = new EffectArtifactsVersionsResource(runtime)
 	}
 
-	/** Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
+	/** Create an artifact from a set of files (version 1). An Idempotency-Key retries the same request, including the source version and file descriptors when supplied. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
 	create(
 		params: EndpointBody<"artifacts", "create">,
 		options: WithResponseRequestOptions,
@@ -5680,7 +5680,7 @@ export class ArtifactsVersionsResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
+	/** Add a new immutable version to an artifact. If the artifact is still on the version the request added, resending the same request returns that version. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
@@ -5750,7 +5750,7 @@ export class ArtifactsResource {
 		this.versions = new ArtifactsVersionsResource(runtime)
 	}
 
-	/** Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
+	/** Create an artifact from a set of files (version 1). An Idempotency-Key retries the same request, including the source version and file descriptors when supplied. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. */
 	create(
 		params: EndpointBody<"artifacts", "create">,
 		options?: PromiseRequestOptions,

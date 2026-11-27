@@ -177,6 +177,8 @@ const STANDING = {
 	"Artifact.APublicationHasAnAccessLevel": "proved",
 	"Artifact.OnlyAReadOrWritePublicationGrantsData": "proved",
 	"Artifact.PinnedVersionWithinHead": "proved",
+	"Artifact.AWriteRecordsItsRequest": "proved",
+	"Artifact.ACommittedCreationKeepsItsRequest": "proved",
 	"Artifact.AReservationIsOpenOnlyBeforeCreation": "proved",
 	"Artifact.OnlyTheLatestReservationIsOpen": "proved",
 	"Artifact.ATokenIsOnlyOpenedOrDropped": "proved",
@@ -188,6 +190,8 @@ const STANDING = {
 	"Artifact.AnExplicitGrantIsRecordedAsGiven": "proved",
 	"Artifact.ANewVersionRecordsTheCapabilitiesItWasGiven": "proved",
 	"Artifact.OnlyANewVersionChangesTheCapabilities": "proved",
+	"Artifact.ANewVersionRecordsWhatItWasMadeFrom": "proved",
+	"Artifact.OnlyANewVersionChangesWhatItWasMadeFrom": "proved",
 	"Artifact.ReservationsAreNumberedInOrder": "proved",
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
@@ -850,6 +854,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							file_count: 1,
 							total_bytes: 1,
 							capabilities: "",
+							made_from: "",
+							request: "",
 							reservation: 1,
 						}),
 					)
@@ -861,6 +867,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							file_count: 1,
 							total_bytes: 2,
 							capabilities: "",
+							made_from: "",
+							request: "",
 						}),
 					)
 					const artifactWorld = yield* recordStep("artifact-created-and-versioned")

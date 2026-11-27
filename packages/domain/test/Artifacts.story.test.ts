@@ -12,6 +12,8 @@ import {
 import { Artifact } from "../src/Artifact/Artifact.aggregate.ts"
 import { ArtifactBytes, ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { decodeCapabilities, encodeCapabilities } from "../src/Artifact/ArtifactCapabilities.ts"
+import { ArtifactId } from "../src/Artifact/Artifact.id.ts"
+import { decodeMadeFrom, encodeMadeFrom } from "../src/Artifact/ArtifactMadeFrom.ts"
 import type { ArtifactCapabilities } from "../src/Artifact/ArtifactCapabilities.ts"
 import { ArtifactNotFound } from "../src/Artifact/ArtifactNotFound.rejection.ts"
 import {
@@ -86,6 +88,8 @@ describe("Artifacts", () => {
 					file_count: 2,
 					total_bytes: 1024,
 					capabilities: "",
+					made_from: "",
+					request: "",
 					reservation: 1,
 				}),
 			),
@@ -98,6 +102,8 @@ describe("Artifacts", () => {
 					file_count: 2,
 					total_bytes: 1024,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.replied({ version: 1 }),
@@ -118,6 +124,7 @@ describe("Artifacts", () => {
 				file_count: 2,
 				total_bytes: 1024,
 				capabilities: "",
+				made_from: "",
 				created_at: t0,
 			}),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), Story.none),
@@ -130,6 +137,8 @@ describe("Artifacts", () => {
 					file_count: 3,
 					total_bytes: 0,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.then(
@@ -140,6 +149,8 @@ describe("Artifacts", () => {
 					file_count: 3,
 					total_bytes: 0,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.replied({ version: 2 }),
@@ -159,6 +170,7 @@ describe("Artifacts", () => {
 				file_count: 2,
 				total_bytes: 1024,
 				capabilities: "",
+				made_from: "",
 				created_at: t0,
 			}),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), {
@@ -169,6 +181,7 @@ describe("Artifacts", () => {
 				file_count: 3,
 				total_bytes: 0,
 				capabilities: "",
+				made_from: "",
 				created_at: t1,
 			}),
 		)
@@ -188,6 +201,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 10,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.given(
@@ -199,6 +214,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 20,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(first.id, 1), {
@@ -227,6 +244,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 1,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.rejected(new ArtifactNotFound({ artifact_id: missing.id })),
@@ -242,6 +261,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 12,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.when(
@@ -252,6 +273,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 1,
 						capabilities: "",
+						made_from: "",
+						request: "",
 						reservation: 1,
 					}),
 				),
@@ -264,6 +287,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 1,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.rejected(
@@ -297,6 +322,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 5,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.clock(t1),
@@ -308,6 +335,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 6,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.then(
@@ -318,6 +347,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 6,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.replied({ version: 2 }),
@@ -354,6 +385,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 7,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
@@ -365,6 +398,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 7,
 					capabilities: "",
+					made_from: "",
+					request: "",
 					reservation: 1,
 				}),
 			),
@@ -390,6 +425,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 1,
 					capabilities: "",
+					made_from: "",
+					request: "",
 					reservation,
 				})
 			const reserve = new ReserveArtifact({ artifact_id: artifact.id })
@@ -429,6 +466,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 1,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.state(artifact, { status: "active", reservations: 3, open_reservation: 0 }),
@@ -466,6 +505,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 1,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.given(
@@ -476,6 +517,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 2,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.clock(t0),
@@ -536,6 +579,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 1,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.given(
@@ -546,6 +591,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 2,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.clock(t0),
@@ -628,6 +675,8 @@ describe("Artifacts", () => {
 						file_count: 1,
 						total_bytes: 1,
 						capabilities: "",
+						made_from: "",
+						request: "",
 					}),
 				),
 				Story.when(claim("fp_a"), { commandId: "publication:key-1" }),
@@ -675,6 +724,105 @@ describe("Artifacts", () => {
 		expect(decodeCapabilities("not json")).toEqual({})
 	})
 
+	it("writes what a version was made from as one short text, and reads back nothing from anything else", () => {
+		const source = { artifact_id: ArtifactId.make("art_0123456789abcdef01234567"), version: 12 }
+		expect(encodeMadeFrom(source)).toBe("art_0123456789abcdef01234567@12")
+		expect(decodeMadeFrom(encodeMadeFrom(source))).toEqual(source)
+		for (const text of [
+			"",
+			"art_0123456789abcdef01234567",
+			"art_0123456789abcdef01234567@0",
+			"@1",
+			"art_0123456789abcdef01234567@01",
+			"art_0123456789abcdef01234567@1@2",
+			"art_0123456789abcdef01234567@1.5",
+		]) {
+			expect([text, decodeMadeFrom(text)]).toEqual([text, null])
+		}
+	})
+
+	it.effect("keeps what each version was made from, and changes it only with a new version", () => {
+		const artifact = Artifact.ref("art_derived")
+		const from = "art_0123456789abcdef01234567@3"
+		return story(
+			Story.clock(t0),
+			Story.when(new ReserveArtifact({ artifact_id: artifact.id })),
+			Story.then(artifact, new ArtifactReserved({ reservation: 1 })),
+			Story.when(
+				new CreateArtifact({
+					artifact_id: artifact.id,
+					name: "Notes",
+					manifest: manifestA,
+					file_count: 2,
+					total_bytes: 20,
+					capabilities: "",
+					made_from: from,
+					request: "",
+					reservation: 1,
+				}),
+			),
+			Story.then(
+				artifact,
+				new ArtifactCreated({
+					version: 1,
+					name: "Notes",
+					manifest: manifestA,
+					file_count: 2,
+					total_bytes: 20,
+					capabilities: "",
+					made_from: from,
+					request: "",
+				}),
+			),
+			Story.state(artifact, { version: 1, made_from: from }),
+			Story.when(
+				new PublishArtifact({
+					artifact_id: artifact.id,
+					token: "tok",
+					pinned_version: 0,
+					access: "",
+					grant: "",
+				}),
+			),
+			Story.then(
+				artifact,
+				new ArtifactPublished({ token: "tok", pinned_version: 0, access: "view", grant: "" }),
+			),
+			Story.state(artifact, { made_from: from }),
+			Story.when(
+				new AddArtifactVersion({
+					artifact_id: artifact.id,
+					expected_version: 1,
+					manifest: manifestB,
+					file_count: 1,
+					total_bytes: 10,
+					capabilities: "",
+					made_from: "",
+					request: "",
+				}),
+			),
+			Story.then(
+				artifact,
+				new ArtifactVersionAdded({
+					version: 2,
+					manifest: manifestB,
+					file_count: 1,
+					total_bytes: 10,
+					capabilities: "",
+					made_from: "",
+					request: "",
+				}),
+			),
+			Story.state(artifact, { version: 2, made_from: "" }),
+			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
+				made_from: from,
+			}),
+			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), {
+				made_from: "",
+			}),
+		)
+	})
+
 	it.effect("keeps each version's capabilities, and changes them only with a new version", () => {
 		const artifact = Artifact.ref("art_capable")
 		const declared = '{"database":{"collections":{"votes":{"visitors":"add"}}}}'
@@ -690,6 +838,8 @@ describe("Artifacts", () => {
 					file_count: 2,
 					total_bytes: 20,
 					capabilities: declared,
+					made_from: "",
+					request: "",
 					reservation: 1,
 				}),
 			),
@@ -702,12 +852,15 @@ describe("Artifacts", () => {
 					file_count: 2,
 					total_bytes: 20,
 					capabilities: declared,
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.state(artifact, { version: 1, capabilities: declared }),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
 				version: 1,
 				capabilities: declared,
+				made_from: "",
 			}),
 			Story.when(
 				new PublishArtifact({
@@ -731,6 +884,8 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 10,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.then(
@@ -741,14 +896,18 @@ describe("Artifacts", () => {
 					file_count: 1,
 					total_bytes: 10,
 					capabilities: "",
+					made_from: "",
+					request: "",
 				}),
 			),
 			Story.state(artifact, { version: 2, capabilities: "" }),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
 				capabilities: declared,
+				made_from: "",
 			}),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), {
 				capabilities: "",
+				made_from: "",
 			}),
 		)
 	})

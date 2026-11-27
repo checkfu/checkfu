@@ -671,7 +671,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifact",
 		title: "Create an artifact",
 		description:
-			"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
+			"Create an artifact from a set of files (version 1). An Idempotency-Key retries the same request, including the source version and file descriptors when supplied. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
 		method: "POST",
 		path: "/v1/artifacts",
 		readOnly: false,
@@ -761,10 +761,28 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							minItems: 1,
 							maxItems: 1000,
 							description:
-								"Every file of version 1. Send a small file's content inline, or name a file by its id",
+								"Every file of version 1, or with made_from the files to add to the source's. Send a small file's content inline, or name a file by its id. Required unless made_from is given",
+						},
+						made_from: {
+							type: "object",
+							properties: {
+								artifact_id: {
+									type: "string",
+									minLength: 1,
+								},
+								version: {
+									type: "integer",
+									minimum: 1,
+									maximum: 9007199254740991,
+								},
+							},
+							required: ["artifact_id", "version"],
+							additionalProperties: false,
+							description:
+								"Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source",
 						},
 					},
-					required: ["name", "files"],
+					required: ["name"],
 					additionalProperties: false,
 				},
 				idempotency_key: {
@@ -839,7 +857,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifactVersion",
 		title: "Create an artifact version",
 		description:
-			"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
+			"Add a new immutable version to an artifact. If the artifact is still on the version the request added, resending the same request returns that version. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
 		method: "POST",
 		path: "/v1/artifacts/{artifact_id}/versions",
 		readOnly: false,
@@ -972,10 +990,28 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							minItems: 1,
 							maxItems: 1000,
 							description:
-								"Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256",
+								"Every file of the version, or with made_from the files to add to the source's; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256. Required unless made_from is given",
+						},
+						made_from: {
+							type: "object",
+							properties: {
+								artifact_id: {
+									type: "string",
+									minLength: 1,
+								},
+								version: {
+									type: "integer",
+									minimum: 1,
+									maximum: 9007199254740991,
+								},
+							},
+							required: ["artifact_id", "version"],
+							additionalProperties: false,
+							description:
+								"Start from another artifact version, such as a type. The source supplies its files and any capability declaration. Add files at new paths and leave out artifact.json. The copy survives changes to or deletion of the source",
 						},
 					},
-					required: ["version", "files"],
+					required: ["version"],
 					additionalProperties: false,
 				},
 			},

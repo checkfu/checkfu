@@ -257,6 +257,9 @@ const stringifyCanonicalJson = (value: unknown): string => {
 	return JSON.stringify(value)
 }
 
+export const canonicalJsonDigest = (digest: Digest.Digest["Service"], value: unknown) =>
+	digest.digestHex(Digest.sha256, utf8Encoder.encode(stringifyCanonicalJson(value)))
+
 export const sha256Json = (
 	digest: Digest.Digest["Service"],
 	value: unknown,
