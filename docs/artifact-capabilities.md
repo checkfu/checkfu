@@ -97,6 +97,18 @@ A page sends and receives the same shapes as the management API: `{"data": …}`
 
 The content Worker only routes the call: it checks the link's signature or the address's shape, then hands the call to the API Worker, which resolves the version, works out what the address allows, and runs the same document operations the management API uses.
 
+**A page does not need to know its own address.** It loads a helper the platform serves beside its files:
+
+```html
+<script src="_/data.js"></script>
+<script>
+  const responses = artifactData.collection("responses")
+  await responses.add({ answer: 42 })
+</script>
+```
+
+The helper works out the address from where it was loaded, so the same page works from a link, a public path or a public hostname. A page in a folder loads `../_/data.js`. Each call returns a promise: `list({limit, page})`, `get(id)`, `add(data, {key})`, `put(id, data)` and `delete(id)`. A refused call rejects with an error that carries the status. The agent's `save_artifact` tool tells the agent about `artifact.json` and this helper.
+
 A page is untrusted and may be public, so it is not given a query language. Documents with fixed limits can be bounded and checked. A query that scans a table cannot.
 
 **What a visitor may do is set per collection**, by `visitors`:

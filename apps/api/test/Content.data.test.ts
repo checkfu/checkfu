@@ -1,5 +1,6 @@
 import { DATA_OPERATIONS, accessAt, permits } from "@checkfu/domain/Artifact/ArtifactAccess"
 import type { DataOperation } from "@checkfu/domain/Artifact/ArtifactAccess"
+import { runInNewContext } from "node:vm"
 import { describe, expect, it } from "vitest"
 import * as Clock from "effect/Clock"
 import * as Digest from "effect/crypto/Digest"
@@ -22,6 +23,7 @@ import { ArtifactStore } from "../src/Artifacts/ArtifactStore.ts"
 import { linkKey } from "../src/Content/ArtifactLink.ts"
 import { TEST_LINK_SECRET } from "../src/Content/ArtifactLinks.ts"
 import { contentRequestOf, serveContent } from "../src/Content/ContentHandler.ts"
+import { DATA_HELPER } from "../src/Content/DataHelper.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { DEFAULT_STORAGE_SCOPE } from "../src/Placement.ts"
 import {
@@ -49,6 +51,27 @@ interface DocumentBody {
 	readonly data: unknown
 	readonly created_at: string
 	readonly updated_at: string
+}
+
+interface DeletedBody {
+	readonly id: string
+	readonly type: string
+}
+
+interface PageCollection {
+	readonly list: (options?: { limit?: number; page?: string | null }) => Promise<ListBody>
+	readonly get: (id: string) => Promise<DocumentBody>
+	readonly add: (data: unknown, options?: { key?: string }) => Promise<DocumentBody>
+	readonly put: (id: string, data: unknown) => Promise<DocumentBody>
+	readonly delete: (id: string) => Promise<DeletedBody>
+}
+
+interface PageData {
+	readonly collection: (name: string) => PageCollection
+}
+
+interface LoadedPage {
+	artifactData?: PageData
 }
 
 interface ListBody {
@@ -179,6 +202,11 @@ const withPages = <A>(
 		),
 	)
 }
+
+const refusalOf = (error: unknown): string =>
+	typeof error === "object" && error !== null && "status" in error && "message" in error
+		? `${String(error.status)}: ${String(error.message)}`
+		: "not a refusal"
 
 const attempt = (
 	page: (url: string, sent?: Sent) => Effect.Effect<Response>,
@@ -394,6 +422,97 @@ describe("A page reaching its artifact's data", () => {
 				expect(yield* status("http://content.test/a/not-a-link/_/data/board")).toBe(404)
 				expect((yield* page(`${root}index.html`, { method: "OPTIONS" })).status).toBe(204)
 				expect(yield* status(`${root}index.html`)).toBe(200)
+			}),
+		))
+
+	it("serves a helper script a page loads to reach its data without knowing its own address", () =>
+		withPages(({ api, page, artifact, link }) =>
+			Effect.gen(function* () {
+				const id = yield* artifact(COLLECTIONS)
+				const root = yield* link(id, "write")
+				const served = yield* page(`${root}_/data.js`)
+				expect(served.status).toBe(200)
+				expect(served.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
+				expect(served.headers.get("access-control-allow-origin")).toBe("*")
+				const source = yield* Effect.promise(() => served.text())
+				expect(source).toBe(DATA_HELPER)
+				const head = yield* page(`${root}_/data.js`, { method: "HEAD" })
+				expect([head.status, head.headers.get("content-length")]).toEqual([
+					200,
+					String(new TextEncoder().encode(DATA_HELPER).byteLength),
+				])
+				expect((yield* page(`${root}_/data.js`, { method: "OPTIONS" })).status).toBe(204)
+				expect((yield* page(`${root}_/data.js`, { method: "POST", raw: "x" })).status).toBe(405)
+				expect((yield* page(`${root}sub/_/data.js`)).status).toBe(404)
+
+				const sent: Array<string> = []
+				const loaded: LoadedPage = {}
+				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+				runInNewContext(source, {
+					globalThis: loaded,
+					document: { currentScript: { src: `${root}_/data.js` } },
+					fetch: (
+						input: URL,
+						init: { method: string; body?: string; headers: Record<string, string> },
+					) => {
+						sent.push(`${init.method} ${String(input).slice(root.length)}`)
+						return runPromise(
+							page(String(input), {
+								method: init.method,
+								headers: init.headers,
+								...(init.body === undefined ? {} : { raw: init.body }),
+							}),
+						)
+					},
+					URL,
+					URLSearchParams,
+				})
+				const data = loaded.artifactData
+				if (data === undefined) {
+					return yield* Effect.die(new Error("The helper did not define artifactData."))
+				}
+				const board = data.collection("board")
+				const calling = <A>(call: () => Promise<A>) => Effect.promise(call)
+
+				const first = yield* calling(() => board.add({ text: "hi" }, { key: "once" }))
+				expect(first).toMatchObject({ collection: "board", data: { text: "hi" } })
+				expect(yield* calling(() => board.add({ text: "hi" }, { key: "once" }))).toEqual(first)
+				expect(
+					yield* calling(() => board.put("pinned note", ["a", 1]).then(() => null, refusalOf)),
+				).toBe("404: Not found.")
+				yield* calling(() => board.put("pinned", ["a", 1]))
+				expect(yield* calling(() => board.get("pinned"))).toMatchObject({ data: ["a", 1] })
+				const listed = yield* calling(() => board.list({ limit: 1 }))
+				expect(listed.data.map((document) => document.id)).toEqual([first.id])
+				const rest = yield* calling(() => board.list({ limit: 1, page: listed.next_page }))
+				expect(rest.data.map((document) => document.id)).toEqual(["pinned"])
+				expect(yield* calling(() => board.delete("pinned"))).toEqual({
+					id: "pinned",
+					type: "artifact_document_deleted",
+				})
+				expect(sent).toEqual([
+					"POST _/data/board",
+					"POST _/data/board",
+					"PUT _/data/board/pinned%20note",
+					"PUT _/data/board/pinned",
+					"GET _/data/board/pinned",
+					"GET _/data/board?limit=1",
+					`GET _/data/board?limit=1&page=${listed.next_page}`,
+					"DELETE _/data/board/pinned",
+				])
+
+				const refused = yield* Effect.promise(() =>
+					data
+						.collection("hidden")
+						.list()
+						.then(() => null, refusalOf),
+				)
+				expect(refused).toBe("403: This address does not allow list on hidden.")
+				expect(
+					(yield* json<ListBody>(yield* api("GET", `/v1/artifacts/${id}/data/board`))).data.map(
+						(document) => document.data,
+					),
+				).toEqual([{ text: "hi" }])
 			}),
 		))
 
