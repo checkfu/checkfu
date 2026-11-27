@@ -6,8 +6,10 @@ export const DATA_CALLS_PER_MINUTE_PER_CALLER = 120
 export const DATA_CALLS_PER_MINUTE_PER_ARTIFACT = 1200
 export const DATA_THROTTLE_PERIOD_SECONDS = 60
 
+export type DataCallKind = "read" | "write"
+
 export interface DataThrottleService {
-	readonly admit: (artifactId: string, caller: string) => Effect.Effect<boolean>
+	readonly admit: (artifactId: string, caller: string, kind: DataCallKind) => Effect.Effect<boolean>
 }
 
 export class DataThrottle extends Context.Service<DataThrottle, DataThrottleService>()(
@@ -38,6 +40,8 @@ export const callerNetwork = (caller: string): string => {
 export const callerKey = (artifactId: string, caller: string) =>
 	`${artifactId}:${callerNetwork(caller)}`
 
+export const artifactKey = (artifactId: string, kind: DataCallKind) => `${artifactId}:${kind}`
+
 export const makeDataThrottleMemory = () => {
 	const counts = new Map<string, number>()
 	const within = (key: string, limit: number) => {
@@ -47,11 +51,11 @@ export const makeDataThrottleMemory = () => {
 	}
 	return {
 		layer: Layer.succeed(DataThrottle, {
-			admit: (artifactId, caller) =>
+			admit: (artifactId, caller, kind) =>
 				Effect.sync(
 					() =>
 						within(callerKey(artifactId, caller), DATA_CALLS_PER_MINUTE_PER_CALLER) &&
-						within(artifactId, DATA_CALLS_PER_MINUTE_PER_ARTIFACT),
+						within(artifactKey(artifactId, kind), DATA_CALLS_PER_MINUTE_PER_ARTIFACT),
 				),
 		}),
 	}

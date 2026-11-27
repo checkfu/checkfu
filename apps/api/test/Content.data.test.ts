@@ -578,6 +578,14 @@ describe("A page reaching its artifact's data", () => {
 					left -= calls
 				}
 				expect((yield* from("192.0.2.1")).status).toBe(429)
+				const write = (caller: string) =>
+					page(`${root}_/data/board`, {
+						method: "POST",
+						body: { data: "still served" },
+						headers: { "cf-connecting-ip": caller },
+					})
+				expect((yield* write("192.0.2.2")).status).toBe(201)
+				expect((yield* from("192.0.2.2")).status).toBe(429)
 
 				const other = yield* artifact(COLLECTIONS)
 				const elsewhere = yield* link(other, "write")
