@@ -7,6 +7,9 @@ import { ArtifactVersionNotFound } from "../Artifact/PublishArtifact.command.ts"
 import { Environment } from "../Environment/Environment.aggregate.ts"
 import { File } from "../File/File.aggregate.ts"
 import { FileNotFound } from "../File/FileNotFound.rejection.ts"
+import { MemoryStore } from "../Memory/MemoryStore.aggregate.ts"
+import { MemoryStoreArchivedError } from "../Memory/MemoryStoreArchived.rejection.ts"
+import { MemoryStoreNotFound } from "../Memory/MemoryStoreNotFound.rejection.ts"
 import { admissionFields, admissionRejections } from "./AdmitSession.command.ts"
 import { artifactMounts, mountedKeys, mountedRefusal } from "./AdmissionMounts.ts"
 import { admissionRefusal } from "./AdmissionRefusal.ts"
@@ -14,7 +17,7 @@ import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts
 import { InitialMessages } from "./InitialMessages.ts"
 import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
-import { SessionResources, filesOf } from "./SessionResource.ts"
+import { SessionResources, filesOf, memoryStoresOf } from "./SessionResource.ts"
 import { MessageText } from "./SessionTypes.ts"
 
 export class AdmitMountedSession extends Domain.Command("AdmitMountedSession", {
@@ -28,7 +31,14 @@ export class AdmitMountedSession extends Domain.Command("AdmitMountedSession", {
 		]),
 	},
 	events: [SessionCreated, UserMessage, SessionStatusRunning],
-	rejects: [...admissionRejections, FileNotFound, ArtifactNotFound, ArtifactVersionNotFound],
+	rejects: [
+		...admissionRejections,
+		FileNotFound,
+		ArtifactNotFound,
+		ArtifactVersionNotFound,
+		MemoryStoreNotFound,
+		MemoryStoreArchivedError,
+	],
 }) {}
 
 export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSession, {
@@ -38,6 +48,7 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 		environment: Environment,
 		files: File,
 		artifacts: Artifact,
+		memoryStores: MemoryStore,
 	},
 	keyOf: (cmd) => ({
 		session: cmd.session_id,
@@ -45,7 +56,7 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 		environment: cmd.environment_id,
 		...mountedKeys(cmd.resources),
 	}),
-	decide: ({ session, agent, environment, files, artifacts }, cmd) => {
+	decide: ({ session, agent, environment, files, artifacts, memoryStores }, cmd) => {
 		if (session.state._tag !== "Uninitialized") {
 			return new SessionAlreadyExists({ session_id: session.id })
 		}
@@ -54,7 +65,7 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 		if (refused !== undefined) {
 			return refused
 		}
-		const mountError = mountedRefusal(cmd.resources, files, artifacts)
+		const mountError = mountedRefusal(cmd.resources, files, artifacts, memoryStores)
 		if (mountError !== undefined) {
 			return mountError
 		}
@@ -108,5 +119,8 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 				})
 			)
 		},
+		EveryMountedMemoryStoreIsActive: ({ before, command }) =>
+			before.memoryStores.length === memoryStoresOf(command.resources).length &&
+			before.memoryStores.every((store) => store.status === "active"),
 	},
 }) {}

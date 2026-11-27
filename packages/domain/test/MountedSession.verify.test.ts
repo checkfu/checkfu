@@ -4,7 +4,11 @@ import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { AdmitMountedSessionDecision } from "../src/Session/AdmitMountedSession.decision.ts"
 
-import { CheckArtifactDecision, CheckFileDecision } from "./fixtures/MountedResourceGuard.ts"
+import {
+	CheckArtifactDecision,
+	CheckFileDecision,
+	CheckMemoryStoreDecision,
+} from "./fixtures/MountedResourceGuard.ts"
 
 it.each([
 	{
@@ -17,6 +21,12 @@ it.each([
 		name: "artifact or skill",
 		decision: CheckArtifactDecision,
 		rule: "TheAcceptedArtifactIsActiveAtThePinnedVersion",
+		verdict: { _tag: "Proved" },
+	},
+	{
+		name: "memory store",
+		decision: CheckMemoryStoreDecision,
+		rule: "TheAcceptedMemoryStoreIsActive",
 		verdict: { _tag: "Proved" },
 	},
 ])(
@@ -38,7 +48,7 @@ it.each([
 )
 
 it.runIf(process.env.CHECKFU_FULL_MOUNT_REPORT === "1")(
-	"records the pinned solver standing for admission with file and artifact participant lists",
+	"records the pinned solver standing for all mounted admission participants",
 	async () => {
 		const report = await Effect.runPromise(
 			Prove.decisionReport(AdmitMountedSessionDecision, {
@@ -52,6 +62,7 @@ it.runIf(process.env.CHECKFU_FULL_MOUNT_REPORT === "1")(
 			expect.arrayContaining([
 				"EveryMountedFileIsReadyAndMatchesItsContent",
 				"EveryMountedArtifactIsActiveAtThePinnedVersion",
+				"EveryMountedMemoryStoreIsActive",
 			]),
 		)
 		for (const verdict of [report.schema, ...report.rules.map((rule) => rule.verdict)]) {

@@ -976,13 +976,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							artifact_id: string
 							version: number
 						}) => reject(404, `Artifact ${artifact_id} has no version ${version}.`),
+						MemoryStoreNotFound: ({ memory_store_id }: { memory_store_id: string }) =>
+							reject(404, `Memory store ${memory_store_id} not found.`),
+						MemoryStoreArchived: ({ memory_store_id }: { memory_store_id: string }) =>
+							reject(409, `Memory store ${memory_store_id} is archived.`),
 						...missing,
 					}
 					// The host looks up the original command receipt before deciding against the current state.
-					const send = asked.some(
-						(resource) =>
-							resource.type === "file" || resource.type === "artifact" || resource.type === "skill",
-					)
+					const send = asked.some((resource) => resource.type !== "github_repository")
 						? admitMounted.send(
 								new AdmitMountedSession({
 									...admission,

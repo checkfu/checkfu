@@ -6,8 +6,16 @@ import { FileNotFound } from "../../src/File/FileNotFound.rejection.ts"
 import { Artifact } from "../../src/Artifact/Artifact.aggregate.ts"
 import { ArtifactNotFound } from "../../src/Artifact/ArtifactNotFound.rejection.ts"
 import { ArtifactVersionNotFound } from "../../src/Artifact/PublishArtifact.command.ts"
+import { MemoryStore } from "../../src/Memory/MemoryStore.aggregate.ts"
+import { MemoryStoreArchivedError } from "../../src/Memory/MemoryStoreArchived.rejection.ts"
+import { MemoryStoreNotFound } from "../../src/Memory/MemoryStoreNotFound.rejection.ts"
 import { mountedRefusal, mountedKeys } from "../../src/Session/AdmissionMounts.ts"
-import { FileMount, ArtifactMount, SkillMount } from "../../src/Session/SessionResource.ts"
+import {
+	FileMount,
+	ArtifactMount,
+	SkillMount,
+	MemoryStoreResource,
+} from "../../src/Session/SessionResource.ts"
 
 export class MountAccepted extends Domain.Event("mount.accepted", {}) {}
 export class RecordMount extends Domain.Command("RecordMount", {
@@ -24,7 +32,13 @@ export class MountCheck extends Domain.Aggregate("MountCheck", {
 	evolve: { "mount.accepted": () => ({ accepted: true }) },
 }) {}
 
-const rejects = [FileNotFound, ArtifactNotFound, ArtifactVersionNotFound] as const
+const rejects = [
+	FileNotFound,
+	ArtifactNotFound,
+	ArtifactVersionNotFound,
+	MemoryStoreNotFound,
+	MemoryStoreArchivedError,
+] as const
 export class CheckFile extends Domain.Command("CheckFile", {
 	input: { resources: Schema.Array(FileMount) },
 	events: [MountAccepted],
@@ -34,7 +48,7 @@ export class CheckFileDecision extends Domain.Decision(CheckFile, {
 	reads: { marker: MountCheck, files: File },
 	keyOf: (cmd) => ({ marker: "check", files: mountedKeys(cmd.resources).files }),
 	decide: ({ marker, files }, cmd) =>
-		mountedRefusal(cmd.resources, files, []) ?? [marker.record(new MountAccepted())],
+		mountedRefusal(cmd.resources, files, [], []) ?? [marker.record(new MountAccepted())],
 	transitions: {
 		TheAcceptedFileIsReadyAndMatchesItsContent: ({ before, command }) =>
 			Boolean.every([
@@ -59,7 +73,7 @@ export class CheckArtifactDecision extends Domain.Decision(CheckArtifact, {
 	reads: { marker: MountCheck, artifacts: Artifact },
 	keyOf: (cmd) => ({ marker: "check", artifacts: mountedKeys(cmd.resources).artifacts }),
 	decide: ({ marker, artifacts }, cmd) =>
-		mountedRefusal(cmd.resources, [], artifacts) ?? [marker.record(new MountAccepted())],
+		mountedRefusal(cmd.resources, [], artifacts, []) ?? [marker.record(new MountAccepted())],
 	transitions: {
 		TheAcceptedArtifactIsActiveAtThePinnedVersion: ({ before, command }) =>
 			Boolean.every([
@@ -71,6 +85,26 @@ export class CheckArtifactDecision extends Domain.Decision(CheckArtifact, {
 						(command.resources[index]?.version ?? 0) <= artifact.version,
 					]),
 				),
+			]),
+	},
+}) {}
+
+export class CheckMemoryStore extends Domain.Command("CheckMemoryStore", {
+	input: { resources: Schema.Tuple([MemoryStoreResource]) },
+	events: [MountAccepted],
+	rejects,
+}) {}
+
+export class CheckMemoryStoreDecision extends Domain.Decision(CheckMemoryStore, {
+	reads: { marker: MountCheck, memoryStores: MemoryStore },
+	keyOf: (cmd) => ({ marker: "check", memoryStores: mountedKeys(cmd.resources).memoryStores }),
+	decide: ({ marker, memoryStores }, cmd) =>
+		mountedRefusal(cmd.resources, [], [], memoryStores) ?? [marker.record(new MountAccepted())],
+	transitions: {
+		TheAcceptedMemoryStoreIsActive: ({ before, command }) =>
+			Boolean.every([
+				before.memoryStores.length === command.resources.length,
+				before.memoryStores.every((store) => store.status === "active"),
 			]),
 	},
 }) {}
