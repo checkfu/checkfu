@@ -781,6 +781,7 @@ import {
 	MAX_ARTIFACT_FILES,
 	MAX_ARTIFACT_NAME_LENGTH,
 	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_FILE_NAME_LENGTH,
 	MAX_INLINE_TOTAL_BYTES,
 } from "./Limits.ts"
 
@@ -791,6 +792,8 @@ export {
 	MAX_ARTIFACT_NAME_LENGTH,
 	MAX_ARTIFACT_PATH_LENGTH,
 	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_FILE_BYTES,
+	MAX_FILE_NAME_LENGTH,
 	MAX_INLINE_FILE_BYTES,
 	MAX_INLINE_TOTAL_BYTES,
 } from "./Limits.ts"
@@ -843,6 +846,17 @@ export const ArtifactContentType = Schema.String.check(
 )
 
 export const Sha256Hex = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
+
+export const FileId = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("FileId"))
+export type FileId = typeof FileId.Type
+
+export const FileName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_FILE_NAME_LENGTH),
+	Schema.makeFilter((name) => (name.isWellFormed() ? undefined : "Expected well-formed Unicode")),
+	Schema.isPattern(new RegExp(String.raw`^${PATH_SEGMENT}$`, "u")),
+)
+export type FileName = typeof FileName.Type
 
 export const ArtifactFileInput = Schema.Struct({
 	path: ArtifactPath.annotate({

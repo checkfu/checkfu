@@ -1,0 +1,164 @@
+# Files and artifacts: the domain
+
+Status: step 1 (Files) is built; the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
+
+## The problem
+
+One concept, the artifact, does four jobs today:
+
+1. **Input.** A session mounts an artifact version to read files.
+2. **Skill.** A skill is an artifact that happens to hold a `SKILL.md`.
+3. **Output.** A session's outputs folder becomes versions of an artifact with a derived id.
+4. **Deliverable.** An artifact can be viewed by link or published at an address.
+
+Each job pulls the artifact a different way, and the seams show:
+
+- Giving an agent one PDF takes three calls and leaves a named, versioned, publishable thing behind.
+- A message cannot carry a file, because there is no single-file id to refer to.
+- An output over a limit loses the whole turn's outputs, and no one can see why. `docs/session-output-visibility.md` lists eight situations the outputs endpoint cannot tell apart.
+- A client can add versions to, publish or delete a session's outputs artifact, so the publisher needs rules for each.
+- Nothing lists skills or checks one when it is uploaded.
+- An artifact needs an empty state (version 0) and a blob upload route only so that large files have somewhere to go.
+
+## The concepts
+
+| Concept | One sentence | Changes? | Has versions? | Who makes it |
+|---|---|---|---|---|
+| **File** | One piece of content with a name. | Never | No | A client uploads it, or a session produces it |
+| **Artifact** | A named deliverable made of files, which can be viewed by link or published at an address. | By adding versions | Yes | A client, from files |
+| **Skill** | A folder of instructions an agent loads. | By adding versions | Yes | A client, from files |
+| **Workspace** | A session's private working disk. | Freely | No | The session; discarded when it ends |
+| **Memory** | Unchanged by this design. | | | |
+
+Words that stay internal: *blob* (bytes stored under a sha256) and *manifest* (a version's list of paths). *Publish* means one thing only: giving an artifact a public address. Outputs are *saved*, not published.
+
+How they relate:
+
+```
+client ──upload──▶ File ──mounted read-only──▶ Session workspace ──outputs folder──▶ File (origin: session, turn, path)
+                    │                                                                  │
+                    └──────────────── named in a version ──▶ Artifact ◀────────────────┘
+                                                              │
+                                                    viewing link · published address
+```
+
+- A session reads Files and produces Files.
+- An artifact version is built from Files. The artifact keeps its own copy of the bytes, so deleting a File never breaks an artifact.
+- A session can also mount an artifact version as a read-only folder, to continue work on a deliverable.
+
+## File
+
+**State:** `status` (none, ready, deleted), `filename`, `content_type`, `size`, `sha256`, reservation counters, `created_at`. Step 3 adds `origin` (uploaded, or `{session_id, turn, path}`).
+
+**Commands and events**
+
+| Command | Event | Notes |
+|---|---|---|
+| `ReserveFile` | `file.reserved` | Before any bytes are written. Same pattern as artifacts. |
+| `CreateFile` | `file.created` | After the bytes are stored; records size and sha256. |
+| `ExpireFileReservation` | `file.reservation_expired` | Scheduled; never rejects. |
+| `DeleteFile` | `file.deleted` | |
+
+**Policies:** `ExpireFileReservations` schedules the expiry. `ReleaseFileBytes` purges the bytes after a delete or a lapsed reservation.
+
+**Rules proved**
+
+- A file is described (filename, size, sha256) exactly when it has been created.
+- Filename, content type, size and sha256 never change once created.
+- A deleted file stays deleted.
+- Creating takes the open reservation; only the latest reservation is open.
+
+**Bytes:** one object per file at `files/<scope>/<file_id>/content`. One owner object per file is the single writer: it takes one content write at a time, refuses a write from a reservation older than one it has seen, and waits for a write in flight before a purge or a release. The upload streams through it, and the sha256 is computed as the bytes arrive. The rules it keeps live in `apps/api/src/Files/ByteOwner.ts`, which artifacts move onto in step 4.
+
+**Upload:** the request body is the file's bytes, with `filename` and an optional `content_type` in the query, and a `Content-Length`. The content type defaults to the one the filename's extension implies. With an `Idempotency-Key`, a retry answers with the same file, and the same key with a different name, type or bytes is refused.
+
+**API**
+
+| Route | Purpose |
+|---|---|
+| `POST /v1/files` | Upload one file. Returns the file. |
+| `GET /v1/files` | List in creation order. Step 3 adds a `session_id` filter for a session's outputs. |
+| `GET /v1/files/{file_id}` | Metadata. |
+| `GET /v1/files/{file_id}/content` | Raw bytes. |
+| `DELETE /v1/files/{file_id}` | Delete. |
+
+CLI: `checkfu files upload <path>`, `list`, `retrieve`, `download --file-id <id>`, `delete`. One file per command, mapped one to one onto the routes.
+
+## Sessions and files
+
+**Input.** A session resource `{type: "file", file_id, mount_path?}` places the file read-only at `/mnt/session/uploads/<mount_path>`, defaulting to its filename. The admission decision reads the File aggregate, so "a session is admitted only with files that exist" becomes a proved rule instead of a handler check. When the session's machine starts, mounted inputs are copied in read-only, so programs run in bash can read them.
+
+**Output.** After each turn that ends with a reply, a policy saves the outputs folder:
+
+1. List `/mnt/session/outputs` inside the turn fence.
+2. For each path whose content differs from the last save of that path, create a File with origin `{session_id, turn, path}`. The file id is derived from session, turn and path, so a replay creates nothing twice.
+3. Record the result on the session: `session.outputs_saved {turn, files}` or `session.outputs_skipped {turn, reason}`.
+
+Each file is saved on its own. One file over a limit is skipped and named in the record; the rest are saved.
+
+`GET /v1/sessions/{session_id}/outputs` returns the latest file for each path, from a view over those events. `GET /v1/files?session_id=` returns every saved file.
+
+**Rules**
+
+- A turn records its outputs at most once, and only a turn that replied records any (proved, on Session).
+- Every file a session records as an output has that session as its origin (checked, across aggregates).
+
+**Later, on the same foundation:** adding and removing file resources on a running session, and `image` and `document` blocks in a user message that name a `file_id`.
+
+## Artifact
+
+An artifact keeps one job: a deliverable with versions that can be viewed and published.
+
+- **A version is built from files.** Each entry is `{path, file_id}`, `{path, content}` for small text, or `{path, sha256}` to keep a file from the version being replaced. The artifact copies the bytes it needs into its own storage.
+- **No empty artifacts.** `OpenArtifact`, version 0 and the blob upload route go away. The rule "an artifact exists exactly when it has a version" returns to its strong form.
+- **Viewing links, publication, pinning a version or following the latest:** unchanged.
+- **Session mount:** `{type: "artifact", artifact_id, version?}` stays, as the way to hand a session an existing deliverable to work on.
+
+Turning a session's outputs into something shareable is one explicit call: create an artifact, or a new version, naming the output files. A tool that lets the agent do this itself can follow.
+
+### One noun for a document, a deck and an app
+
+An artifact is sometimes a document, sometimes a slide deck, sometimes a dashboard that behaves like an app. These stay one concept, with three additions, none of which is a new noun:
+
+- **Capabilities.** A version declares what its page needs from the platform at run time: a small database of its own, a way to ask an agent, files it can offer for download. A page with no capabilities is plain static files, as today.
+- **Data apart from versions.** Whatever a capability stores (rows in the artifact's database, files people add) belongs to the artifact, not to a version. Moving the published pointer to an older version changes the page and never the data.
+- **Types.** A type is an artifact others are made from: it supplies the page and its capabilities, and the new artifact supplies only its content. "Document", "slides" and "dashboard" are types, so adding a kind of artifact means publishing a type, not changing the domain.
+
+**Rules to add when these are built:** a version's capabilities never change; an artifact made from a type records the type and version it was made from; deleting an artifact deletes its data.
+
+## Skill
+
+A skill becomes its own resource: `POST /v1/skills` with files, versions as full snapshots, checked for a valid `SKILL.md` when uploaded, listed with `GET /v1/skills`, and attached to an agent version (sessions can still add one). It shares the versioned-file storage with artifacts and none of the publication rules. Until this is built, the current convention stays.
+
+## What is removed
+
+| Removed | Replaced by |
+|---|---|
+| Outputs as an artifact with a derived id; its publisher; the "follows the directory" contract | Outputs saved as Files; `session.outputs_saved` |
+| `OpenArtifact`, version 0, `PUT /v1/artifacts/{id}/blobs/{sha256}`, per-blob upload lock | `POST /v1/files`, then versions that name file ids |
+| The `skill` resource as a convention over artifacts | The Skill resource |
+| Separate, smaller output limits for the whole folder | Per-file limits shared with Files |
+| "Publish" used for adding a version or saving outputs | "Publish" only for an artifact's public address |
+
+## Order of work
+
+| Step | Change | Depends on |
+|---|---|---|
+| 1 (built) | File aggregate, shared byte owner, `/v1/files`, CLI commands, proofs | |
+| 2 | `file` session resource, admission rule, copy into the machine | 1 |
+| 3 | Outputs saved as Files; session outputs record and view; remove the outputs publisher | 1 |
+| 4 | Artifact versions from file ids; remove empty artifacts and blob upload | 1 |
+| 5 | Skill resource, attached to agents | 4 |
+| 6 | File blocks in messages; add and remove resources on a running session | 2 |
+| 7 | A tool for the agent to create or update an artifact | 4 |
+| 8 | Artifact capabilities, starting with a per-artifact database, with data kept apart from versions | 4 |
+| 9 | Artifact types, with document, slides and dashboard as the first three | 8 |
+
+Each step is one pull request with its rules proved or checked before it merges.
+
+## Open questions
+
+- **Copying bytes into an artifact.** A version of many large files copies them from file storage to artifact storage. This keeps ownership simple, but it has not been timed.
+- **Saving large outputs.** Output files are read from the machine in small batches today. Raising the per-file output limit to the File limit needs a streaming path from the machine.
+- **One owner object per file.** It keeps uploads and purges in order, as it does for artifacts. A session that saves many output files makes many of them; the cost has not been measured.
+- **Model support for attachments** depends on the harness passing images and documents to each provider.

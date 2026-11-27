@@ -32,6 +32,11 @@ const SOURCES = [
 		version: 3,
 		from: ["Agent", "Artifact", "Automation", "Environment", "MemoryStore", "Session"],
 	},
+	{
+		name: "Listing",
+		version: 4,
+		from: ["Agent", "Artifact", "Automation", "Environment", "File", "MemoryStore", "Session"],
+	},
 	{ name: "MemoryStoreView", version: 1, from: ["MemoryStore"] },
 	{ name: "MemoryView", version: 1, from: ["Memory"] },
 	{ name: "MemoryIndex", version: 1, from: ["Memory"] },

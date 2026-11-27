@@ -38,6 +38,12 @@ import {
 	ReleaseArtifactBytes,
 	ReleaseArtifactBytesLive,
 } from "./Artifact/ReleaseArtifactBytes.policy.ts"
+import {
+	ExpireFileReservations,
+	ExpireFileReservationsLive,
+} from "./File/ExpireFileReservations.policy.ts"
+import { File } from "./File/File.aggregate.ts"
+import { ReleaseFileBytes, ReleaseFileBytesLive } from "./File/ReleaseFileBytes.policy.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
@@ -86,6 +92,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		Automation,
 		AutomationCapacity,
 		Artifact,
+		File,
 		MemoryStore,
 		Memory,
 	],
@@ -132,6 +139,8 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		PublishSessionOutputs,
 		ExpireArtifactReservations,
 		ReleaseArtifactBytes,
+		ExpireFileReservations,
+		ReleaseFileBytes,
 		PublishWebhookEvents,
 	],
 	sagas: [RunTurn],
@@ -544,6 +553,9 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"PublishArtifact",
 		"UnpublishArtifact",
 		"ClaimArtifactIdempotencyKey",
+		"ReserveFile",
+		"CreateFile",
+		"DeleteFile",
 		"CreateMemoryStore",
 		"UpdateMemoryStore",
 		"ArchiveMemoryStore",
@@ -578,6 +590,8 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	FreeAutomationSlotLive,
 	ExpireArtifactReservationsLive,
 	ReleaseArtifactBytesLive,
+	ExpireFileReservationsLive,
+	ReleaseFileBytesLive,
 	PublishWebhookEventsLive,
 	ListingLive,
 	ListResourcesLive,

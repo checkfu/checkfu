@@ -31,6 +31,10 @@ import {
 	SkillMount,
 	ArtifactName,
 	ArtifactPath,
+	ArtifactContentType,
+	FileId,
+	FileName,
+	MAX_FILE_BYTES,
 	AutomationId,
 	AutomationDescription,
 	AutomationName,
@@ -391,6 +395,11 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 
 export class ArtifactBodyLimit extends HttpApiMiddleware.Service<ArtifactBodyLimit>()(
 	"@checkfu/api/ArtifactBodyLimit",
+	{ error: ERRORS[413] },
+) {}
+
+export class FileBodyLimit extends HttpApiMiddleware.Service<FileBodyLimit>()(
+	"@checkfu/api/FileBodyLimit",
 	{ error: ERRORS[413] },
 ) {}
 
@@ -1198,6 +1207,23 @@ export const ArtifactLinkResource = Schema.Struct({
 })
 export type ArtifactLink = typeof ArtifactLinkResource.Type
 
+export const FileResource = Schema.Struct({
+	id: FileId,
+	type: Schema.Literal("file"),
+	filename: FileName,
+	content_type: Schema.String,
+	size: NonNegativeInt.annotate({ description: "Size in bytes" }),
+	sha256: Sha256Hex,
+	created_at: Schema.DateTimeUtc,
+})
+export type File = typeof FileResource.Type
+
+export const FileDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("file_deleted"),
+})
+export type FileDeleted = typeof FileDeleted.Type
+
 export const ArtifactDeleted = Schema.Struct({
 	id: Schema.String,
 	type: Schema.Literal("artifact_deleted"),
@@ -1657,6 +1683,9 @@ export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
 export const ListSessionsResponse = listResponse(SessionResource)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
+
+export const ListFilesResponse = listResponse(FileResource)
+export type ListFilesResponse = typeof ListFilesResponse.Type
 
 export const ListArtifactsResponse = listResponse(ArtifactSummaryResource)
 export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
@@ -2626,6 +2655,104 @@ const Automations = HttpApiGroup.make("automations")
 			}),
 	)
 	.annotate(OpenApi.Description, "Run agents on a schedule and inspect their runs")
+	.middleware(Authentication)
+
+const fileParams = { file_id: FileId.annotate({ description: "File ID" }) }
+
+const Files = HttpApiGroup.make("files")
+	.add(
+		HttpApiEndpoint.post("upload", "/v1/files", {
+			headers: IdempotencyHeaders,
+			query: {
+				filename: FileName.annotate({
+					description: "Name of the file, for example report.pdf; one name, not a path",
+				}),
+				content_type: Schema.optionalKey(
+					ArtifactContentType.annotate({
+						description: "Media type; inferred from the filename extension when omitted",
+					}),
+				),
+			},
+			payload: Schema.Uint8Array.pipe(
+				HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" }),
+			),
+			success: FileResource.pipe(HttpApiSchema.status(201)),
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Upload a file")
+			.annotate(
+				OpenApi.Description,
+				`Upload one file as the raw request body, with a Content-Length header. A file never changes after it is uploaded; to change its content, upload another. At most ${MAX_FILE_BYTES / 1024 / 1024} MiB.`,
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-skip": true,
+				"x-checkfu-endpoint": { group: "files", endpoint: "upload" },
+			})
+			.middleware(FileBodyLimit),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/files", {
+			query: artifactListQuery,
+			success: ListFilesResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List files")
+			.annotate(
+				OpenApi.Description,
+				"List files in creation order, oldest first by default. Deleted files never appear.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "files",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "files", endpoint: "list" },
+				"x-checkfu-mcp": { name: "files_listFiles" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/files/:file_id", {
+			params: fileParams,
+			success: FileResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a file")
+			.annotate(OpenApi.Description, "Retrieve a file's name, type, size and sha256")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "files",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "files", endpoint: "get" },
+				"x-checkfu-mcp": { name: "files_getFile" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("content", "/v1/files/:file_id/content", {
+			params: fileParams,
+			success: HttpApiSchema.StreamUint8Array(),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Download a file")
+			.annotate(OpenApi.Description, "Download a file's bytes, with its content type")
+			.annotate(OpenApi.Override, {
+				"x-forge-skip": true,
+				"x-checkfu-endpoint": { group: "files", endpoint: "content" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/v1/files/:file_id", {
+			params: fileParams,
+			success: FileDeleted,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a file")
+			.annotate(OpenApi.Description, "Delete a file and its bytes. This cannot be undone.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "files",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "files", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "files_deleteFile" },
+			}),
+	)
+	.annotate(OpenApi.Description, "Upload files to give to agents, and download files they produce")
 	.middleware(Authentication)
 
 const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. Content sent inline in JSON is at most ${MAX_INLINE_FILE_BYTES / 1024 / 1024} MiB per file and ${MAX_INLINE_TOTAL_BYTES / 1024 / 1024} MiB per request, in a body of at most ${MAX_ARTIFACT_BODY_BYTES} bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.`
@@ -3614,6 +3741,7 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Sessions)
 	.add(Automations)
 	.add(Artifacts)
+	.add(Files)
 	.add(Vaults)
 	.add(Webhooks)
 	.add(MemoryStores)

@@ -1,8 +1,10 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
+import { makeFileStoreMemory } from "@checkfu/api/Files/FileStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import {
 	CredentialSecretsLive,
@@ -93,15 +95,18 @@ export const makeTestServer = Effect.gen(function* () {
 		Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(listingStore),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(HarnessLive),
 			),
 		).pipe(Layer.provide(Domain.InMemory)),
-		Layer.mergeAll(makeArtifactStoreMemory().layer, ArtifactLinksTest).pipe(
-			Layer.provide(Domain.InMemory),
-		),
+		Layer.mergeAll(
+			makeArtifactStoreMemory().layer,
+			makeFileStoreMemory().layer,
+			ArtifactLinksTest,
+		).pipe(Layer.provide(Domain.InMemory)),
 		HarnessLive,
 	).pipe(
 		Layer.provideMerge(Digest.layerWebCrypto),

@@ -1,6 +1,7 @@
 import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { FileBytesKept } from "../src/File/FileBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
@@ -40,7 +41,7 @@ const HarnessStubLayer = Harness.toLayer(
 
 const CheckfuInMemory = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
-		Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
+		Layer.provide([ArtifactBytesKept, FileBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 		Layer.provide([HarnessStubLayer, ListingStore.memory]),
 	),
 ).pipe(Layer.provide(Domain.InMemory))

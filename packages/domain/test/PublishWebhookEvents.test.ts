@@ -8,6 +8,7 @@ import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { ArtifactId } from "../src/Artifact/Artifact.id.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { FileBytesKept } from "../src/File/FileBytes.external.ts"
 import { AutomationId, automationRunId } from "../src/Automation/Automation.id.ts"
 import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 import { FireAutomation } from "../src/Automation/FireAutomation.command.ts"
@@ -84,7 +85,7 @@ describe("PublishWebhookEvents policy", () => {
 			})
 			const layer = Checkfu.layer(
 				CheckfuHandlersLive.pipe(
-					Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, eventsLayer]),
+					Layer.provide([ArtifactBytesKept, FileBytesKept, SessionOutputsUnpublished, eventsLayer]),
 					Layer.provide([HarnessStubLayer, ListingStore.memory]),
 				),
 			).pipe(Layer.provide(Domain.InMemory))

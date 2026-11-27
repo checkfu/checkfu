@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { AgentVersionByNumberView } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
@@ -42,6 +43,7 @@ import {
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { makeFileStoreMemory } from "../src/Files/FileStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
@@ -211,6 +213,7 @@ describe("interrupted turns and turn recovery", () => {
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
@@ -223,6 +226,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(makeFileStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -365,6 +369,7 @@ describe("interrupted turns and turn recovery", () => {
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
@@ -377,6 +382,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(makeFileStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
 			Layer.provideMerge(
@@ -568,6 +574,7 @@ describe("interrupted turns and turn recovery", () => {
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
@@ -580,6 +587,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(makeFileStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -677,6 +685,7 @@ describe("interrupted turns and turn recovery", () => {
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
@@ -689,6 +698,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(makeFileStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {

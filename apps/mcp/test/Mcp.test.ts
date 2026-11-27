@@ -198,6 +198,9 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				"environments_getEnvironment",
 				"environments_listEnvironments",
 				"environments_updateEnvironment",
+				"files_deleteFile",
+				"files_getFile",
+				"files_listFiles",
 				"memoryStores_archiveMemoryStore",
 				"memoryStores_createMemory",
 				"memoryStores_createMemoryStore",
@@ -289,6 +292,9 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				environments_getEnvironment: "read-only, additive, repeatable",
 				environments_listEnvironments: "read-only, additive, repeatable",
 				environments_updateEnvironment: "writes, destructive, not repeatable",
+				files_deleteFile: "writes, destructive, repeatable",
+				files_getFile: "read-only, additive, repeatable",
+				files_listFiles: "read-only, additive, repeatable",
 				memoryStores_archiveMemoryStore: "writes, destructive, repeatable",
 				memoryStores_createMemory: "writes, additive, not repeatable",
 				memoryStores_createMemoryStore: "writes, additive, not repeatable",
@@ -494,6 +500,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				const session = { path: { session_id: "sess_1" } }
 				const automation = { path: { automation_id: "auto_1" } }
 				const artifact = { path: { artifact_id: "art_1" } }
+				const file = { path: { file_id: "file_1" } }
 				const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
 				const webhook = { path: { webhook_id: "whe_1" } }
 				const webhookDelivery = { path: { webhook_id: "whe_1", delivery_id: "wdel_1" } }
@@ -547,6 +554,9 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					environments_getEnvironment: environment,
 					environments_listEnvironments: { query: { order: "desc" } },
 					environments_updateEnvironment: { ...environment, body: { version: 1, config } },
+					files_deleteFile: file,
+					files_getFile: file,
+					files_listFiles: { query: { limit: "5", order: "desc" } },
 					memoryStores_archiveMemoryStore: store,
 					memoryStores_createMemory: {
 						...store,

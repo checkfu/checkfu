@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
@@ -40,6 +41,7 @@ import {
 	TEST_API_KEY,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { makeFileStoreMemory } from "../src/Files/FileStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
@@ -357,6 +359,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
@@ -370,6 +373,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(makeFileStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(TestRuntimeContext),
@@ -1694,6 +1698,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
+				Layer.provideMerge(makeFileStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
 				Layer.provideMerge(VaultsTestLive),
 				Layer.provideMerge(TestRuntimeContext),

@@ -3,7 +3,10 @@ import { RecordInitialMessagesLive } from "../src/Session/RecordInitialMessages.
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import { ExpireArtifactReservationsLive } from "../src/Artifact/ExpireArtifactReservations.policy.ts"
 import { ReleaseArtifactBytesLive } from "../src/Artifact/ReleaseArtifactBytes.policy.ts"
+import { ExpireFileReservationsLive } from "../src/File/ExpireFileReservations.policy.ts"
+import { ReleaseFileBytesLive } from "../src/File/ReleaseFileBytes.policy.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { FileBytesKept } from "../src/File/FileBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import { PublishSessionOutputsLive } from "../src/Session/PublishSessionOutputs.policy.ts"
 import { describe, expect, it } from "@effect/vitest"
@@ -146,6 +149,8 @@ const handlersOf =
 			FreeAutomationSlotLive,
 			ExpireArtifactReservationsLive,
 			ReleaseArtifactBytesLive,
+			ExpireFileReservationsLive,
+			ReleaseFileBytesLive,
 			PublishWebhookEventsLive,
 			ListingLive,
 			ListResourcesLive,
@@ -206,6 +211,7 @@ const run = <A, E, R>(
 						harness(platform),
 						ListingStore.memory,
 						ArtifactBytesKept,
+						FileBytesKept,
 						SessionOutputsUnpublished,
 						WebhookEventsNoop,
 					]),

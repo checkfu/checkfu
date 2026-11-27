@@ -319,6 +319,30 @@ export interface CheckfuOperations {
 		EndpointJsonSuccess<"environments", "update">,
 		EndpointJsonBody<"environments", "update">
 	>
+	readonly "files.delete": OperationShape<
+		EndpointParams<"files", "delete">,
+		EndpointQuery<"files", "delete">,
+		EndpointBody<"files", "delete">,
+		EndpointSuccess<"files", "delete">,
+		EndpointJsonSuccess<"files", "delete">,
+		EndpointJsonBody<"files", "delete">
+	>
+	readonly "files.list": OperationShape<
+		EndpointParams<"files", "list">,
+		RelaxOptionalProps<EndpointQuery<"files", "list">>,
+		EndpointBody<"files", "list">,
+		EndpointSuccess<"files", "list">,
+		EndpointJsonSuccess<"files", "list">,
+		EndpointJsonBody<"files", "list">
+	>
+	readonly "files.retrieve": OperationShape<
+		EndpointParams<"files", "get">,
+		EndpointQuery<"files", "get">,
+		EndpointBody<"files", "get">,
+		EndpointSuccess<"files", "get">,
+		EndpointJsonSuccess<"files", "get">,
+		EndpointJsonBody<"files", "get">
+	>
 	readonly "memoryStores.archive": OperationShape<
 		EndpointParams<"memory_stores", "archive">,
 		EndpointQuery<"memory_stores", "archive">,
@@ -2336,6 +2360,143 @@ export class EffectEnvironmentsResource {
 						),
 						pendingUpdateReadiness(params, "environments.update"),
 					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectFilesResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Delete a file and its bytes. This cannot be undone. */
+	delete(
+		fileId: PathParam<"files", "delete", "file_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"files", "delete">>, CheckfuSdkError>
+	delete(
+		fileId: PathParam<"files", "delete", "file_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"files", "delete">, CheckfuSdkError>
+	delete(
+		fileId: PathParam<"files", "delete", "file_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"files", "delete"> | WithResponse<EndpointSuccess<"files", "delete">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(decodeEndpointParams("files", "delete", { file_id: fileId }), (pathParams) =>
+				executeWithRetries(this.#runtime, "checkfu.files.delete", "idempotent", options, () =>
+					this.#runtime.raw.files.delete({
+						params: pathParams,
+						responseMode: "decoded-and-response",
+					}),
+				),
+			),
+			options,
+		)
+	}
+
+	/** List files in creation order, oldest first by default. Deleted files never appear. */
+	list(
+		params: (RelaxOptionalProps<EndpointQuery<"files", "list">> & AnyRequestOptions) | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"files", "list">>, CheckfuSdkError>
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"files", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"files", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"files", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"files", "list"> | WithResponse<EndpointSuccess<"files", "list">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.files.list", "idempotent", options, () =>
+				this.#runtime.raw.files.list({
+					query: {
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List files in creation order, oldest first by default. Deleted files never appear. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"files", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(page) =>
+				this.list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Auto-paginate items for List files in creation order, oldest first by default. Deleted files never appear. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"files", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(page) =>
+				this.list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Retrieve a file's name, type, size and sha256 */
+	retrieve(
+		fileId: PathParam<"files", "get", "file_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"files", "get">>, CheckfuSdkError>
+	retrieve(
+		fileId: PathParam<"files", "get", "file_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"files", "get">, CheckfuSdkError>
+	retrieve(
+		fileId: PathParam<"files", "get", "file_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"files", "get"> | WithResponse<EndpointSuccess<"files", "get">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(decodeEndpointParams("files", "get", { file_id: fileId }), (pathParams) =>
+				executeWithRetries(this.#runtime, "checkfu.files.retrieve", "idempotent", options, () =>
+					this.#runtime.raw.files.get({
+						params: pathParams,
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -4588,6 +4749,7 @@ export class EffectResources {
 	readonly automationRuns: EffectAutomationRunsResource
 	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
+	readonly files: EffectFilesResource
 	readonly memoryStores: EffectMemoryStoresResource
 	readonly sessions: EffectSessionsResource
 	readonly vaults: EffectVaultsResource
@@ -4599,6 +4761,7 @@ export class EffectResources {
 		this.automationRuns = new EffectAutomationRunsResource(runtime)
 		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
+		this.files = new EffectFilesResource(runtime)
 		this.memoryStores = new EffectMemoryStoresResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
 		this.vaults = new EffectVaultsResource(runtime)
@@ -5175,6 +5338,60 @@ export class EnvironmentsResource {
 	): APIPromise<EndpointJsonSuccess<"environments", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectEnvironmentsResource(effectRuntime).update(environmentId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class FilesResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Delete a file and its bytes. This cannot be undone. */
+	delete(
+		fileId: PathParam<"files", "delete", "file_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"files", "delete">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectFilesResource(effectRuntime).delete(fileId, { ...effectOpts, withResponse: true }),
+		)
+	}
+
+	/** List files in creation order, oldest first by default. Deleted files never appear. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"files", "list">>>,
+		ItemOf<EndpointJsonSuccess<"files", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.page,
+			options,
+			(effectRuntime, page, effectOpts) =>
+				new EffectFilesResource(effectRuntime).list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
+	/** Retrieve a file's name, type, size and sha256 */
+	retrieve(
+		fileId: PathParam<"files", "get", "file_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"files", "get">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectFilesResource(effectRuntime).retrieve(fileId, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -5987,6 +6204,7 @@ export class PromiseResources {
 	readonly automationRuns: AutomationRunsResource
 	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
+	readonly files: FilesResource
 	readonly memoryStores: MemoryStoresResource
 	readonly sessions: SessionsResource
 	readonly vaults: VaultsResource
@@ -5998,6 +6216,7 @@ export class PromiseResources {
 		this.automationRuns = new AutomationRunsResource(runtime)
 		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
+		this.files = new FilesResource(runtime)
 		this.memoryStores = new MemoryStoresResource(runtime)
 		this.sessions = new SessionsResource(runtime)
 		this.vaults = new VaultsResource(runtime)

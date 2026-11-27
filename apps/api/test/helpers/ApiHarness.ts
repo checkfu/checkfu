@@ -35,6 +35,7 @@ import { Webhooks, WebhooksHandlersLive } from "@checkfu/domain/Webhooks.model"
 import { WebhookEvents } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import type { WebhookEventPublication } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { ListingStore, makeListingStoreMemory } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
@@ -69,6 +70,8 @@ import {
 	SessionOutputsUnpublished,
 } from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
+import { FileBytesLive } from "../../src/Files/FileBytesLive.ts"
+import { makeFileStoreMemory } from "../../src/Files/FileStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import type { WebhookHttpSender } from "../../src/Webhooks/WebhookDeliveryEngine.ts"
 import { makeWebhookDeliveryStoreMemory } from "../../src/Webhooks/WebhookDeliveryStoreMemory.ts"
@@ -250,6 +253,7 @@ export const checkfuWithHarness = <E, R>(
 	const hosted = Checkfu.layer(
 		CheckfuHandlersLive.pipe(
 			Layer.provide(ArtifactBytesKept),
+			Layer.provide(FileBytesKept),
 			Layer.provide(SessionOutputsUnpublished),
 			Layer.provide(ListingStore.memory),
 			Layer.provide(harness),
@@ -763,6 +767,7 @@ export const makePiDurableTestLayer = (
 	)
 
 	const artifactStore = makeArtifactStoreMemory()
+	const fileStore = makeFileStoreMemory()
 	const listingMemory = makeListingStoreMemory()
 	const listingStore = listingMemory.layer
 	const WebhooksLive = Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(listingStore)))
@@ -814,6 +819,7 @@ export const makePiDurableTestLayer = (
 			Layer.provide(listingStore),
 			Layer.provide(HarnessLive),
 			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
+			Layer.provide(FileBytesLive.pipe(Layer.provide(fileStore.layer))),
 			Layer.provide(SessionOutputsRecorded.pipe(Layer.provide(artifactStore.layer))),
 			Layer.provide(WebhookEventsRuntimeLive),
 		),
@@ -859,6 +865,7 @@ export const makePiDurableTestLayer = (
 		ArtifactLinksTest,
 	).pipe(
 		Layer.provideMerge(artifactStore.layer),
+		Layer.provideMerge(fileStore.layer),
 		Layer.provideMerge(
 			Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
 		),
@@ -902,6 +909,7 @@ export const makePiDurableTestLayer = (
 		conversations,
 		resets,
 		artifactStore,
+		fileStore,
 		webhookDeliveries,
 		discardedWorkspaces,
 		workspaceFiles,

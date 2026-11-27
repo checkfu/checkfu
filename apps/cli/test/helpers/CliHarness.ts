@@ -1,8 +1,10 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
+import { makeFileStoreMemory } from "@checkfu/api/Files/FileStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import {
 	CredentialSecretsLive,
@@ -46,6 +48,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Sink from "effect/Sink"
@@ -84,8 +87,18 @@ const permissionDenied = (method: string, filePath: string) =>
 		pathOrDescriptor: filePath,
 	})
 
-const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
-	typeof input === "string" || "href" in input ? new Request(input, init) : input
+const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request => {
+	if (typeof input !== "string" && !("href" in input)) {
+		return input
+	}
+	const body = init?.body
+	if (!Predicate.isUint8Array(body)) {
+		return new Request(input, init)
+	}
+	const headers = new Headers(init?.headers)
+	headers.set("content-length", String(body.byteLength))
+	return new Request(input, { ...init, headers })
+}
 
 export interface ModelTurnInput {
 	readonly session_id: SessionId
@@ -221,6 +234,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
+				Layer.provide(FileBytesKept),
 				Layer.provide(SessionOutputsUnpublished),
 				Layer.provide(listingStore),
 				Layer.provide(WebhookEventsNoop),
@@ -246,6 +260,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			vaultListingQueriesFrom(VaultsLive),
 			HarnessLive.pipe(Layer.provideMerge(CheckfuLive)),
 			makeArtifactStoreMemory().layer,
+			makeFileStoreMemory().layer,
 			ArtifactLinksTest,
 		).pipe(
 			Layer.provide(Domain.InMemory),

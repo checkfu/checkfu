@@ -1,6 +1,7 @@
 import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { FileBytesKept } from "../src/File/FileBytes.external.ts"
 import {
 	SessionOutputs,
 	SessionOutputsUnpublished,
@@ -71,7 +72,7 @@ import {
 
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
-		Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
+		Layer.provide([ArtifactBytesKept, FileBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
@@ -101,7 +102,12 @@ describe("Checkfu unified hosted model stories", () => {
 			Layer.build(
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
-						Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
+						Layer.provide([
+							ArtifactBytesKept,
+							FileBytesKept,
+							SessionOutputsUnpublished,
+							WebhookEventsNoop,
+						]),
 						Layer.provide([HarnessStubLayer, ListingStore.memory]),
 					),
 				),

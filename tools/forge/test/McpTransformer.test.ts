@@ -116,6 +116,7 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
+			"files_deleteFile",
 			"memoryStores_archiveMemoryStore",
 			"memoryStores_deleteMemoryStore",
 			"sessions_archiveSession",

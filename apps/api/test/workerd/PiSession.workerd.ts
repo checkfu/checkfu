@@ -637,6 +637,94 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
 	}, 60_000)
 
+	const uploadFile = (
+		query: string,
+		bytes: Uint8Array<ArrayBuffer>,
+		headers: Record<string, string> = {},
+	) =>
+		fetch(`${baseUrl}/v1/files?${query}`, {
+			method: "POST",
+			headers: {
+				...AUTH_HEADERS,
+				"content-type": "application/octet-stream",
+				"content-length": String(bytes.byteLength),
+				...headers,
+			},
+			body: bytes,
+		})
+
+	it("stores an uploaded file in R2, answers a retry with the same file, and removes its bytes on delete", async () => {
+		interface StoredFile {
+			readonly id: string
+			readonly filename: string
+			readonly content_type: string
+			readonly size: number
+			readonly sha256: string
+		}
+		const data = Uint8Array.from({ length: 300_000 }, (_, index) => (index * 29 + 3) % 256)
+		const key = { "idempotency-key": `file-${crypto.randomUUID()}` }
+		const created = await uploadFile("filename=report.pdf", data, key)
+		expect(created.status, await created.clone().text()).toBe(201)
+		const file = (await created.json()) as StoredFile
+		expect(file).toMatchObject({
+			filename: "report.pdf",
+			content_type: "application/pdf",
+			size: data.byteLength,
+			sha256: createHash("sha256").update(data).digest("hex"),
+		})
+		const bucket = artifactBucketName(workerStage)
+		const storedBytes = () => localR2(baseUrl, "GET", bucket, `files/default/${file.id}/content`)
+		expect((await storedBytes()).status).toBe(200)
+
+		const replay = await uploadFile("filename=report.pdf", data, key)
+		expect(replay.status).toBe(201)
+		expect(((await replay.json()) as StoredFile).id).toBe(file.id)
+		expect(
+			(
+				await uploadFile(
+					"filename=report.pdf",
+					data.map((byte) => 255 - byte),
+					key,
+				)
+			).status,
+		).toBe(409)
+
+		expect((await apiJson<StoredFile>(`/v1/files/${file.id}`)).body).toMatchObject({
+			id: file.id,
+			size: data.byteLength,
+		})
+		const download = await apiFetch(`/v1/files/${file.id}/content`)
+		expect(download.status).toBe(200)
+		expect(download.headers.get("content-type")).toBe("application/pdf")
+		expect(download.headers.get("content-disposition")).toBe(
+			"attachment; filename*=UTF-8''report.pdf",
+		)
+		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
+
+		const empty = await uploadFile("filename=empty.txt", new Uint8Array(0))
+		expect(empty.status).toBe(201)
+		const emptyFile = (await empty.json()) as StoredFile
+		expect(emptyFile.size).toBe(0)
+		expect(
+			(await (await apiFetch(`/v1/files/${emptyFile.id}/content`)).arrayBuffer()).byteLength,
+		).toBe(0)
+
+		const listed = await pollResourceReady<{ readonly data: ReadonlyArray<StoredFile> }>(
+			"/v1/files?limit=100",
+			(page) => page.data.some((row) => row.id === file.id),
+		)
+		expect(listed.data.find((row) => row.id === file.id)).toMatchObject({ filename: "report.pdf" })
+
+		const deleted = await apiFetch(`/v1/files/${file.id}`, { method: "DELETE" })
+		expect(deleted.status).toBe(200)
+		expect(await deleted.json()).toEqual({ id: file.id, type: "file_deleted" })
+		expect((await storedBytes()).status).toBe(404)
+		expect((await apiFetch(`/v1/files/${file.id}`)).status).toBe(404)
+		expect((await apiFetch(`/v1/files/${file.id}/content`)).status).toBe(404)
+		expect((await uploadFile("filename=report.pdf", data, key)).status).toBe(409)
+		expect((await storedBytes()).status).toBe(404)
+	}, 60_000)
+
 	it("serves the OpenAPI document as a static asset, without running the Worker", async () => {
 		const res = await fetch(`${baseUrl}/openapi.json`)
 		expect(res.status).toBe(200)

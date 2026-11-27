@@ -1966,6 +1966,115 @@ const environmentsUpdateCommand = CommandMake(
 	),
 )
 
+const filesDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "files delete",
+	apiGroup: "files",
+	apiEndpoint: "delete",
+	hasBody: false,
+	flags: [
+		{
+			propName: "fileId",
+			flagName: "file-id",
+			wireName: "file_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const filesDeleteCommand = CommandMake(
+	"delete",
+	{
+		fileId: FlagString("file-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("File ID")),
+	},
+	(flags) => invokeGeneratedOperation(filesDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Delete a file and its bytes. This cannot be undone."))
+
+const filesListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "files list",
+	apiGroup: "files",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const filesListCommand = CommandMake(
+	"list",
+	{
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(filesListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List files in creation order, oldest first by default. Deleted files never appear.",
+	),
+)
+
+const filesRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "files retrieve",
+	apiGroup: "files",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "fileId",
+			flagName: "file-id",
+			wireName: "file_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const filesRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		fileId: FlagString("file-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("File ID")),
+	},
+	(flags) => invokeGeneratedOperation(filesRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a file's name, type, size and sha256"))
+
 const memoryStoresArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "memory-stores archive",
 	apiGroup: "memory_stores",
@@ -4286,6 +4395,7 @@ export const buildGeneratedResourceCommands = <
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const FilesExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const MemoryStoresExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const MemoryStoresMemoriesExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -4305,6 +4415,7 @@ export const buildGeneratedResourceCommands = <
 	readonly automations?: AutomationsExtras
 	readonly "automations:runs"?: AutomationsRunsExtras
 	readonly environments?: EnvironmentsExtras
+	readonly files?: FilesExtras
 	readonly "memory-stores"?: MemoryStoresExtras
 	readonly "memory-stores:memories"?: MemoryStoresMemoriesExtras
 	readonly sessions?: SessionsExtras
@@ -4396,6 +4507,15 @@ export const buildGeneratedResourceCommands = <
 				environmentsRetrieveCommand,
 				environmentsUpdateCommand,
 				...(extras?.["environments"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("files").pipe(
+			CommandWithDescription("Manage files"),
+			CommandWithSubcommands([
+				filesDeleteCommand,
+				filesListCommand,
+				filesRetrieveCommand,
+				...(extras?.["files"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("memory-stores").pipe(

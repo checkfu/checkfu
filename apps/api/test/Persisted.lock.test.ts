@@ -83,7 +83,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(14)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(15)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -511,7 +511,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.map((shape) => shape.id)
 					.toSorted()
 			expect(idsOf("artifact-object")).toEqual(["artifact-object:manifest"])
-			expect(idsOf("artifact-marks")).toEqual(["artifact-marks:ArtifactObjects/marks"])
+			expect(idsOf("artifact-marks")).toEqual([
+				"artifact-marks:ArtifactObjects/marks",
+				"artifact-marks:FileObjects/marks",
+			])
 			const manifest = "artifact-object:manifest"
 			const written = lockWith({
 				[manifest]: [
