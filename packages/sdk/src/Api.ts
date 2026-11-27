@@ -1339,14 +1339,14 @@ export const SessionOutputsResource = Schema.Struct({
 	}),
 	status: Schema.Literals(["none", "saved", "skipped"]).annotate({
 		description:
-			"saved: the files are the outputs directory as that turn left it. skipped: that turn's outputs could not be read, and the files are those of the last turn that saved",
+			"When saved, the listed files come from that turn. When skipped, the listed files come from the last turn that saved outputs",
 	}),
 	reason: Schema.NullOr(Schema.String).annotate({
 		description: "Why the turn's outputs were skipped",
 	}),
 	files: Schema.Array(FileResource),
 	skipped: Schema.Array(Schema.Struct({ path: Schema.String, reason: Schema.String })).annotate({
-		description: "Files in the outputs directory that were not saved, and why",
+		description: "Files and directories skipped while saving outputs, with a reason for each",
 	}),
 	recorded_at: Schema.NullOr(Schema.DateTimeUtc),
 })
@@ -2551,7 +2551,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "Retrieve a session's outputs")
 			.annotate(
 				OpenApi.Description,
-				"Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason",
+				"Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Download each saved file on its own. After every reply the directory is saved file by file. The skipped list gives a reason for each skipped file or directory",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.outputs",

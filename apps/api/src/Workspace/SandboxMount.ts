@@ -284,7 +284,7 @@ def list_outputs(root, limit, max_path):
                 path = prefix + child.name
                 metadata = child.stat(follow_symlinks=False)
                 if stat.S_ISDIR(metadata.st_mode):
-                    kind = "dir"
+                    kind = "dir" if len(path) <= max_path else "pruned_directory"
                 elif stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
                     kind = "file"
                 else:
@@ -292,7 +292,7 @@ def list_outputs(root, limit, max_path):
                 entries.append({"path": path, "type": kind, "size": metadata.st_size if kind == "file" else 0})
                 if len(entries) >= limit:
                     return
-                if kind == "dir" and len(path) <= max_path:
+                if kind == "dir":
                     nested = under(root, path, dir_flags, beneath | no_symlinks | no_xdev)
                     try:
                         walk(nested, path + "/", metadata)

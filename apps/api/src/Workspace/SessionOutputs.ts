@@ -1,3 +1,4 @@
+import { MAX_ARTIFACT_PATH_LENGTH } from "@checkfu/sdk/Limits"
 import type { Workspace } from "@cloudflare/computer"
 import * as Predicate from "effect/Predicate"
 import * as Hex from "effect/encoding/Hex"
@@ -76,15 +77,21 @@ export const makeStoredOutputFiles = (
 				for (const { name, type } of provider.readdirEntriesSync(`${root}${parent}`)) {
 					const relative = `${parent}/${name}`
 					const stat = type === "file" ? provider.lstatSync(`${root}${relative}`) : undefined
+					const pruned =
+						type === "dir" && Array.from(relative.slice(1)).length > MAX_ARTIFACT_PATH_LENGTH
 					entries.push({
 						path: relative.slice(1),
-						type: stat !== undefined && stat.nlink !== 1 ? "other" : type,
+						type: pruned
+							? "pruned_directory"
+							: stat !== undefined && stat.nlink !== 1
+								? "other"
+								: type,
 						size: stat?.size ?? 0,
 					})
 					if (entries.length === limit) {
 						return
 					}
-					if (type === "dir") {
+					if (type === "dir" && !pruned) {
 						walk(relative)
 						if (entries.length === limit) {
 							return
@@ -179,7 +186,12 @@ export const makeSessionOutputs = (files: {
 			if (entry.type === "dir") {
 				continue
 			}
-			if (!isArtifactPath(entry.path)) {
+			if (entry.type === "pruned_directory") {
+				skipped.push({
+					path: shownPath(entry.path),
+					reason: "Directory path too long. Its contents were skipped.",
+				})
+			} else if (!isArtifactPath(entry.path)) {
 				skipped.push({ path: shownPath(entry.path), reason: "This path is not allowed." })
 			} else if (entry.type === "file") {
 				paths.push(entry.path)

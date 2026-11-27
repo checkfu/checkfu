@@ -14668,7 +14668,7 @@
 										"status": {
 											"type": "string",
 											"enum": ["none", "saved", "skipped"],
-											"description": "saved: the files are the outputs directory as that turn left it. skipped: that turn's outputs could not be read, and the files are those of the last turn that saved"
+											"description": "When saved, the listed files come from that turn. When skipped, the listed files come from the last turn that saved outputs"
 										},
 										"reason": {
 											"anyOf": [
@@ -14788,7 +14788,7 @@
 												"required": ["path", "reason"],
 												"additionalProperties": false
 											},
-											"description": "Files in the outputs directory that were not saved, and why"
+											"description": "Files and directories skipped while saving outputs, with a reason for each"
 										},
 										"recorded_at": {
 											"anyOf": [
@@ -15153,7 +15153,7 @@
 						}
 					}
 				},
-				"description": "Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason",
+				"description": "Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Download each saved file on its own. After every reply the directory is saved file by file. The skipped list gives a reason for each skipped file or directory",
 				"summary": "Retrieve a session's outputs",
 				"x-forge-group-name": "sessions.outputs",
 				"x-forge-method-name": "retrieve",

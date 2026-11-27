@@ -138,6 +138,29 @@ describe("A session's outputs reader", () => {
 		])
 	})
 
+	it("reports a pruned output directory while saving its sibling", async () => {
+		const reads: Array<string> = []
+		const directory = ["a".repeat(200), "b".repeat(200), "c".repeat(120)].join("/")
+		const outputs = makeSessionOutputs({
+			list: async () => [
+				{ path: directory, type: "pruned_directory" },
+				{ path: "report.txt", type: "file" },
+			],
+			read: async (path) => {
+				reads.push(path)
+				return new Uint8Array(1)
+			},
+		})
+		expect(await outputs.list()).toMatchObject({
+			ok: true,
+			files: [{ path: "report.txt" }],
+			skipped: [
+				{ path: "a".repeat(128), reason: "Directory path too long. Its contents were skipped." },
+			],
+		})
+		expect(reads).toEqual(["report.txt"])
+	})
+
 	it("reads the files after one that is gone or has changed size", async () => {
 		const outputs = makeSessionOutputs({
 			list: async () => [],

@@ -367,6 +367,31 @@ describe("a session's machine, in a container of its image", () => {
 		}
 	}, 45_000)
 
+	it("lists outputs with a visible skip for a directory past the path limit", async () => {
+		const root = "/mnt/session/outputs/long-path-capture"
+		const first = "a".repeat(200)
+		const second = "b".repeat(200)
+		const boundary = [first, second, "c".repeat(110)].join("/")
+		const pruned = `${boundary}/child`
+		const outputs = makeSessionOutputs(makeSandboxOutputFiles(root, inContainer))
+		try {
+			await sh(`mkdir -p -- ${root}/${pruned}`)
+			await Effect.runPromise(sandbox.writeFile(`${root}/${pruned}/deliverable.txt`, "nested"))
+			const skipped = [
+				{ path: "a".repeat(128), reason: "Directory path too long. Its contents were skipped." },
+			]
+			expect(await outputs.list()).toEqual({ ok: true, files: [], skipped })
+			await Effect.runPromise(sandbox.writeFile(`${root}/visible.txt`, "ok"))
+			expect(await outputs.list()).toMatchObject({
+				ok: true,
+				files: [{ path: "visible.txt" }],
+				skipped,
+			})
+		} finally {
+			await sh(`rm -rf -- ${root}`)
+		}
+	}, 45_000)
+
 	it("captures a workspace artifact through the guarded machine reader", async () => {
 		const root = "/workspace/artifact-capture"
 		const input = { name: "Report", directory: `${root}/./` }

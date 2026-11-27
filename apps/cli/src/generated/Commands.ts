@@ -3562,7 +3562,7 @@ const sessionsOutputsRetrieveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsOutputsRetrieveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason",
+		"Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Download each saved file on its own. After every reply the directory is saved file by file. The skipped list gives a reason for each skipped file or directory",
 	),
 )
 
