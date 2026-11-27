@@ -35360,6 +35360,9 @@
 													},
 													"token": {
 														"type": "string",
+														"format": "password",
+														"writeOnly": true,
+														"x-forge-sensitive": true,
 														"minLength": 8,
 														"maxLength": 16384,
 														"pattern": "^[!-~]+$",
@@ -36772,6 +36775,9 @@
 														"anyOf": [
 															{
 																"type": "string",
+																"format": "password",
+																"writeOnly": true,
+																"x-forge-sensitive": true,
 																"minLength": 8,
 																"maxLength": 16384,
 																"pattern": "^[!-~]+$",
@@ -36781,7 +36787,9 @@
 																"type": "null"
 															}
 														],
-														"description": "Replacement bearer token. Never returned."
+														"description": "Replacement bearer token. Never returned.",
+														"writeOnly": true,
+														"x-forge-sensitive": true
 													}
 												},
 												"required": ["type"],

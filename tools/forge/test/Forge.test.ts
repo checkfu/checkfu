@@ -477,8 +477,26 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(cliCommands).toContain('"flagName":"current-version","wireName":"version"')
 		expect(cliCommands).not.toContain('FlagInt("version")')
 		expect(cliCommands).not.toContain('FlagString("authorization-token")')
+		expect(cliCommands).not.toContain('FlagString("auth")')
 		expect(cliCommands).not.toContain('"flagName":"resources"')
 		expect(cliCommands).not.toContain('FlagString("resources")')
+
+		const secret = { format: "password", writeOnly: true, "x-forge-sensitive": true }
+		for (const [path, token] of [
+			["/v1/vaults/{vault_id}/credentials", secret],
+			[
+				"/v1/vaults/{vault_id}/credentials/{credential_id}",
+				{ writeOnly: true, "x-forge-sensitive": true, anyOf: [secret, { type: "null" }] },
+			],
+		] as const) {
+			expect(spec.paths[path]?.["post"]?.["requestBody"]).toMatchObject({
+				content: {
+					"application/json": {
+						schema: { properties: { auth: { anyOf: [{ properties: { token } }] } } },
+					},
+				},
+			})
+		}
 	})
 
 	it("bypasses OpenApi.fromApi caching so nondeterministic OpenAPI generation is detected", () => {

@@ -1049,7 +1049,7 @@ export type CredentialAuth = typeof CredentialAuth.Type
 export const MIN_CREDENTIAL_SECRET_LENGTH = 8
 
 export const CredentialSecret = Schema.Redacted(
-	Schema.String.check(
+	Schema.String.annotate({ format: "password", writeOnly: true, "x-forge-sensitive": true }).check(
 		Schema.isMinCodePoints(MIN_CREDENTIAL_SECRET_LENGTH),
 		Schema.isMaxLength(MAX_CREDENTIAL_SECRET_LENGTH),
 		Schema.isPattern(/^[!-~]+$/u, {

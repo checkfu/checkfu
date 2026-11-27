@@ -3536,14 +3536,6 @@ const vaultsCredentialsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "auth",
-			flagName: "auth",
-			wireName: "auth",
-			location: "body",
-			kind: "structured",
-			required: false,
-		},
-		{
 			propName: "displayName",
 			flagName: "display-name",
 			wireName: "display_name",
@@ -3566,13 +3558,6 @@ const vaultsCredentialsCreateCommand = CommandMake(
 	"create",
 	{
 		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
-		auth: FlagString("auth").pipe(
-			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription(
-				"What the credential authenticates against, and its secret (JSON, YAML, or @file)",
-			),
-			FlagOptional,
-		),
 		displayName: FlagString("display-name").pipe(
 			FlagWithDescription("Human-readable credential name"),
 			FlagOptional,
@@ -3768,14 +3753,6 @@ const vaultsCredentialsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "auth",
-			flagName: "auth",
-			wireName: "auth",
-			location: "body",
-			kind: "structured",
-			required: false,
-		},
-		{
 			propName: "displayName",
 			flagName: "display-name",
 			wireName: "display_name",
@@ -3793,13 +3770,6 @@ const vaultsCredentialsUpdateCommand = CommandMake(
 		credentialId: FlagString("credential-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Credential ID"),
-		),
-		auth: FlagString("auth").pipe(
-			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription(
-				"Replacement secret. The MCP server URL cannot change. (JSON, YAML, or @file)",
-			),
-			FlagOptional,
 		),
 		displayName: FlagString("display-name").pipe(
 			FlagWithDescription("Updated credential name, or null to clear it"),

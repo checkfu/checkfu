@@ -992,6 +992,8 @@ export const UpdateCredentialBody = Schema.Struct({
 				token: Schema.optionalKey(
 					Schema.NullOr(CredentialSecret).annotate({
 						description: "Replacement bearer token. Never returned.",
+						writeOnly: true,
+						"x-forge-sensitive": true,
 					}),
 				),
 			}),

@@ -25,6 +25,45 @@ const untilListed = <E, R>(run: Effect.Effect<CliRunResult, E, R>, id: string) =
 	)
 
 describe("CLI help, errors, and resource commands", () => {
+	it.live("creates and rotates a vault credential from stdin", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const cli = yield* makeTestServer()
+				const vault = yield* cli.run(["vaults", "create", "--display-name", "Tools"])
+				expect(vault.exitCode).toBe(0)
+				const vaultId = (JSON.parse(vault.stdout) as { readonly id: string }).id
+				const createHelp = yield* cli.run(["vaults:credentials", "create", "--help"])
+				const updateHelp = yield* cli.run(["vaults:credentials", "update", "--help"])
+				for (const help of [createHelp, updateHelp]) {
+					expect(help.exitCode).toBe(0)
+					expect(help.stdout).not.toContain("--auth")
+				}
+
+				const token = "fixture-vault-token"
+				const created = yield* cli.run(["vaults:credentials", "create", "--vault-id", vaultId], {
+					stdin: JSON.stringify({
+						auth: { type: "static_bearer", token, mcp_server_url: "https://tools.example.com/mcp" },
+					}),
+				})
+				expect(created.stderr).toBe("")
+				expect(created.exitCode).toBe(0)
+				expect(created.stdout).not.toContain(token)
+				const credentialId = (JSON.parse(created.stdout) as { readonly id: string }).id
+				expect(credentialId).toBeTruthy()
+
+				const replacement = "fixture-replacement-token"
+				const updated = yield* cli.run(
+					["vaults:credentials", "update", "--vault-id", vaultId, "--credential-id", credentialId],
+					{ stdin: JSON.stringify({ auth: { type: "static_bearer", token: replacement } }) },
+				)
+				expect(updated.stderr).toBe("")
+				expect(updated.exitCode).toBe(0)
+				expect(updated.stdout).not.toContain(replacement)
+				expect(JSON.parse(updated.stdout)).toMatchObject({ id: credentialId })
+			}),
+		),
+	)
+
 	it("renders help without requiring credentials and omits any beta prefix", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
