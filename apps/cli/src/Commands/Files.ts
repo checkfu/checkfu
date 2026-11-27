@@ -60,6 +60,11 @@ const uploadCommand = Command.make(
 			if (received > size) {
 				return yield* usageError(`${input.path}: the file grew while it was being read. Try again.`)
 			}
+			if (received < size) {
+				return yield* usageError(
+					`${input.path}: the file shrank while it was being read. Try again.`,
+				)
+			}
 			const bytes = new Uint8Array(received)
 			let offset = 0
 			for (const chunk of chunks) {

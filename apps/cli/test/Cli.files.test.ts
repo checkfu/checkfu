@@ -166,28 +166,36 @@ describe("CLI files", () => {
 					expect(missing.exitCode).toBe(1)
 					expect(missing.errorMessage).toContain("no such file")
 
-					const growing = Layer.succeed(FileSystem.FileSystem, {
-						...fs,
-						stat: (filePath) =>
-							fs
-								.stat(filePath)
-								.pipe(
-									Effect.tap(() =>
-										filePath === source
-											? fs.writeFile(source, new Uint8Array(data.byteLength + 1))
-											: Effect.void,
+					for (const [length, change] of [
+						[data.byteLength + 1, "grew"],
+						[data.byteLength - 1, "shrank"],
+						[0, "shrank"],
+					] as const) {
+						yield* fs.writeFile(source, data)
+						const changing = Layer.succeed(FileSystem.FileSystem, {
+							...fs,
+							stat: (filePath) =>
+								fs
+									.stat(filePath)
+									.pipe(
+										Effect.tap(() =>
+											filePath === source
+												? fs.writeFile(source, new Uint8Array(length))
+												: Effect.void,
+										),
 									),
-								),
-					})
-					const grew = yield* cli.run(["files", "upload", source], {
-						fileSystem: growing,
-						interceptFetch: (next, request) => {
-							expect(request.method).not.toBe("POST")
-							return next(request)
-						},
-					})
-					expect(grew.exitCode).toBe(1)
-					expect(grew.errorMessage).toContain("grew while it was being read")
+						})
+						const result = yield* cli.run(["files", "upload", source], {
+							fileSystem: changing,
+							interceptFetch: (next, request) => {
+								expect(request.method).not.toBe("POST")
+								return next(request)
+							},
+						})
+						expect(result.exitCode).toBe(1)
+						expect(result.errorMessage).toContain(`${change} while it was being read`)
+					}
+					expect((yield* run("files", "upload", source)).exitCode).toBe(0)
 
 					expect((yield* run("files", "delete", "--file-id", file.id)).exitCode).toBe(0)
 					expect(
