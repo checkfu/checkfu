@@ -208,6 +208,11 @@ export const isObjectOrComplexUnion = (ty: Type): boolean => {
 	return false
 }
 
+export const isAnyJson = (ty: Type): boolean => {
+	const unwrapped = unwrapNullableType(ty)
+	return unwrapped.kind === "scalar" && unwrapped.scalar === "unknown"
+}
+
 export const isSseMethod = (method: Method): boolean =>
 	method.responses.some((res) => res.contents.some((c) => c.mediaType === "text/event-stream"))
 

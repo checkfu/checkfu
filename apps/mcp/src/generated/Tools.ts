@@ -611,6 +611,65 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "artifacts_addDocument",
+		title: "Add a document",
+		description:
+			"Add a document to a collection under a new id. A collection holds up to 10000 documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409",
+		method: "POST",
+		path: "/v1/artifacts/{artifact_id}/data/{collection}",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						collection: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Collection name",
+							allOf: [
+								{
+									pattern: "^[a-z][a-z0-9_-]{0,31}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "collection"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						data: {
+							description: "The document: any JSON value of at most 65536 bytes once encoded",
+						},
+					},
+					required: ["data"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "artifacts_createArtifact",
 		title: "Create an artifact",
 		description:
@@ -951,6 +1010,56 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "artifacts_deleteDocument",
+		title: "Delete a document",
+		description: "Remove one document from a collection",
+		method: "DELETE",
+		path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						collection: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Collection name",
+							allOf: [
+								{
+									pattern: "^[a-z][a-z0-9_-]{0,31}$",
+								},
+							],
+						},
+						document_id: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Document ID",
+							allOf: [
+								{
+									pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "collection", "document_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "artifacts_getArtifact",
 		title: "Retrieve an artifact",
 		description: "Retrieve an artifact and the files of its latest version",
@@ -1069,6 +1178,87 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "artifacts_getDatabase",
+		title: "Describe an artifact's database",
+		description:
+			"List the collections an artifact's database holds, with how many documents and bytes are in each. A database holds up to 16 collections and 67108864 bytes of documents",
+		method: "GET",
+		path: "/v1/artifacts/{artifact_id}/data",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_getDocument",
+		title: "Retrieve a document",
+		description: "Retrieve one document from a collection",
+		method: "GET",
+		path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						collection: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Collection name",
+							allOf: [
+								{
+									pattern: "^[a-z][a-z0-9_-]{0,31}$",
+								},
+							],
+						},
+						document_id: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Document ID",
+							allOf: [
+								{
+									pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "collection", "document_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "artifacts_listArtifacts",
 		title: "List artifacts",
 		description:
@@ -1106,6 +1296,64 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				},
 			},
 			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_listDocuments",
+		title: "List documents",
+		description: "List the documents in a collection, oldest first. Use next_page to continue",
+		method: "GET",
+		path: "/v1/artifacts/{artifact_id}/data/{collection}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						collection: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Collection name",
+							allOf: [
+								{
+									pattern: "^[a-z][a-z0-9_-]{0,31}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "collection"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}$",
+							description: "Opaque pagination cursor from the previous response's next_page.",
+						},
+						limit: {
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
 			additionalProperties: false,
 		},
 	},
@@ -1163,6 +1411,66 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					maxLength: 128,
 					description:
 						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_putDocument",
+		title: "Put a document",
+		description: "Store a document under an id you choose, replacing the document already there",
+		method: "PUT",
+		path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						collection: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Collection name",
+							allOf: [
+								{
+									pattern: "^[a-z][a-z0-9_-]{0,31}$",
+								},
+							],
+						},
+						document_id: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Document ID",
+							allOf: [
+								{
+									pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "collection", "document_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						data: {
+							description: "The document: any JSON value of at most 65536 bytes once encoded",
+						},
+					},
+					required: ["data"],
+					additionalProperties: false,
 				},
 			},
 			required: ["path", "body"],

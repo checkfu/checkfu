@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { makeArtifactDatabaseMemory } from "../../src/ArtifactData/ArtifactDatabaseMemory.ts"
 import { ArtifactBytesLive } from "../../src/Artifacts/ArtifactBytesLive.ts"
 import * as Domain from "@alchemy.run/domain"
 import {
@@ -802,6 +803,7 @@ export const makePiDurableTestLayer = (
 
 	const artifactStore = makeArtifactStoreMemory()
 	const fileStore = makeFileStoreMemory()
+	const artifactDatabase = makeArtifactDatabaseMemory()
 	const listingMemory = makeListingStoreMemory()
 	const listingStore = listingMemory.layer
 	const WebhooksLive = Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(listingStore)))
@@ -852,7 +854,12 @@ export const makePiDurableTestLayer = (
 		CheckfuHandlersLive.pipe(
 			Layer.provide(listingStore),
 			Layer.provide(HarnessLive),
-			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
+			Layer.provide(
+				ArtifactBytesLive.pipe(
+					Layer.provide(artifactStore.layer),
+					Layer.provide(artifactDatabase.layer),
+				),
+			),
 			Layer.provide(FileBytesLive.pipe(Layer.provide(fileStore.layer))),
 			Layer.provide(OutputsSaverRecorded.pipe(Layer.provide(fileStore.layer))),
 			Layer.provide(WebhookEventsRuntimeLive),
@@ -900,6 +907,7 @@ export const makePiDurableTestLayer = (
 	).pipe(
 		Layer.provideMerge(artifactStore.layer),
 		Layer.provideMerge(fileStore.layer),
+		Layer.provideMerge(artifactDatabase.layer),
 		Layer.provideMerge(
 			Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
 		),
@@ -945,6 +953,7 @@ export const makePiDurableTestLayer = (
 		resets,
 		artifactStore,
 		fileStore,
+		artifactDatabase,
 		webhookDeliveries,
 		discardedWorkspaces,
 		workspaceFiles,

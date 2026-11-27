@@ -153,6 +153,54 @@ export interface CheckfuOperations {
 		EndpointJsonSuccess<"artifacts", "unpublish">,
 		EndpointJsonBody<"artifacts", "unpublish">
 	>
+	readonly "artifacts.data.add": OperationShape<
+		EndpointParams<"artifact_data", "addDocument">,
+		EndpointQuery<"artifact_data", "addDocument">,
+		EndpointBody<"artifact_data", "addDocument">,
+		EndpointSuccess<"artifact_data", "addDocument">,
+		EndpointJsonSuccess<"artifact_data", "addDocument">,
+		EndpointJsonBody<"artifact_data", "addDocument">
+	>
+	readonly "artifacts.data.delete": OperationShape<
+		EndpointParams<"artifact_data", "deleteDocument">,
+		EndpointQuery<"artifact_data", "deleteDocument">,
+		EndpointBody<"artifact_data", "deleteDocument">,
+		EndpointSuccess<"artifact_data", "deleteDocument">,
+		EndpointJsonSuccess<"artifact_data", "deleteDocument">,
+		EndpointJsonBody<"artifact_data", "deleteDocument">
+	>
+	readonly "artifacts.data.describe": OperationShape<
+		EndpointParams<"artifact_data", "getDatabase">,
+		EndpointQuery<"artifact_data", "getDatabase">,
+		EndpointBody<"artifact_data", "getDatabase">,
+		EndpointSuccess<"artifact_data", "getDatabase">,
+		EndpointJsonSuccess<"artifact_data", "getDatabase">,
+		EndpointJsonBody<"artifact_data", "getDatabase">
+	>
+	readonly "artifacts.data.list": OperationShape<
+		EndpointParams<"artifact_data", "listDocuments">,
+		RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">>,
+		EndpointBody<"artifact_data", "listDocuments">,
+		EndpointSuccess<"artifact_data", "listDocuments">,
+		EndpointJsonSuccess<"artifact_data", "listDocuments">,
+		EndpointJsonBody<"artifact_data", "listDocuments">
+	>
+	readonly "artifacts.data.put": OperationShape<
+		EndpointParams<"artifact_data", "putDocument">,
+		EndpointQuery<"artifact_data", "putDocument">,
+		EndpointBody<"artifact_data", "putDocument">,
+		EndpointSuccess<"artifact_data", "putDocument">,
+		EndpointJsonSuccess<"artifact_data", "putDocument">,
+		EndpointJsonBody<"artifact_data", "putDocument">
+	>
+	readonly "artifacts.data.retrieve": OperationShape<
+		EndpointParams<"artifact_data", "getDocument">,
+		EndpointQuery<"artifact_data", "getDocument">,
+		EndpointBody<"artifact_data", "getDocument">,
+		EndpointSuccess<"artifact_data", "getDocument">,
+		EndpointJsonSuccess<"artifact_data", "getDocument">,
+		EndpointJsonBody<"artifact_data", "getDocument">
+	>
 	readonly "artifacts.versions.create": OperationShape<
 		EndpointParams<"artifacts", "createVersion">,
 		EndpointQuery<"artifacts", "createVersion">,
@@ -1090,6 +1138,367 @@ export class EffectAgentsResource {
 	}
 }
 
+export class EffectArtifactsDataResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Add a document to a collection under a new id. A collection holds up to 10000 documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409 */
+	add(
+		artifactId: PathParam<"artifact_data", "addDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "addDocument", "collection">,
+		params: EndpointBody<"artifact_data", "addDocument">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "addDocument">>, CheckfuSdkError>
+	add(
+		artifactId: PathParam<"artifact_data", "addDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "addDocument", "collection">,
+		params: EndpointBody<"artifact_data", "addDocument">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifact_data", "addDocument">, CheckfuSdkError>
+	add(
+		artifactId: PathParam<"artifact_data", "addDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "addDocument", "collection">,
+		params: EndpointBody<"artifact_data", "addDocument">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"artifact_data", "addDocument">
+		| WithResponse<EndpointSuccess<"artifact_data", "addDocument">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifact_data", "addDocument", {
+					artifact_id: artifactId,
+					collection,
+				}),
+				(pathParams) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.data.add",
+							key !== undefined ? "idempotent" : "pre-commit-only",
+							withResolvedIdempotencyKey(options, key),
+							() =>
+								this.#runtime.raw.artifact_data.addDocument({
+									params: pathParams,
+									headers: key === undefined ? {} : { "idempotency-key": key },
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Remove one document from a collection */
+	delete(
+		artifactId: PathParam<"artifact_data", "deleteDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "deleteDocument", "collection">,
+		documentId: PathParam<"artifact_data", "deleteDocument", "document_id">,
+		options: WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "deleteDocument">>, CheckfuSdkError>
+	delete(
+		artifactId: PathParam<"artifact_data", "deleteDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "deleteDocument", "collection">,
+		documentId: PathParam<"artifact_data", "deleteDocument", "document_id">,
+		options?: RequestOptions<never>,
+	): Effect<EndpointSuccess<"artifact_data", "deleteDocument">, CheckfuSdkError>
+	delete(
+		artifactId: PathParam<"artifact_data", "deleteDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "deleteDocument", "collection">,
+		documentId: PathParam<"artifact_data", "deleteDocument", "document_id">,
+		options?: AnyRequestOptions<never>,
+	): Effect<
+		| EndpointSuccess<"artifact_data", "deleteDocument">
+		| WithResponse<EndpointSuccess<"artifact_data", "deleteDocument">>,
+		CheckfuSdkError
+	> {
+		options = snapshotRequestOptions(options)
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifact_data", "deleteDocument", {
+					artifact_id: artifactId,
+					collection,
+					document_id: documentId,
+				}),
+				(pathParams) =>
+					EffectFlatMap(forbidIdempotencyKey("artifacts.data.delete", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.data.delete",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifact_data.deleteDocument({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List the collections an artifact's database holds, with how many documents and bytes are in each. A database holds up to 16 collections and 67108864 bytes of documents */
+	describe(
+		artifactId: PathParam<"artifact_data", "getDatabase", "artifact_id">,
+		options: WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "getDatabase">>, CheckfuSdkError>
+	describe(
+		artifactId: PathParam<"artifact_data", "getDatabase", "artifact_id">,
+		options?: RequestOptions<never>,
+	): Effect<EndpointSuccess<"artifact_data", "getDatabase">, CheckfuSdkError>
+	describe(
+		artifactId: PathParam<"artifact_data", "getDatabase", "artifact_id">,
+		options?: AnyRequestOptions<never>,
+	): Effect<
+		| EndpointSuccess<"artifact_data", "getDatabase">
+		| WithResponse<EndpointSuccess<"artifact_data", "getDatabase">>,
+		CheckfuSdkError
+	> {
+		options = snapshotRequestOptions(options)
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifact_data", "getDatabase", { artifact_id: artifactId }),
+				(pathParams) =>
+					EffectFlatMap(forbidIdempotencyKey("artifacts.data.describe", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.data.describe",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifact_data.getDatabase({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List the documents in a collection, oldest first. Use next_page to continue */
+	list(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">> &
+					AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "listDocuments">>, CheckfuSdkError>
+	list(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params: RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">> &
+			WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "listDocuments">>, CheckfuSdkError>
+	list(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">> &
+			RequestOptions<never>,
+		options?: RequestOptions<never>,
+	): Effect<EndpointSuccess<"artifact_data", "listDocuments">, CheckfuSdkError>
+	list(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
+	): Effect<
+		| EndpointSuccess<"artifact_data", "listDocuments">
+		| WithResponse<EndpointSuccess<"artifact_data", "listDocuments">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		options = snapshotRequestOptions(options)
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifact_data", "listDocuments", {
+					artifact_id: artifactId,
+					collection,
+				}),
+				(pathParams) =>
+					EffectFlatMap(forbidIdempotencyKey("artifacts.data.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.data.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifact_data.listDocuments({
+									params: pathParams,
+									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List the documents in a collection, oldest first. Use next_page to continue */
+	listPages(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">>,
+		options?: RequestOptions<never>,
+	): Stream<EndpointSuccess<"artifact_data", "listDocuments">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(page) =>
+				this.list(
+					artifactId,
+					collection,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Auto-paginate items for List the documents in a collection, oldest first. Use next_page to continue */
+	listStream(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">>,
+		options?: RequestOptions<never>,
+	): Stream<ItemOf<EndpointSuccess<"artifact_data", "listDocuments">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(page) =>
+				this.list(
+					artifactId,
+					collection,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Store a document under an id you choose, replacing the document already there */
+	put(
+		artifactId: PathParam<"artifact_data", "putDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "putDocument", "collection">,
+		documentId: PathParam<"artifact_data", "putDocument", "document_id">,
+		params: EndpointBody<"artifact_data", "putDocument">,
+		options: WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "putDocument">>, CheckfuSdkError>
+	put(
+		artifactId: PathParam<"artifact_data", "putDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "putDocument", "collection">,
+		documentId: PathParam<"artifact_data", "putDocument", "document_id">,
+		params: EndpointBody<"artifact_data", "putDocument">,
+		options?: RequestOptions<never>,
+	): Effect<EndpointSuccess<"artifact_data", "putDocument">, CheckfuSdkError>
+	put(
+		artifactId: PathParam<"artifact_data", "putDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "putDocument", "collection">,
+		documentId: PathParam<"artifact_data", "putDocument", "document_id">,
+		params: EndpointBody<"artifact_data", "putDocument">,
+		options?: AnyRequestOptions<never>,
+	): Effect<
+		| EndpointSuccess<"artifact_data", "putDocument">
+		| WithResponse<EndpointSuccess<"artifact_data", "putDocument">>,
+		CheckfuSdkError
+	> {
+		options = snapshotRequestOptions(options)
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifact_data", "putDocument", {
+					artifact_id: artifactId,
+					collection,
+					document_id: documentId,
+				}),
+				(pathParams) =>
+					EffectFlatMap(forbidIdempotencyKey("artifacts.data.put", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.data.put",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifact_data.putDocument({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve one document from a collection */
+	retrieve(
+		artifactId: PathParam<"artifact_data", "getDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "getDocument", "collection">,
+		documentId: PathParam<"artifact_data", "getDocument", "document_id">,
+		options: WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"artifact_data", "getDocument">>, CheckfuSdkError>
+	retrieve(
+		artifactId: PathParam<"artifact_data", "getDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "getDocument", "collection">,
+		documentId: PathParam<"artifact_data", "getDocument", "document_id">,
+		options?: RequestOptions<never>,
+	): Effect<EndpointSuccess<"artifact_data", "getDocument">, CheckfuSdkError>
+	retrieve(
+		artifactId: PathParam<"artifact_data", "getDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "getDocument", "collection">,
+		documentId: PathParam<"artifact_data", "getDocument", "document_id">,
+		options?: AnyRequestOptions<never>,
+	): Effect<
+		| EndpointSuccess<"artifact_data", "getDocument">
+		| WithResponse<EndpointSuccess<"artifact_data", "getDocument">>,
+		CheckfuSdkError
+	> {
+		options = snapshotRequestOptions(options)
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifact_data", "getDocument", {
+					artifact_id: artifactId,
+					collection,
+					document_id: documentId,
+				}),
+				(pathParams) =>
+					EffectFlatMap(forbidIdempotencyKey("artifacts.data.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.data.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifact_data.getDocument({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+}
+
 export class EffectArtifactsVersionsResource {
 	readonly #runtime: EffectSdkRuntime
 
@@ -1285,10 +1694,12 @@ export class EffectArtifactsVersionsResource {
 
 export class EffectArtifactsResource {
 	readonly #runtime: EffectSdkRuntime
+	readonly data: EffectArtifactsDataResource
 	readonly versions: EffectArtifactsVersionsResource
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.#runtime = runtime
+		this.data = new EffectArtifactsDataResource(runtime)
 		this.versions = new EffectArtifactsVersionsResource(runtime)
 	}
 
@@ -5150,6 +5561,118 @@ export class AgentsResource {
 	}
 }
 
+export class ArtifactsDataResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Add a document to a collection under a new id. A collection holds up to 10000 documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409 */
+	add(
+		artifactId: PathParam<"artifact_data", "addDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "addDocument", "collection">,
+		params: EndpointBody<"artifact_data", "addDocument">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifact_data", "addDocument">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsDataResource(effectRuntime).add(artifactId, collection, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Remove one document from a collection */
+	delete(
+		artifactId: PathParam<"artifact_data", "deleteDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "deleteDocument", "collection">,
+		documentId: PathParam<"artifact_data", "deleteDocument", "document_id">,
+		options?: PromiseRequestOptions<never>,
+	): APIPromise<EndpointJsonSuccess<"artifact_data", "deleteDocument">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsDataResource(effectRuntime).delete(artifactId, collection, documentId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** List the collections an artifact's database holds, with how many documents and bytes are in each. A database holds up to 16 collections and 67108864 bytes of documents */
+	describe(
+		artifactId: PathParam<"artifact_data", "getDatabase", "artifact_id">,
+		options?: PromiseRequestOptions<never>,
+	): APIPromise<EndpointJsonSuccess<"artifact_data", "getDatabase">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsDataResource(effectRuntime).describe(artifactId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** List the documents in a collection, oldest first. Use next_page to continue */
+	list(
+		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
+		collection: PathParam<"artifact_data", "listDocuments", "collection">,
+		params?: RelaxOptionalProps<EndpointQuery<"artifact_data", "listDocuments">>,
+		options?: PromiseRequestOptions<never>,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"artifact_data", "listDocuments">>>,
+		ItemOf<EndpointJsonSuccess<"artifact_data", "listDocuments">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.page,
+			options,
+			(effectRuntime, page, effectOpts) =>
+				new EffectArtifactsDataResource(effectRuntime).list(
+					artifactId,
+					collection,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
+	/** Store a document under an id you choose, replacing the document already there */
+	put(
+		artifactId: PathParam<"artifact_data", "putDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "putDocument", "collection">,
+		documentId: PathParam<"artifact_data", "putDocument", "document_id">,
+		params: EndpointBody<"artifact_data", "putDocument">,
+		options?: PromiseRequestOptions<never>,
+	): APIPromise<EndpointJsonSuccess<"artifact_data", "putDocument">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsDataResource(effectRuntime).put(
+				artifactId,
+				collection,
+				documentId,
+				params,
+				{ ...effectOpts, withResponse: true },
+			),
+		)
+	}
+
+	/** Retrieve one document from a collection */
+	retrieve(
+		artifactId: PathParam<"artifact_data", "getDocument", "artifact_id">,
+		collection: PathParam<"artifact_data", "getDocument", "collection">,
+		documentId: PathParam<"artifact_data", "getDocument", "document_id">,
+		options?: PromiseRequestOptions<never>,
+	): APIPromise<EndpointJsonSuccess<"artifact_data", "getDocument">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsDataResource(effectRuntime).retrieve(artifactId, collection, documentId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
 export class ArtifactsVersionsResource {
 	readonly #runtime: PromiseSdkRuntime
 
@@ -5218,10 +5741,12 @@ export class ArtifactsVersionsResource {
 
 export class ArtifactsResource {
 	readonly #runtime: PromiseSdkRuntime
+	readonly data: ArtifactsDataResource
 	readonly versions: ArtifactsVersionsResource
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.#runtime = runtime
+		this.data = new ArtifactsDataResource(runtime)
 		this.versions = new ArtifactsVersionsResource(runtime)
 	}
 

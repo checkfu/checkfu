@@ -23,6 +23,10 @@ import {
 import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { OutputsSaverLive } from "./Files/OutputsSaverLive.ts"
+import {
+	ArtifactDataObjectsLive,
+	ArtifactDatabaseDurable,
+} from "./ArtifactData/ArtifactDatabase.do.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { FileBytesLive } from "./Files/FileBytesLive.ts"
@@ -107,6 +111,8 @@ const ArtifactStoreLive = ArtifactStoreR2.pipe(
 	Layer.provide(ArtifactObjectsLive),
 	Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
 )
+
+const ArtifactDatabaseLive = ArtifactDatabaseDurable.pipe(Layer.provide(ArtifactDataObjectsLive))
 
 const FileStoreLive = FileStoreR2.pipe(
 	Layer.provide(FileObjectsLive),
@@ -214,6 +220,7 @@ const CheckfuLive = Checkfu.layer(
 	Layer.provide(PiHarnessExecutorLive),
 	Layer.provide(PlacedDurableObjects),
 	Layer.provide(ArtifactStoreLive),
+	Layer.provide(ArtifactDatabaseLive),
 	Layer.provide(FileStoreLive),
 )
 
@@ -265,6 +272,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	vaultListingQueriesFrom(VaultsLive),
 	CheckfuLive,
 	ArtifactStoreLive,
+	ArtifactDatabaseLive,
 	FileStoreLive,
 	CustomToolFaultsLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),

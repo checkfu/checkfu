@@ -74,6 +74,42 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/artifacts/{artifact_id}/publication",
 			},
 			{
+				group: "artifacts:data",
+				name: "add",
+				httpMethod: "POST",
+				path: "/v1/artifacts/{artifact_id}/data/{collection}",
+			},
+			{
+				group: "artifacts:data",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
+			},
+			{
+				group: "artifacts:data",
+				name: "describe",
+				httpMethod: "GET",
+				path: "/v1/artifacts/{artifact_id}/data",
+			},
+			{
+				group: "artifacts:data",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/artifacts/{artifact_id}/data/{collection}",
+			},
+			{
+				group: "artifacts:data",
+				name: "put",
+				httpMethod: "PUT",
+				path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
+			},
+			{
+				group: "artifacts:data",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
+			},
+			{
 				group: "artifacts:versions",
 				name: "create",
 				httpMethod: "POST",
@@ -801,7 +837,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(82)
+		expect(inspectedMethods.length).toBe(88)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

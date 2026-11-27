@@ -759,6 +759,89 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(gone.status).toBe(404)
 	}, 60_000)
 
+	it("keeps an artifact's documents in its own database, and erases them with the artifact", async () => {
+		interface Document {
+			readonly id: string
+			readonly data: unknown
+			readonly created_at: string
+		}
+		const make = async (name: string) =>
+			(
+				await apiJson<{ readonly id: string }>("/v1/artifacts", {
+					method: "POST",
+					body: { name, files: [{ path: "index.html", content: `<h1>${name}</h1>` }] },
+				})
+			).body.id
+		const one = await make("Data one")
+		const two = await make("Data two")
+		const data = `/v1/artifacts/${one}/data`
+
+		const keyed = {
+			method: "POST",
+			body: { data: { choice: "b" } },
+			headers: { "idempotency-key": `vote-${one}` },
+		}
+		const added = await apiJson<Document>(`${data}/votes`, keyed)
+		expect(added.status, JSON.stringify(added.body)).toBe(201)
+		expect(added.body.data).toEqual({ choice: "b" })
+		const again = await apiJson<Document>(`${data}/votes`, keyed)
+		expect(again.body).toEqual(added.body)
+		expect(
+			(await apiJson(`${data}/votes`, { ...keyed, body: { data: { choice: "a" } } })).status,
+		).toBe(409)
+
+		const large = "é".repeat(30_000)
+		const put = await apiJson<Document>(`${data}/votes/pinned`, {
+			method: "PUT",
+			body: { data: { large, list: [1, null, true] } },
+		})
+		expect(put.status, JSON.stringify(put.body).slice(0, 300)).toBe(200)
+		const replaced = await apiJson<Document>(`${data}/votes/pinned`, {
+			method: "PUT",
+			body: { data: "second" },
+		})
+		expect(replaced.body).toMatchObject({ data: "second", created_at: put.body.created_at })
+		expect(
+			(
+				await apiJson(`${data}/votes/too-large`, {
+					method: "PUT",
+					body: { data: "x".repeat(65_536) },
+				})
+			).status,
+		).toBe(400)
+
+		const first = await apiJson<{
+			readonly data: ReadonlyArray<Document>
+			readonly next_page: string | null
+		}>(`${data}/votes?limit=1`)
+		expect(first.body.data.map((document) => document.id)).toEqual([added.body.id])
+		const rest = await apiJson<{
+			readonly data: ReadonlyArray<Document>
+			readonly next_page: string | null
+		}>(`${data}/votes?limit=1&page=${first.body.next_page}`)
+		expect(rest.body.data.map((document) => document.id)).toEqual(["pinned"])
+		expect(rest.body.next_page).toBeNull()
+
+		expect((await apiJson(data)).body).toEqual({
+			type: "artifact_database",
+			artifact_id: one,
+			bytes: 14 + 8,
+			collections: [{ name: "votes", documents: 2, bytes: 14 + 8 }],
+		})
+		expect((await apiJson(`/v1/artifacts/${two}/data`)).body).toMatchObject({ collections: [] })
+		expect((await apiFetch(`/v1/artifacts/${two}/data/votes/pinned`)).status).toBe(404)
+
+		expect((await apiFetch(`${data}/votes/pinned`, { method: "DELETE" })).status).toBe(200)
+		expect((await apiFetch(`${data}/votes/pinned`)).status).toBe(404)
+
+		expect((await apiFetch(`/v1/artifacts/${one}`, { method: "DELETE" })).status).toBe(200)
+		expect((await apiFetch(data)).status).toBe(404)
+		expect((await apiJson(`${data}/votes/late`, { method: "PUT", body: { data: 1 } })).status).toBe(
+			404,
+		)
+		expect((await apiFetch(`/v1/artifacts/${two}`, { method: "DELETE" })).status).toBe(200)
+	}, 60_000)
+
 	const uploadFile = (
 		query: string,
 		bytes: Uint8Array<ArrayBuffer>,

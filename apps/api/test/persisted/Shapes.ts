@@ -8,6 +8,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { Webhooks } from "@checkfu/domain/Webhooks.model"
 import { ApiCalls } from "../../src/Api.ts"
+import { DOCUMENT_TABLES } from "../../src/ArtifactData/ArtifactDocuments.ts"
 import { CUSTODY_TABLES } from "../../src/Connection/SecretCustody.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
 import { ArtifactMarks } from "../../src/Artifacts/ArtifactOwnership.ts"
@@ -43,6 +44,7 @@ export type PersistedKind =
 	| "webhook-table"
 	| "webhook-callback"
 	| "vault-table"
+	| "artifact-data-table"
 	| "artifact-object"
 	| "artifact-marks"
 	| "signed-link"
@@ -75,6 +77,8 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"Webhook fan-out callbacks are routed by shard and callback name. Subscriber enqueue retries stop after fourteen days. Cleanup is due twenty-four hours after the scan and retries settle. Unacknowledged alarms can remain scheduled beyond either deadline. Keep names and payloads readable while those jobs can still run.",
 	"vault-table":
 		"The table already exists in every vault's connection object and holds its secrets, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
+	"artifact-data-table":
+		"The table already exists in every artifact's database object and holds its documents, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"artifact-object":
 		"Artifact manifests stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
 	"artifact-marks":
@@ -502,6 +506,14 @@ const VAULT_TABLES: ReadonlyArray<PersistedShape> = Object.entries(CUSTODY_TABLE
 	}),
 )
 
+const ARTIFACT_DATA_TABLES: ReadonlyArray<PersistedShape> = Object.entries(DOCUMENT_TABLES).map(
+	([name, table]): PersistedShape => ({
+		id: `artifact-data-table:${name}`,
+		kind: "artifact-data-table",
+		schema: Schema.Literal(table),
+	}),
+)
+
 const ARTIFACT_OBJECTS: ReadonlyArray<PersistedShape> = [
 	{ id: "artifact-object:manifest", kind: "artifact-object", schema: ArtifactManifest },
 ]
@@ -536,6 +548,7 @@ export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...WEBHOOK_TABLES,
 	...WEBHOOK_CALLBACKS,
 	...VAULT_TABLES,
+	...ARTIFACT_DATA_TABLES,
 	...ARTIFACT_OBJECTS,
 	...ARTIFACT_MARKS,
 	...SIGNED_LINKS,
@@ -575,6 +588,7 @@ export const registryProblems = (
 		"webhook-table",
 		"webhook-callback",
 		"vault-table",
+		"artifact-data-table",
 		"artifact-object",
 		"artifact-marks",
 		"signed-link",

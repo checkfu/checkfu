@@ -176,6 +176,25 @@ const published = await run(["artifacts", "publish", ...artifactId], { version: 
 assert.notEqual(published.publication, null)
 assert.equal((await run(["artifacts", "unpublish", ...artifactId])).publication, null)
 
+const notes = [...artifactId, "--collection", "notes"]
+const note = await run([
+	"artifacts:data",
+	"add",
+	...notes,
+	"--data",
+	JSON.stringify({ text: "first" }),
+])
+assert.deepEqual(note.data, { text: "first" })
+const pinnedNote = [...notes, "--document-id", "pinned"]
+assert.equal((await run(["artifacts:data", "put", ...pinnedNote], { data: ["a", 1] })).id, "pinned")
+assert.deepEqual((await run(["artifacts:data", "retrieve", ...pinnedNote])).data, ["a", 1])
+assert.equal((await run(["artifacts:data", "list", ...notes])).data.length, 2)
+assert.equal((await run(["artifacts:data", "describe", ...artifactId])).collections[0].documents, 2)
+assert.equal(
+	(await run(["artifacts:data", "delete", ...pinnedNote])).type,
+	"artifact_document_deleted",
+)
+
 const vault = await run(["vaults", "create", "--display-name", "CLI secrets"])
 const vaultId = ["--vault-id", vault.id]
 await run(["vaults", "update", ...vaultId, "--display-name", "Updated vault"])

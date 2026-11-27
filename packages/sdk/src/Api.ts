@@ -24,6 +24,9 @@ import {
 	AgentSnapshot,
 	AgentSystem,
 	ArtifactCapabilities,
+	ArtifactCollectionName,
+	ArtifactDocumentId,
+	MAX_ARTIFACT_COLLECTIONS,
 	ArtifactFile,
 	ArtifactFilesInput,
 	ArtifactVersionFilesInput,
@@ -135,6 +138,9 @@ import {
 import type { AgentTool, SessionEventType } from "./Schemas.ts"
 import {
 	MAX_EVENTS_BODY_BYTES,
+	MAX_ARTIFACT_COLLECTION_DOCUMENTS,
+	MAX_ARTIFACT_DATABASE_BYTES,
+	MAX_ARTIFACT_DOCUMENT_BYTES,
 	MAX_SESSION_BODY_BYTES,
 	MAX_SESSION_EVENTS_PER_BATCH,
 	MAX_SESSION_INITIAL_MESSAGES_BYTES,
@@ -1291,6 +1297,44 @@ export const ArtifactDeleted = Schema.Struct({
 })
 export type ArtifactDeleted = typeof ArtifactDeleted.Type
 
+export const ArtifactDocumentResource = Schema.Struct({
+	id: ArtifactDocumentId,
+	type: Schema.Literal("artifact_document"),
+	artifact_id: ArtifactId,
+	collection: ArtifactCollectionName,
+	data: Schema.Json.annotate({ description: "The document: any JSON value" }),
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type ArtifactDocument = typeof ArtifactDocumentResource.Type
+
+export const ArtifactDocumentBody = Schema.Struct({
+	data: Schema.Json.annotate({
+		description: `The document: any JSON value of at most ${MAX_ARTIFACT_DOCUMENT_BYTES} bytes once encoded`,
+	}),
+})
+export type ArtifactDocumentBody = typeof ArtifactDocumentBody.Type
+
+export const ArtifactDocumentDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("artifact_document_deleted"),
+})
+export type ArtifactDocumentDeleted = typeof ArtifactDocumentDeleted.Type
+
+export const ArtifactDatabaseResource = Schema.Struct({
+	type: Schema.Literal("artifact_database"),
+	artifact_id: ArtifactId,
+	bytes: NonNegativeInt.annotate({ description: "Encoded size of every document held" }),
+	collections: Schema.Array(
+		Schema.Struct({
+			name: Schema.String,
+			documents: NonNegativeInt,
+			bytes: NonNegativeInt,
+		}),
+	).annotate({ description: "Every collection that holds a document, by name" }),
+})
+export type ArtifactDatabase = typeof ArtifactDatabaseResource.Type
+
 export const WebhookEventSubscriptions = Schema.Array(WebhookEventSubscription)
 	.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_WEBHOOK_EVENT_TYPES))
 	.annotate({
@@ -1865,6 +1909,14 @@ const automationParams = {
 }
 const artifactParams = { artifact_id: ArtifactId.annotate({ description: "Artifact ID" }) }
 const artifactVersionParams = { ...artifactParams, version: ArtifactVersionFromString }
+const artifactCollectionParams = {
+	...artifactParams,
+	collection: ArtifactCollectionName.annotate({ description: "Collection name" }),
+}
+const artifactDocumentParams = {
+	...artifactCollectionParams,
+	document_id: ArtifactDocumentId.annotate({ description: "Document ID" }),
+}
 const memoryStoreParams = {
 	memory_store_id: MemoryStoreId.annotate({ description: "Memory store ID" }),
 }
@@ -3073,6 +3125,127 @@ const Artifacts = HttpApiGroup.make("artifacts")
 	.annotate(OpenApi.Description, "Manage artifacts")
 	.middleware(Authentication)
 
+const ArtifactData = HttpApiGroup.make("artifact_data")
+	.add(
+		HttpApiEndpoint.get("getDatabase", "/v1/artifacts/:artifact_id/data", {
+			params: artifactParams,
+			success: ArtifactDatabaseResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Describe an artifact's database")
+			.annotate(
+				OpenApi.Description,
+				`List the collections an artifact's database holds, with how many documents and bytes are in each. A database holds up to ${MAX_ARTIFACT_COLLECTIONS} collections and ${MAX_ARTIFACT_DATABASE_BYTES} bytes of documents`,
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.data",
+				"x-forge-method-name": "describe",
+				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "getDatabase" },
+				"x-checkfu-mcp": { name: "artifacts_getDatabase" },
+				"x-checkfu-cli": {
+					groupDescription: "Read and write the documents in an artifact's database",
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listDocuments", "/v1/artifacts/:artifact_id/data/:collection", {
+			params: artifactCollectionParams,
+			query: {
+				page: Schema.optionalKey(EventListPage),
+				limit: Schema.optionalKey(ListLimitFromString),
+			},
+			success: listResponse(ArtifactDocumentResource),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List documents")
+			.annotate(
+				OpenApi.Description,
+				"List the documents in a collection, oldest first. Use next_page to continue",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.data",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "listDocuments" },
+				"x-checkfu-mcp": { name: "artifacts_listDocuments" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("addDocument", "/v1/artifacts/:artifact_id/data/:collection", {
+			params: artifactCollectionParams,
+			headers: IdempotencyHeaders,
+			payload: ArtifactDocumentBody,
+			success: ArtifactDocumentResource.pipe(HttpApiSchema.status(201)),
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Add a document")
+			.annotate(
+				OpenApi.Description,
+				`Add a document to a collection under a new id. A collection holds up to ${MAX_ARTIFACT_COLLECTION_DOCUMENTS} documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409`,
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.data",
+				"x-forge-method-name": "add",
+				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "addDocument" },
+				"x-checkfu-mcp": { name: "artifacts_addDocument", destructive: false },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getDocument", "/v1/artifacts/:artifact_id/data/:collection/:document_id", {
+			params: artifactDocumentParams,
+			success: ArtifactDocumentResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a document")
+			.annotate(OpenApi.Description, "Retrieve one document from a collection")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.data",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "getDocument" },
+				"x-checkfu-mcp": { name: "artifacts_getDocument" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.put("putDocument", "/v1/artifacts/:artifact_id/data/:collection/:document_id", {
+			params: artifactDocumentParams,
+			payload: ArtifactDocumentBody,
+			success: ArtifactDocumentResource,
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Put a document")
+			.annotate(
+				OpenApi.Description,
+				"Store a document under an id you choose, replacing the document already there",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.data",
+				"x-forge-method-name": "put",
+				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "putDocument" },
+				"x-checkfu-mcp": { name: "artifacts_putDocument" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete(
+			"deleteDocument",
+			"/v1/artifacts/:artifact_id/data/:collection/:document_id",
+			{
+				params: artifactDocumentParams,
+				success: ArtifactDocumentDeleted,
+				error: HandlerErrors,
+			},
+		)
+			.annotate(OpenApi.Summary, "Delete a document")
+			.annotate(OpenApi.Description, "Remove one document from a collection")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.data",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "deleteDocument" },
+				"x-checkfu-mcp": { name: "artifacts_deleteDocument" },
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage the documents in an artifact's database")
+	.middleware(Authentication)
+
 const Vaults = HttpApiGroup.make("vaults")
 	.add(
 		HttpApiEndpoint.post("create", "/v1/vaults", {
@@ -3773,6 +3946,7 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Sessions)
 	.add(Automations)
 	.add(Artifacts)
+	.add(ArtifactData)
 	.add(Files)
 	.add(Vaults)
 	.add(Webhooks)

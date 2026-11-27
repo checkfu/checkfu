@@ -175,6 +175,41 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(Array.from(listedArtifacts, (entry) => entry.name)).toEqual(["sdk-artifact"])
 							expect(Array.from(listedArtifacts, (entry) => entry.id)).toEqual([artifact.id])
 
+							const response = yield* client.artifacts.data.add(
+								artifact.id,
+								"responses",
+								{ data: { answer: 42 } },
+								{ idempotencyKey: "sdk-response-1" },
+							)
+							expect(response.data).toEqual({ answer: 42 })
+							expect(
+								(yield* client.artifacts.data.add(
+									artifact.id,
+									"responses",
+									{ data: { answer: 42 } },
+									{ idempotencyKey: "sdk-response-1" },
+								)).id,
+							).toBe(response.id)
+							yield* client.artifacts.data.put(artifact.id, "responses", "pinned", {
+								data: ["a", 1],
+							})
+							expect(
+								(yield* client.artifacts.data.retrieve(artifact.id, "responses", "pinned")).data,
+							).toEqual(["a", 1])
+							const documents = yield* Stream.runCollect(
+								client.artifacts.data.listStream(artifact.id, "responses", { limit: 1 }),
+							)
+							expect(Array.from(documents, (document) => document.id)).toEqual([
+								response.id,
+								"pinned",
+							])
+							expect((yield* client.artifacts.data.describe(artifact.id)).collections).toEqual([
+								{ name: "responses", documents: 2, bytes: 20 },
+							])
+							expect(
+								yield* client.artifacts.data.delete(artifact.id, "responses", "pinned"),
+							).toEqual({ id: "pinned", type: "artifact_document_deleted" })
+
 							const automation = yield* client.automations.create(
 								{
 									name: "sdk-automation",

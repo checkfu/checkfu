@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T15:58:40.373Z",
+			"cut_at": "2026-11-27T16:46:22.606Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -309,6 +309,9 @@
 				"vault-table:secrets": "d4894ded0eb2cb54ec3d3b25722abfee87e716d814f6fa2faa8756089a41a1f2",
 				"vault-table:tombstones": "ab80c9d97c0d9844420019544c8694a44a26f42b9bd7f957453864dd9f4b64f8",
 				"vault-table:vault": "c55afb704028078ad013361d49c793753f5f62b81a4e9460d41fd2963ecab18e",
+				"artifact-data-table:documents": "58add860bb6e602a55345104ac6fcd6b255e8fdb514e6802132dbb946505f6e4",
+				"artifact-data-table:order": "2166ff4112b4548d40430050c32639e4412cfd82b57e3f57034e7d18f0a65e32",
+				"artifact-data-table:totals": "9888a31a136a4a8da91d10543de18990e80e614ad40a03125bc3ece192261eef",
 				"artifact-object:manifest": "96b92e6d7f5776a9f40fdabce0058bc1719854304fbfd0378478e6cd7d4790c8",
 				"artifact-marks:ArtifactObjects/marks": "9a4479672513953d36a3a251b5b8a587a32072053f5b328e271ddb9e0f78e078",
 				"artifact-marks:FileObjects/marks": "9a4479672513953d36a3a251b5b8a587a32072053f5b328e271ddb9e0f78e078",
@@ -17080,6 +17083,36 @@
 					"CREATE TABLE IF NOT EXISTS vault (id INTEGER PRIMARY KEY CHECK (id = 1), sealed INTEGER NOT NULL)",
 					"CREATE TABLE IF NOT EXISTS vault (id INTEGER PRIMARY KEY CHECK (id = 1), sealed INTEGER NOT NULL)",
 					"CREATE TABLE IF NOT EXISTS vault (id INTEGER PRIMARY KEY CHECK (id = 1), sealed INTEGER NOT NULL)"
+				],
+				"artifact-data-table:documents": [
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))"
+				],
+				"artifact-data-table:order": [
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)"
+				],
+				"artifact-data-table:totals": [
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
+					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)"
 				],
 				"artifact-object:manifest": [
 					{
