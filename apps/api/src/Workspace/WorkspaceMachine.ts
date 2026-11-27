@@ -46,27 +46,38 @@ export async function* packDirectories(
 ): AsyncGenerator<Uint8Array> {
 	const { createTarPacker } = await import("modern-tar")
 	const { readable, controller } = createTarPacker()
+	const producer = new AbortController()
+	const { signal } = producer
 	const entry = async (
 		at: string,
 		name: string,
 		directory: boolean,
 		link: boolean,
 	): Promise<void> => {
+		signal.throwIfAborted()
 		const stat = await files.lstat(at)
+		signal.throwIfAborted()
 		const header = { name, mode: stat.mode & 0o7777, mtime: new Date(stat.mtime) }
 		if (link) {
 			const linkname = await files.readlink(at)
+			signal.throwIfAborted()
 			await controller.add({ ...header, type: "symlink", size: 0, linkname }).close()
 		} else if (directory) {
 			await controller.add({ ...header, type: "directory", size: 0 }).close()
 			await add(at, `${name}/`)
 		} else {
 			const body = await files.readFile(at)
+			if (signal.aborted) {
+				await body.cancel(signal.reason)
+				return
+			}
 			await body.pipeTo(controller.add({ ...header, type: "file", size: stat.size }))
 		}
 	}
 	const add = async (path: string, prefix: string): Promise<void> => {
+		signal.throwIfAborted()
 		for (const item of await files.readdir(path)) {
+			signal.throwIfAborted()
 			await entry(
 				`${path}/${item.name}`,
 				`${prefix}${item.name}`,
@@ -75,8 +86,9 @@ export async function* packDirectories(
 			)
 		}
 	}
-	const packed = (async () => {
+	const pack = async () => {
 		for (const directory of directories) {
+			signal.throwIfAborted()
 			const stat = await files.lstat(directory).catch((error: unknown) => {
 				if (Predicate.hasProperty(error, "code") && error.code === "ENOENT") {
 					return undefined
@@ -92,23 +104,29 @@ export async function* packDirectories(
 				)
 			}
 		}
-	})().then(
-		() => {
+		if (!signal.aborted) {
 			controller.finalize()
-		},
-		(error: unknown) => {
-			controller.error(error)
-		},
-	)
-	const reader = readable.getReader()
-	for (;;) {
-		const { done, value } = await reader.read()
-		if (done) {
-			break
 		}
-		yield value
 	}
-	await packed
+	void pack().catch((error: unknown) => {
+		if (!signal.aborted) {
+			controller.error(error)
+		}
+	})
+	const reader = readable.getReader()
+	try {
+		for (;;) {
+			const chunk = await reader.read()
+			if (chunk.done) {
+				return
+			}
+			yield chunk.value
+		}
+	} finally {
+		producer.abort()
+		await reader.cancel().catch(() => undefined)
+		reader.releaseLock()
+	}
 }
 
 const PART_BYTES = 4 * 1024 * 1024

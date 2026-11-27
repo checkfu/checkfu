@@ -29,7 +29,9 @@ const makePlatform = () => {
 		failOpen: false,
 		failRemove: false,
 		failUnpack: false,
+		failWrite: false,
 		opening: Promise.resolve(),
+		writing: Promise.resolve(),
 	}
 	const done = (stdout = "", exitCode = 0): ExecResult => ({ exitCode, stdout, stderr: "" })
 	const stagedUnder = (disk: Disk, directory: string): ReadonlyArray<Uint8Array> =>
@@ -85,7 +87,11 @@ const makePlatform = () => {
 			readFile: (path) => alive(() => disk.staged.get(path) ?? new Uint8Array()),
 			readTextFile: (path) => alive(() => text(disk.staged.get(path) ?? new Uint8Array())),
 			writeFile: (path, content) =>
-				alive(() => {
+				alive(async () => {
+					await state.writing
+					if (state.failWrite) {
+						throw new Error("staging write failed")
+					}
 					disk.staged.set(path, bytesOf(content))
 				}),
 		}
@@ -175,7 +181,7 @@ const deferred = () => {
 	return { held, release }
 }
 
-const makeMachine = () => {
+const makeMachine = (source?: StoredFiles) => {
 	const platform = makePlatform()
 	const kept = new Map<string, unknown>()
 	const { tree, stored } = makeStored()
@@ -233,7 +239,7 @@ const makeMachine = () => {
 		disk,
 		directory: "/workspace",
 		extraDirectories: ["/mnt/session/outputs"],
-		stored,
+		stored: source ?? stored,
 		settled: () => {
 			settled += 1
 			return Promise.resolve()
@@ -266,6 +272,129 @@ describe("workspace machine", () => {
 		expect(await Promise.all([content(machine), content(machine)])).toEqual([SEEDED, SEEDED])
 		await content(machine)
 		expect([state.opened.length, settled(), machine.engaged()]).toEqual([1, 1, true])
+	})
+
+	it("cancels the archive when a staging write fails and can restore it on retry", async () => {
+		const chunk = new Uint8Array(256 * 1024)
+		const chunks = 128
+		let cancelled = 0
+		const opened: Array<string> = []
+		const { stored } = makeStored()
+		const source: StoredFiles = {
+			...stored,
+			readdir: (path) =>
+				Promise.resolve(
+					path === "/workspace"
+						? ["large", "later"].map((name) => ({
+								name,
+								isDirectory: false,
+								isSymbolicLink: false,
+							}))
+						: [],
+				),
+			lstat: async (path) =>
+				path === "/workspace/large" || path === "/workspace/later"
+					? {
+							mode: 0o644,
+							size: path.endsWith("/large") ? chunks * chunk.length : 0,
+							mtime: 0,
+							isDirectory: false,
+							isSymbolicLink: false,
+						}
+					: stored.lstat(path),
+			readFile: (path) => {
+				opened.push(path)
+				let remaining = path.endsWith("/large") ? chunks : 0
+				return Promise.resolve(
+					new ReadableStream<Uint8Array>({
+						pull: (controller) => {
+							if (remaining === 0) {
+								controller.close()
+							} else {
+								remaining--
+								controller.enqueue(chunk)
+							}
+						},
+						cancel: () => {
+							cancelled++
+						},
+					}),
+				)
+			},
+		}
+		const { machine, state, content } = makeMachine(source)
+		state.failWrite = true
+		await expect(content(machine)).rejects.toThrow("staging write failed")
+		await expect.poll(() => cancelled, { timeout: 1000 }).toBe(1)
+		expect(opened).toEqual(["/workspace/large"])
+		expect(state.disk).toBeUndefined()
+		state.failWrite = false
+		expect(await content(machine)).toBe(SEEDED)
+		expect(opened).toEqual(["/workspace/large", "/workspace/large", "/workspace/later"])
+	})
+
+	it("cleans up a failed staging write before a read-ahead file opens", async () => {
+		const first = new Uint8Array(4 * 1024 * 1024)
+		const pending = Promise.withResolvers<ReadableStream<Uint8Array>>()
+		const reading = deferred()
+		const cancelled = deferred()
+		const { stored } = makeStored()
+		const source: StoredFiles = {
+			...stored,
+			readdir: (path) =>
+				Promise.resolve(
+					path === "/workspace"
+						? ["first", "later"].map((name) => ({
+								name,
+								isDirectory: false,
+								isSymbolicLink: false,
+							}))
+						: [],
+				),
+			lstat: (path) =>
+				path === "/workspace/first" || path === "/workspace/later"
+					? Promise.resolve({
+							mode: 0o644,
+							size: path.endsWith("/first") ? first.length : 0,
+							mtime: 0,
+							isDirectory: false,
+							isSymbolicLink: false,
+						})
+					: stored.lstat(path),
+			readFile: (path) => {
+				if (path === "/workspace/later") {
+					reading.release()
+					return pending.promise
+				}
+				return Promise.resolve(
+					new ReadableStream({
+						start: (controller) => {
+							controller.enqueue(first)
+							controller.close()
+						},
+					}),
+				)
+			},
+		}
+		const { machine, state, content } = makeMachine(source)
+		state.failWrite = true
+		state.writing = reading.held
+		try {
+			await expect(
+				Promise.race([
+					content(machine),
+					pause(1000).then(() => {
+						throw new Error("Staging cleanup waited for the pending read")
+					}),
+				]),
+			).rejects.toThrow("staging write failed")
+			expect(state.disk).toBeUndefined()
+		} finally {
+			pending.resolve(new ReadableStream({ cancel: cancelled.release }))
+		}
+		await expect(
+			Promise.race([cancelled.held.then(() => true), pause(1000).then(() => false)]),
+		).resolves.toBe(true)
 	})
 
 	it("goes on without a machine when the first one cannot be had or filled", async () => {
