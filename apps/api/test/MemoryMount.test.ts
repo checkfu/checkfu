@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
 import { makeMemoryMount } from "../src/Workspace/MemoryMount.ts"
 import { withCallSignal } from "../src/Workspace/CallSignal.ts"
 import { makeSessionMemory } from "../src/Workspace/SessionMemory.ts"
@@ -303,6 +304,77 @@ describe("memory mount", () => {
 		const binary = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe])
 		expect(await code(mount.writeFile?.("notes/image.png", body(binary), {}))).toBe("EINVAL")
 		expect(files.has("/image.png")).toBe(false)
+	})
+
+	it("accepts an empty write and a split UTF-8 character at the byte limit", async () => {
+		const files = new Map<string, string>()
+		const mount = mountOver(files)
+		const content = "a".repeat(MAX_MEMORY_CONTENT_BYTES - 4) + "📝"
+		const bytes = utf8.encode(content)
+		const split = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(bytes.subarray(0, -2))
+				controller.enqueue(bytes.subarray(-2))
+				controller.close()
+			},
+		})
+
+		expect(await code(mount.writeFile?.("notes/empty.md", body(""), {}))).toBe("ok")
+		expect(await code(mount.writeFile?.("notes/full.md", split, {}))).toBe("ok")
+		expect(files.get("/empty.md")).toBe("")
+		expect(files.get("/full.md")).toBe(content)
+	})
+
+	it.each([false, true])(
+		"cancels an oversized write before the sentinel (split: %s)",
+		async (split) => {
+			const calls: Array<string> = []
+			const mount = mountOver(new Map(), { calls })
+			const chunks = split
+				? [utf8.encode("ab"), new Uint8Array(MAX_MEMORY_CONTENT_BYTES)]
+				: [new Uint8Array(MAX_MEMORY_CONTENT_BYTES + 1)]
+			let cancelled = false
+			let pulledSentinel = false
+			const source = new ReadableStream<Uint8Array>(
+				{
+					pull(controller) {
+						const chunk = chunks.shift()
+						if (chunk === undefined) {
+							pulledSentinel = true
+							controller.enqueue(utf8.encode("sentinel"))
+							controller.close()
+							return
+						}
+						controller.enqueue(chunk)
+					},
+					cancel() {
+						cancelled = true
+					},
+				},
+				{ highWaterMark: 0 },
+			)
+
+			expect(await code(mount.writeFile?.("notes/too-large.md", source, {}))).toBe("EINVAL")
+			expect(cancelled).toBe(true)
+			expect(pulledSentinel).toBe(false)
+			expect(source.locked).toBe(false)
+			expect(calls).toEqual([])
+		},
+	)
+
+	it("releases the reader and preserves source failures", async () => {
+		const calls: Array<string> = []
+		const mount = mountOver(new Map(), { calls })
+		const broke = new Error("source failed")
+		const source = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.error(broke)
+			},
+		})
+
+		await expect(mount.writeFile?.("notes/broken.md", source, {})).rejects.toBe(broke)
+		expect(source.locked).toBe(false)
+		expect(calls).toEqual([])
 	})
 
 	it("lets the last write win, and moves a directory one file at a time", async () => {
