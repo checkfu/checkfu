@@ -38,6 +38,7 @@ export type FakeOpenAIAction =
 	  }
 	| {
 			readonly kind: "tool_call"
+			readonly callId?: string
 			readonly name: string
 			readonly arguments: JsonObject
 	  }
@@ -385,7 +386,13 @@ export const startFakeOpenAIResponsesServer = async (
 			}
 
 			if (action.kind === "tool_call") {
-				writeToolCallEvents(res, responseId, `call_fake_${id}`, action.name, action.arguments)
+				writeToolCallEvents(
+					res,
+					responseId,
+					action.callId ?? `call_fake_${id}`,
+					action.name,
+					action.arguments,
+				)
 				return
 			}
 

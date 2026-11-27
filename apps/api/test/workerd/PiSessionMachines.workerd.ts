@@ -203,6 +203,14 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 						arguments: { name: "Empty", directory: "/workspace/nowhere" },
 					},
 				],
+				"Append one row.": [
+					{
+						kind: "tool_call",
+						callId: "provider-repeated-id".repeat(8),
+						name: "artifact_data",
+						arguments: { name: "Q3 report", collection: "rows", operation: "add", data: "row" },
+					},
+				],
 				"Fill in the numbers.": [
 					{
 						kind: "tool_call",
@@ -310,6 +318,14 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		expect(await replyAfterTurn(session.id, "Read the report's large note.", 7)).toMatch(
 			/"next_byte_offset":4096/u,
 		)
+		for (const turn of [8, 9]) {
+			expect(await replyAfterTurn(session.id, "Append one row.", turn)).toContain('"data":"row"')
+		}
+		const rows = await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+			`/v1/artifacts/${artifactId}/data/rows`,
+		)
+		expect(rows.body.data).toHaveLength(2)
+		expect(new Set(rows.body.data.map(({ id }) => id)).size).toBe(2)
 		if (process.env["CHECKFU_MEASURE_ARTIFACT_PAGES"] === "1") {
 			const artifactPath = `/v1/artifacts/${artifactId}`
 			const version = await apiFetch(`${artifactPath}/versions`, {
@@ -348,7 +364,7 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 			expect(JSON.parse(visitor)).toEqual(page)
 			const bytes = new TextEncoder().encode(owner).byteLength
 			tailOffset = bytes - 32
-			const tail = await replyAfterTurn(session.id, "Measure the report's collection.", 8)
+			const tail = await replyAfterTurn(session.id, "Measure the report's collection.", 10)
 			const result = JSON.parse(tail.replace(/^Done: /u, "")) as {
 				text: string
 				next_byte_offset: number | null

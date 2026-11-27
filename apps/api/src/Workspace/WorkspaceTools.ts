@@ -223,7 +223,11 @@ const INTERRUPTED: ToolExecutionResult = {
 
 export const workspaceExtension = (
 	tools: ReadonlyArray<WorkspaceTool>,
-	run: (call: WorkspaceToolCall, signal: AbortSignal | undefined) => Promise<WorkspaceToolResult>,
+	run: (
+		call: WorkspaceToolCall,
+		signal: AbortSignal | undefined,
+		taskId: number,
+	) => Promise<WorkspaceToolResult>,
 ): Extension => ({
 	name: WORKSPACE_EXTENSION,
 	sections: [{ key: "workspace", render: () => WORKSPACE_PROMPT }],
@@ -243,6 +247,7 @@ export const workspaceExtension = (
 			const { content, isError } = await run(
 				{ id: api.callId, name: tool.name, arguments: args },
 				context.abortSignal,
+				api.taskId,
 			)
 			return { output: content, isError }
 		},

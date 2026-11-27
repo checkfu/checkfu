@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Schedule from "effect/Schedule"
+import { artifactData } from "../src/Workspace/ArtifactDataTool.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { MAX_TOOL_ARTIFACT_FILES } from "../src/Workspace/SessionArtifactTool.ts"
 import {
@@ -658,6 +659,62 @@ describe("An artifact the agent saves", () => {
 					"No artifact named",
 				)
 			}),
+		))
+
+	it("reuses the returned add key after a committed response is lost", () =>
+		withSessions(
+			(apiFetch, { createSession, workspaceFiles, save, runInWorld, sessionArtifactSaves }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession
+					workspaceFiles(session.id).set("/workspace/site/index.html", "report")
+					const id = idIn(yield* save(session.id, "Report", "/workspace/site"))
+					const data = { name: "Report", collection: "rows", operation: "add", data: "one" }
+					const saves = sessionArtifactSaves()
+					const firstKey = `pi:${session.id}:20`
+					let committed: string | null = null
+					const lost = yield* Effect.promise(() =>
+						artifactData(data, {
+							defaultKey: firstKey,
+							writeResult: async () => {
+								throw new Error("Unexpected large result")
+							},
+							ask: async (name, req) => {
+								const result = await runInWorld(saves.sessionArtifactData(session.id, 1, name, req))
+								if (result.ok) {
+									committed = result.id
+								}
+								throw new Error("Lost the committed response")
+							},
+						}),
+					)
+					expect(committed).toBeTypeOf("string")
+					expect(lost.content).toEqual([
+						{
+							type: "text",
+							text: `The add could have succeeded. Repeat it with key "${firstKey}" to avoid another document.`,
+						},
+					])
+					const retried = yield* Effect.promise(() =>
+						artifactData(
+							{ ...data, key: firstKey },
+							{
+								defaultKey: `pi:${session.id}:21`,
+								writeResult: async () => {
+									throw new Error("Unexpected large result")
+								},
+								ask: (name, req) => runInWorld(saves.sessionArtifactData(session.id, 1, name, req)),
+							},
+						),
+					)
+					expect(retried.isError).toBe(false)
+					const rows = yield* json<{ data: ReadonlyArray<{ id: string }> }>(
+						yield* request(apiFetch, "GET", `/v1/artifacts/${id}/data/rows`),
+					)
+					expect(rows.data.map((row) => row.id)).toEqual([committed])
+					expect(retried.content).toEqual([
+						{ type: "text", text: expect.stringContaining(JSON.stringify(committed)) },
+					])
+				}),
 		))
 
 	it("rejects invalid page sizes at the API binding and refuses writes from an interrupted turn", () =>
