@@ -28,6 +28,8 @@ import {
 	CurrentRequestTransportMeta,
 	DEFAULT_TIMEOUT_MS,
 	cancelResponseBody,
+	forbidIdempotencyKey,
+	snapshotHeaders,
 	lookupHeader,
 	mergeHeaderMaps,
 	parseRetryAfterMs,
@@ -65,9 +67,30 @@ export interface StreamSseOptions {
 }
 
 export interface StreamSessionEventsOptions extends StreamSseOptions {
+	readonly idempotencyKey?: undefined
 	readonly after?: number | undefined
 	readonly event_deltas?: ReadonlyArray<SessionPreviewType> | undefined
 }
+
+export const snapshotSessionStreamOptions = (
+	options: StreamSessionEventsOptions | undefined,
+	after = options?.after,
+): StreamSessionEventsOptions | undefined =>
+	options === undefined && after === undefined
+		? undefined
+		: {
+				after,
+				idempotencyKey: options?.idempotencyKey,
+				event_deltas: options?.event_deltas?.slice(),
+				maxReconnectAttempts: options?.maxReconnectAttempts,
+				baseReconnectDelayMs: options?.baseReconnectDelayMs,
+				errorBodyTimeoutMs: options?.errorBodyTimeoutMs,
+				healthyIdleDurationMs: options?.healthyIdleDurationMs,
+				openTimeoutMs: options?.openTimeoutMs,
+				idleTimeoutMs: options?.idleTimeoutMs,
+				headers: snapshotHeaders(options?.headers),
+				onOpen: options?.onOpen,
+			}
 
 export interface ApiSseStreamConfig<Event, E extends ApiSseError = ApiSseError> {
 	readonly open: (context: {
@@ -682,8 +705,11 @@ export function streamSessionEvents(
 	options?: StreamSessionEventsOptions,
 	defaultHeaders?: HeaderMap,
 ): Stream.Stream<SessionStreamEvent, CheckfuSdkError> {
+	options = snapshotSessionStreamOptions(options)
+	const baseHeaders = snapshotHeaders(defaultHeaders)
 	return Stream.unwrap(
 		Effect.gen(function* () {
+			yield* forbidIdempotencyKey("sessions.events.stream", options, { headers: baseHeaders })
 			const parsedSessionId = yield* Schema.decodeEffect(SessionId)(sessionId).pipe(
 				Effect.mapError(
 					(err) =>
@@ -701,7 +727,7 @@ export function streamSessionEvents(
 					message: "after must be a non-negative integer.",
 				})
 			}
-			const effectiveInitialHeaders = mergeHeaderMaps(defaultHeaders, options?.headers)
+			const effectiveInitialHeaders = mergeHeaderMaps(baseHeaders, options?.headers)
 			const rawHeaderLastEventId = lookupHeader(effectiveInitialHeaders, "last-event-id")
 			const headerLastEventId =
 				typeof rawHeaderLastEventId === "string" && rawHeaderLastEventId.length > 0
@@ -745,7 +771,7 @@ export function streamSessionEvents(
 				getCursor: (event) => ("seq" in event ? String(event.seq) : undefined),
 				isCursorAdvance: (prev, next) => prev === undefined || Number(next) > Number(prev),
 				isTerminal: (event) => event.type === "session.archived",
-				defaultHeaders,
+				defaultHeaders: baseHeaders,
 				options,
 			}).pipe(
 				Stream.filter((event) => {

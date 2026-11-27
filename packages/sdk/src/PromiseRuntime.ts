@@ -29,8 +29,10 @@ import type {
 	SessionEventsStreamOptions,
 	WithResponse,
 } from "./Runtime.ts"
+import { snapshotSessionStreamOptions } from "./Sse.ts"
+import { snapshotHeaders } from "./Transport.ts"
 
-export interface PromiseRequestOptions extends RequestOptions {
+export interface PromiseRequestOptions<Key extends string = string> extends RequestOptions<Key> {
 	readonly signal?: AbortSignal | undefined
 }
 
@@ -43,7 +45,7 @@ export interface PromiseWaitForPendingOptions<T> {
 	readonly initialDelay?: Duration.Input | undefined
 	readonly maxDelay?: Duration.Input | undefined
 	until?(this: void, resource: T): boolean
-	readonly requestOptions?: PromiseRequestOptions | undefined
+	readonly requestOptions?: PromiseRequestOptions<never> | undefined
 	readonly signal?: AbortSignal | undefined
 }
 
@@ -125,18 +127,14 @@ export const toIsoJson = <T>(value: T): IsoDateTimes<T> => {
 export const isSignalAborted = (signal: AbortSignal | undefined): boolean =>
 	signal?.aborted === true
 
-export const toEffectRequestOptions = (
-	options: PromiseRequestOptions | undefined,
-): RequestOptions | undefined => {
+export const toEffectRequestOptions = <Key extends string>(
+	options: PromiseRequestOptions<Key> | undefined,
+): RequestOptions<Key> | undefined => {
 	if (options === undefined) {
 		return undefined
 	}
-	return {
-		...(options.headers === undefined ? {} : { headers: options.headers }),
-		...(options.timeout === undefined ? {} : { timeout: options.timeout }),
-		...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
-		...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
-	}
+	const { headers, timeout, maxRetries, idempotencyKey } = options
+	return { headers: snapshotHeaders(headers), timeout, maxRetries, idempotencyKey }
 }
 
 const toWebResponse = async <A>(
@@ -502,12 +500,12 @@ export class EventStreamPromise<T> implements Promise<EventStream<T>>, AsyncIter
 	}
 }
 
-export const executeUnaryPromise = <A>(
+export const executeUnaryPromise = <A, Key extends string = never>(
 	runtime: PromiseSdkRuntime,
-	requestOptions: PromiseRequestOptions | undefined,
+	requestOptions: PromiseRequestOptions<Key> | undefined,
 	run: (
 		effectRuntime: EffectSdkRuntime,
-		effectOpts: RequestOptions | undefined,
+		effectOpts: RequestOptions<Key> | undefined,
 	) => Effect.Effect<WithResponse<A>, CheckfuSdkError>,
 ): APIPromise<IsoDateTimes<A>> => {
 	const signal = requestOptions?.signal
@@ -530,14 +528,14 @@ export const executeUnaryPromise = <A>(
 	return new APIPromise(promise)
 }
 
-export const executePaginatedPromise = <Item>(
+export const executePaginatedPromise = <Item, Key extends string = never>(
 	runtime: PromiseSdkRuntime,
 	initialPage: string | undefined,
-	requestOptions: PromiseRequestOptions | undefined,
+	requestOptions: PromiseRequestOptions<Key> | undefined,
 	runPage: (
 		effectRuntime: EffectSdkRuntime,
 		token: string | undefined,
-		effectOpts: RequestOptions | undefined,
+		effectOpts: RequestOptions<Key> | undefined,
 	) => Effect.Effect<WithResponse<PageEnvelope<Item>>, CheckfuSdkError>,
 ): PagePromise<CursorPage<IsoDateTimes<Item>>, IsoDateTimes<Item>> => {
 	const signal = requestOptions?.signal
@@ -594,6 +592,7 @@ export const executeSseStreamPromise = <Event>(
 			throw new APIUserAbortError({ message: "Request was aborted." })
 		}
 
+		const effectStreamOpts = snapshotSessionStreamOptions(streamOptions)
 		const controller = new AbortController()
 		const onExternalAbort = (): void => {
 			controller.abort(externalSignal?.reason)
@@ -615,12 +614,11 @@ export const executeSseStreamPromise = <Event>(
 		}
 
 		const fiber = runtime.runFork((effectRuntime) => {
-			const { signal: _ignoredSignal, ...effectStreamOpts } = streamOptions ?? {}
 			return buildStream(effectRuntime, {
 				...effectStreamOpts,
 				onOpen: (status) =>
 					Effect.gen(function* () {
-						if (effectStreamOpts.onOpen !== undefined) {
+						if (effectStreamOpts?.onOpen !== undefined) {
 							yield* effectStreamOpts.onOpen(status)
 						}
 						yield* Deferred.succeed(opened, undefined)

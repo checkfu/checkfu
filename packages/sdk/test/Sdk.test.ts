@@ -60,6 +60,7 @@ import {
 	isPendingResource,
 	normalizeApiUrl,
 	streamApiSse,
+	streamSessionEvents,
 } from "../src/index.ts"
 import type {
 	BodyOf,
@@ -2781,6 +2782,248 @@ describe("@checkfu/sdk", () => {
 						{ after: null, lastEventId: "100" },
 					])
 				}),
+		)
+
+		it.live("refuses unsupported request keys before either SDK sends a request", () =>
+			Effect.gen(function* () {
+				const requests: Array<Request> = []
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					const request = toWebRequest(input, init)
+					requests.push(request)
+					if (new URL(request.url).pathname === "/v1/agents") {
+						return jsonResponse(sampleAgent(), 201)
+					}
+					return jsonResponse(
+						{
+							id: "wdel_new",
+							type: "webhook_delivery",
+							webhook_id: "whe_test",
+							event_id: "evt_artifact_test_1",
+							event_type: "artifact.created",
+							status: "pending",
+							attempt_count: 0,
+							max_attempts: 3,
+							next_attempt_at: ISO_NOW,
+							last_attempt_at: null,
+							last_http_status: null,
+							last_outcome: null,
+							last_error: null,
+							created_at: ISO_NOW,
+							updated_at: ISO_NOW,
+							completed_at: null,
+						},
+						201,
+					)
+				}
+				const body = { name: "Helper", model: "fixture-model" }
+				const looseKey = Object.fromEntries([["idempotencyKey", "retry"]])
+				const keyedHeader = { headers: { "IdEmPoTeNcY-kEy": "retry" } }
+				const ordinary = { headers: { "x-trace": "ordinary" }, idempotencyKey: undefined }
+				const unsupported = {
+					_tag: "CheckfuConfigError",
+					message: expect.stringContaining("takes no idempotency key"),
+				}
+				const promise = new Checkfu({ apiKey: "ck_test", baseUrl: "http://localhost:1337", fetch })
+				try {
+					for (const options of [looseKey, keyedHeader]) {
+						const call = promise.webhooks.deliveries.redeliver("whe_test", "wdel_old", options)
+						yield* Effect.promise(() =>
+							expect(call.withResponse()).rejects.toMatchObject(unsupported),
+						)
+					}
+					expect(requests).toEqual([])
+					const response = yield* Effect.promise(() =>
+						promise.webhooks.deliveries.redeliver("whe_test", "wdel_old", ordinary).withResponse(),
+					)
+					expect(response.status).toBe(201)
+					expect(response.data.id).toBe("wdel_new")
+					expect(requests[0]?.headers.get("x-trace")).toBe("ordinary")
+					yield* Effect.promise(() => promise.webhooks.deliveries.redeliver("whe_test", "wdel_old"))
+					yield* Effect.promise(() => promise.agents.create(body, { idempotencyKey: "promise" }))
+				} finally {
+					yield* Effect.promise(() => promise.close())
+				}
+				expect(requests.map((request) => request.headers.get("idempotency-key"))).toEqual([
+					null,
+					null,
+					"promise",
+				])
+				requests.length = 0
+				yield* Effect.gen(function* () {
+					const effect = yield* CheckfuClient
+					for (const options of [looseKey, keyedHeader]) {
+						const failure = yield* Effect.flip(
+							effect.webhooks.deliveries.redeliver("whe_test", "wdel_old", {
+								...options,
+								withResponse: true,
+							}),
+						)
+						expect(failure).toMatchObject(unsupported)
+					}
+					const inline = yield* Effect.flip(
+						effect.agents.retrieve(
+							"agent_1",
+							{ ...looseKey, version: 1 },
+							{ headers: { "x-trace": "another" } },
+						),
+					)
+					expect(inline).toMatchObject(unsupported)
+					const stream = yield* Effect.flip(
+						Stream.runCollect(effect.sessions.events.stream("sess_1", undefined, keyedHeader)),
+					)
+					expect(stream).toMatchObject(unsupported)
+					expect(requests).toEqual([])
+					const response = yield* effect.webhooks.deliveries.redeliver("whe_test", "wdel_old", {
+						...ordinary,
+						withResponse: true,
+					})
+					expect(response.status).toBe(201)
+					expect(response.data.id).toBe("wdel_new")
+					expect(requests[0]?.headers.get("x-trace")).toBe("ordinary")
+					yield* effect.agents.create(body, { idempotencyKey: "effect", ...keyedHeader })
+				}).pipe(Effect.provide(makeEffectLayer(fetch)))
+				expect(requests.map((request) => request.headers.get("idempotency-key"))).toEqual([
+					null,
+					"retry",
+				])
+			}),
+		)
+
+		it.live("keeps a validated header snapshot for delayed requests and streams", () =>
+			Effect.gen(function* () {
+				const requests: Array<Request> = []
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					const request = toWebRequest(input, init)
+					requests.push(request)
+					return new URL(request.url).pathname.endsWith("/stream")
+						? new Response(sseFrame(sampleArchivedEvent(1)), {
+								headers: { "content-type": "text/event-stream" },
+							})
+						: jsonResponse({ data: [], next_page: null })
+				}
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const headers = Object.fromEntries([["x-trace", "original"]])
+					const listing = client.agents.list(undefined, { headers })
+					const stream = client.sessions.events.stream("sess_1", undefined, { headers })
+					const direct = streamSessionEvents(client.raw, "sess_2", { headers })
+					headers["Idempotency-Key"] = "added-after-creation"
+					headers["x-trace"] = "changed"
+					yield* listing
+					yield* Stream.runCollect(stream)
+					yield* Stream.runCollect(direct)
+					expect(
+						requests.map(({ headers }) => [headers.get("idempotency-key"), headers.get("x-trace")]),
+					).toEqual([
+						[null, "original"],
+						[null, "original"],
+						[null, "original"],
+					])
+					const attempt = streamSessionEvents(client.raw, "sess_3", { headers })
+					expect(yield* Effect.flip(Stream.runCollect(attempt))).toMatchObject({
+						_tag: "CheckfuConfigError",
+						message: expect.stringContaining("takes no idempotency key"),
+					})
+					expect(requests).toHaveLength(3)
+				}).pipe(Effect.provide(makeEffectLayer(fetch)))
+			}),
+		)
+
+		it.live("copies inherited options while keeping their response and stream behavior", () =>
+			Effect.gen(function* () {
+				const paths: Array<string> = []
+				const opened: Array<string> = []
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					const url = new URL(toWebRequest(input, init).url)
+					paths.push(url.pathname + url.search)
+					return url.pathname.endsWith("/stream")
+						? new Response(null, { status: 204 })
+						: jsonResponse({ data: [], next_page: null })
+				}
+				class ListingOptions {
+					get withResponse(): true {
+						return true
+					}
+				}
+				class StreamOptions {
+					readonly source: string
+					constructor(source: string) {
+						this.source = source
+					}
+					get after(): number {
+						return 3
+					}
+					get onOpen() {
+						return () => Effect.sync(() => void opened.push(this.source))
+					}
+				}
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const response = yield* client.agents.list(undefined, new ListingOptions())
+					expect(response.status).toBe(200)
+					yield* Stream.runCollect(
+						client.sessions.events.stream("sess_1", undefined, new StreamOptions("generated")),
+					)
+					yield* Stream.runCollect(
+						streamSessionEvents(client.raw, "sess_2", new StreamOptions("direct")),
+					)
+					expect(paths).toEqual([
+						"/v1/agents",
+						"/v1/sessions/sess_1/events/stream?after=3",
+						"/v1/sessions/sess_2/events/stream?after=3",
+					])
+					expect(opened).toEqual(["generated", "direct"])
+				}).pipe(Effect.provide(makeEffectLayer(fetch)))
+			}),
+		)
+
+		it.live("snapshots Promise request options before starting a delayed request", () =>
+			Effect.promise(async () => {
+				const paths: Array<string> = []
+				const opened: Array<number> = []
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					const url = new URL(toWebRequest(input, init).url)
+					paths.push(url.pathname + url.search)
+					return new Response(null, { status: 204 })
+				}
+				const client = new Checkfu({ apiKey: "ck_test_key", fetch })
+				const blocked = {
+					_tag: "CheckfuConfigError",
+					message: expect.stringContaining("takes no idempotency key"),
+				}
+				class StreamOptions {
+					get headers() {
+						return { "Idempotency-Key": "from-prototype" }
+					}
+				}
+				class AllowedStreamOptions {
+					get after(): number {
+						return 3
+					}
+					get onOpen() {
+						return (status: number) => Effect.sync(() => void opened.push(status))
+					}
+				}
+				try {
+					await expect(
+						client.sessions.events.stream("sess_1", undefined, new StreamOptions()),
+					).rejects.toMatchObject(blocked)
+					const headers = Object.fromEntries([["Idempotency-Key", "before-await"]])
+					const listing = client.agents.list(undefined, { headers })
+					const stream = client.sessions.events.stream("sess_2", undefined, { headers })
+					delete headers["Idempotency-Key"]
+					await Promise.all([
+						expect(listing).rejects.toMatchObject(blocked),
+						expect(stream).rejects.toMatchObject(blocked),
+					])
+					expect(paths).toEqual([])
+					await client.sessions.events.stream("sess_3", undefined, new AllowedStreamOptions())
+					expect(paths).toEqual(["/v1/sessions/sess_3/events/stream?after=3"])
+					expect(opened).toEqual([204])
+				} finally {
+					await client.close()
+				}
+			}),
 		)
 
 		it.live("waits for pending automation receipts in both clients", () =>

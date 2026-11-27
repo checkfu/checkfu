@@ -130,7 +130,7 @@ export type PendingResolvedResource = PendingResolved[PendingResourceType]
 const retrievePending = (
 	client: CheckfuSdkClient,
 	pending: PendingResource,
-	options: RequestOptions | undefined,
+	options: RequestOptions<never> | undefined,
 ): Effect.Effect<PendingResolvedResource, CheckfuSdkError> => {
 	switch (pending.type) {
 		case "agent":

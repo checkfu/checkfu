@@ -142,6 +142,8 @@ const generateResourcesFile = (
 	const executePaginatedPagesEffect = runtimeMod.ident("executePaginatedPagesEffect")
 	const executePaginatedStreamEffect = runtimeMod.ident("executePaginatedStreamEffect")
 	const executeWithRetries = runtimeMod.ident("executeWithRetries")
+	const forbidIdempotencyKey = runtimeMod.ident("forbidIdempotencyKey")
+	const snapshotRequestOptions = runtimeMod.ident("snapshotRequestOptions")
 	const pendingUpdateReadiness = runtimeMod.ident("pendingUpdateReadiness")
 	const resolveCallIdempotencyKey = runtimeMod.ident("resolveCallIdempotencyKey")
 	const resolveRequiredIdempotencyKey = runtimeMod.ident("resolveRequiredIdempotencyKey")
@@ -219,6 +221,7 @@ const generateResourcesFile = (
 	const emitEffectOperation = (op: SurfaceOperation): void => {
 		const g = JSON.stringify(op.apiGroup)
 		const e = JSON.stringify(op.apiEndpoint)
+		const keyType = op.supportsIdempotencyKey ? "" : "<never>"
 		const docText = formatJsDocComment(op.description || op.summary || op.operationId)
 		const pathArgs = op.pathParams.map((p) => ({
 			argName: safeParamArgName(p),
@@ -338,6 +341,7 @@ const generateResourcesFile = (
 									: mode === "default"
 										? RequestOptions
 										: AnyRequestOptions,
+								keyType,
 							]
 						: []),
 					undef,
@@ -370,11 +374,23 @@ const generateResourcesFile = (
 			}
 			const keyed = op.requiresIdempotencyKey ? " & { readonly idempotencyKey: string }" : ""
 			if (mode === "withResponse") {
-				out("options: ", WithResponseRequestOptions, keyed, ",")
+				out("options: ", WithResponseRequestOptions, keyType, keyed, ",")
 			} else if (mode === "default") {
-				out(op.requiresIdempotencyKey ? "options: " : "options?: ", RequestOptions, keyed, ",")
+				out(
+					op.requiresIdempotencyKey ? "options: " : "options?: ",
+					RequestOptions,
+					keyType,
+					keyed,
+					",",
+				)
 			} else {
-				out(op.requiresIdempotencyKey ? "options: " : "options?: ", AnyRequestOptions, keyed, ",")
+				out(
+					op.requiresIdempotencyKey ? "options: " : "options?: ",
+					AnyRequestOptions,
+					keyType,
+					keyed,
+					",",
+				)
 			}
 		}
 
@@ -431,6 +447,9 @@ const generateResourcesFile = (
 		out.indent(() => {
 			if (acceptsOptionsWithQuery) {
 				out("options ??= params")
+			}
+			if (!op.supportsIdempotencyKey) {
+				out("options = ", snapshotRequestOptions, "(options)")
 			}
 			const emitRawInvoke = (): void => {
 				const safetyExpr =
@@ -536,7 +555,16 @@ const generateResourcesFile = (
 
 			const emitWithIdempotency = (): void => {
 				if (!op.supportsIdempotencyKey) {
-					emitInvoke()
+					out(
+						EffectFlatMap,
+						"(",
+						forbidIdempotencyKey,
+						"(",
+						JSON.stringify(op.operationId),
+						acceptsOptionsWithQuery ? ", options, params), () =>" : ", options), () =>",
+					)
+					out.indent(() => emitInvoke())
+					out(")")
 					return
 				}
 				out(
@@ -545,7 +573,7 @@ const generateResourcesFile = (
 					op.requiresIdempotencyKey ? resolveRequiredIdempotencyKey : resolveCallIdempotencyKey,
 					op.requiresIdempotencyKey
 						? "(this.#runtime, options), (key) =>"
-						: "(this.#runtime, options, true), (key) =>",
+						: "(this.#runtime, options), (key) =>",
 				)
 				out.indent(() => emitInvoke())
 				out(")")
@@ -587,7 +615,7 @@ const generateResourcesFile = (
 					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
-				out("options?: ", RequestOptions, ",")
+				out("options?: ", RequestOptions, keyType, ",")
 			})
 			out("): ", StreamType, "<", EndpointSuccess, "<", g, ", ", e, ">, ", CheckfuSdkError, "> {")
 			out.indent(() => {
@@ -624,7 +652,7 @@ const generateResourcesFile = (
 					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
-				out("options?: ", RequestOptions, ",")
+				out("options?: ", RequestOptions, keyType, ",")
 			})
 			out(
 				"): ",
@@ -673,6 +701,7 @@ const generateResourcesFile = (
 	const emitPromiseOperation = (op: SurfaceOperation, effectClsName: string): void => {
 		const g = JSON.stringify(op.apiGroup)
 		const e = JSON.stringify(op.apiEndpoint)
+		const keyType = op.supportsIdempotencyKey ? "" : "<never>"
 		const docText = formatJsDocComment(op.description || op.summary || op.operationId)
 		const pathArgs = op.pathParams.map((p) => ({
 			argName: safeParamArgName(p),
@@ -772,7 +801,7 @@ const generateResourcesFile = (
 					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
-				out("options?: ", PromiseRequestOptions, ",")
+				out("options?: ", PromiseRequestOptions, keyType, ",")
 			})
 			out(
 				"): ",
@@ -855,7 +884,7 @@ const generateResourcesFile = (
 					", ",
 					e,
 					">>",
-					...(acceptsOptionsWithQuery ? [" & ", PromiseRequestOptions] : []),
+					...(acceptsOptionsWithQuery ? [" & ", PromiseRequestOptions, keyType] : []),
 					",",
 				)
 			} else if (hasBodyAndQuery) {
@@ -877,7 +906,7 @@ const generateResourcesFile = (
 			if (op.requiresIdempotencyKey) {
 				out("options: ", PromiseRequestOptions, " & { readonly idempotencyKey: string },")
 			} else {
-				out("options?: ", PromiseRequestOptions, ",")
+				out("options?: ", PromiseRequestOptions, keyType, ",")
 			}
 		})
 		out("): ", APIPromise, "<", EndpointJsonSuccess, "<", g, ", ", e, ">> {")

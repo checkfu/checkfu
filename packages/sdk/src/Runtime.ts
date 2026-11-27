@@ -38,10 +38,12 @@ import {
 	mapRawClientError,
 } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
-import { streamApiSse, streamSessionEvents } from "./Sse.ts"
+import { snapshotSessionStreamOptions, streamApiSse, streamSessionEvents } from "./Sse.ts"
 import type { StreamSessionEventsOptions } from "./Sse.ts"
 import {
 	CurrentRequestTransportMeta,
+	forbidIdempotencyKey,
+	snapshotHeaders,
 	computeRetryDelayMs,
 	lookupHeader,
 	mergeHeaderMaps,
@@ -50,6 +52,8 @@ import {
 	validatePathSegment,
 } from "./Transport.ts"
 import type { HeaderMap, RetrySafety } from "./Transport.ts"
+
+export { forbidIdempotencyKey }
 
 export type {
 	ApiEndpoint,
@@ -178,23 +182,39 @@ export interface PageEnvelope<Item> {
 	readonly next_page: string | null
 }
 
-export interface RequestOptions {
+export interface RequestOptions<Key extends string = string> {
 	readonly headers?: HeaderMap | undefined
 	readonly timeout?: Duration.Input | null | undefined
 	readonly maxRetries?: number | undefined
-	readonly idempotencyKey?: string | undefined
+	readonly idempotencyKey?: Key | undefined
 	readonly withResponse?: false | undefined
 }
 
-export interface WithResponseRequestOptions {
+export interface WithResponseRequestOptions<Key extends string = string> {
 	readonly headers?: HeaderMap | undefined
 	readonly timeout?: Duration.Input | null | undefined
 	readonly maxRetries?: number | undefined
-	readonly idempotencyKey?: string | undefined
+	readonly idempotencyKey?: Key | undefined
 	readonly withResponse: true
 }
 
-export type AnyRequestOptions = RequestOptions | WithResponseRequestOptions
+export type AnyRequestOptions<Key extends string = string> =
+	| RequestOptions<Key>
+	| WithResponseRequestOptions<Key>
+
+export const snapshotRequestOptions = <Options extends AnyRequestOptions>(
+	options: Options | undefined,
+): Options | undefined =>
+	options === undefined
+		? undefined
+		: {
+				...options,
+				headers: snapshotHeaders(options.headers),
+				idempotencyKey: options.idempotencyKey,
+				maxRetries: options.maxRetries,
+				timeout: options.timeout,
+				withResponse: options.withResponse,
+			}
 
 export interface WithResponse<A> {
 	readonly data: A
@@ -204,16 +224,14 @@ export interface WithResponse<A> {
 	readonly requestId: string | undefined
 }
 
-export interface SessionEventsStreamOptions extends StreamSessionEventsOptions {
-	readonly headers?: HeaderMap | undefined
-}
+export type SessionEventsStreamOptions = StreamSessionEventsOptions
 
 export interface WaitForPendingOptions<T> {
 	readonly timeout?: Duration.Input | undefined
 	readonly initialDelay?: Duration.Input | undefined
 	readonly maxDelay?: Duration.Input | undefined
 	until?(this: void, resource: T): boolean
-	readonly requestOptions?: RequestOptions | undefined
+	readonly requestOptions?: RequestOptions<never> | undefined
 }
 
 export interface EffectSdkRuntime {
@@ -314,13 +332,7 @@ const decodeClientIdempotencyKey = (key: string): Effect.Effect<ClientEventId, B
 export const resolveCallIdempotencyKey = (
 	runtime: EffectSdkRuntime,
 	options: AnyRequestOptions | undefined,
-	supportsIdempotency: boolean,
 ): Effect.Effect<ClientEventId | undefined, BadRequestError> => {
-	if (!supportsIdempotency) {
-		return options?.idempotencyKey !== undefined
-			? decodeClientIdempotencyKey(options.idempotencyKey)
-			: Effect.undefined
-	}
 	const perCallHeader = lookupHeader(options?.headers, "idempotency-key")
 	if (perCallHeader !== undefined) {
 		return perCallHeader === null ? Effect.undefined : decodeClientIdempotencyKey(perCallHeader)
@@ -342,7 +354,7 @@ export const resolveRequiredIdempotencyKey = (
 	options: AnyRequestOptions | undefined,
 ): Effect.Effect<ClientEventId, BadRequestError> =>
 	Effect.filterOrFail(
-		resolveCallIdempotencyKey({ ...runtime, autoIdempotencyKey: false }, options, true),
+		resolveCallIdempotencyKey({ ...runtime, autoIdempotencyKey: false }, options),
 		(key): key is ClientEventId => key !== undefined,
 		() =>
 			new BadRequestError({
@@ -561,16 +573,15 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 			streamSessionEvents(
 				runtime.raw,
 				sessionId,
-				{
-					...options,
-					...(after === undefined ? {} : { after }),
-				},
+				snapshotSessionStreamOptions(options, after),
 				runtime.defaultHeaders,
 			),
 		)
 	}
+	const requestOptions = snapshotSessionStreamOptions(options)
 	return Stream.unwrap(
 		Effect.gen(function* () {
+			yield* forbidIdempotencyKey(`${String(group)}.${String(endpoint)}`, requestOptions)
 			const hasParams = Object.keys(rawParams).length > 0
 			const decodedParams = hasParams
 				? yield* decodeEndpointParams(group, endpoint, rawParams)
@@ -603,7 +614,7 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 						}),
 					),
 				defaultHeaders: runtime.defaultHeaders,
-				options,
+				options: requestOptions,
 			})
 		}),
 	)
@@ -659,7 +670,7 @@ const isRetryablePendingRead = (error: CheckfuSdkError): boolean =>
 
 export const pollPending = <T>(
 	pending: PendingResource,
-	fetchResource: (id: string, opts?: RequestOptions) => Effect.Effect<T, CheckfuSdkError>,
+	fetchResource: (id: string, opts?: RequestOptions<never>) => Effect.Effect<T, CheckfuSdkError>,
 	options?: WaitForPendingOptions<T>,
 ): Effect.Effect<T, CheckfuSdkError> =>
 	Effect.gen(function* () {

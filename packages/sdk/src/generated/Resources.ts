@@ -26,9 +26,11 @@ import {
 	executePaginatedPagesEffect,
 	executePaginatedStreamEffect,
 	executeWithRetries,
+	forbidIdempotencyKey,
 	pendingUpdateReadiness,
 	resolveCallIdempotencyKey,
 	resolveRequiredIdempotencyKey,
+	snapshotRequestOptions,
 	unwrapResponse,
 	withPendingReadiness,
 	withResolvedIdempotencyKey,
@@ -727,48 +729,51 @@ export class EffectAgentsVersionsResource {
 	list(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError>
 	list(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
 		params: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError>
 	list(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError>
 	list(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"agents", "listVersions">
 		| WithResponse<EndpointSuccess<"agents", "listVersions">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("agents", "listVersions", { agent_id: agentId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.agents.versions.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.agents.listVersions({
-								params: pathParams,
-								query: {
-									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("agents.versions.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.agents.versions.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.agents.listVersions({
+									params: pathParams,
+									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -779,7 +784,7 @@ export class EffectAgentsVersionsResource {
 	listPages(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -799,7 +804,7 @@ export class EffectAgentsVersionsResource {
 	listStream(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -829,41 +834,51 @@ export class EffectAgentsResource {
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"agents", "archive">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"agents", "archive">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "archive">>, CheckfuSdkError>
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
-		params: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "archive">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "archive">>, CheckfuSdkError>
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"agents", "archive">, CheckfuSdkError>
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"agents", "archive"> | WithResponse<EndpointSuccess<"agents", "archive">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("agents", "archive", { agent_id: agentId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(this.#runtime, "checkfu.agents.archive", "idempotent", options, () =>
-							this.#runtime.raw.agents.archive({
-								params: pathParams,
-								query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("agents.archive", options, params), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.agents.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.agents.archive({
+										params: pathParams,
+										query:
+											params?.["version"] === undefined ? {} : { version: params?.["version"] },
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -887,7 +902,7 @@ export class EffectAgentsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -910,37 +925,42 @@ export class EffectAgentsResource {
 
 	/** List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
 	list(
-		params: (RelaxOptionalProps<EndpointQuery<"agents", "list">> & AnyRequestOptions) | undefined,
-		options: WithResponseRequestOptions,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"agents", "list">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"agents", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "list">> & WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"agents", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"agents", "list"> | WithResponse<EndpointSuccess<"agents", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.agents.list", "idempotent", options, () =>
-				this.#runtime.raw.agents.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["include_archived"] === undefined
-							? {}
-							: { include_archived: params["include_archived"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("agents.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.agents.list", "idempotent", options, () =>
+					this.#runtime.raw.agents.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["include_archived"] === undefined
+								? {}
+								: { include_archived: params["include_archived"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -949,7 +969,7 @@ export class EffectAgentsResource {
 	/** Auto-paginate pages for List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"agents", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -967,7 +987,7 @@ export class EffectAgentsResource {
 	/** Auto-paginate items for List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"agents", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -985,35 +1005,40 @@ export class EffectAgentsResource {
 	/** Retrieve an agent by ID */
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
-		params: (RelaxOptionalProps<EndpointQuery<"agents", "get">> & AnyRequestOptions) | undefined,
-		options: WithResponseRequestOptions,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"agents", "get">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "get">>, CheckfuSdkError>
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
-		params: RelaxOptionalProps<EndpointQuery<"agents", "get">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "get">> & WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "get">>, CheckfuSdkError>
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"agents", "get">, CheckfuSdkError>
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"agents", "get"> | WithResponse<EndpointSuccess<"agents", "get">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("agents", "get", { agent_id: agentId }), (pathParams) =>
-				executeWithRetries(this.#runtime, "checkfu.agents.retrieve", "idempotent", options, () =>
-					this.#runtime.raw.agents.get({
-						params: pathParams,
-						query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
-						responseMode: "decoded-and-response",
-					}),
+				EffectFlatMap(forbidIdempotencyKey("agents.retrieve", options, params), () =>
+					executeWithRetries(this.#runtime, "checkfu.agents.retrieve", "idempotent", options, () =>
+						this.#runtime.raw.agents.get({
+							params: pathParams,
+							query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
+							responseMode: "decoded-and-response",
+						}),
+					),
 				),
 			),
 			options,
@@ -1024,37 +1049,40 @@ export class EffectAgentsResource {
 	update(
 		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"agents", "update">>, CheckfuSdkError>
 	update(
 		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"agents", "update">, CheckfuSdkError>
 	update(
 		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"agents", "update"> | WithResponse<EndpointSuccess<"agents", "update">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("agents", "update", { agent_id: agentId }), (pathParams) =>
-				withPendingReadiness(
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.agents.update",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.agents.update({
-								params: pathParams,
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
+				EffectFlatMap(forbidIdempotencyKey("agents.update", options), () =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.agents.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.agents.update({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						pendingUpdateReadiness(params, "agents.update"),
 					),
-					pendingUpdateReadiness(params, "agents.update"),
 				),
 			),
 			options,
@@ -1073,40 +1101,43 @@ export class EffectArtifactsVersionsResource {
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "createVersion">>, CheckfuSdkError>
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "createVersion">, CheckfuSdkError>
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"artifacts", "createVersion">
 		| WithResponse<EndpointSuccess<"artifacts", "createVersion">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "createVersion", { artifact_id: artifactId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.artifacts.versions.create",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.artifacts.createVersion({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("artifacts.versions.create", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.artifacts.versions.create",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.artifacts.createVersion({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "create" },
 						),
-						{ kind: "create" },
 					),
 			),
 			options,
@@ -1118,40 +1149,43 @@ export class EffectArtifactsVersionsResource {
 		artifactId: PathParam<"artifacts", "getFile", "artifact_id">,
 		version: PathParam<"artifacts", "getFile", "version">,
 		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "getFile">>, CheckfuSdkError>
 	file(
 		artifactId: PathParam<"artifacts", "getFile", "artifact_id">,
 		version: PathParam<"artifacts", "getFile", "version">,
 		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "getFile">, CheckfuSdkError>
 	file(
 		artifactId: PathParam<"artifacts", "getFile", "artifact_id">,
 		version: PathParam<"artifacts", "getFile", "version">,
 		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"artifacts", "getFile"> | WithResponse<EndpointSuccess<"artifacts", "getFile">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "getFile", { artifact_id: artifactId, version }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.artifacts.versions.file",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.artifacts.getFile({
-								params: pathParams,
-								query: {
-									file: params["file"],
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("artifacts.versions.file", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.versions.file",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifacts.getFile({
+									params: pathParams,
+									query: {
+										file: params["file"],
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1163,39 +1197,42 @@ export class EffectArtifactsVersionsResource {
 		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
 		version: PathParam<"artifacts", "createLink", "version">,
 		params: EndpointBody<"artifacts", "createLink">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "createLink">>, CheckfuSdkError>
 	link(
 		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
 		version: PathParam<"artifacts", "createLink", "version">,
 		params: EndpointBody<"artifacts", "createLink">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "createLink">, CheckfuSdkError>
 	link(
 		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
 		version: PathParam<"artifacts", "createLink", "version">,
 		params: EndpointBody<"artifacts", "createLink">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"artifacts", "createLink">
 		| WithResponse<EndpointSuccess<"artifacts", "createLink">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "createLink", { artifact_id: artifactId, version }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.artifacts.versions.link",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.artifacts.createLink({
-								params: pathParams,
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("artifacts.versions.link", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.versions.link",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.artifacts.createLink({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1206,36 +1243,39 @@ export class EffectArtifactsVersionsResource {
 	retrieve(
 		artifactId: PathParam<"artifacts", "getVersion", "artifact_id">,
 		version: PathParam<"artifacts", "getVersion", "version">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "getVersion">>, CheckfuSdkError>
 	retrieve(
 		artifactId: PathParam<"artifacts", "getVersion", "artifact_id">,
 		version: PathParam<"artifacts", "getVersion", "version">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "getVersion">, CheckfuSdkError>
 	retrieve(
 		artifactId: PathParam<"artifacts", "getVersion", "artifact_id">,
 		version: PathParam<"artifacts", "getVersion", "version">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"artifacts", "getVersion">
 		| WithResponse<EndpointSuccess<"artifacts", "getVersion">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "getVersion", { artifact_id: artifactId, version }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.artifacts.versions.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.artifacts.getVersion({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("artifacts.versions.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.versions.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifacts.getVersion({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1269,7 +1309,7 @@ export class EffectArtifactsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -1293,28 +1333,36 @@ export class EffectArtifactsResource {
 	/** Delete an artifact and every stored version of its files */
 	delete(
 		artifactId: PathParam<"artifacts", "delete", "artifact_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "delete">>, CheckfuSdkError>
 	delete(
 		artifactId: PathParam<"artifacts", "delete", "artifact_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "delete">, CheckfuSdkError>
 	delete(
 		artifactId: PathParam<"artifacts", "delete", "artifact_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"artifacts", "delete"> | WithResponse<EndpointSuccess<"artifacts", "delete">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "delete", { artifact_id: artifactId }),
 				(pathParams) =>
-					executeWithRetries(this.#runtime, "checkfu.artifacts.delete", "idempotent", options, () =>
-						this.#runtime.raw.artifacts.delete({
-							params: pathParams,
-							responseMode: "decoded-and-response",
-						}),
+					EffectFlatMap(forbidIdempotencyKey("artifacts.delete", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.delete",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifacts.delete({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1324,35 +1372,39 @@ export class EffectArtifactsResource {
 	/** List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	list(
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"artifacts", "list"> | WithResponse<EndpointSuccess<"artifacts", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.artifacts.list", "idempotent", options, () =>
-				this.#runtime.raw.artifacts.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("artifacts.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.artifacts.list", "idempotent", options, () =>
+					this.#runtime.raw.artifacts.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -1361,7 +1413,7 @@ export class EffectArtifactsResource {
 	/** Auto-paginate pages for List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"artifacts", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -1379,7 +1431,7 @@ export class EffectArtifactsResource {
 	/** Auto-paginate items for List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -1417,7 +1469,7 @@ export class EffectArtifactsResource {
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "publish", { artifact_id: artifactId }),
 				(pathParams) =>
-					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.artifacts.publish",
@@ -1440,33 +1492,36 @@ export class EffectArtifactsResource {
 	/** Retrieve an artifact and the files of its latest version */
 	retrieve(
 		artifactId: PathParam<"artifacts", "get", "artifact_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"artifacts", "get">>, CheckfuSdkError>
 	retrieve(
 		artifactId: PathParam<"artifacts", "get", "artifact_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"artifacts", "get">, CheckfuSdkError>
 	retrieve(
 		artifactId: PathParam<"artifacts", "get", "artifact_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"artifacts", "get"> | WithResponse<EndpointSuccess<"artifacts", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "get", { artifact_id: artifactId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.artifacts.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.artifacts.get({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("artifacts.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.artifacts.get({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1494,7 +1549,7 @@ export class EffectArtifactsResource {
 			EffectFlatMap(
 				decodeEndpointParams("artifacts", "unpublish", { artifact_id: artifactId }),
 				(pathParams) =>
-					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.artifacts.unpublish",
@@ -1524,34 +1579,37 @@ export class EffectAutomationRunsResource {
 	/** Retrieve a run by the ID returned in run results and webhook events. */
 	retrieve(
 		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "getRunById">>, CheckfuSdkError>
 	retrieve(
 		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "getRunById">, CheckfuSdkError>
 	retrieve(
 		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"automations", "getRunById">
 		| WithResponse<EndpointSuccess<"automations", "getRunById">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "getRunById", { automation_run_id: automationRunId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.automationRuns.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.automations.getRunById({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("automationRuns.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automationRuns.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.automations.getRunById({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1570,49 +1628,53 @@ export class EffectAutomationsRunsResource {
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError>
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError>
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError>
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"automations", "listRuns">
 		| WithResponse<EndpointSuccess<"automations", "listRuns">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "listRuns", { automation_id: automationId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.automations.runs.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.automations.listRuns({
-								params: pathParams,
-								query: {
-									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("automations.runs.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.runs.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.automations.listRuns({
+									params: pathParams,
+									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+										...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1623,7 +1685,7 @@ export class EffectAutomationsRunsResource {
 	listPages(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -1643,7 +1705,7 @@ export class EffectAutomationsRunsResource {
 	listStream(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -1663,36 +1725,39 @@ export class EffectAutomationsRunsResource {
 	retrieve(
 		automationId: PathParam<"automations", "getRun", "automation_id">,
 		run: PathParam<"automations", "getRun", "run">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "getRun">>, CheckfuSdkError>
 	retrieve(
 		automationId: PathParam<"automations", "getRun", "automation_id">,
 		run: PathParam<"automations", "getRun", "run">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "getRun">, CheckfuSdkError>
 	retrieve(
 		automationId: PathParam<"automations", "getRun", "automation_id">,
 		run: PathParam<"automations", "getRun", "run">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"automations", "getRun">
 		| WithResponse<EndpointSuccess<"automations", "getRun">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "getRun", { automation_id: automationId, run }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.automations.runs.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.automations.getRun({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("automations.runs.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.runs.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.automations.getRun({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1713,49 +1778,52 @@ export class EffectAutomationsResource {
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"automations", "archive">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"automations", "archive">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "archive">>, CheckfuSdkError>
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
 		params: RelaxOptionalProps<EndpointQuery<"automations", "archive">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "archive">>, CheckfuSdkError>
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "archive">, CheckfuSdkError>
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"automations", "archive">
 		| WithResponse<EndpointSuccess<"automations", "archive">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "archive", { automation_id: automationId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.automations.archive",
-							"idempotent",
-							options,
-							() =>
-								this.#runtime.raw.automations.archive({
-									params: pathParams,
-									query:
-										params?.["revision"] === undefined ? {} : { revision: params?.["revision"] },
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("automations.archive", options, params), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.automations.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.automations.archive({
+										params: pathParams,
+										query:
+											params?.["revision"] === undefined ? {} : { revision: params?.["revision"] },
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -1804,39 +1872,43 @@ export class EffectAutomationsResource {
 	/** List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"automations", "list">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"automations", "list">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"automations", "list"> | WithResponse<EndpointSuccess<"automations", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.automations.list", "idempotent", options, () =>
-				this.#runtime.raw.automations.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["include_archived"] === undefined
-							? {}
-							: { include_archived: params["include_archived"] }),
-						...(params?.["agent_id"] === undefined ? {} : { agent_id: params["agent_id"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("automations.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.automations.list", "idempotent", options, () =>
+					this.#runtime.raw.automations.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["include_archived"] === undefined
+								? {}
+								: { include_archived: params["include_archived"] }),
+							...(params?.["agent_id"] === undefined ? {} : { agent_id: params["agent_id"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -1845,7 +1917,7 @@ export class EffectAutomationsResource {
 	/** Auto-paginate pages for List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"automations", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -1863,7 +1935,7 @@ export class EffectAutomationsResource {
 	/** Auto-paginate items for List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"automations", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -1881,36 +1953,39 @@ export class EffectAutomationsResource {
 	/** Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue. */
 	pause(
 		automationId: PathParam<"automations", "pause", "automation_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "pause">>, CheckfuSdkError>
 	pause(
 		automationId: PathParam<"automations", "pause", "automation_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "pause">, CheckfuSdkError>
 	pause(
 		automationId: PathParam<"automations", "pause", "automation_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"automations", "pause"> | WithResponse<EndpointSuccess<"automations", "pause">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "pause", { automation_id: automationId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.automations.pause",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.automations.pause({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("automations.pause", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.automations.pause",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.automations.pause({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "requires-until", operation: "automations.pause" },
 						),
-						{ kind: "requires-until", operation: "automations.pause" },
 					),
 			),
 			options,
@@ -1920,33 +1995,36 @@ export class EffectAutomationsResource {
 	/** Retrieve an automation by ID */
 	retrieve(
 		automationId: PathParam<"automations", "get", "automation_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "get">>, CheckfuSdkError>
 	retrieve(
 		automationId: PathParam<"automations", "get", "automation_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "get">, CheckfuSdkError>
 	retrieve(
 		automationId: PathParam<"automations", "get", "automation_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"automations", "get"> | WithResponse<EndpointSuccess<"automations", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "get", { automation_id: automationId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.automations.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.automations.get({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("automations.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.automations.get({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -1973,7 +2051,7 @@ export class EffectAutomationsResource {
 			EffectFlatMap(
 				decodeEndpointParams("automations", "run", { automation_id: automationId }),
 				(pathParams) =>
-					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.automations.run",
@@ -1995,37 +2073,40 @@ export class EffectAutomationsResource {
 	/** Resume an automation's schedule from now, without running the occurrences it missed */
 	unpause(
 		automationId: PathParam<"automations", "unpause", "automation_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "unpause">>, CheckfuSdkError>
 	unpause(
 		automationId: PathParam<"automations", "unpause", "automation_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "unpause">, CheckfuSdkError>
 	unpause(
 		automationId: PathParam<"automations", "unpause", "automation_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"automations", "unpause">
 		| WithResponse<EndpointSuccess<"automations", "unpause">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "unpause", { automation_id: automationId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.automations.unpause",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.automations.unpause({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("automations.unpause", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.automations.unpause",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.automations.unpause({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "requires-until", operation: "automations.unpause" },
 						),
-						{ kind: "requires-until", operation: "automations.unpause" },
 					),
 			),
 			options,
@@ -2036,40 +2117,43 @@ export class EffectAutomationsResource {
 	update(
 		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"automations", "update">>, CheckfuSdkError>
 	update(
 		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"automations", "update">, CheckfuSdkError>
 	update(
 		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"automations", "update">
 		| WithResponse<EndpointSuccess<"automations", "update">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "update", { automation_id: automationId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.automations.update",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.automations.update({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("automations.update", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.automations.update",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.automations.update({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							pendingUpdateReadiness(params, "automations.update"),
 						),
-						pendingUpdateReadiness(params, "automations.update"),
 					),
 			),
 			options,
@@ -2088,48 +2172,53 @@ export class EffectEnvironmentsResource {
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"environments", "archive">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"environments", "archive">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "archive">>, CheckfuSdkError>
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
 		params: RelaxOptionalProps<EndpointQuery<"environments", "archive">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "archive">>, CheckfuSdkError>
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"environments", "archive">, CheckfuSdkError>
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"environments", "archive">
 		| WithResponse<EndpointSuccess<"environments", "archive">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("environments", "archive", { environment_id: environmentId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.environments.archive",
-							"idempotent",
-							options,
-							() =>
-								this.#runtime.raw.environments.archive({
-									params: pathParams,
-									query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("environments.archive", options, params), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.environments.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.environments.archive({
+										params: pathParams,
+										query:
+											params?.["version"] === undefined ? {} : { version: params?.["version"] },
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -2154,7 +2243,7 @@ export class EffectEnvironmentsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -2178,34 +2267,37 @@ export class EffectEnvironmentsResource {
 	/** Delete an environment */
 	delete(
 		environmentId: PathParam<"environments", "delete", "environment_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "delete">>, CheckfuSdkError>
 	delete(
 		environmentId: PathParam<"environments", "delete", "environment_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"environments", "delete">, CheckfuSdkError>
 	delete(
 		environmentId: PathParam<"environments", "delete", "environment_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"environments", "delete">
 		| WithResponse<EndpointSuccess<"environments", "delete">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("environments", "delete", { environment_id: environmentId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.environments.delete",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.environments.delete({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("environments.delete", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.environments.delete",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.environments.delete({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2215,38 +2307,42 @@ export class EffectEnvironmentsResource {
 	/** List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
 	list(
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"environments", "list">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"environments", "list">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"environments", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"environments", "list">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"environments", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"environments", "list"> | WithResponse<EndpointSuccess<"environments", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.environments.list", "idempotent", options, () =>
-				this.#runtime.raw.environments.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["include_archived"] === undefined
-							? {}
-							: { include_archived: params["include_archived"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("environments.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.environments.list", "idempotent", options, () =>
+					this.#runtime.raw.environments.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["include_archived"] === undefined
+								? {}
+								: { include_archived: params["include_archived"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -2255,7 +2351,7 @@ export class EffectEnvironmentsResource {
 	/** Auto-paginate pages for List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"environments", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -2273,7 +2369,7 @@ export class EffectEnvironmentsResource {
 	/** Auto-paginate items for List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"environments", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -2291,33 +2387,36 @@ export class EffectEnvironmentsResource {
 	/** Retrieve an environment by ID */
 	retrieve(
 		environmentId: PathParam<"environments", "get", "environment_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "get">>, CheckfuSdkError>
 	retrieve(
 		environmentId: PathParam<"environments", "get", "environment_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"environments", "get">, CheckfuSdkError>
 	retrieve(
 		environmentId: PathParam<"environments", "get", "environment_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"environments", "get"> | WithResponse<EndpointSuccess<"environments", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("environments", "get", { environment_id: environmentId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.environments.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.environments.get({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("environments.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.environments.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.environments.get({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2328,40 +2427,43 @@ export class EffectEnvironmentsResource {
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"environments", "update">>, CheckfuSdkError>
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"environments", "update">, CheckfuSdkError>
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"environments", "update">
 		| WithResponse<EndpointSuccess<"environments", "update">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("environments", "update", { environment_id: environmentId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.environments.update",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.environments.update({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("environments.update", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.environments.update",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.environments.update({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							pendingUpdateReadiness(params, "environments.update"),
 						),
-						pendingUpdateReadiness(params, "environments.update"),
 					),
 			),
 			options,
@@ -2379,26 +2481,29 @@ export class EffectFilesResource {
 	/** Delete a file and its bytes. This cannot be undone. */
 	delete(
 		fileId: PathParam<"files", "delete", "file_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"files", "delete">>, CheckfuSdkError>
 	delete(
 		fileId: PathParam<"files", "delete", "file_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"files", "delete">, CheckfuSdkError>
 	delete(
 		fileId: PathParam<"files", "delete", "file_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"files", "delete"> | WithResponse<EndpointSuccess<"files", "delete">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("files", "delete", { file_id: fileId }), (pathParams) =>
-				executeWithRetries(this.#runtime, "checkfu.files.delete", "idempotent", options, () =>
-					this.#runtime.raw.files.delete({
-						params: pathParams,
-						responseMode: "decoded-and-response",
-					}),
+				EffectFlatMap(forbidIdempotencyKey("files.delete", options), () =>
+					executeWithRetries(this.#runtime, "checkfu.files.delete", "idempotent", options, () =>
+						this.#runtime.raw.files.delete({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
 				),
 			),
 			options,
@@ -2407,34 +2512,39 @@ export class EffectFilesResource {
 
 	/** List files in creation order, oldest first by default. Deleted files never appear. */
 	list(
-		params: (RelaxOptionalProps<EndpointQuery<"files", "list">> & AnyRequestOptions) | undefined,
-		options: WithResponseRequestOptions,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"files", "list">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"files", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"files", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"files", "list">> & WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"files", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"files", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"files", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"files", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"files", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"files", "list"> | WithResponse<EndpointSuccess<"files", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.files.list", "idempotent", options, () =>
-				this.#runtime.raw.files.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("files.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.files.list", "idempotent", options, () =>
+					this.#runtime.raw.files.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -2443,7 +2553,7 @@ export class EffectFilesResource {
 	/** Auto-paginate pages for List files in creation order, oldest first by default. Deleted files never appear. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"files", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"files", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -2461,7 +2571,7 @@ export class EffectFilesResource {
 	/** Auto-paginate items for List files in creation order, oldest first by default. Deleted files never appear. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"files", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"files", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -2479,26 +2589,29 @@ export class EffectFilesResource {
 	/** Retrieve a file's name, type, size and sha256 */
 	retrieve(
 		fileId: PathParam<"files", "get", "file_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"files", "get">>, CheckfuSdkError>
 	retrieve(
 		fileId: PathParam<"files", "get", "file_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"files", "get">, CheckfuSdkError>
 	retrieve(
 		fileId: PathParam<"files", "get", "file_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"files", "get"> | WithResponse<EndpointSuccess<"files", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("files", "get", { file_id: fileId }), (pathParams) =>
-				executeWithRetries(this.#runtime, "checkfu.files.retrieve", "idempotent", options, () =>
-					this.#runtime.raw.files.get({
-						params: pathParams,
-						responseMode: "decoded-and-response",
-					}),
+				EffectFlatMap(forbidIdempotencyKey("files.retrieve", options), () =>
+					executeWithRetries(this.#runtime, "checkfu.files.retrieve", "idempotent", options, () =>
+						this.#runtime.raw.files.get({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
 				),
 			),
 			options,
@@ -2517,40 +2630,43 @@ export class EffectMemoryStoresMemoriesResource {
 	create(
 		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "createMemory">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "createMemory">>, CheckfuSdkError>
 	create(
 		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "createMemory">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "createMemory">, CheckfuSdkError>
 	create(
 		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "createMemory">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "createMemory">
 		| WithResponse<EndpointSuccess<"memory_stores", "createMemory">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "createMemory", { memory_store_id: memoryStoreId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.memoryStores.memories.create",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.memory_stores.createMemory({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.memories.create", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.memoryStores.memories.create",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.memory_stores.createMemory({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "create" },
 						),
-						{ kind: "create" },
 					),
 			),
 			options,
@@ -2562,33 +2678,37 @@ export class EffectMemoryStoresMemoriesResource {
 		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
+					AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "deleteMemory">>, CheckfuSdkError>
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
 		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "deleteMemory">>, CheckfuSdkError>
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
+			RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "deleteMemory">, CheckfuSdkError>
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "deleteMemory">
 		| WithResponse<EndpointSuccess<"memory_stores", "deleteMemory">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "deleteMemory", {
@@ -2596,20 +2716,22 @@ export class EffectMemoryStoresMemoriesResource {
 					memory_id: memoryId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.memoryStores.memories.delete",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.memory_stores.deleteMemory({
-								params: pathParams,
-								query:
-									params?.["expected_content_sha256"] === undefined
-										? {}
-										: { expected_content_sha256: params?.["expected_content_sha256"] },
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.memories.delete", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.memories.delete",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.deleteMemory({
+									params: pathParams,
+									query:
+										params?.["expected_content_sha256"] === undefined
+											? {}
+											: { expected_content_sha256: params?.["expected_content_sha256"] },
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2620,50 +2742,56 @@ export class EffectMemoryStoresMemoriesResource {
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
+					AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "listMemories">>, CheckfuSdkError>
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
 		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "listMemories">>, CheckfuSdkError>
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
+			RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "listMemories">, CheckfuSdkError>
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "listMemories">
 		| WithResponse<EndpointSuccess<"memory_stores", "listMemories">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "listMemories", { memory_store_id: memoryStoreId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.memoryStores.memories.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.memory_stores.listMemories({
-								params: pathParams,
-								query: {
-									...(params?.["path_prefix"] === undefined
-										? {}
-										: { path_prefix: params["path_prefix"] }),
-									...(params?.["depth"] === undefined ? {} : { depth: params["depth"] }),
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.memories.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.memories.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.listMemories({
+									params: pathParams,
+									query: {
+										...(params?.["path_prefix"] === undefined
+											? {}
+											: { path_prefix: params["path_prefix"] }),
+										...(params?.["depth"] === undefined ? {} : { depth: params["depth"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2674,22 +2802,23 @@ export class EffectMemoryStoresMemoriesResource {
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "getMemory">>, CheckfuSdkError>
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "getMemory">, CheckfuSdkError>
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "getMemory">
 		| WithResponse<EndpointSuccess<"memory_stores", "getMemory">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "getMemory", {
@@ -2697,16 +2826,18 @@ export class EffectMemoryStoresMemoriesResource {
 					memory_id: memoryId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.memoryStores.memories.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.memory_stores.getMemory({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.memories.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.memories.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.getMemory({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2718,24 +2849,25 @@ export class EffectMemoryStoresMemoriesResource {
 		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
 		params: EndpointBody<"memory_stores", "updateMemory">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "updateMemory">>, CheckfuSdkError>
 	update(
 		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
 		params: EndpointBody<"memory_stores", "updateMemory">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "updateMemory">, CheckfuSdkError>
 	update(
 		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
 		params: EndpointBody<"memory_stores", "updateMemory">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "updateMemory">
 		| WithResponse<EndpointSuccess<"memory_stores", "updateMemory">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "updateMemory", {
@@ -2743,20 +2875,22 @@ export class EffectMemoryStoresMemoriesResource {
 					memory_id: memoryId,
 				}),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.memoryStores.memories.update",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.memory_stores.updateMemory({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.memories.update", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.memoryStores.memories.update",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.memory_stores.updateMemory({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							pendingUpdateReadiness(params, "memoryStores.memories.update"),
 						),
-						pendingUpdateReadiness(params, "memoryStores.memories.update"),
 					),
 			),
 			options,
@@ -2776,37 +2910,40 @@ export class EffectMemoryStoresResource {
 	/** Make a memory store read-only and stop new sessions from attaching it */
 	archive(
 		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "archive">>, CheckfuSdkError>
 	archive(
 		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "archive">, CheckfuSdkError>
 	archive(
 		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "archive">
 		| WithResponse<EndpointSuccess<"memory_stores", "archive">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "archive", { memory_store_id: memoryStoreId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.memoryStores.archive",
-							"idempotent",
-							options,
-							() =>
-								this.#runtime.raw.memory_stores.archive({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.archive", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.memoryStores.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.memory_stores.archive({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -2831,7 +2968,7 @@ export class EffectMemoryStoresResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -2855,34 +2992,37 @@ export class EffectMemoryStoresResource {
 	/** Delete a memory store and make its memories unreachable */
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "delete">>, CheckfuSdkError>
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "delete">, CheckfuSdkError>
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "delete">
 		| WithResponse<EndpointSuccess<"memory_stores", "delete">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "delete", { memory_store_id: memoryStoreId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.memoryStores.delete",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.memory_stores.delete({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.delete", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.delete",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.delete({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2892,39 +3032,43 @@ export class EffectMemoryStoresResource {
 	/** List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
 	list(
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "list">
 		| WithResponse<EndpointSuccess<"memory_stores", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.memoryStores.list", "idempotent", options, () =>
-				this.#runtime.raw.memory_stores.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["include_archived"] === undefined
-							? {}
-							: { include_archived: params["include_archived"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("memoryStores.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.memoryStores.list", "idempotent", options, () =>
+					this.#runtime.raw.memory_stores.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["include_archived"] === undefined
+								? {}
+								: { include_archived: params["include_archived"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -2933,7 +3077,7 @@ export class EffectMemoryStoresResource {
 	/** Auto-paginate pages for List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"memory_stores", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -2951,7 +3095,7 @@ export class EffectMemoryStoresResource {
 	/** Auto-paginate items for List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -2969,33 +3113,36 @@ export class EffectMemoryStoresResource {
 	/** Retrieve a memory store by ID */
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "get">>, CheckfuSdkError>
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "get">, CheckfuSdkError>
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"memory_stores", "get"> | WithResponse<EndpointSuccess<"memory_stores", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "get", { memory_store_id: memoryStoreId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.memoryStores.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.memory_stores.get({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.get({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3006,40 +3153,43 @@ export class EffectMemoryStoresResource {
 	update(
 		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "update">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"memory_stores", "update">>, CheckfuSdkError>
 	update(
 		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "update">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"memory_stores", "update">, CheckfuSdkError>
 	update(
 		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "update">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"memory_stores", "update">
 		| WithResponse<EndpointSuccess<"memory_stores", "update">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("memory_stores", "update", { memory_store_id: memoryStoreId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.memoryStores.update",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.memory_stores.update({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("memoryStores.update", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.memoryStores.update",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.memory_stores.update({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							pendingUpdateReadiness(params, "memoryStores.update"),
 						),
-						pendingUpdateReadiness(params, "memoryStores.update"),
 					),
 			),
 			options,
@@ -3058,50 +3208,53 @@ export class EffectSessionsEventsResource {
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "listEvents">, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"sessions", "listEvents">
 		| WithResponse<EndpointSuccess<"sessions", "listEvents">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "listEvents", { session_id: sessionId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.events.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.sessions.listEvents({
-								params: pathParams,
-								query: {
-									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-									...(params?.["types"] === undefined ? {} : { types: params["types"] }),
-									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.events.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.events.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.sessions.listEvents({
+									params: pathParams,
+									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+										...(params?.["types"] === undefined ? {} : { types: params["types"] }),
+										...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3112,7 +3265,7 @@ export class EffectSessionsEventsResource {
 	listPages(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"sessions", "listEvents">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -3132,7 +3285,7 @@ export class EffectSessionsEventsResource {
 	listStream(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -3172,7 +3325,7 @@ export class EffectSessionsEventsResource {
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "sendEvents", { session_id: sessionId }),
 				(pathParams) =>
-					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.sessions.events.send",
@@ -3229,34 +3382,37 @@ export class EffectSessionsOutputsResource {
 	/** Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason */
 	retrieve(
 		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "getOutputs">>, CheckfuSdkError>
 	retrieve(
 		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "getOutputs">, CheckfuSdkError>
 	retrieve(
 		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"sessions", "getOutputs">
 		| WithResponse<EndpointSuccess<"sessions", "getOutputs">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "getOutputs", { session_id: sessionId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.outputs.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.sessions.getOutputs({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.outputs.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.outputs.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.sessions.getOutputs({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3274,34 +3430,37 @@ export class EffectSessionsResourcesResource {
 	/** List what is mounted in a session's workspace */
 	list(
 		sessionId: PathParam<"sessions", "listResources", "session_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "listResources">>, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listResources", "session_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "listResources">, CheckfuSdkError>
 	list(
 		sessionId: PathParam<"sessions", "listResources", "session_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"sessions", "listResources">
 		| WithResponse<EndpointSuccess<"sessions", "listResources">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "listResources", { session_id: sessionId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.resources.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.sessions.listResources({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.resources.list", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.resources.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.sessions.listResources({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3312,22 +3471,23 @@ export class EffectSessionsResourcesResource {
 	retrieve(
 		sessionId: PathParam<"sessions", "getResource", "session_id">,
 		resourceId: PathParam<"sessions", "getResource", "resource_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "getResource">>, CheckfuSdkError>
 	retrieve(
 		sessionId: PathParam<"sessions", "getResource", "session_id">,
 		resourceId: PathParam<"sessions", "getResource", "resource_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "getResource">, CheckfuSdkError>
 	retrieve(
 		sessionId: PathParam<"sessions", "getResource", "session_id">,
 		resourceId: PathParam<"sessions", "getResource", "resource_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"sessions", "getResource">
 		| WithResponse<EndpointSuccess<"sessions", "getResource">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "getResource", {
@@ -3335,16 +3495,18 @@ export class EffectSessionsResourcesResource {
 					resource_id: resourceId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.resources.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.sessions.getResource({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.resources.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.resources.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.sessions.getResource({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3356,24 +3518,25 @@ export class EffectSessionsResourcesResource {
 		sessionId: PathParam<"sessions", "updateResource", "session_id">,
 		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
 		params: EndpointBody<"sessions", "updateResource">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "updateResource">>, CheckfuSdkError>
 	update(
 		sessionId: PathParam<"sessions", "updateResource", "session_id">,
 		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
 		params: EndpointBody<"sessions", "updateResource">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "updateResource">, CheckfuSdkError>
 	update(
 		sessionId: PathParam<"sessions", "updateResource", "session_id">,
 		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
 		params: EndpointBody<"sessions", "updateResource">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"sessions", "updateResource">
 		| WithResponse<EndpointSuccess<"sessions", "updateResource">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "updateResource", {
@@ -3381,17 +3544,19 @@ export class EffectSessionsResourcesResource {
 					resource_id: resourceId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.resources.update",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.sessions.updateResource({
-								params: pathParams,
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.resources.update", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.resources.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.sessions.updateResource({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3415,36 +3580,39 @@ export class EffectSessionsResource {
 	/** Archive a session */
 	archive(
 		sessionId: PathParam<"sessions", "archive", "session_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "archive">>, CheckfuSdkError>
 	archive(
 		sessionId: PathParam<"sessions", "archive", "session_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "archive">, CheckfuSdkError>
 	archive(
 		sessionId: PathParam<"sessions", "archive", "session_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"sessions", "archive"> | WithResponse<EndpointSuccess<"sessions", "archive">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "archive", { session_id: sessionId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.sessions.archive",
-							"idempotent",
-							options,
-							() =>
-								this.#runtime.raw.sessions.archive({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.archive", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.sessions.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.sessions.archive({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -3468,7 +3636,7 @@ export class EffectSessionsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -3491,38 +3659,44 @@ export class EffectSessionsResource {
 
 	/** List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
 	list(
-		params: (RelaxOptionalProps<EndpointQuery<"sessions", "list">> & AnyRequestOptions) | undefined,
-		options: WithResponseRequestOptions,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"sessions", "list">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"sessions", "list">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"sessions", "list"> | WithResponse<EndpointSuccess<"sessions", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.sessions.list", "idempotent", options, () =>
-				this.#runtime.raw.sessions.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["include_archived"] === undefined
-							? {}
-							: { include_archived: params["include_archived"] }),
-						...(params?.["agent_id"] === undefined ? {} : { agent_id: params["agent_id"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("sessions.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.sessions.list", "idempotent", options, () =>
+					this.#runtime.raw.sessions.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["include_archived"] === undefined
+								? {}
+								: { include_archived: params["include_archived"] }),
+							...(params?.["agent_id"] === undefined ? {} : { agent_id: params["agent_id"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -3531,7 +3705,7 @@ export class EffectSessionsResource {
 	/** Auto-paginate pages for List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"sessions", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -3549,7 +3723,7 @@ export class EffectSessionsResource {
 	/** Auto-paginate items for List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"sessions", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -3567,33 +3741,36 @@ export class EffectSessionsResource {
 	/** Retrieve a session by ID */
 	retrieve(
 		sessionId: PathParam<"sessions", "get", "session_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "get">>, CheckfuSdkError>
 	retrieve(
 		sessionId: PathParam<"sessions", "get", "session_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"sessions", "get">, CheckfuSdkError>
 	retrieve(
 		sessionId: PathParam<"sessions", "get", "session_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"sessions", "get"> | WithResponse<EndpointSuccess<"sessions", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "get", { session_id: sessionId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.sessions.get({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("sessions.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.sessions.get({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3612,22 +3789,23 @@ export class EffectVaultsCredentialsResource {
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "archiveCredential">>, CheckfuSdkError>
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "archiveCredential">, CheckfuSdkError>
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"vaults", "archiveCredential">
 		| WithResponse<EndpointSuccess<"vaults", "archiveCredential">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "archiveCredential", {
@@ -3635,19 +3813,21 @@ export class EffectVaultsCredentialsResource {
 					credential_id: credentialId,
 				}),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.vaults.credentials.archive",
-							"idempotent",
-							options,
-							() =>
-								this.#runtime.raw.vaults.archiveCredential({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("vaults.credentials.archive", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.vaults.credentials.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.vaults.archiveCredential({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -3678,7 +3858,7 @@ export class EffectVaultsCredentialsResource {
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "createCredential", { vault_id: vaultId }),
 				(pathParams) =>
-					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 						withPendingReadiness(
 							executeWithRetries(
 								this.#runtime,
@@ -3705,22 +3885,23 @@ export class EffectVaultsCredentialsResource {
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "deleteCredential">>, CheckfuSdkError>
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "deleteCredential">, CheckfuSdkError>
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"vaults", "deleteCredential">
 		| WithResponse<EndpointSuccess<"vaults", "deleteCredential">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "deleteCredential", {
@@ -3728,19 +3909,21 @@ export class EffectVaultsCredentialsResource {
 					credential_id: credentialId,
 				}),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.vaults.credentials.delete",
-							"idempotent",
-							options,
-							() =>
-								this.#runtime.raw.vaults.deleteCredential({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("vaults.credentials.delete", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.vaults.credentials.delete",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.vaults.deleteCredential({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "requires-until", operation: "vaults.credentials.delete" },
 						),
-						{ kind: "requires-until", operation: "vaults.credentials.delete" },
 					),
 			),
 			options,
@@ -3751,52 +3934,56 @@ export class EffectVaultsCredentialsResource {
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
 		params: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "listCredentials">, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"vaults", "listCredentials">
 		| WithResponse<EndpointSuccess<"vaults", "listCredentials">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "listCredentials", { vault_id: vaultId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.vaults.credentials.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.vaults.listCredentials({
-								params: pathParams,
-								query: {
-									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-									...(params?.["include_archived"] === undefined
-										? {}
-										: { include_archived: params["include_archived"] }),
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("vaults.credentials.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.credentials.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.vaults.listCredentials({
+									params: pathParams,
+									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+										...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+										...(params?.["include_archived"] === undefined
+											? {}
+											: { include_archived: params["include_archived"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3807,7 +3994,7 @@ export class EffectVaultsCredentialsResource {
 	listPages(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"vaults", "listCredentials">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -3827,7 +4014,7 @@ export class EffectVaultsCredentialsResource {
 	listStream(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -3847,22 +4034,23 @@ export class EffectVaultsCredentialsResource {
 	retrieve(
 		vaultId: PathParam<"vaults", "getCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "getCredential", "credential_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "getCredential">>, CheckfuSdkError>
 	retrieve(
 		vaultId: PathParam<"vaults", "getCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "getCredential", "credential_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "getCredential">, CheckfuSdkError>
 	retrieve(
 		vaultId: PathParam<"vaults", "getCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "getCredential", "credential_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"vaults", "getCredential">
 		| WithResponse<EndpointSuccess<"vaults", "getCredential">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "getCredential", {
@@ -3870,16 +4058,18 @@ export class EffectVaultsCredentialsResource {
 					credential_id: credentialId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.vaults.credentials.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.vaults.getCredential({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("vaults.credentials.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.credentials.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.vaults.getCredential({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -3891,24 +4081,25 @@ export class EffectVaultsCredentialsResource {
 		vaultId: PathParam<"vaults", "updateCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "updateCredential", "credential_id">,
 		params: EndpointBody<"vaults", "updateCredential">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "updateCredential">>, CheckfuSdkError>
 	update(
 		vaultId: PathParam<"vaults", "updateCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "updateCredential", "credential_id">,
 		params: EndpointBody<"vaults", "updateCredential">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "updateCredential">, CheckfuSdkError>
 	update(
 		vaultId: PathParam<"vaults", "updateCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "updateCredential", "credential_id">,
 		params: EndpointBody<"vaults", "updateCredential">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"vaults", "updateCredential">
 		| WithResponse<EndpointSuccess<"vaults", "updateCredential">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "updateCredential", {
@@ -3916,20 +4107,22 @@ export class EffectVaultsCredentialsResource {
 					credential_id: credentialId,
 				}),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.vaults.credentials.update",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.vaults.updateCredential({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
+					EffectFlatMap(forbidIdempotencyKey("vaults.credentials.update", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.vaults.credentials.update",
+								"pre-commit-only",
+								options,
+								() =>
+									this.#runtime.raw.vaults.updateCredential({
+										params: pathParams,
+										payload: params,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							pendingUpdateReadiness(params, "vaults.credentials.update"),
 						),
-						pendingUpdateReadiness(params, "vaults.credentials.update"),
 					),
 			),
 			options,
@@ -3949,31 +4142,39 @@ export class EffectVaultsResource {
 	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "archive">>, CheckfuSdkError>
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "archive">, CheckfuSdkError>
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"vaults", "archive"> | WithResponse<EndpointSuccess<"vaults", "archive">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "archive", { vault_id: vaultId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(this.#runtime, "checkfu.vaults.archive", "idempotent", options, () =>
-							this.#runtime.raw.vaults.archive({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("vaults.archive", options), () =>
+						withPendingReadiness(
+							executeWithRetries(
+								this.#runtime,
+								"checkfu.vaults.archive",
+								"idempotent",
+								options,
+								() =>
+									this.#runtime.raw.vaults.archive({
+										params: pathParams,
+										responseMode: "decoded-and-response",
+									}),
+							),
+							{ kind: "archive" },
 						),
-						{ kind: "archive" },
 					),
 			),
 			options,
@@ -3997,7 +4198,7 @@ export class EffectVaultsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -4021,29 +4222,32 @@ export class EffectVaultsResource {
 	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "delete">>, CheckfuSdkError>
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "delete">, CheckfuSdkError>
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"vaults", "delete"> | WithResponse<EndpointSuccess<"vaults", "delete">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("vaults", "delete", { vault_id: vaultId }), (pathParams) =>
-				withPendingReadiness(
-					executeWithRetries(this.#runtime, "checkfu.vaults.delete", "idempotent", options, () =>
-						this.#runtime.raw.vaults.delete({
-							params: pathParams,
-							responseMode: "decoded-and-response",
-						}),
+				EffectFlatMap(forbidIdempotencyKey("vaults.delete", options), () =>
+					withPendingReadiness(
+						executeWithRetries(this.#runtime, "checkfu.vaults.delete", "idempotent", options, () =>
+							this.#runtime.raw.vaults.delete({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+						),
+						{ kind: "requires-until", operation: "vaults.delete" },
 					),
-					{ kind: "requires-until", operation: "vaults.delete" },
 				),
 			),
 			options,
@@ -4052,37 +4256,42 @@ export class EffectVaultsResource {
 
 	/** List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true. */
 	list(
-		params: (RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions) | undefined,
-		options: WithResponseRequestOptions,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"vaults", "list"> | WithResponse<EndpointSuccess<"vaults", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.vaults.list", "idempotent", options, () =>
-				this.#runtime.raw.vaults.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["include_archived"] === undefined
-							? {}
-							: { include_archived: params["include_archived"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("vaults.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.vaults.list", "idempotent", options, () =>
+					this.#runtime.raw.vaults.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["include_archived"] === undefined
+								? {}
+								: { include_archived: params["include_archived"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -4091,7 +4300,7 @@ export class EffectVaultsResource {
 	/** Auto-paginate pages for List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"vaults", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -4109,7 +4318,7 @@ export class EffectVaultsResource {
 	/** Auto-paginate items for List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"vaults", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -4127,26 +4336,29 @@ export class EffectVaultsResource {
 	/** Retrieve a vault by ID */
 	retrieve(
 		vaultId: PathParam<"vaults", "get", "vault_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "get">>, CheckfuSdkError>
 	retrieve(
 		vaultId: PathParam<"vaults", "get", "vault_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "get">, CheckfuSdkError>
 	retrieve(
 		vaultId: PathParam<"vaults", "get", "vault_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"vaults", "get"> | WithResponse<EndpointSuccess<"vaults", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("vaults", "get", { vault_id: vaultId }), (pathParams) =>
-				executeWithRetries(this.#runtime, "checkfu.vaults.retrieve", "idempotent", options, () =>
-					this.#runtime.raw.vaults.get({
-						params: pathParams,
-						responseMode: "decoded-and-response",
-					}),
+				EffectFlatMap(forbidIdempotencyKey("vaults.retrieve", options), () =>
+					executeWithRetries(this.#runtime, "checkfu.vaults.retrieve", "idempotent", options, () =>
+						this.#runtime.raw.vaults.get({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
 				),
 			),
 			options,
@@ -4157,37 +4369,40 @@ export class EffectVaultsResource {
 	update(
 		vaultId: PathParam<"vaults", "update", "vault_id">,
 		params: EndpointBody<"vaults", "update">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "update">>, CheckfuSdkError>
 	update(
 		vaultId: PathParam<"vaults", "update", "vault_id">,
 		params: EndpointBody<"vaults", "update">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"vaults", "update">, CheckfuSdkError>
 	update(
 		vaultId: PathParam<"vaults", "update", "vault_id">,
 		params: EndpointBody<"vaults", "update">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"vaults", "update"> | WithResponse<EndpointSuccess<"vaults", "update">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("vaults", "update", { vault_id: vaultId }), (pathParams) =>
-				withPendingReadiness(
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.vaults.update",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.vaults.update({
-								params: pathParams,
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
+				EffectFlatMap(forbidIdempotencyKey("vaults.update", options), () =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.vaults.update({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						pendingUpdateReadiness(params, "vaults.update"),
 					),
-					pendingUpdateReadiness(params, "vaults.update"),
 				),
 			),
 			options,
@@ -4206,48 +4421,53 @@ export class EffectWebhooksDeliveriesResource {
 	list(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
 		params:
-			| (RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & AnyRequestOptions)
+			| (RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & AnyRequestOptions<never>)
 			| undefined,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "listDeliveries">>, CheckfuSdkError>
 	list(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
 		params: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> &
-			WithResponseRequestOptions,
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "listDeliveries">>, CheckfuSdkError>
 	list(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> &
+			RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "listDeliveries">, CheckfuSdkError>
 	list(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> &
+			AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"webhooks", "listDeliveries">
 		| WithResponse<EndpointSuccess<"webhooks", "listDeliveries">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "listDeliveries", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.webhooks.deliveries.list",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.webhooks.listDeliveries({
-								params: pathParams,
-								query: {
-									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-								},
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.deliveries.list", options, params), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.deliveries.list",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.listDeliveries({
+									params: pathParams,
+									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+									},
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4258,7 +4478,7 @@ export class EffectWebhooksDeliveriesResource {
 	listPages(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"webhooks", "listDeliveries">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -4278,7 +4498,7 @@ export class EffectWebhooksDeliveriesResource {
 	listStream(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"webhooks", "listDeliveries">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -4298,22 +4518,23 @@ export class EffectWebhooksDeliveriesResource {
 	redeliver(
 		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "redeliver">>, CheckfuSdkError>
 	redeliver(
 		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "redeliver">, CheckfuSdkError>
 	redeliver(
 		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"webhooks", "redeliver">
 		| WithResponse<EndpointSuccess<"webhooks", "redeliver">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "redeliver", {
@@ -4321,16 +4542,18 @@ export class EffectWebhooksDeliveriesResource {
 					delivery_id: deliveryId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.webhooks.deliveries.redeliver",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.webhooks.redeliver({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.deliveries.redeliver", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.deliveries.redeliver",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.redeliver({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4341,22 +4564,23 @@ export class EffectWebhooksDeliveriesResource {
 	retrieve(
 		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "getDelivery">>, CheckfuSdkError>
 	retrieve(
 		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "getDelivery">, CheckfuSdkError>
 	retrieve(
 		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		| EndpointSuccess<"webhooks", "getDelivery">
 		| WithResponse<EndpointSuccess<"webhooks", "getDelivery">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "getDelivery", {
@@ -4364,16 +4588,18 @@ export class EffectWebhooksDeliveriesResource {
 					delivery_id: deliveryId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.webhooks.deliveries.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.webhooks.getDelivery({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.deliveries.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.deliveries.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.getDelivery({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4407,7 +4633,7 @@ export class EffectWebhooksResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -4431,28 +4657,36 @@ export class EffectWebhooksResource {
 	/** Delete a webhook endpoint, discard its signing secrets, and purge its delivery queue. */
 	delete(
 		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "delete">>, CheckfuSdkError>
 	delete(
 		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "delete">, CheckfuSdkError>
 	delete(
 		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "delete"> | WithResponse<EndpointSuccess<"webhooks", "delete">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "delete", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(this.#runtime, "checkfu.webhooks.delete", "idempotent", options, () =>
-						this.#runtime.raw.webhooks.delete({
-							params: pathParams,
-							responseMode: "decoded-and-response",
-						}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.delete", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.delete",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.delete({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4461,35 +4695,41 @@ export class EffectWebhooksResource {
 
 	/** List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
 	list(
-		params: (RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & AnyRequestOptions) | undefined,
-		options: WithResponseRequestOptions,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "list">>, CheckfuSdkError>
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & WithResponseRequestOptions,
+		params: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> &
+			WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & RequestOptions,
-		options?: RequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & AnyRequestOptions,
-		options?: AnyRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "list"> | WithResponse<EndpointSuccess<"webhooks", "list">>,
 		CheckfuSdkError
 	> {
 		options ??= params
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
-			executeWithRetries(this.#runtime, "checkfu.webhooks.list", "idempotent", options, () =>
-				this.#runtime.raw.webhooks.list({
-					query: {
-						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
-						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
-						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-						...(params?.["id"] === undefined ? {} : { id: params["id"] }),
-					},
-					responseMode: "decoded-and-response",
-				}),
+			EffectFlatMap(forbidIdempotencyKey("webhooks.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.webhooks.list", "idempotent", options, () =>
+					this.#runtime.raw.webhooks.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+							...(params?.["id"] === undefined ? {} : { id: params["id"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
 			),
 			options,
 		)
@@ -4498,7 +4738,7 @@ export class EffectWebhooksResource {
 	/** Auto-paginate pages for List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<EndpointSuccess<"webhooks", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
 			(page) =>
@@ -4516,7 +4756,7 @@ export class EffectWebhooksResource {
 	/** Auto-paginate items for List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Stream<ItemOf<EndpointSuccess<"webhooks", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
 			(page) =>
@@ -4534,28 +4774,31 @@ export class EffectWebhooksResource {
 	/** Pause deliveries to a webhook endpoint without deleting it. */
 	pause(
 		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "pause">>, CheckfuSdkError>
 	pause(
 		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "pause">, CheckfuSdkError>
 	pause(
 		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "pause"> | WithResponse<EndpointSuccess<"webhooks", "pause">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "pause", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(this.#runtime, "checkfu.webhooks.pause", "idempotent", options, () =>
-						this.#runtime.raw.webhooks.pause({
-							params: pathParams,
-							responseMode: "decoded-and-response",
-						}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.pause", options), () =>
+						executeWithRetries(this.#runtime, "checkfu.webhooks.pause", "idempotent", options, () =>
+							this.#runtime.raw.webhooks.pause({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+						),
 					),
 			),
 			options,
@@ -4565,28 +4808,36 @@ export class EffectWebhooksResource {
 	/** Resume a paused or auto-disabled webhook endpoint and clear its failure window. */
 	resume(
 		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "resume">>, CheckfuSdkError>
 	resume(
 		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "resume">, CheckfuSdkError>
 	resume(
 		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "resume"> | WithResponse<EndpointSuccess<"webhooks", "resume">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "resume", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(this.#runtime, "checkfu.webhooks.resume", "idempotent", options, () =>
-						this.#runtime.raw.webhooks.resume({
-							params: pathParams,
-							responseMode: "decoded-and-response",
-						}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.resume", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.resume",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.resume({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4596,33 +4847,36 @@ export class EffectWebhooksResource {
 	/** Retrieve a webhook endpoint by ID */
 	retrieve(
 		webhookId: PathParam<"webhooks", "get", "webhook_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "get">>, CheckfuSdkError>
 	retrieve(
 		webhookId: PathParam<"webhooks", "get", "webhook_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "get">, CheckfuSdkError>
 	retrieve(
 		webhookId: PathParam<"webhooks", "get", "webhook_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "get"> | WithResponse<EndpointSuccess<"webhooks", "get">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "get", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.webhooks.retrieve",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.webhooks.get({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.retrieve", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.retrieve",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.get({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4650,7 +4904,7 @@ export class EffectWebhooksResource {
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "rotateSecret", { webhook_id: webhookId }),
 				(pathParams) =>
-					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options), (key) =>
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.webhooks.rotateSecret",
@@ -4672,33 +4926,36 @@ export class EffectWebhooksResource {
 	/** Queue a signed webhook.test delivery for an active webhook endpoint. */
 	test(
 		webhookId: PathParam<"webhooks", "test", "webhook_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "test">>, CheckfuSdkError>
 	test(
 		webhookId: PathParam<"webhooks", "test", "webhook_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "test">, CheckfuSdkError>
 	test(
 		webhookId: PathParam<"webhooks", "test", "webhook_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "test"> | WithResponse<EndpointSuccess<"webhooks", "test">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "test", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.webhooks.test",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.webhooks.test({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.test", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.test",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.test({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4709,36 +4966,39 @@ export class EffectWebhooksResource {
 	update(
 		webhookId: PathParam<"webhooks", "update", "webhook_id">,
 		params: EndpointBody<"webhooks", "update">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect<WithResponse<EndpointSuccess<"webhooks", "update">>, CheckfuSdkError>
 	update(
 		webhookId: PathParam<"webhooks", "update", "webhook_id">,
 		params: EndpointBody<"webhooks", "update">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect<EndpointSuccess<"webhooks", "update">, CheckfuSdkError>
 	update(
 		webhookId: PathParam<"webhooks", "update", "webhook_id">,
 		params: EndpointBody<"webhooks", "update">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect<
 		EndpointSuccess<"webhooks", "update"> | WithResponse<EndpointSuccess<"webhooks", "update">>,
 		CheckfuSdkError
 	> {
+		options = snapshotRequestOptions(options)
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("webhooks", "update", { webhook_id: webhookId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.webhooks.update",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.webhooks.update({
-								params: pathParams,
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(forbidIdempotencyKey("webhooks.update", options), () =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.webhooks.update({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -4783,7 +5043,7 @@ export class AgentsVersionsResource {
 	list(
 		agentId: PathParam<"agents", "listVersions", "agent_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "listVersions">>>,
 		ItemOf<EndpointJsonSuccess<"agents", "listVersions">>
@@ -4817,8 +5077,8 @@ export class AgentsResource {
 	/** Archive an agent */
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & PromiseRequestOptions,
-		options?: PromiseRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & PromiseRequestOptions<never>,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"agents", "archive">> {
 		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
 			new EffectAgentsResource(effectRuntime).archive(agentId, params, {
@@ -4841,7 +5101,7 @@ export class AgentsResource {
 	/** List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "list">>>,
 		ItemOf<EndpointJsonSuccess<"agents", "list">>
@@ -4864,8 +5124,8 @@ export class AgentsResource {
 	/** Retrieve an agent by ID */
 	retrieve(
 		agentId: PathParam<"agents", "get", "agent_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & PromiseRequestOptions,
-		options?: PromiseRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "get">> & PromiseRequestOptions<never>,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"agents", "get">> {
 		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
 			new EffectAgentsResource(effectRuntime).retrieve(agentId, params, {
@@ -4879,7 +5139,7 @@ export class AgentsResource {
 	update(
 		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"agents", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAgentsResource(effectRuntime).update(agentId, params, {
@@ -4901,7 +5161,7 @@ export class ArtifactsVersionsResource {
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "createVersion">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsVersionsResource(effectRuntime).create(artifactId, params, {
@@ -4916,7 +5176,7 @@ export class ArtifactsVersionsResource {
 		artifactId: PathParam<"artifacts", "getFile", "artifact_id">,
 		version: PathParam<"artifacts", "getFile", "version">,
 		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "getFile">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsVersionsResource(effectRuntime).file(artifactId, version, params, {
@@ -4931,7 +5191,7 @@ export class ArtifactsVersionsResource {
 		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
 		version: PathParam<"artifacts", "createLink", "version">,
 		params: EndpointBody<"artifacts", "createLink">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "createLink">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsVersionsResource(effectRuntime).link(artifactId, version, params, {
@@ -4945,7 +5205,7 @@ export class ArtifactsVersionsResource {
 	retrieve(
 		artifactId: PathParam<"artifacts", "getVersion", "artifact_id">,
 		version: PathParam<"artifacts", "getVersion", "version">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "getVersion">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsVersionsResource(effectRuntime).retrieve(artifactId, version, {
@@ -4981,7 +5241,7 @@ export class ArtifactsResource {
 	/** Delete an artifact and every stored version of its files */
 	delete(
 		artifactId: PathParam<"artifacts", "delete", "artifact_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsResource(effectRuntime).delete(artifactId, {
@@ -4994,7 +5254,7 @@ export class ArtifactsResource {
 	/** List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"artifacts", "list">>>,
 		ItemOf<EndpointJsonSuccess<"artifacts", "list">>
@@ -5031,7 +5291,7 @@ export class ArtifactsResource {
 	/** Retrieve an artifact and the files of its latest version */
 	retrieve(
 		artifactId: PathParam<"artifacts", "get", "artifact_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"artifacts", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsResource(effectRuntime).retrieve(artifactId, {
@@ -5065,7 +5325,7 @@ export class AutomationRunsResource {
 	/** Retrieve a run by the ID returned in run results and webhook events. */
 	retrieve(
 		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "getRunById">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationRunsResource(effectRuntime).retrieve(automationRunId, {
@@ -5087,7 +5347,7 @@ export class AutomationsRunsResource {
 	list(
 		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "listRuns">>>,
 		ItemOf<EndpointJsonSuccess<"automations", "listRuns">>
@@ -5112,7 +5372,7 @@ export class AutomationsRunsResource {
 	retrieve(
 		automationId: PathParam<"automations", "getRun", "automation_id">,
 		run: PathParam<"automations", "getRun", "run">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "getRun">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsRunsResource(effectRuntime).retrieve(automationId, run, {
@@ -5135,8 +5395,9 @@ export class AutomationsResource {
 	/** Archive an automation so it never runs again */
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & PromiseRequestOptions,
-		options?: PromiseRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> &
+			PromiseRequestOptions<never>,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "archive">> {
 		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).archive(automationId, params, {
@@ -5163,7 +5424,7 @@ export class AutomationsResource {
 	/** List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "list">>>,
 		ItemOf<EndpointJsonSuccess<"automations", "list">>
@@ -5186,7 +5447,7 @@ export class AutomationsResource {
 	/** Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue. */
 	pause(
 		automationId: PathParam<"automations", "pause", "automation_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "pause">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).pause(automationId, {
@@ -5199,7 +5460,7 @@ export class AutomationsResource {
 	/** Retrieve an automation by ID */
 	retrieve(
 		automationId: PathParam<"automations", "get", "automation_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).retrieve(automationId, {
@@ -5225,7 +5486,7 @@ export class AutomationsResource {
 	/** Resume an automation's schedule from now, without running the occurrences it missed */
 	unpause(
 		automationId: PathParam<"automations", "unpause", "automation_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "unpause">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).unpause(automationId, {
@@ -5239,7 +5500,7 @@ export class AutomationsResource {
 	update(
 		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"automations", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).update(automationId, params, {
@@ -5260,8 +5521,9 @@ export class EnvironmentsResource {
 	/** Archive an environment */
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & PromiseRequestOptions,
-		options?: PromiseRequestOptions,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> &
+			PromiseRequestOptions<never>,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"environments", "archive">> {
 		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
 			new EffectEnvironmentsResource(effectRuntime).archive(environmentId, params, {
@@ -5287,7 +5549,7 @@ export class EnvironmentsResource {
 	/** Delete an environment */
 	delete(
 		environmentId: PathParam<"environments", "delete", "environment_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"environments", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectEnvironmentsResource(effectRuntime).delete(environmentId, {
@@ -5300,7 +5562,7 @@ export class EnvironmentsResource {
 	/** List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"environments", "list">>>,
 		ItemOf<EndpointJsonSuccess<"environments", "list">>
@@ -5323,7 +5585,7 @@ export class EnvironmentsResource {
 	/** Retrieve an environment by ID */
 	retrieve(
 		environmentId: PathParam<"environments", "get", "environment_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"environments", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectEnvironmentsResource(effectRuntime).retrieve(environmentId, {
@@ -5337,7 +5599,7 @@ export class EnvironmentsResource {
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"environments", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectEnvironmentsResource(effectRuntime).update(environmentId, params, {
@@ -5358,7 +5620,7 @@ export class FilesResource {
 	/** Delete a file and its bytes. This cannot be undone. */
 	delete(
 		fileId: PathParam<"files", "delete", "file_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"files", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectFilesResource(effectRuntime).delete(fileId, { ...effectOpts, withResponse: true }),
@@ -5368,7 +5630,7 @@ export class FilesResource {
 	/** List files in creation order, oldest first by default. Deleted files never appear. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"files", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"files", "list">>>,
 		ItemOf<EndpointJsonSuccess<"files", "list">>
@@ -5391,7 +5653,7 @@ export class FilesResource {
 	/** Retrieve a file's name, type, size and sha256 */
 	retrieve(
 		fileId: PathParam<"files", "get", "file_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"files", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectFilesResource(effectRuntime).retrieve(fileId, {
@@ -5413,7 +5675,7 @@ export class MemoryStoresMemoriesResource {
 	create(
 		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "createMemory">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "createMemory">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresMemoriesResource(effectRuntime).create(memoryStoreId, params, {
@@ -5428,8 +5690,8 @@ export class MemoryStoresMemoriesResource {
 		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
-			PromiseRequestOptions,
-		options?: PromiseRequestOptions,
+			PromiseRequestOptions<never>,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "deleteMemory">> {
 		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresMemoriesResource(effectRuntime).delete(
@@ -5445,8 +5707,8 @@ export class MemoryStoresMemoriesResource {
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
-			PromiseRequestOptions,
-		options?: PromiseRequestOptions,
+			PromiseRequestOptions<never>,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "listMemories">> {
 		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresMemoriesResource(effectRuntime).list(memoryStoreId, params, {
@@ -5460,7 +5722,7 @@ export class MemoryStoresMemoriesResource {
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "getMemory">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresMemoriesResource(effectRuntime).retrieve(memoryStoreId, memoryId, {
@@ -5475,7 +5737,7 @@ export class MemoryStoresMemoriesResource {
 		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
 		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
 		params: EndpointBody<"memory_stores", "updateMemory">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "updateMemory">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresMemoriesResource(effectRuntime).update(
@@ -5500,7 +5762,7 @@ export class MemoryStoresResource {
 	/** Make a memory store read-only and stop new sessions from attaching it */
 	archive(
 		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresResource(effectRuntime).archive(memoryStoreId, {
@@ -5526,7 +5788,7 @@ export class MemoryStoresResource {
 	/** Delete a memory store and make its memories unreachable */
 	delete(
 		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresResource(effectRuntime).delete(memoryStoreId, {
@@ -5539,7 +5801,7 @@ export class MemoryStoresResource {
 	/** List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"memory_stores", "list">>>,
 		ItemOf<EndpointJsonSuccess<"memory_stores", "list">>
@@ -5562,7 +5824,7 @@ export class MemoryStoresResource {
 	/** Retrieve a memory store by ID */
 	retrieve(
 		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresResource(effectRuntime).retrieve(memoryStoreId, {
@@ -5576,7 +5838,7 @@ export class MemoryStoresResource {
 	update(
 		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "update">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"memory_stores", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectMemoryStoresResource(effectRuntime).update(memoryStoreId, params, {
@@ -5598,7 +5860,7 @@ export class SessionsEventsResource {
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "listEvents">>>,
 		ItemOf<EndpointJsonSuccess<"sessions", "listEvents">>
@@ -5665,7 +5927,7 @@ export class SessionsOutputsResource {
 	/** Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason */
 	retrieve(
 		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"sessions", "getOutputs">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectSessionsOutputsResource(effectRuntime).retrieve(sessionId, {
@@ -5686,7 +5948,7 @@ export class SessionsResourcesResource {
 	/** List what is mounted in a session's workspace */
 	list(
 		sessionId: PathParam<"sessions", "listResources", "session_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"sessions", "listResources">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectSessionsResourcesResource(effectRuntime).list(sessionId, {
@@ -5700,7 +5962,7 @@ export class SessionsResourcesResource {
 	retrieve(
 		sessionId: PathParam<"sessions", "getResource", "session_id">,
 		resourceId: PathParam<"sessions", "getResource", "resource_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"sessions", "getResource">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectSessionsResourcesResource(effectRuntime).retrieve(sessionId, resourceId, {
@@ -5715,7 +5977,7 @@ export class SessionsResourcesResource {
 		sessionId: PathParam<"sessions", "updateResource", "session_id">,
 		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
 		params: EndpointBody<"sessions", "updateResource">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"sessions", "updateResource">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectSessionsResourcesResource(effectRuntime).update(sessionId, resourceId, params, {
@@ -5742,7 +6004,7 @@ export class SessionsResource {
 	/** Archive a session */
 	archive(
 		sessionId: PathParam<"sessions", "archive", "session_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"sessions", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectSessionsResource(effectRuntime).archive(sessionId, {
@@ -5768,7 +6030,7 @@ export class SessionsResource {
 	/** List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "list">>>,
 		ItemOf<EndpointJsonSuccess<"sessions", "list">>
@@ -5791,7 +6053,7 @@ export class SessionsResource {
 	/** Retrieve a session by ID */
 	retrieve(
 		sessionId: PathParam<"sessions", "get", "session_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"sessions", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectSessionsResource(effectRuntime).retrieve(sessionId, {
@@ -5813,7 +6075,7 @@ export class VaultsCredentialsResource {
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "archiveCredential">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsCredentialsResource(effectRuntime).archive(vaultId, credentialId, {
@@ -5841,7 +6103,7 @@ export class VaultsCredentialsResource {
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "deleteCredential">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsCredentialsResource(effectRuntime).delete(vaultId, credentialId, {
@@ -5855,7 +6117,7 @@ export class VaultsCredentialsResource {
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"vaults", "listCredentials">>>,
 		ItemOf<EndpointJsonSuccess<"vaults", "listCredentials">>
@@ -5880,7 +6142,7 @@ export class VaultsCredentialsResource {
 	retrieve(
 		vaultId: PathParam<"vaults", "getCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "getCredential", "credential_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "getCredential">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsCredentialsResource(effectRuntime).retrieve(vaultId, credentialId, {
@@ -5895,7 +6157,7 @@ export class VaultsCredentialsResource {
 		vaultId: PathParam<"vaults", "updateCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "updateCredential", "credential_id">,
 		params: EndpointBody<"vaults", "updateCredential">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "updateCredential">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsCredentialsResource(effectRuntime).update(vaultId, credentialId, params, {
@@ -5918,7 +6180,7 @@ export class VaultsResource {
 	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsResource(effectRuntime).archive(vaultId, {
@@ -5941,7 +6203,7 @@ export class VaultsResource {
 	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsResource(effectRuntime).delete(vaultId, {
@@ -5954,7 +6216,7 @@ export class VaultsResource {
 	/** List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"vaults", "list">>>,
 		ItemOf<EndpointJsonSuccess<"vaults", "list">>
@@ -5977,7 +6239,7 @@ export class VaultsResource {
 	/** Retrieve a vault by ID */
 	retrieve(
 		vaultId: PathParam<"vaults", "get", "vault_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsResource(effectRuntime).retrieve(vaultId, {
@@ -5991,7 +6253,7 @@ export class VaultsResource {
 	update(
 		vaultId: PathParam<"vaults", "update", "vault_id">,
 		params: EndpointBody<"vaults", "update">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"vaults", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectVaultsResource(effectRuntime).update(vaultId, params, {
@@ -6013,7 +6275,7 @@ export class WebhooksDeliveriesResource {
 	list(
 		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"webhooks", "listDeliveries">>>,
 		ItemOf<EndpointJsonSuccess<"webhooks", "listDeliveries">>
@@ -6038,7 +6300,7 @@ export class WebhooksDeliveriesResource {
 	redeliver(
 		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "redeliver">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksDeliveriesResource(effectRuntime).redeliver(webhookId, deliveryId, {
@@ -6052,7 +6314,7 @@ export class WebhooksDeliveriesResource {
 	retrieve(
 		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
 		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "getDelivery">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksDeliveriesResource(effectRuntime).retrieve(webhookId, deliveryId, {
@@ -6088,7 +6350,7 @@ export class WebhooksResource {
 	/** Delete a webhook endpoint, discard its signing secrets, and purge its delivery queue. */
 	delete(
 		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksResource(effectRuntime).delete(webhookId, {
@@ -6101,7 +6363,7 @@ export class WebhooksResource {
 	/** List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): PagePromise<
 		CursorPage<ItemOf<EndpointJsonSuccess<"webhooks", "list">>>,
 		ItemOf<EndpointJsonSuccess<"webhooks", "list">>
@@ -6124,7 +6386,7 @@ export class WebhooksResource {
 	/** Pause deliveries to a webhook endpoint without deleting it. */
 	pause(
 		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "pause">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksResource(effectRuntime).pause(webhookId, {
@@ -6137,7 +6399,7 @@ export class WebhooksResource {
 	/** Resume a paused or auto-disabled webhook endpoint and clear its failure window. */
 	resume(
 		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "resume">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksResource(effectRuntime).resume(webhookId, {
@@ -6150,7 +6412,7 @@ export class WebhooksResource {
 	/** Retrieve a webhook endpoint by ID */
 	retrieve(
 		webhookId: PathParam<"webhooks", "get", "webhook_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksResource(effectRuntime).retrieve(webhookId, {
@@ -6176,7 +6438,7 @@ export class WebhooksResource {
 	/** Queue a signed webhook.test delivery for an active webhook endpoint. */
 	test(
 		webhookId: PathParam<"webhooks", "test", "webhook_id">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "test">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksResource(effectRuntime).test(webhookId, {
@@ -6190,7 +6452,7 @@ export class WebhooksResource {
 	update(
 		webhookId: PathParam<"webhooks", "update", "webhook_id">,
 		params: EndpointBody<"webhooks", "update">,
-		options?: PromiseRequestOptions,
+		options?: PromiseRequestOptions<never>,
 	): APIPromise<EndpointJsonSuccess<"webhooks", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectWebhooksResource(effectRuntime).update(webhookId, params, {

@@ -247,6 +247,32 @@ export const lookupHeader = (
 	return found
 }
 
+interface KeyOptions {
+	readonly headers?: HeaderMap | undefined
+	readonly idempotencyKey?: string | undefined
+}
+
+export const snapshotHeaders = (headers: HeaderMap | undefined): HeaderMap | undefined =>
+	headers === undefined ? undefined : { ...headers }
+
+const hasRequestKey = (options: KeyOptions | undefined): boolean => {
+	const header = lookupHeader(options?.headers, "idempotency-key")
+	return options?.idempotencyKey !== undefined || (header !== undefined && header !== null)
+}
+
+export const forbidIdempotencyKey = (
+	operation: string,
+	options: KeyOptions | undefined,
+	inlineOptions?: KeyOptions,
+): Effect.Effect<void, CheckfuConfigError> =>
+	hasRequestKey(options) || hasRequestKey(inlineOptions)
+		? Effect.fail(
+				new CheckfuConfigError({
+					message: `${operation} takes no idempotency key; retrying it with one would not prevent a duplicate.`,
+				}),
+			)
+		: Effect.void
+
 export const mergeHeaderMaps = (
 	base: HeaderMap | undefined,
 	override: HeaderMap | undefined,

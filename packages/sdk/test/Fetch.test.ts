@@ -179,6 +179,19 @@ describe("the fetch client", () => {
 		expect(sent.map((call) => call.headers.get("idempotency-key"))).toEqual(["run-once"])
 	})
 
+	it("refuses a redelivery key before calling the transport", async () => {
+		const { sent, fetch } = recording(201, "{}")
+		const request = untyped(createFetchClient({ fetch }))
+		const input: LooseInput = {
+			path: { webhook_id: "whe_test", delivery_id: "wdel_old" },
+			idempotencyKey: "retry",
+		}
+		await expect(request("webhooks.deliveries.redeliver", input)).rejects.toThrow(
+			"webhooks.deliveries.redeliver takes no idempotency key",
+		)
+		expect(sent).toEqual([])
+	})
+
 	it("uses the headers it was created with, even if the caller's object changes later", async () => {
 		const { sent, fetch } = recording(201, JSON.stringify({ id: "agent_1", type: "agent" }))
 		const shared = new Headers({ "x-trace": "dashboard" })
