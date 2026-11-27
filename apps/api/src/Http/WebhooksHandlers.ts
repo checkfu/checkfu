@@ -27,6 +27,7 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Schema from "effect/Schema"
 import {
+	WEBHOOK_TEST_EVENT_TYPE,
 	WebhookDeliveryStore,
 	buildWebhookEventEnvelopeJson,
 } from "../Webhooks/WebhookDeliveryStore.ts"
@@ -449,7 +450,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 						const deliveryId = WebhookDeliveryId.make(yield* randomId(random, "wdel"))
 						const payloadJson = buildWebhookEventEnvelopeJson({
 							event_id: eventId,
-							event_type: "webhook.test",
+							event_type: WEBHOOK_TEST_EVENT_TYPE,
 							resource_type: "webhook",
 							resource_id: params.webhook_id,
 							occurred_at: nowMillis,
@@ -458,7 +459,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 							deliveries.enqueue(params.webhook_id, {
 								delivery_id: deliveryId,
 								event_id: eventId,
-								event_type: "webhook.test",
+								event_type: WEBHOOK_TEST_EVENT_TYPE,
 								dedupe_key: eventId,
 								payload_json: payloadJson,
 							}),

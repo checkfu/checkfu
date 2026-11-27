@@ -77,6 +77,8 @@ export class WebhookDeliveryStore extends Context.Service<
 	WebhookDeliveryStoreService
 >()("@checkfu/api/WebhookDeliveryStore") {}
 
+export const WEBHOOK_TEST_EVENT_TYPE = "webhook.test"
+
 export const buildWebhookEventEnvelopeJson = (event: WebhookEventPublication): string =>
 	JSON.stringify({
 		type: "event",

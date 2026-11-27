@@ -32,7 +32,7 @@ import type {
 	ListWebhookDeliveriesQuery,
 	WebhookDeliveryRecord,
 } from "./WebhookDeliveryStore.ts"
-import { signingIdForDelivery } from "./WebhookDeliveryStore.ts"
+import { WEBHOOK_TEST_EVENT_TYPE, signingIdForDelivery } from "./WebhookDeliveryStore.ts"
 import {
 	STANDARD_WEBHOOK_HEADERS,
 	deriveWebhookSigningSecret,
@@ -779,7 +779,10 @@ export class WebhookDeliveryEngine {
 					self.#skipAllPending(attemptAt, `Webhook endpoint is ${endpoint.status}.`)
 					break
 				}
-				if (!matchesWebhookSubscription(endpoint.event_types, row.event_type)) {
+				if (
+					row.event_type !== WEBHOOK_TEST_EVENT_TYPE &&
+					!matchesWebhookSubscription(endpoint.event_types, row.event_type)
+				) {
 					self.#skipDelivery(
 						row,
 						attemptAt,
