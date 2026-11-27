@@ -146,13 +146,16 @@ describe("workspace tool output", () => {
 		}
 	})
 
-	it("tells Pi where Bash keeps working files and publishes deliverables", async () => {
+	it("tells Pi where Bash keeps working files and saves deliverables", async () => {
 		const { tools } = workspaceExtension(await workspaceToolDeclarations(), () =>
 			Promise.reject(new Error("not called")),
 		)
 		const bash = tools?.find(({ name }) => name === "bash")
 		expect(bash?.description).toMatch(/\/workspace\b[^.]*working files/u)
-		expect(bash?.description).toMatch(/deliverables[^.]*\/mnt\/session\/outputs\b[^.]*artifact/u)
+		expect(bash?.description).toMatch(
+			/deliverables[^.]*\/mnt\/session\/outputs\b[^.]*save them for the user/u,
+		)
+		expect(bash?.description).toMatch(/uploaded files[^.]*with the file tools/u)
 	})
 
 	it("leaves a change that succeeded a success, for Pi to shorten, and caps an edit's diff to fit", () => {
