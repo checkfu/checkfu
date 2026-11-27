@@ -11,7 +11,6 @@ import {
 	decodeWebhookEventTypes,
 	encodeWebhookEventTypes,
 } from "@checkfu/domain/Webhook/WebhookTypes"
-import { parsePublicHttpsWebhookUrl } from "@checkfu/domain/Webhook/WebhookUrl"
 import {
 	WebhookDeliveryId,
 	WebhookEndpointStatus,
@@ -60,6 +59,19 @@ export const keyedWebhookId = (digest: Digest.Digest["Service"], idempotencyKey:
 const dedupeEventTypes = (eventTypes: ReadonlyArray<string>): ReadonlyArray<string> => [
 	...new Set(eventTypes),
 ]
+
+const publicWebhookUrl = Effect.fnUntraced(function* (url: string) {
+	const { parsePublicHttpsWebhookUrl } = yield* Effect.promise(
+		() => import("@checkfu/domain/Webhook/WebhookUrl"),
+	)
+	return (
+		parsePublicHttpsWebhookUrl(url) ??
+		(yield* reject(
+			400,
+			"Webhook URL must be a public HTTPS URL without embedded credentials or fragments.",
+		))
+	)
+})
 
 const storedDelivery = <A, E extends { readonly _tag: string }, R>(
 	effect: Effect.Effect<A, E | WebhookDeliveryStoreError, R>,
@@ -158,13 +170,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 			.handle("create", ({ headers, payload }) =>
 				handled(
 					Effect.gen(function* () {
-						const canonicalUrl = parsePublicHttpsWebhookUrl(payload.url)
-						if (canonicalUrl === null) {
-							return yield* reject(
-								400,
-								"Webhook URL must be a public HTTPS URL without embedded credentials or fragments.",
-							)
-						}
+						const canonicalUrl = yield* publicWebhookUrl(payload.url)
 						const description = payload.description ?? ""
 						const eventTypes = dedupeEventTypes(payload.event_types)
 						const encodedEventTypes = encodeWebhookEventTypes(eventTypes)
@@ -272,14 +278,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 					Effect.gen(function* () {
 						let nextUrl: string | null = null
 						if (payload.url !== undefined) {
-							const canonicalUrl = parsePublicHttpsWebhookUrl(payload.url)
-							if (canonicalUrl === null) {
-								return yield* reject(
-									400,
-									"Webhook URL must be a public HTTPS URL without embedded credentials or fragments.",
-								)
-							}
-							nextUrl = canonicalUrl
+							nextUrl = yield* publicWebhookUrl(payload.url)
 						}
 						const nextDescription = payload.description ?? null
 						const nextEventTypes =

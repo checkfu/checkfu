@@ -38,7 +38,6 @@ import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurabl
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
 import { WebhookDelivererLive, WebhookDeliveryStoreDo } from "./Webhooks/WebhookDeliverer.do.ts"
-import { apiWorkerWebhookEgressProps } from "./Webhooks/WebhookEgressConfig.ts"
 import { WebhookEventsLive } from "./Webhooks/WebhookEventsLive.ts"
 import { WebhookFanoutContinuationDo, WebhookFanoutLive } from "./Webhooks/WebhookFanout.do.ts"
 import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
@@ -288,6 +287,9 @@ export default ApiWorker.make(
 	Effect.gen(function* () {
 		const { api } = yield* customDomains
 		const customCatalogProps = yield* apiWorkerCustomProvidersProps
+		const { apiWorkerWebhookEgressProps } = yield* Effect.promise(
+			() => import("./Webhooks/WebhookEgressConfig.ts"),
+		)
 		const webhookEgressProps = yield* apiWorkerWebhookEgressProps
 		const mergedEnv = {
 			...customCatalogProps.env,
