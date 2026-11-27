@@ -422,44 +422,50 @@ it("keeps the SDK event fold aligned with session resources after generated inpu
 
 describe("What a round of approved and denied calls publishes", () => {
 	it("runs exactly the allowed calls, marks the denied ones blocked, and publishes each once", async () => {
-		await fc.assert(
-			fc.asyncProperty(fc.array(fc.boolean(), { minLength: 1, maxLength: 4 }), async (allows) => {
-				const targets = allows.map((_, index) => `t${index}`)
-				await world((call) =>
-					Effect.gen(function* () {
-						const id = yield* session(call)
-						yield* send(call, id, [message(`plan:${JSON.stringify(targets)}`)])
-						const paused = yield* until(call, id, waiting(1), "no pause")
-						const uses = paused.filter((e) => e.type === "agent.mcp_tool_use")
-						expect(uses).toHaveLength(targets.length)
-						for (const use of uses) {
-							const index = targets.indexOf((use.input as { readonly target: string }).target)
-							yield* send(call, id, [
-								confirm(use.tool_use_id, allows[index] === true ? "allow" : "deny"),
-							])
-						}
-						const all = yield* until(call, id, ended, "turn did not end")
-						const published = all.filter((e) => e.type === "agent.mcp_tool_use")
-						expect(new Set(published.map((e) => e.tool_use_id)).size).toBe(targets.length)
-						expect(ran.toSorted()).toEqual(targets.filter((_, index) => allows[index] === true))
-						for (const use of published) {
-							const target = (use.input as { readonly target: string }).target
-							const result = all.find(
-								(e) => e.type === "agent.mcp_tool_result" && e.tool_use_id === use.tool_use_id,
-							)
-							if (allows[targets.indexOf(target)] === true) {
-								expect(result?.rejected).toBeUndefined()
-								expect(result?.is_error).toBe(false)
-							} else {
-								expect(result?.rejected).toBe("blocked")
-								expect(ran).not.toContain(target)
-							}
-						}
-					}),
-				)
-			}),
-			{ numRuns: ANSWER_RUNS },
+		const cases = [1, 2, 3, 4].flatMap((length) =>
+			Array.from({ length: 2 ** length }, (_, mask) =>
+				Array.from({ length }, (_, index) => (mask & (1 << index)) !== 0),
+			),
 		)
+		for (const allows of cases) {
+			const targets = allows.map((_, index) => `t${index}`)
+			await world((call) =>
+				Effect.gen(function* () {
+					const id = yield* session(call)
+					yield* send(call, id, [message(`plan:${JSON.stringify(targets)}`)])
+					const paused = yield* until(call, id, waiting(1), "no pause")
+					const uses = paused.filter((e) => e.type === "agent.mcp_tool_use")
+					expect(uses).toHaveLength(targets.length)
+					for (const use of uses) {
+						const index = targets.indexOf((use.input as { readonly target: string }).target)
+						yield* send(call, id, [
+							confirm(use.tool_use_id, allows[index] === true ? "allow" : "deny"),
+						])
+					}
+					const all = yield* until(call, id, ended, "turn did not end")
+					const published = all.filter((e) => e.type === "agent.mcp_tool_use")
+					const publishedTargets = published.map(
+						(use) => (use.input as { readonly target: string }).target,
+					)
+					expect(publishedTargets.toSorted(), JSON.stringify(allows)).toEqual(targets)
+					expect(new Set(published.map((e) => e.tool_use_id)).size).toBe(targets.length)
+					const results = all.filter((e) => e.type === "agent.mcp_tool_result")
+					expect(results, JSON.stringify(allows)).toHaveLength(targets.length)
+					expect(ran.toSorted()).toEqual(targets.filter((_, index) => allows[index] === true))
+					for (const use of published) {
+						const target = (use.input as { readonly target: string }).target
+						const result = results.find((e) => e.tool_use_id === use.tool_use_id)
+						if (allows[targets.indexOf(target)] === true) {
+							expect(result?.rejected).toBeUndefined()
+							expect(result?.is_error).toBe(false)
+						} else {
+							expect(result?.rejected).toBe("blocked")
+							expect(ran).not.toContain(target)
+						}
+					}
+				}),
+			)
+		}
 	}, 600_000)
 })
 
