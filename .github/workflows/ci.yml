@@ -56,24 +56,46 @@ jobs:
         name: Fail if the typecheck changed any tracked file
         run: git diff --exit-code
 
-  test:
+  # Each package's tests already use Vitest workers, so packages that share a runner run one at a
+  # time. The heaviest get runners of their own; the last leg is every package the others leave out.
+  test-packages:
+    name: test (${{ matrix.leg.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        leg:
+          - name: api
+            filter: --filter=@checkfu/api
+          - name: cli
+            filter: --filter=@checkfu/cli --filter=@checkfu/release
+          - name: rest
+            filter: --filter=!@checkfu/domain --filter=!@checkfu/api --filter=!@checkfu/cli --filter=!@checkfu/release
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          turbo-cache: test
-      # Each package already uses Vitest workers. Competing package runners can
-      # starve large-payload and streaming checks on this runner.
-      - run: bun x turbo run test --continue --filter='!@checkfu/domain' --concurrency=1
-      - if: ${{ !cancelled() }}
+          turbo-cache: test-${{ matrix.leg.name }}
+      - run: bun x turbo run test --continue --concurrency=1 ${{ matrix.leg.filter }}
+      - if: ${{ !cancelled() && matrix.leg.name == 'api' }}
         run: bun run test:bun
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
+
+  # The required check: it passes only when every test leg passed.
+  test:
+    needs: test-packages
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.test-packages.result }}
 
   # Long Z3 proofs get their own runners. The other domain files share one, in parallel.
   domain-proofs:
