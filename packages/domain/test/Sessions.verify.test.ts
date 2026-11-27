@@ -21,7 +21,7 @@ describe("Sessions Z3 formal verification", () => {
 					apis: [SessionsApi],
 					instances: 1,
 					depth: 2,
-					budget: 20_000,
+					budget: 30_000,
 					faults: { redeliver: true, reorder: true, rerun: true },
 					walks: { count: 25 },
 					opaque: [
@@ -40,10 +40,10 @@ describe("Sessions Z3 formal verification", () => {
 				)
 				expect(report.undone).toEqual([])
 				yield* Effect.logInfo(Verify.render(report))
-				expect(report.explored.followed).toEqual([
+				expect(report.explored.followed.toSorted()).toEqual([
+					"EnsureTurnStopped",
+					"PublishSessionOutputs",
 					"StartTurn",
-					"DiscardWorkspace",
-					"StopModelRequest",
 				])
 				expect(report.explored.idle).toEqual([])
 				expect(report.explored.sagas).toEqual(["RunTurn"])

@@ -34,7 +34,18 @@ import {
 	SessionAlreadyExists,
 	SessionCreated,
 } from "../src/Session/CreateSession.command.ts"
-import { DiscardWorkspace, DiscardWorkspaceLive } from "../src/Session/DiscardWorkspace.policy.ts"
+import {
+	EnsureTurnStopped,
+	EnsureTurnStoppedLive,
+} from "../src/Session/EnsureTurnStopped.policy.ts"
+import {
+	PublishSessionOutputs,
+	PublishSessionOutputsLive,
+} from "../src/Session/PublishSessionOutputs.policy.ts"
+import {
+	SessionOutputs,
+	SessionOutputsUnpublished,
+} from "../src/Session/SessionOutputs.external.ts"
 import { Harness, boundedHarness, clampHarnessReply } from "../src/Session/Harness.external.ts"
 import { FailModelRequest } from "../src/Session/FailModelRequest.command.ts"
 import { InterruptModelRequest } from "../src/Session/InterruptModelRequest.command.ts"
@@ -79,7 +90,6 @@ import type { SessionId } from "../src/Session/Session.id.ts"
 import type { ToolCall } from "../src/Session/SessionTypes.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { StaleTurn } from "../src/Session/StaleTurn.rejection.ts"
-import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModelRequest.policy.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
 import { UnknownModelRequest } from "../src/Session/UnknownModelRequest.rejection.ts"
@@ -88,8 +98,8 @@ import { Sessions, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
 const StartTurnNoopLayer = Layer.mergeAll(
 	StartTurn.toLayer(Effect.succeed(() => Effect.void)),
-	StopModelRequest.toLayer(Effect.succeed(() => Effect.void)),
-	DiscardWorkspace.toLayer(Effect.succeed(() => Effect.void)),
+	EnsureTurnStopped.toLayer(Effect.succeed(() => Effect.void)),
+	PublishSessionOutputs.toLayer(Effect.succeed(() => Effect.void)),
 )
 const aggregateStory = Story.make(Sessions, {
 	layer: Layer.mergeAll(StartTurnNoopLayer, RunTurnLive),
@@ -99,23 +109,23 @@ const story = aggregateStory
 
 const fullStory = Story.make(Sessions, {
 	layer: SessionsHandlersLive,
-	stub: [Harness],
+	stub: [Harness, SessionOutputs],
 })
 
-const retryCleanup = StopModelRequest.toLayer(StopModelRequest, {
+const retryCleanup = EnsureTurnStopped.toLayer(EnsureTurnStopped, {
 	retry: Schedule.recurs(1),
-}).pipe(Layer.provide(StopModelRequestLive))
+}).pipe(Layer.provide(EnsureTurnStoppedLive))
 const redeliveryStory = Story.make(Sessions, {
-	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, retryCleanup, DiscardWorkspaceLive),
-	stub: [Harness],
+	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, retryCleanup, PublishSessionOutputsLive),
+	stub: [Harness, SessionOutputs],
 })
 
-const retryDiscard = DiscardWorkspace.toLayer(DiscardWorkspace, {
+const retryDiscard = PublishSessionOutputs.toLayer(PublishSessionOutputs, {
 	retry: Schedule.recurs(1),
-}).pipe(Layer.provide(DiscardWorkspaceLive))
+}).pipe(Layer.provide(PublishSessionOutputsLive))
 const discardStory = Story.make(Sessions, {
-	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, StopModelRequestLive, retryDiscard),
-	stub: [Harness],
+	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, EnsureTurnStoppedLive, retryDiscard),
+	stub: [Harness, SessionOutputs],
 })
 
 const HarnessNoopLayer = Harness.toLayer(
@@ -148,7 +158,7 @@ const createdEvent = new SessionCreated({
 describe("Sessions", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(Layer.build(Sessions.layer(SessionsHandlersLive))).pipe(
-			Effect.provide([Domain.InMemory, HarnessNoopLayer]),
+			Effect.provide([Domain.InMemory, HarnessNoopLayer, SessionOutputsUnpublished]),
 		),
 	)
 
@@ -927,6 +937,8 @@ describe("Sessions", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
+				Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
+				Story.succeed(SessionOutputs.publish, undefined),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
 					result: { status: "completed" },
@@ -991,6 +1003,8 @@ describe("Sessions", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 				),
+				Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+				Story.succeed(SessionOutputs.publish, undefined),
 				Story.saga(RunTurn, turn2Key, {
 					_tag: "Completed",
 					result: { status: "completed" },
@@ -1249,6 +1263,8 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.saga(RunTurn, turn1Key, {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -1277,6 +1293,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -1428,6 +1446,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -1557,6 +1577,7 @@ describe("Sessions", () => {
 							Layer.provide(
 								Layer.mergeAll(
 									Domain.InMemory,
+									SessionOutputsUnpublished,
 									boundedHarness(
 										Effect.succeed({
 											interrupt: () => Effect.void,
@@ -1700,6 +1721,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
 	})
@@ -1847,6 +1870,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 			Story.view(TurnInput, session, { turn: 1, input: [] }),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Continue" })),
@@ -1879,6 +1904,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 			Story.view(TurnInput, session, { turn: 2 }),
 		)
@@ -2061,6 +2088,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 			Story.view(TurnInput, session, { last_reply_turn: 2 }),
 		)
@@ -2139,6 +2168,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 			Story.view(TurnInput, session, { turn: 2 }),
 		)
@@ -2385,6 +2416,8 @@ describe("Sessions", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 				),
+				Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+				Story.succeed(SessionOutputs.publish, undefined),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 				Story.succeed("redelivery", Harness.interrupt, undefined),
 				Story.succeed("turn-1", Harness.runTurn, {
@@ -2405,8 +2438,8 @@ describe("Sessions", () => {
 		const memory = InMemory.make({ manual: true })
 		const handlers = Layer.mergeAll(
 			StartTurnLive,
-			StopModelRequestLive,
-			DiscardWorkspaceLive,
+			EnsureTurnStoppedLive,
+			PublishSessionOutputsLive,
 			RunTurn.toLayer(Effect.succeed(() => Effect.succeed({ status: "completed" as const }))),
 		)
 		const state = await Effect.runPromise(
@@ -2467,7 +2500,9 @@ describe("Sessions", () => {
 			}).pipe(
 				Effect.provide(
 					Sessions.layer(handlers).pipe(
-						Layer.provide(Layer.mergeAll(memory.layer, HarnessNoopLayer)),
+						Layer.provide(
+							Layer.mergeAll(memory.layer, HarnessNoopLayer, SessionOutputsUnpublished),
+						),
 					),
 				),
 			),
@@ -2531,6 +2566,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.saga(RunTurn, turn1Key, {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -2651,6 +2688,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
+			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
+			Story.succeed(SessionOutputs.publish, undefined),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -3046,6 +3085,8 @@ describe("Sessions", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1, event_ids: "[]" }),
 				),
+				Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
+				Story.succeed(SessionOutputs.publish, undefined),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
 					result: { status: "completed" },
@@ -3196,6 +3237,7 @@ describe("Sessions", () => {
 						Layer.provide(
 							Layer.mergeAll(
 								Domain.InMemory,
+								SessionOutputsUnpublished,
 								boundedHarness(
 									Effect.succeed({
 										interrupt: () => Effect.void,

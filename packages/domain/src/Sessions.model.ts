@@ -3,7 +3,11 @@ import { SystemContext } from "./Session/SystemContext.aggregate.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
-import { DiscardWorkspace, DiscardWorkspaceLive } from "./Session/DiscardWorkspace.policy.ts"
+import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
+import {
+	PublishSessionOutputs,
+	PublishSessionOutputsLive,
+} from "./Session/PublishSessionOutputs.policy.ts"
 import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.ts"
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
@@ -12,7 +16,6 @@ import { MAX_SESSION_INITIAL_EVENTS } from "./Session/SessionTypes.ts"
 import { SessionTurnCompletion } from "./Session/SessionTurnCompletion.view.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
-import { StopModelRequest, StopModelRequestLive } from "./Session/StopModelRequest.policy.ts"
 import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 
@@ -25,7 +28,7 @@ export class Sessions extends Domain.Model("Sessions", {
 		SendSystemMessageDecision,
 	],
 	views: [SessionView, SessionTurnCompletion, TurnInput],
-	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
+	policies: [StartTurn, EnsureTurnStopped, PublishSessionOutputs],
 	sagas: [RunTurn],
 	invariants: {
 		SessionViewMatchesSession: (m) =>
@@ -140,7 +143,7 @@ export class SessionsApi extends Domain.Api("SessionsApi", {
 
 export const SessionsHandlersLive = Layer.mergeAll(
 	StartTurnLive,
-	StopModelRequestLive,
-	DiscardWorkspaceLive,
+	EnsureTurnStoppedLive,
+	PublishSessionOutputsLive,
 	RunTurnLive,
 )
