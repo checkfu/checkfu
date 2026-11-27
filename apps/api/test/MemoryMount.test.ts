@@ -402,6 +402,27 @@ describe("session memory", () => {
 		expect(reads).toBe(2)
 	})
 
+	it("preserves missing results and transport errors while reporting projection lag to file tools", async () => {
+		const failure = new Error("transport disconnected")
+		let busy = true
+		const memory = makeSessionMemory(
+			{
+				...fakeMemory(new Map()),
+				read: (_, path) =>
+					path === "/offline" ? Promise.reject(failure) : Promise.resolve(busy ? "busy" : null),
+				stat: () => Promise.resolve(busy ? "busy" : null),
+			},
+			heldIn(),
+		)
+		const expected = { code: "EIO", message: "The memory store is busy. Try again." }
+		await expect(memory.read("notes", "/m")).rejects.toMatchObject(expected)
+		await expect(memory.stat("notes", "/m")).rejects.toMatchObject(expected)
+		await expect(memory.read("notes", "/offline")).rejects.toBe(failure)
+		busy = false
+		expect(await memory.read("notes", "/m")).toBeNull()
+		expect(await memory.stat("notes", "/m")).toBeNull()
+	})
+
 	it("asks each listing for the writes it was acknowledged for, until a listing has shown them", async () => {
 		const asked: Array<ReadonlyArray<MemoryReceipt>> = []
 		let lagging = false
@@ -414,7 +435,7 @@ describe("session memory", () => {
 				remove: () => Promise.resolve({ ok: true, content_sha256: "", receipt: null }),
 				list: (_, after) => {
 					asked.push(after)
-					return lagging ? Promise.reject(new Error("the listing is behind")) : Promise.resolve([])
+					return Promise.resolve(lagging ? ("busy" as const) : [])
 				},
 				write: (_, path) => {
 					version += 1
@@ -433,7 +454,10 @@ describe("session memory", () => {
 		await memory.write("notes", "/b.md", "one", false)
 		await memory.write("other", "/c.md", "one", false)
 		lagging = true
-		await expect(memory.list("notes")).rejects.toThrow("the listing is behind")
+		await expect(memory.list("notes")).rejects.toMatchObject({
+			code: "EIO",
+			message: "The memory store is busy. Try again.",
+		})
 		lagging = false
 		await memory.list("notes")
 		await memory.remove("notes", "/b.md", null)

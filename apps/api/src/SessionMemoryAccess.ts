@@ -6,6 +6,7 @@ import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { MAX_MEMORY_CONTENT_BYTES, MemoryPath } from "@checkfu/domain/Memory/MemoryTypes"
 import { memoryStoresOf } from "@checkfu/domain/Session/SessionResource"
+import { MEMORY_BUSY_MESSAGE } from "./Workspace/SessionMemory.ts"
 import type { MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
 import * as Digest from "effect/crypto/Digest"
 import * as DateTime from "effect/DateTime"
@@ -52,7 +53,7 @@ const rejection = (tag: string, path: string): MemoryOutcome => {
 			return refused("EEXIST", `${path} is already a memory.`)
 		case "MemoryViewLagging":
 		case "MemoryLayoutChanged":
-			return refused("EIO", "The memory store is busy. Try again.")
+			return refused("EIO", MEMORY_BUSY_MESSAGE)
 		default:
 			return refused("EEXIST", `${path} changed while it was being moved.`)
 	}
@@ -124,7 +125,7 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 					size: entry.content_size_bytes,
 					updated_at: DateTime.toEpochMillis(entry.updated_at),
 				}))
-			}),
+			}).pipe(Effect.catchTag("MemoryViewLagging", () => Effect.succeed("busy" as const))),
 		memoryStat: (sessionId: string, name: string, path: string) =>
 			Effect.map(mountedMemory(sessionId, name, path), (found) =>
 				found === null
@@ -133,7 +134,7 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 							size: found.content_size_bytes,
 							updated_at: DateTime.toEpochMillis(found.updated_at),
 						},
-			),
+			).pipe(Effect.catchTag("MemoryViewLagging", () => Effect.succeed("busy" as const))),
 		memoryRead: (sessionId: string, name: string, path: string) =>
 			Effect.map(mountedMemory(sessionId, name, path), (found) =>
 				found === null
@@ -143,7 +144,7 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 							content_sha256: found.content_sha256,
 							updated_at: DateTime.toEpochMillis(found.updated_at),
 						},
-			),
+			).pipe(Effect.catchTag("MemoryViewLagging", () => Effect.succeed("busy" as const))),
 		memoryWrite: (
 			sessionId: string,
 			name: string,
