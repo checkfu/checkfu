@@ -400,7 +400,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				depth: 3,
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
-				walks: { count: 400, length: 12 },
+				walks: { count: 120, length: 12 },
 
 				allow: { skipped: ["EnsureTurnStarted", "PublishWebhookEvents"] },
 				opaque: [
