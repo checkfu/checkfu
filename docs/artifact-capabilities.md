@@ -171,7 +171,7 @@ In the API, creating an artifact or adding a version takes `made_from`:
   "files": [{ "path": "content.md", "content": "# Q3" }] }
 ```
 
-The type's files are copied into the new version when it is made, and `files` are added beside them. A path the type already has is refused. With `made_from`, `files` may be left out. The version records what it was made from, and the artifact and version resources show it.
+The type's files are copied into the new version when it is made, and `files` are added beside them. A path the type already has is refused, and so is an `artifact.json` among the files sent: the declaration is the type's. With `made_from`, `files` may be left out. The version records what it was made from, and the artifact and version resources show it.
 
 The derived version keeps the type's files and declaration as they were when it was made. A new version of the type, or deleting the type, changes nothing in it. Adopting a newer type version is a new version of the derived artifact, made with `made_from` again and its own files kept by their sha256.
 

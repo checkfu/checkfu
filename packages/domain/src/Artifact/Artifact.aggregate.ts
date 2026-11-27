@@ -195,12 +195,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				(ok) => ok,
 			)
 		},
-		OnlyANewVersionChangesWhatItWasMadeFrom: ({ before, after, command }) =>
-			[
-				command._tag === "CreateArtifact",
-				command._tag === "AddArtifactVersion",
-				after.made_from === before.made_from,
-			].some((ok) => ok),
+		OnlyANewVersionChangesWhatItWasMadeFrom: ({ before, after }) =>
+			[after.version !== before.version, after.made_from === before.made_from].some((ok) => ok),
 		ReservationsAreNumberedInOrder: ({ before, after, command }) =>
 			[
 				after.reservations === before.reservations,

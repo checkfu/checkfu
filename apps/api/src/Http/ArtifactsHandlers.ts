@@ -265,7 +265,7 @@ export const artifactWrites = Effect.gen(function* () {
 	const files = yield* File
 	const fileStore = yield* FileStore
 	const digest = yield* Digest.Digest
-	const { loadManifest } = yield* artifactReads
+	const { loadManifest, missingBytes } = yield* artifactReads
 
 	const build = (files: ReadonlyArray<ArtifactVersionEntry>, kept?: ReadonlyMap<string, number>) =>
 		buildArtifactVersion(digest, files, kept).pipe(
@@ -354,7 +354,9 @@ export const artifactWrites = Effect.gen(function* () {
 									)
 								: yield* stored(store.blobStream(source.artifact_id, sha256))
 						if (body === null) {
-							return yield* reject(404, `${named} not found.`)
+							return "file_id" in source
+								? yield* reject(404, `${named} not found.`)
+								: yield* missingBytes(source.artifact_id, { sha256 })
 						}
 						const copied = yield* stored(store.putBlob(id, sha256, body, size, reservation)).pipe(
 							Effect.catchTags({
@@ -431,7 +433,7 @@ export const artifactWrites = Effect.gen(function* () {
 			if ("artifact_id" in source) {
 				const copied = yield* stored(store.getBlob(source.artifact_id, declared.sha256))
 				return copied === null
-					? yield* reject(404, `Artifact ${source.artifact_id} not found.`)
+					? yield* missingBytes(source.artifact_id, { sha256: declared.sha256 })
 					: yield* declaredBy(copied)
 			}
 			const sent = yield* fileStore
@@ -451,6 +453,17 @@ export const artifactWrites = Effect.gen(function* () {
 
 	return { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf }
 })
+
+const holdsWhatWasSent = (manifest: ArtifactManifest, sent: BuiltArtifactVersion | null) =>
+	sent === null ||
+	sent.manifest.files.every((file) =>
+		manifest.files.some(
+			(held) =>
+				held.path === file.path &&
+				held.sha256 === file.sha256 &&
+				held.content_type === file.content_type,
+		),
+	)
 
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
 	Effect.gen(function* () {
@@ -547,6 +560,12 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						: { ...own, made_from: "" }
 				}
 				const from = source.artifact_id
+				if (own.files.some((file) => file.path === ARTIFACT_DECLARATION_FILE)) {
+					return yield* reject(
+						400,
+						`${ARTIFACT_DECLARATION_FILE} comes from the version this one is made from. Leave it out.`,
+					)
+				}
 				const found = yield* locateVersion(from, yield* requireActive(from), source.version)
 				const manifest = yield* loadManifest(from, found.manifest)
 				const taken = new Set(manifest.files.map((file) => file.path))
@@ -571,6 +590,16 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				}
 			})
 
+		const builtAlone = (
+			files: ReadonlyArray<ArtifactVersionEntry>,
+			kept?: ReadonlyMap<string, number>,
+		) =>
+			files.length === 0
+				? Effect.succeed(null)
+				: buildArtifactVersion(digest, files, kept).pipe(
+						Effect.catchTag("InvalidArtifactFiles", () => Effect.undefined),
+					)
+
 		const loadVersion = (id: ArtifactId, version: number, built?: BuiltArtifactVersion) =>
 			Effect.gen(function* () {
 				const found = yield* locateVersion(id, yield* requireActive(id), version)
@@ -581,10 +610,37 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
-					const resolved = yield* startingFrom(
-						payload.made_from,
-						yield* fromFiles(payload.files ?? []),
-					)
+					const own = yield* fromFiles(payload.files ?? [])
+					if (idempotencyKey !== undefined && payload.made_from !== undefined) {
+						const keyed = yield* keyedArtifactId(digest, idempotencyKey)
+						const existing = yield* artifacts.get(keyed)
+						if (existing.status === "deleted") {
+							return yield* reject(404, `Artifact ${keyed} was deleted after creation committed.`)
+						}
+						if (existing.status === "active") {
+							const first = yield* locateVersion(keyed, existing, 1)
+							const manifest = yield* loadManifest(keyed, first.manifest)
+							const sent = yield* builtAlone(own.files)
+							return existing.name === payload.name &&
+								first.made_from === encodeMadeFrom(payload.made_from) &&
+								sent !== undefined &&
+								holdsWhatWasSent(manifest, sent)
+								? artifactResource(
+										keyed,
+										{
+											...existing,
+											version: 1,
+											capabilities: first.capabilities,
+											made_from: first.made_from,
+											updated_at: existing.created_at,
+										},
+										manifest,
+										null,
+									)
+								: yield* reusedKey
+						}
+					}
+					const resolved = yield* startingFrom(payload.made_from, own)
 					const built = yield* build(resolved.files)
 					let id: ArtifactId
 					let sendOptions: { readonly commandId: string } | undefined
@@ -594,6 +650,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							commandId: yield* createCommandId(digest, "artifact", idempotencyKey, {
 								name: payload.name,
 								manifest: built.manifest_hash,
+								made_from: resolved.made_from,
 							}),
 						}
 					} else {
@@ -732,7 +789,29 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const id = params.artifact_id
 					const state = yield* requireActive(id)
 					const sent = payload.files ?? []
-					const resolved = yield* startingFrom(payload.made_from, yield* fromFiles(sent))
+					const own = yield* fromFiles(sent)
+					if (
+						payload.made_from !== undefined &&
+						state.version === payload.version + 1 &&
+						state.made_from === encodeMadeFrom(payload.made_from)
+					) {
+						const again = yield* builtAlone(
+							own.files,
+							yield* keptIn(id, sent, state.replaced_manifest),
+						)
+						if (
+							again !== undefined &&
+							holdsWhatWasSent(yield* loadManifest(id, state.manifest), again)
+						) {
+							const replay = yield* loadVersion(id, state.version).pipe(
+								orPending(id, "artifact_version"),
+							)
+							return isPending(replay)
+								? { ...replay, version: state.version }
+								: versionResource(id, replay.found, replay.manifest)
+						}
+					}
+					const resolved = yield* startingFrom(payload.made_from, own)
 					if (state.version !== payload.version) {
 						if (state.version === payload.version + 1) {
 							const replaced = yield* keptIn(id, sent, state.replaced_manifest)
@@ -740,7 +819,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 								Effect.asSome,
 								Effect.catchTag("InvalidArtifactFiles", () => Effect.succeedNone),
 							)
-							if (Option.isSome(resent) && resent.value.manifest_hash === state.manifest) {
+							if (
+								Option.isSome(resent) &&
+								resent.value.manifest_hash === state.manifest &&
+								state.made_from === resolved.made_from
+							) {
 								const replay = yield* loadVersion(id, state.version, resent.value).pipe(
 									orPending(id, "artifact_version"),
 								)
@@ -773,6 +856,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 								id,
 								payload.version,
 								built.manifest_hash,
+								resolved.made_from,
 							]),
 						},
 					)

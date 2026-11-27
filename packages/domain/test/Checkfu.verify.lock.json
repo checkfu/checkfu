@@ -860,7 +860,7 @@
 			},
 			"Artifact.OnlyANewVersionChangesWhatItWasMadeFrom": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag === \"CreateArtifact\",\n\t\t\t\tcommand._tag === \"AddArtifactVersion\",\n\t\t\t\tafter.made_from === before.made_from,\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after }) =>\n\t\t\t[after.version !== before.version, after.made_from === before.made_from].some((ok) => ok)"
 			}
 		}
 	}

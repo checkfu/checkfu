@@ -2332,6 +2332,102 @@ describe("Artifact bytes", () => {
 			}),
 		))
 
+	it("answers a retry with what was committed, even after the source is deleted, and tells sources apart", () =>
+		withApi(({ call, uploadFile }) =>
+			Effect.gen(function* () {
+				const page = [{ path: "index.html", content: "page" }]
+				const make = (name: string) =>
+					Effect.flatMap(call("POST", "/v1/artifacts", { name, files: page }), (res) =>
+						json<ArtifactBody>(res),
+					)
+				const source = yield* make("Type")
+				const twin = yield* make("Twin type")
+				const from = (id: string) => ({ artifact_id: id, version: 1 })
+				const uploaded = yield* json<{ id: string }>(
+					yield* uploadFile("data.csv", new TextEncoder().encode("a,b\n1,2\n")),
+				)
+
+				const key = { "idempotency-key": "derived-once" }
+				const body = {
+					name: "Derived",
+					made_from: from(source.id),
+					files: [
+						{ path: "content.md", content: "# Hi" },
+						{ path: "data.csv", file_id: uploaded.id },
+					],
+				}
+				const first = yield* call("POST", "/v1/artifacts", body, key)
+				expect(first.status).toBe(201)
+				const derived = yield* json<ArtifactBody & { made_from: unknown }>(first)
+				expect(derived.files.map((file) => file.path)).toEqual([
+					"content.md",
+					"data.csv",
+					"index.html",
+				])
+				const other = (changes: Partial<typeof body>) =>
+					call("POST", "/v1/artifacts", { ...body, ...changes }, key)
+				expect((yield* other({ made_from: from(twin.id) })).status).toBe(409)
+				expect((yield* other({ name: "Renamed" })).status).toBe(409)
+				expect(
+					(yield* other({ files: [{ path: "content.md", content: "# Changed" }] })).status,
+				).toBe(409)
+
+				const versions = `/v1/artifacts/${derived.id}/versions`
+				const next = {
+					version: 1,
+					made_from: from(source.id),
+					files: [{ path: "content.md", content: "# Second" }],
+				}
+				const added = yield* call("POST", versions, next)
+				expect(added.status).toBe(201)
+				const second = yield* json<{ version: number; made_from: unknown }>(added)
+				expect(second).toMatchObject({ version: 2, made_from: from(source.id) })
+				expect((yield* call("POST", versions, { ...next, made_from: from(twin.id) })).status).toBe(
+					409,
+				)
+
+				expect((yield* call("DELETE", `/v1/artifacts/${source.id}`)).status).toBe(200)
+				const retried = yield* call("POST", "/v1/artifacts", body, key)
+				expect(retried.status).toBe(201)
+				expect(yield* json(retried)).toMatchObject({
+					id: derived.id,
+					version: 1,
+					made_from: from(source.id),
+				})
+				const readded = yield* call("POST", versions, next)
+				expect(readded.status).toBe(201)
+				expect(yield* json(readded)).toMatchObject({ version: 2, made_from: from(source.id) })
+				expect(
+					(yield* call("POST", versions, {
+						...next,
+						files: [{ path: "content.md", content: "# Different" }],
+					})).status,
+				).toBe(404)
+
+				const status = (path: string, sent: unknown) =>
+					Effect.map(call("POST", path, sent), (res) => res.status)
+				expect(yield* status(versions, { version: 2 })).toBe(400)
+				expect(
+					yield* status("/v1/artifacts", {
+						name: "Folder clash",
+						made_from: from(twin.id),
+						files: [{ path: "index.html/inner.txt", content: "x" }],
+					}),
+				).toBe(400)
+				for (const made of [from(twin.id), from(derived.id)]) {
+					const declared = yield* call("POST", "/v1/artifacts", {
+						name: "Declares",
+						made_from: made,
+						files: [{ path: "artifact.json", content: "{}" }],
+					})
+					expect(declared.status).toBe(400)
+					expect((yield* json<ErrorBody>(declared)).error.message).toContain(
+						"artifact.json comes from the version this one is made from",
+					)
+				}
+			}),
+		))
+
 	it("refuses an artifact with no files", () =>
 		withApi(({ call }) =>
 			Effect.gen(function* () {
