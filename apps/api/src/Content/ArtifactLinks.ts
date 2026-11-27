@@ -1,5 +1,6 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { RuntimeContext } from "alchemy/RuntimeContext"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -8,18 +9,25 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { publishDomain } from "../CustomDomain.ts"
 import { DEFAULT_STORAGE_SCOPE, storageScope } from "../Placement.ts"
-import { linkKey, linkUrl, publicationUrl, signLink } from "./ArtifactLink.ts"
+import { linkKey, linkUrl, publicationUrl, signLink, verifyLink } from "./ArtifactLink.ts"
 import type { ArtifactLinkClaims } from "./ArtifactLink.ts"
 import { ArtifactLinkSecret, ContentWorker } from "./Content.ts"
 
 export interface ArtifactLinksService {
 	readonly mint: (claims: Omit<ArtifactLinkClaims, "scope">) => Effect.Effect<string>
+	readonly verify: (token: string) => Effect.Effect<ArtifactLinkClaims | null>
 	readonly publicationUrl: (address: string) => Effect.Effect<string>
 }
 
 export class ArtifactLinks extends Context.Service<ArtifactLinks, ArtifactLinksService>()(
 	"@checkfu/api/ArtifactLinks",
 ) {}
+
+const verifiedIn = (scope: string, mac: Mac.Mac["Service"], key: Mac.Key, token: string) =>
+	Effect.map(
+		Effect.flatMap(Clock.currentTimeMillis, (now) => verifyLink(mac, key, token, now)),
+		(claims) => (claims === null || claims.scope !== scope ? null : claims),
+	)
 
 export const artifactLinksFor = (origin: string, secret: string, scope: string, domain?: string) =>
 	Layer.effect(
@@ -30,6 +38,7 @@ export const artifactLinksFor = (origin: string, secret: string, scope: string, 
 			return {
 				mint: (claims) =>
 					Effect.map(signLink(mac, key, { ...claims, scope }), (token) => linkUrl(origin, token)),
+				verify: (token) => verifiedIn(scope, mac, key, token),
 				publicationUrl: (address) => Effect.succeed(publicationUrl(origin, domain, address)),
 			}
 		}),
@@ -68,6 +77,7 @@ export const ArtifactLinksLive = Layer.effect(
 				Effect.flatMap(resolved, ({ key, base }) =>
 					Effect.map(signLink(mac, key, { ...claims, scope }), (token) => linkUrl(base, token)),
 				),
+			verify: (token) => Effect.flatMap(resolved, ({ key }) => verifiedIn(scope, mac, key, token)),
 			publicationUrl: (address) =>
 				Effect.map(resolved, ({ base }) => publicationUrl(base, domain, address)),
 		}

@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { ApiWorker, ArtifactVersionNotReady } from "../Api.ts"
+import type { DataAddress, DataCall } from "../Api.ts"
 import { ArtifactReader, ArtifactReaderR2, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import { publishDomain } from "../CustomDomain.ts"
 import { storageScope } from "../Placement.ts"
@@ -74,6 +75,8 @@ export default ContentWorker.make(
 		const resolveArtifactVersion = (artifactId: string, version: number) =>
 			apiCall(() => api.resolveArtifactVersion(artifactId, version))
 		const resolvePublication = (address: string) => apiCall(() => api.resolvePublication(address))
+		const artifactData = (address: DataAddress, call: DataCall) =>
+			apiCall(() => api.artifactData(address, call))
 		const secret = yield* (yield* ArtifactLinkSecret).text
 		const runtime = yield* Cloudflare.Worker
 		const key = yield* Effect.cached(
@@ -93,6 +96,7 @@ export default ContentWorker.make(
 					store,
 					resolveArtifactVersion,
 					resolvePublication,
+					artifactData,
 					scope,
 					publishDomain: domain,
 					nowMillis,

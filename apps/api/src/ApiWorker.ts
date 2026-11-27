@@ -338,8 +338,15 @@ export default ApiWorker.make(
 				Effect.provide(services),
 			),
 		)
+		const visitorData = yield* Effect.cached(
+			Effect.promise(() => import("./ArtifactData/VisitorData.ts")).pipe(
+				Effect.flatMap(({ VisitorData }) => VisitorData),
+				Effect.provide(services),
+			),
+		)
 		return ApiWorker.of({
 			...handler,
+			artifactData: (address, call) => Effect.flatMap(visitorData, (serve) => serve(address, call)),
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
 			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),
 			memoryMounts: (sessionId) => Effect.orDie(memory.memoryMounts(sessionId)),

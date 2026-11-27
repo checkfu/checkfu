@@ -556,6 +556,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(idsOf("signed-link")).toEqual(["signed-link:ArtifactLink/claims"])
 			expect(idsOf("api-call")).toEqual(
 				[
+					"api-call:Api.artifactData/args",
+					"api-call:Api.artifactData/error",
+					"api-call:Api.artifactData/result",
 					"api-call:Api.resolveArtifactVersion/args",
 					"api-call:Api.resolveArtifactVersion/error",
 					"api-call:Api.resolveArtifactVersion/result",
