@@ -2,7 +2,7 @@
 import type { JsonAgent, JsonAutomation, JsonSession } from "@checkfu/sdk/client"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router"
-import { render } from "@testing-library/react"
+import { cleanup, render } from "@testing-library/react"
 import { act, useState } from "react"
 import type * as React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -54,6 +54,7 @@ const permissions = (container: HTMLElement): ReadonlyArray<string> =>
 	[...container.querySelectorAll("select")].map((select) => select.value)
 
 afterEach(() => {
+	cleanup()
 	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
 })
@@ -118,6 +119,7 @@ describe("the default MCP permission", () => {
 })
 
 describe("agent revision navigation", () => {
+	const routeRenderWait = { timeout: 3000 }
 	const revision: JsonAgent = {
 		...agent,
 		model: { id: "historical-model" },
@@ -231,45 +233,41 @@ describe("agent revision navigation", () => {
 		}
 	}
 
-	it.each(["/sessions", `/sessions/${session.id}`, `/automations/${automation.id}`])(
-		"opens the pinned revision from %s",
-		async (path) => {
-			const view = await openRoute(path)
-			const link = view.container.querySelector<HTMLAnchorElement>(`a[href^="${agentPath}"]`)
-			expect(link?.getAttribute("href")).toBe(`${agentPath}?version=1`)
-			if (link === null) {
-				throw new Error("Missing link to agent revision.")
-			}
-			await click(link)
-			await view.findByText("historical-model")
-			expect(view.getByText("Original instructions")).toBeDefined()
-			expect(view.queryByRole("button", { name: "Edit" })).toBeNull()
-			expect(view.queryByRole("button", { name: "Archive" })).toBeNull()
-			expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`])
-			view.unmount()
-		},
-	)
+	it.each([
+		{ path: "/sessions", name: `${agent.id} v1` },
+		{ path: `/sessions/${session.id}`, name: "Agent v1" },
+		{ path: `/automations/${automation.id}`, name: agent.id },
+	])("opens the pinned revision from $path", async ({ path, name }) => {
+		const view = await openRoute(path)
+		const link = await view.findByRole("link", { name }, routeRenderWait)
+		expect(link.getAttribute("href")).toBe(`${agentPath}?version=1`)
+		await click(link)
+		await view.findByText("historical-model", undefined, routeRenderWait)
+		expect(view.getByText("Original instructions")).toBeDefined()
+		expect(view.queryByRole("button", { name: "Edit" })).toBeNull()
+		expect(view.queryByRole("button", { name: "Archive" })).toBeNull()
+		expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`])
+	})
 
 	it("keeps a directly loaded revision and the current editor separate through history", async () => {
 		const view = await openRoute(`${agentPath}?version=1`)
-		expect(view.getByText("historical-model")).toBeDefined()
+		await view.findByText("historical-model", undefined, routeRenderWait)
 		await click(view.getByRole("link", { name: "View current agent" }))
+		await view.findByText("current-model", undefined, routeRenderWait)
 		expect(view.router.state.location.href).toBe(agentPath)
-		expect(view.getByText("current-model")).toBeDefined()
 		await click(view.getByRole("button", { name: "Edit" }))
 		expect(view.getByRole("button", { name: "Save new version" })).toBeDefined()
 		await act(async () => view.router.history.back())
 		await settle()
+		await view.findByText("historical-model", undefined, routeRenderWait)
 		expect(view.router.state.location.href).toBe(`${agentPath}?version=1`)
-		expect(view.getByText("historical-model")).toBeDefined()
 		await act(async () => view.router.history.forward())
 		await settle()
+		await view.findByRole("button", { name: "Edit" }, routeRenderWait)
 		expect(view.router.state.location.href).toBe(agentPath)
-		expect(view.getByRole("button", { name: "Edit" })).toBeDefined()
 		expect(view.queryClient.getQueryData(agentQuery(agent.id).queryKey)).toEqual(head)
 		expect(view.queryClient.getQueryData(agentQuery(agent.id, 1).queryKey)).toEqual(revision)
 		expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`, agentApiPath])
-		view.unmount()
 	})
 
 	it.each([
@@ -278,9 +276,8 @@ describe("agent revision navigation", () => {
 		["99", "Agent revision not found.", [`${agentApiPath}?version=99`]],
 	])("shows a route error for requested revision %s", async (version, message, requests) => {
 		const view = await openRoute(`${agentPath}?version=${version}`)
-		expect(view.getByText(message)).toBeDefined()
+		await view.findByText(message, undefined, routeRenderWait)
 		expect(view.queryByText("current-model")).toBeNull()
 		expect(view.agentRequests()).toEqual(requests)
-		view.unmount()
 	})
 })
