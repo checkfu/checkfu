@@ -112,11 +112,7 @@ describe("@checkfu/pi-providers catalog & registry", () => {
 		expect(resolveModelSpecifier("openai/computer-use-preview-2025-03-11")).toBeNull()
 		expect(
 			resolveModelSpecifier("openai/computer-use-preview-2025-03-11", { minContextWindow: 4096 }),
-		).toEqual({
-			provider: "openai",
-			modelId: "computer-use-preview-2025-03-11",
-			cataloged: false,
-		})
+		).toBeNull()
 		expect(resolveModelSpecifier("openai/gpt-audio")).toBeNull()
 		expect(resolveModelSpecifier("openai/gpt-audio-1.5")).toBeNull()
 		expect(resolveModelSpecifier("openai/gpt-audio-mini")).toBeNull()
@@ -177,6 +173,46 @@ describe("@checkfu/pi-providers catalog & registry", () => {
 		expect(resolveModelSpecifier("unknown-provider/foo")).toBeNull()
 		expect(resolveModelSpecifier("openai/")).toBeNull()
 		expect(resolveModelSpecifier("openai/has spaces")).toBeNull()
+	})
+
+	it.each([
+		"gpt-3.5-turbo-0301",
+		"gpt-4-32k-0613",
+		"gpt-4-0125-preview",
+		"computer-use-preview-2025-03-11",
+		"ft:gpt-4:org:name:id",
+	])("requires catalog metadata for historical model %s on built-in routes", (id) => {
+		for (const route of [
+			"openai/",
+			"openrouter/",
+			"openrouter/openai/",
+			"openrouter/~openai/",
+			"cloudflare-ai-gateway/",
+			"cloudflare-ai-gateway/openai/",
+			"cloudflare-ai-gateway/openrouter/openai/",
+			"cloudflare-ai-gateway/openrouter/~openai/",
+		]) {
+			const path = route + id
+			expect(resolveModelSpecifier(path, { minContextWindow: 1 }), path).toBeNull()
+		}
+	})
+
+	it("requires model metadata for router aliases and retains available gateway fine-tune bases", () => {
+		for (const model of [
+			"openrouter/~openai/gpt-4-32k-0613:nitro",
+			"cloudflare-ai-gateway/openrouter/~openai/gpt-4-32k-0613:nitro",
+			"openrouter/openai/ft:o3-mini:org:name:id",
+			"cloudflare-ai-gateway/openrouter/openai/ft:o3-mini:org:name:id",
+		]) {
+			expect(resolveModelSpecifier(model, { minContextWindow: 1 }), model).toBeNull()
+		}
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openai/ft:o3-mini:org:name:id"),
+		).toMatchObject({
+			provider: "cloudflare-ai-gateway",
+			modelId: "openai/ft:o3-mini:org:name:id",
+			cataloged: false,
+		})
 	})
 
 	it("collects secret env vars and infers providers by longest key prefix", () => {
@@ -3578,11 +3614,7 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			env: { OPENAI_API_KEY: "sk-a" },
 			minContextWindow: 4096,
 		})
-		expect(lowFloorOpenAI.getModel("openai", "computer-use-preview-2025-03-11")).toMatchObject({
-			id: "computer-use-preview-2025-03-11",
-			contextWindow: 8192,
-			maxTokens: 1024,
-		})
+		expect(lowFloorOpenAI.getModel("openai", "computer-use-preview-2025-03-11")).toBeUndefined()
 		expect(lowFloorOpenAI.getModel("openai", "gpt-3.5-turbo-instruct")).toBeUndefined()
 		expect(lowFloorOpenAI.getModel("openai", "gpt-3.5-turbo-instruct-0914")).toBeUndefined()
 		expect(sessionA.getModel("openai", "ft:gpt-4o-mini:org:my-transcribe-helper:id")).toMatchObject(

@@ -43,14 +43,6 @@ const hasControlOrWhitespace = (value: string): boolean => {
 export const isValidModelId = (modelId: string): boolean =>
 	modelId.length > 0 && modelId.length <= MAX_MODEL_ID_LENGTH && !hasControlOrWhitespace(modelId)
 
-const LEGACY_OPENAI_BASE_ALIASES = new Map<string, string>([
-	["gpt-4-turbo-preview", "gpt-4-turbo"],
-	["gpt-4-0125-preview", "gpt-4-turbo"],
-	["gpt-4-1106-preview", "gpt-4-turbo"],
-	["gpt-4-vision-preview", "gpt-4-turbo"],
-	["gpt-4-1106-vision-preview", "gpt-4-turbo"],
-])
-
 export const stripOpenAISnapshotSuffix = (modelId: string): string | undefined => {
 	const withoutIsoDate = modelId.replace(/-\d{4}-\d{2}-\d{2}$/, "")
 	if (withoutIsoDate !== modelId && withoutIsoDate.length > 0) {
@@ -79,7 +71,6 @@ export const openAIFineTuneBaseCandidates = (modelId: string): ReadonlyArray<str
 	}
 	const rawBase = rest.slice(0, nextColon)
 	const candidates: Array<string> = [rawBase]
-	appendUniqueCandidate(candidates, LEGACY_OPENAI_BASE_ALIASES.get(rawBase))
 	appendUniqueCandidate(candidates, stripOpenAISnapshotSuffix(rawBase))
 	return candidates
 }
@@ -90,7 +81,6 @@ export const openAIBaseModelCandidates = (modelId: string): ReadonlyArray<string
 		return fineTuneCandidates
 	}
 	const candidates: Array<string> = []
-	appendUniqueCandidate(candidates, LEGACY_OPENAI_BASE_ALIASES.get(modelId))
 	appendUniqueCandidate(candidates, stripOpenAISnapshotSuffix(modelId))
 	return candidates
 }
@@ -101,27 +91,6 @@ const openAIModelFamilyCandidates = (modelId: string): ReadonlyArray<string> => 
 		return fineTuneCandidates
 	}
 	return [modelId, ...openAIBaseModelCandidates(modelId)]
-}
-
-export const findLegacyOpenAIModelLimits = (
-	modelId: string,
-): { readonly contextWindow: number; readonly maxTokens: number } | undefined => {
-	for (const candidate of openAIModelFamilyCandidates(modelId)) {
-		const normalized = stripOpenAISnapshotSuffix(candidate) ?? candidate
-		if (normalized === "computer-use-preview") {
-			return { contextWindow: 8192, maxTokens: 1024 }
-		}
-		if (normalized === "gpt-4-32k") {
-			return { contextWindow: 32_768, maxTokens: 4096 }
-		}
-		if (candidate === "gpt-3.5-turbo-0301" || candidate === "gpt-3.5-turbo-0613") {
-			return { contextWindow: 4096, maxTokens: 4096 }
-		}
-		if (normalized === "gpt-3.5-turbo" || normalized === "gpt-3.5-turbo-16k") {
-			return { contextWindow: 16_385, maxTokens: 4096 }
-		}
-	}
-	return undefined
 }
 
 // Exact catalog entries are resolved before this check. Retired OpenAI families
@@ -521,20 +490,21 @@ const lacksCatalogLimits = (provider: string, modelId: string): boolean => {
 	) {
 		return true
 	}
-	const routedId = openRouterId === undefined ? modelId : stripVariantSuffix(openRouterId)
+	const routedId = openRouterId ?? modelId
+	const mayRouteOpenAI = openRouterId !== undefined || provider === "cloudflare-ai-gateway"
 	const openAIId =
-		provider === "openai" || (provider === "cloudflare-ai-gateway" && !routedId.includes("/"))
+		provider === "openai" || (mayRouteOpenAI && !routedId.includes("/"))
 			? routedId
-			: routedId.startsWith("openai/") &&
-				  (openRouterId !== undefined || provider === "cloudflare-ai-gateway")
-				? routedId.slice("openai/".length)
+			: mayRouteOpenAI
+				? /^~?openai\/(.+)$/u.exec(routedId)?.[1]
 				: undefined
+	if (openAIId === undefined) {
+		return false
+	}
+	const family = openAIId.startsWith("ft:") ? openAIId : stripVariantSuffix(openAIId)
 	return (
-		openAIId !== undefined &&
-		(isHistoricalOpenAIModel(openAIId) ||
-			openAIModelFamilyCandidates(openAIId).some((id) =>
-				OPENAI_MODELS_WITHOUT_CATALOG_LIMITS.has(id),
-			))
+		isHistoricalOpenAIModel(family) ||
+		openAIModelFamilyCandidates(family).some((id) => OPENAI_MODELS_WITHOUT_CATALOG_LIMITS.has(id))
 	)
 }
 
@@ -581,12 +551,6 @@ type UpstreamPrimaryMatch =
 			readonly cataloged: boolean
 			readonly model: Model<Api>
 	  }
-	| {
-			readonly matched: true
-			readonly kind: "legacy"
-			readonly contextWindow: number
-			readonly maxTokens: number
-	  }
 
 const findUpstreamPrimaryOrDerived = (
 	upstream: "openai" | "anthropic",
@@ -613,17 +577,6 @@ const findUpstreamPrimaryOrDerived = (
 			return { matched: true, kind: "primary", cataloged: false, model: baseModel }
 		}
 	}
-	if (upstream === "openai") {
-		const legacyLimits = findLegacyOpenAIModelLimits(wireId)
-		if (legacyLimits !== undefined) {
-			return {
-				matched: true,
-				kind: "legacy",
-				contextWindow: legacyLimits.contextWindow,
-				maxTokens: legacyLimits.maxTokens,
-			}
-		}
-	}
 	return { matched: false }
 }
 
@@ -631,7 +584,6 @@ const materializeUpstreamMatch = (
 	spec: ProviderSpec,
 	modelId: string,
 	wireModelId: string,
-	format: WireFormat,
 	route: ModelRoute,
 	minContextWindow: number,
 	matched: Exclude<UpstreamPrimaryMatch, { readonly matched: false }>,
@@ -639,26 +591,6 @@ const materializeUpstreamMatch = (
 ): ResolvedProviderModelPlan | undefined => {
 	if (matched.kind === "rejected") {
 		return undefined
-	}
-	if (matched.kind === "legacy") {
-		if (spec.allowUnlistedModels === false && ownProperty(spec.models, modelId) === undefined) {
-			return undefined
-		}
-		return matched.contextWindow >= minContextWindow
-			? {
-					kind: "synthesized",
-					cataloged: false,
-					wireModelId,
-					format,
-					route,
-					contextWindow: matched.contextWindow,
-					defaults: {
-						contextWindow: matched.contextWindow,
-						maxTokens: matched.maxTokens,
-						reasoning: false,
-					},
-				}
-			: undefined
 	}
 	const cataloged = matched.cataloged && options?.forceUnlisted !== true
 	if (
@@ -838,7 +770,6 @@ const resolveOpenRouterTargetPlan = (
 			spec,
 			lookupModelId,
 			lookupModelId,
-			format,
 			route,
 			minContextWindow,
 			upstream,
@@ -924,33 +855,6 @@ const resolveGatewayDerivedBase = (
 								wireModelId: wireId,
 								route,
 								model: primaryBase,
-							}
-						: undefined,
-			}
-		}
-	}
-	if (upstream === "openai") {
-		const legacyLimits = findLegacyOpenAIModelLimits(wireId)
-		if (legacyLimits !== undefined) {
-			if (spec.allowUnlistedModels === false && ownProperty(spec.models, modelId) === undefined) {
-				return { matched: true, plan: undefined }
-			}
-			return {
-				matched: true,
-				plan:
-					legacyLimits.contextWindow >= minContextWindow
-						? {
-								kind: "synthesized",
-								cataloged: false,
-								wireModelId: wireId,
-								format: expectedApi,
-								route,
-								contextWindow: legacyLimits.contextWindow,
-								defaults: {
-									contextWindow: legacyLimits.contextWindow,
-									maxTokens: legacyLimits.maxTokens,
-									reasoning: false,
-								},
 							}
 						: undefined,
 			}
@@ -1329,15 +1233,7 @@ const resolveUncheckedProviderModelPlan = (
 		}
 		const matched = findUpstreamPrimaryOrDerived(spec.id, modelId)
 		if (matched.matched) {
-			return materializeUpstreamMatch(
-				spec,
-				modelId,
-				modelId,
-				spec.defaultFormat,
-				"default",
-				minContextWindow,
-				matched,
-			)
+			return materializeUpstreamMatch(spec, modelId, modelId, "default", minContextWindow, matched)
 		}
 	} else if (isKnownNonChatModel(spec.id, modelId)) {
 		return undefined
