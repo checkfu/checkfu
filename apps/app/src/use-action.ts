@@ -6,10 +6,12 @@ import { ApiError, errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts
 export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 	action: (...args: Args) => Promise<Result>,
 	{
+		mutationKey,
 		invalidates,
 		refreshes,
 		then,
 	}: {
+		readonly mutationKey?: QueryKey
 		readonly invalidates?: ReadonlyArray<QueryKey>
 		readonly refreshes?: ReadonlyArray<QueryKey>
 		readonly then?: (result: Result, ...args: Args) => void
@@ -17,6 +19,7 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 ) {
 	const queryClient = useQueryClient()
 	const mutation = useMutation({
+		...(mutationKey === undefined ? {} : { mutationKey }),
 		mutationFn: (args: Args) => action(...args),
 		onSettled: () =>
 			Promise.all([

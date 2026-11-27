@@ -10,10 +10,10 @@ import { DataTable } from "@checkfu/ui/table"
 import type { ArtifactFileContent } from "@checkfu/sdk/Api"
 
 import type { JsonArtifact } from "@checkfu/sdk/client"
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
+import { useIsMutating, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ExternalLinkIcon } from "lucide-react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import type * as React from "react"
 import {
 	byteSize,
@@ -243,11 +243,7 @@ function ArtifactView({
 			</DescriptionList>
 			<FilesSection artifact={artifact} version={version} path={path} />
 			<LinkSection key={`${artifact.id}@${version}`} artifactId={artifact.id} version={version} />
-			<PublicationSection
-				key={artifact.publication?.address ?? "unpublished"}
-				artifact={artifact}
-				version={version}
-			/>
+			<PublicationSection artifact={artifact} version={version} />
 		</>
 	)
 }
@@ -509,25 +505,50 @@ function PublicationSection({
 	readonly version: number
 }): React.JSX.Element {
 	const { publication } = artifact
+	const queryClient = useQueryClient()
 	const [serve, setServe] = useState<"latest" | "pinned">("latest")
-	const [unpublishing, setUnpublishing] = useState(false)
+	const [confirmAddress, setConfirmAddress] = useState<string | null>(null)
+	const confirmation = useRef<string | null>(null)
+	const setConfirmation = (address: string | null) => {
+		confirmation.current = address
+		setConfirmAddress(address)
+	}
+	const mutationKey = ["artifact-publication", artifact.id]
+	const filter = { mutationKey, exact: true }
+	const pending = useIsMutating(filter) > 0
 	const publishKey = useSubmissionKey()
-	const publish = useAction(
-		async (target: number | "latest") => {
-			const body = { version: target }
-			await checkfu.artifacts.publish(artifact.id, body, publishKey.keyFor({ body, publication }))
-			publishKey.settle()
-		},
-		{ invalidates: [["artifacts"]] },
-	)
 	const unpublishKey = useSubmissionKey()
-	const unpublish = useAction(
-		async () => {
-			await checkfu.artifacts.unpublish(artifact.id, unpublishKey.keyFor({ publication }))
-			unpublishKey.settle()
+	const change = useAction(
+		async (target: number | "latest" | "unpublish") => {
+			const { queryKey } = artifactQuery(artifact.id)
+			let updated: JsonArtifact
+			if (target === "unpublish") {
+				updated = await checkfu.artifacts.unpublish(
+					artifact.id,
+					unpublishKey.keyFor({ publication }),
+				)
+				unpublishKey.settle()
+				setConfirmation(null)
+				setServe("latest")
+			} else {
+				const body = { version: target }
+				updated = await checkfu.artifacts.publish(
+					artifact.id,
+					body,
+					publishKey.keyFor({ body, publication }),
+				)
+				publishKey.settle()
+			}
+			await queryClient.cancelQueries({ queryKey, exact: true })
+			queryClient.setQueryData(queryKey, updated)
 		},
-		{ invalidates: [["artifacts"]], then: () => setUnpublishing(false) },
+		{ mutationKey, invalidates: [["artifacts"]] },
 	)
+	const run = (target: number | "latest" | "unpublish") => {
+		if (queryClient.isMutating(filter) === 0) {
+			change.run(target)
+		}
+	}
 	return (
 		<section className="space-y-3">
 			<div className="space-y-1">
@@ -543,16 +564,14 @@ function PublicationSection({
 					<Field label="Serve" className="w-48">
 						<Select
 							value={serve}
+							disabled={pending}
 							onChange={(event) => setServe(event.target.value === "pinned" ? "pinned" : "latest")}
 						>
 							<option value="latest">Follow latest</option>
 							<option value="pinned">Pin v{version}</option>
 						</Select>
 					</Field>
-					<Button
-						disabled={publish.pending}
-						onClick={() => publish.run(serve === "pinned" ? version : "latest")}
-					>
+					<Button disabled={pending} onClick={() => run(serve === "pinned" ? version : "latest")}>
 						Publish
 					</Button>
 				</div>
@@ -567,12 +586,20 @@ function PublicationSection({
 						</Description>
 						<Description label="Published">{timeAgo(publication.published_at)}</Description>
 					</DescriptionList>
-					{unpublishing ? (
+					{confirmAddress === publication.address ? (
 						<Confirm
 							label="Unpublish"
-							pending={unpublish.pending}
-							onConfirm={() => unpublish.run()}
-							onCancel={() => setUnpublishing(false)}
+							pending={pending}
+							onConfirm={() => {
+								if (confirmation.current === publication.address) {
+									run("unpublish")
+								}
+							}}
+							onCancel={() => {
+								if (queryClient.isMutating(filter) === 0) {
+									setConfirmation(null)
+								}
+							}}
 						>
 							Unpublish {artifact.name}? Its address stops working at once, and publishing again
 							gives it a new one.
@@ -580,12 +607,7 @@ function PublicationSection({
 					) : (
 						<div className="flex flex-wrap gap-2">
 							{publication.version === version ? null : (
-								<Button
-									variant="outline"
-									size="sm"
-									disabled={publish.pending}
-									onClick={() => publish.run(version)}
-								>
+								<Button variant="outline" size="sm" disabled={pending} onClick={() => run(version)}>
 									Pin to v{version}
 								</Button>
 							)}
@@ -593,26 +615,29 @@ function PublicationSection({
 								<Button
 									variant="outline"
 									size="sm"
-									disabled={publish.pending}
-									onClick={() => publish.run("latest")}
+									disabled={pending}
+									onClick={() => run("latest")}
 								>
 									Follow latest
 								</Button>
 							)}
-							<Button variant="destructive" size="sm" onClick={() => setUnpublishing(true)}>
+							<Button
+								variant="destructive"
+								size="sm"
+								disabled={pending}
+								onClick={() => {
+									if (queryClient.isMutating(filter) === 0) {
+										setConfirmation(publication.address)
+									}
+								}}
+							>
 								Unpublish
 							</Button>
 						</div>
 					)}
 				</>
 			)}
-			{[publish.error, unpublish.error].map((message) =>
-				message === undefined ? null : (
-					<Callout key={message} tone="error">
-						{message}
-					</Callout>
-				),
-			)}
+			{change.error === undefined ? null : <Callout tone="error">{change.error}</Callout>}
 		</section>
 	)
 }
