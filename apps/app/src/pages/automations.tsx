@@ -485,6 +485,7 @@ function AutomationDetails({
 					<Link
 						to="/agents/$agentId"
 						params={{ agentId: automation.agent.id }}
+						search={{ version: automation.agent.version }}
 						className="hover:underline"
 					>
 						{shortId(automation.agent.id)}

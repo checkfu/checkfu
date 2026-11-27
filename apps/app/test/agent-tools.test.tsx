@@ -1,11 +1,16 @@
 // @vitest-environment happy-dom
-import type { JsonAgent } from "@checkfu/sdk/client"
-import { useState } from "react"
+import type { JsonAgent, JsonAutomation, JsonSession } from "@checkfu/sdk/client"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router"
+import { render } from "@testing-library/react"
+import { act, useState } from "react"
 import type * as React from "react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { bodyOf, draftOf, problemsOf } from "../src/agent-draft.ts"
 import { AgentToolsFields, AgentToolsSummary } from "../src/pages/agent-tools.tsx"
-import { button, click, mount, type } from "./dom.tsx"
+import { agentQuery } from "../src/queries.ts"
+import { routeTree } from "../src/routeTree.gen.ts"
+import { button, click, mount, newQueryClient, settle, stubApi, type } from "./dom.tsx"
 
 const AT = "2026-11-24T00:00:00.000Z"
 
@@ -49,6 +54,7 @@ const permissions = (container: HTMLElement): ReadonlyArray<string> =>
 	[...container.querySelectorAll("select")].map((select) => select.value)
 
 afterEach(() => {
+	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
 })
 
@@ -108,5 +114,173 @@ describe("the default MCP permission", () => {
 		expect(saved.container.textContent).toContain("Ask first (default)")
 		expect(saved.container.textContent).not.toMatch(/read-only/iu)
 		saved.unmount()
+	})
+})
+
+describe("agent revision navigation", () => {
+	const revision: JsonAgent = {
+		...agent,
+		model: { id: "historical-model" },
+		system: "Original instructions",
+	}
+	const head: JsonAgent = {
+		...agent,
+		version: 2,
+		model: { id: "current-model" },
+		system: "Current instructions",
+		mcp_servers: [],
+		tools: [],
+	}
+	const agentPath = `/agents/${agent.id}`
+	const agentApiPath = `/v1${agentPath}`
+	const session: JsonSession = {
+		id: "sesn_1",
+		type: "session",
+		title: "Run using version one",
+		agent: revision,
+		environment_id: "env_1",
+		mcp_server_credentials: [],
+		resources: [],
+		status: "idle",
+		turn: 1,
+		usage: { input_tokens: 1, output_tokens: 1 },
+		created_at: AT,
+		updated_at: AT,
+		archived_at: null,
+	}
+	const automation: JsonAutomation = {
+		id: "auto_1",
+		type: "automation",
+		name: "Morning report",
+		description: null,
+		agent: { id: revision.id, version: revision.version },
+		environment_id: "env_1",
+		initial_events: [
+			{ type: "user.message", content: [{ type: "text", text: "Write the report." }] },
+		],
+		schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+		status: "active",
+		pause_reason: null,
+		run_count: 0,
+		revision: 1,
+		upcoming_runs_at: [],
+		last_run_at: null,
+		created_at: AT,
+		updated_at: AT,
+		archived_at: null,
+	}
+
+	const openRoute = async (initialPath: string) => {
+		vi.stubGlobal(
+			"EventSource",
+			class {
+				addEventListener(): void {}
+				close(): void {}
+			},
+		)
+		const sent = stubApi(({ path }) => {
+			const url = new URL(path, "https://dashboard.test")
+			switch (url.pathname) {
+				case "/auth/session":
+					return { body: {} }
+				case "/v1/sessions":
+					return { body: { data: [session], next_page: null } }
+				case `/v1/sessions/${session.id}`:
+					return { body: session }
+				case `/v1/sessions/${session.id}/events`:
+				case `/v1/automations/${automation.id}/runs`:
+					return { body: { data: [], next_page: null } }
+				case `/v1/automations/${automation.id}`:
+					return { body: automation }
+				case agentApiPath:
+					if (!url.searchParams.has("version")) {
+						return { body: head }
+					}
+					if (url.searchParams.get("version") === String(revision.version)) {
+						return { body: revision }
+					}
+					return {
+						status: 404,
+						body: { error: { type: "not_found_error", message: "Agent revision not found." } },
+					}
+				default:
+					throw new Error(`Unexpected request ${path}`)
+			}
+		})
+		const queryClient = newQueryClient()
+		const router = createRouter({
+			routeTree,
+			context: { queryClient },
+			history: createMemoryHistory({ initialEntries: [initialPath] }),
+		})
+		const view = render(
+			<QueryClientProvider client={queryClient}>
+				<RouterProvider router={router} />
+			</QueryClientProvider>,
+		)
+		await act(async () => {
+			await router.load()
+		})
+		await settle()
+		return {
+			...view,
+			router,
+			queryClient,
+			agentRequests: () =>
+				sent.filter(({ path }) => path.startsWith(agentApiPath)).map(({ path }) => path),
+		}
+	}
+
+	it.each(["/sessions", `/sessions/${session.id}`, `/automations/${automation.id}`])(
+		"opens the pinned revision from %s",
+		async (path) => {
+			const view = await openRoute(path)
+			const link = view.container.querySelector<HTMLAnchorElement>(`a[href^="${agentPath}"]`)
+			expect(link?.getAttribute("href")).toBe(`${agentPath}?version=1`)
+			if (link === null) {
+				throw new Error("Missing link to agent revision.")
+			}
+			await click(link)
+			await view.findByText("historical-model")
+			expect(view.getByText("Original instructions")).toBeDefined()
+			expect(view.queryByRole("button", { name: "Edit" })).toBeNull()
+			expect(view.queryByRole("button", { name: "Archive" })).toBeNull()
+			expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`])
+			view.unmount()
+		},
+	)
+
+	it("keeps a directly loaded revision and the current editor separate through history", async () => {
+		const view = await openRoute(`${agentPath}?version=1`)
+		expect(view.getByText("historical-model")).toBeDefined()
+		await click(view.getByRole("link", { name: "View current agent" }))
+		expect(view.router.state.location.href).toBe(agentPath)
+		expect(view.getByText("current-model")).toBeDefined()
+		await click(view.getByRole("button", { name: "Edit" }))
+		expect(view.getByRole("button", { name: "Save new version" })).toBeDefined()
+		await act(async () => view.router.history.back())
+		await settle()
+		expect(view.router.state.location.href).toBe(`${agentPath}?version=1`)
+		expect(view.getByText("historical-model")).toBeDefined()
+		await act(async () => view.router.history.forward())
+		await settle()
+		expect(view.router.state.location.href).toBe(agentPath)
+		expect(view.getByRole("button", { name: "Edit" })).toBeDefined()
+		expect(view.queryClient.getQueryData(agentQuery(agent.id).queryKey)).toEqual(head)
+		expect(view.queryClient.getQueryData(agentQuery(agent.id, 1).queryKey)).toEqual(revision)
+		expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`, agentApiPath])
+		view.unmount()
+	})
+
+	it.each([
+		["invalid", "Agent version must be a positive integer.", []],
+		["0", "Agent version must be a positive integer.", []],
+		["99", "Agent revision not found.", [`${agentApiPath}?version=99`]],
+	])("shows a route error for requested revision %s", async (version, message, requests) => {
+		const view = await openRoute(`${agentPath}?version=${version}`)
+		expect(view.getByText(message)).toBeDefined()
+		expect(view.queryByText("current-model")).toBeNull()
+		expect(view.agentRequests()).toEqual(requests)
+		view.unmount()
 	})
 })

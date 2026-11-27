@@ -108,6 +108,7 @@ export function SessionsPage(): React.JSX.Element {
 							<Link
 								to="/agents/$agentId"
 								params={{ agentId: session.agent.id }}
+								search={{ version: session.agent.version }}
 								className="font-mono text-xs hover:underline"
 							>
 								{shortId(session.agent.id)} v{session.agent.version}
@@ -377,6 +378,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 						<Link
 							to="/agents/$agentId"
 							params={{ agentId: session.agent.id }}
+							search={{ version: session.agent.version }}
 							className="hover:underline"
 						>
 							Agent v{session.agent.version}

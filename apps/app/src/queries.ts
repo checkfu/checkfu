@@ -10,10 +10,10 @@ export const agentsPage = (token?: string) =>
 		queryFn: ({ signal }) => checkfu.agents.list(token, signal),
 	})
 
-export const agentQuery = (id: string) =>
+export const agentQuery = (id: string, version?: number) =>
 	queryOptions({
-		queryKey: ["agents", "one", id],
-		queryFn: ({ signal }) => checkfu.agents.retrieve(id, signal),
+		queryKey: version === undefined ? ["agents", "one", id] : ["agents", "version", id, version],
+		queryFn: ({ signal }) => checkfu.agents.retrieve(id, { version, signal }),
 	})
 
 export const agentChoices = infiniteQueryOptions({

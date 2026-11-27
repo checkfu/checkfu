@@ -116,8 +116,15 @@ const newestFirst = (page: string | undefined) => ({
 	...(page === undefined ? {} : { page }),
 })
 
-const retrieveAgent = (agent_id: string, signal?: AbortSignal): Promise<JsonAgent> =>
-	request("agents.retrieve", { path: { agent_id }, ...(signal === undefined ? {} : { signal }) })
+const retrieveAgent = (
+	agent_id: string,
+	options?: { readonly version?: number | undefined; readonly signal?: AbortSignal },
+): Promise<JsonAgent> =>
+	request("agents.retrieve", {
+		path: { agent_id },
+		...(options?.version === undefined ? {} : { query: { version: options.version } }),
+		...withSignal(options?.signal),
+	})
 const retrieveEnvironment = (
 	environment_id: string,
 	signal?: AbortSignal,

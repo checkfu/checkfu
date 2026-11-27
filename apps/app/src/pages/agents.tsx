@@ -294,8 +294,57 @@ export function NewAgentPage(): React.JSX.Element {
 
 export function AgentPage(): React.JSX.Element {
 	const { agentId } = detail.useParams()
-	const agent = present(useSuspenseQuery(agentQuery(agentId)))
-	return <AgentView key={agent.id} agent={agent} />
+	const { version } = detail.useSearch()
+	const agent = present(useSuspenseQuery(agentQuery(agentId, version)))
+	return version === undefined ? (
+		<AgentView key={agent.id} agent={agent} />
+	) : (
+		<AgentRevisionView key={`${agent.id}:${version}`} agent={agent} />
+	)
+}
+
+function AgentRevisionView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
+	return (
+		<>
+			<PageHeader
+				title={agent.name}
+				id={agent.id}
+				breadcrumb={<Link to="/agents">Agents</Link>}
+				accessory={<span className="text-xs text-muted-foreground">Read-only revision</span>}
+				description={agent.description ?? undefined}
+				actions={
+					<Button variant="outline" size="sm" asChild>
+						<Link to="/agents/$agentId" params={{ agentId: agent.id }} search={{}}>
+							View current agent
+						</Link>
+					</Button>
+				}
+			/>
+			<AgentConfiguration agent={agent} />
+		</>
+	)
+}
+
+function AgentConfiguration({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
+	return (
+		<AgentConfigurationView agent={agent}>
+			<DescriptionList>
+				<Description label="Model">
+					<span className="font-mono">{agent.model.id}</span>
+				</Description>
+				<Description label="Version">v{agent.version}</Description>
+				<Description label="Created">{timeAgo(agent.created_at)}</Description>
+				<Description label="Updated">{timeAgo(agent.updated_at)}</Description>
+			</DescriptionList>
+			<section className="space-y-2">
+				<h2 className="text-sm font-medium">System prompt</h2>
+				<pre className="rounded-lg border bg-muted/40 p-4 text-control whitespace-pre-wrap">
+					{agent.system ?? "None"}
+				</pre>
+			</section>
+			<AgentToolsSummary agent={agent} />
+		</AgentConfigurationView>
+	)
 }
 
 interface Edit {
@@ -411,23 +460,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 				<Callout tone="error">{exportProject.error}</Callout>
 			)}
 			{edit === null ? (
-				<AgentConfigurationView agent={agent}>
-					<DescriptionList>
-						<Description label="Model">
-							<span className="font-mono">{agent.model.id}</span>
-						</Description>
-						<Description label="Version">v{agent.version}</Description>
-						<Description label="Created">{timeAgo(agent.created_at)}</Description>
-						<Description label="Updated">{timeAgo(agent.updated_at)}</Description>
-					</DescriptionList>
-					<section className="space-y-2">
-						<h2 className="text-sm font-medium">System prompt</h2>
-						<pre className="rounded-lg border bg-muted/40 p-4 text-control whitespace-pre-wrap">
-							{agent.system ?? "None"}
-						</pre>
-					</section>
-					<AgentToolsSummary agent={agent} />
-				</AgentConfigurationView>
+				<AgentConfiguration agent={agent} />
 			) : (
 				<AgentForm
 					key={edit.base.version}
