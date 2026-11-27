@@ -48,14 +48,16 @@ bun run test:bun
 bun run test:workerd
 ```
 
-The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. The other domain files run serially so concurrent Z3 work does not starve the Sessions proof's unchanged deadline. This changes scheduling, not proof requirements or coverage.
+The domain CI jobs run with `CHECKFU_PROVE=1`, separating the unified proof from the other domain suites. `Sessions.verify` and `Sessions.replay.verify` each run on a runner of their own, and the other domain files run serially on one more, so concurrent Z3 work does not starve a proof. The required `domain` check passes only when all three pass. This changes scheduling, not proof requirements or coverage.
 
 Main's active CI run finishes while newer pushes replace the pending run. This lets the proof jobs complete and save their content-based task results even when main advances frequently. The next run reuses results only for unchanged inputs. PR updates cancel their older run.
 
 On a local machine, run the heavy proof groups separately to avoid solver contention:
 
 ```sh
-CHECKFU_PROVE=1 bun run --cwd packages/domain test --exclude test/Checkfu.verify.test.ts --no-file-parallelism
+CHECKFU_PROVE=1 bun run --cwd packages/domain test --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --no-file-parallelism
+CHECKFU_PROVE=1 bun run --cwd packages/domain test test/Sessions.verify.test.ts
+CHECKFU_PROVE=1 bun run --cwd packages/domain test test/Sessions.replay.verify.test.ts
 CHECKFU_PROVE=1 bun run --cwd packages/domain test test/Checkfu.verify.test.ts
 ```
 

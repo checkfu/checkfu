@@ -75,25 +75,46 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
-  # The Z3 proofs in packages/domain take minutes, so they get a runner of their own.
-  domain:
+  # The Z3 proofs in packages/domain take minutes. Each Sessions proof gets a runner of its own,
+  # and the other domain files share one, serially, so concurrent Z3 work cannot starve a proof.
+  domain-proofs:
+    name: domain (${{ matrix.shard.name }})
     runs-on: ubuntu-latest
-    # Allow the fault-exhaustive Sessions proof and the other serial proofs to finish.
-    timeout-minutes: 35
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: rest
+            args: --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --no-file-parallelism
+          - name: sessions
+            args: test/Sessions.verify.test.ts
+          - name: sessions-replay
+            args: test/Sessions.replay.verify.test.ts
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          turbo-cache: domain
-      # Concurrent solver-heavy files can starve the Sessions proof.
-      - run: bun x turbo run test --filter=@checkfu/domain -- --exclude test/Checkfu.verify.test.ts --no-file-parallelism
+          turbo-cache: domain-${{ matrix.shard.name }}
+      - run: bun x turbo run test --filter=@checkfu/domain -- ${{ matrix.shard.args }}
         env:
           CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
+
+  # The required check: it passes only when every domain-proofs shard passed.
+  domain:
+    needs: domain-proofs
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.domain-proofs.result }}
 
   # The unified Checkfu proof alone takes about ten minutes, so it runs beside the other proofs.
   domain-checkfu:
