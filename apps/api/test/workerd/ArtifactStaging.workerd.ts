@@ -37,7 +37,7 @@ it.runIf(process.env.CHECKFU_MEASURE_ARTIFACT_STAGING === "1")(
 				invalidChecksumStored: false,
 			})
 			for (const { files, bytes } of [
-				{ files: 2, bytes: 2_093 },
+				{ files: 2, bytes: 2093 },
 				{ files: 64, bytes: 66_999 },
 			]) {
 				for (const distribution of ["cold", "mixed", "warm"]) {
