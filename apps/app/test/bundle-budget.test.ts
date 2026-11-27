@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join, relative, resolve, sep } from "node:path"
 import { brotliCompressSync } from "node:zlib"
 import { build } from "vite"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -68,32 +68,36 @@ const cssOf = (keys: Iterable<string>) => [...keys].flatMap((key) => manifest[ke
 const chunksOf = (route: string) =>
 	Object.keys(manifest).filter((key) => key === route || key.startsWith(`${route}?`))
 
-const ROUTES = [
-	"src/routes/sign-in.tsx",
-	"src/routes/_app/sessions/index.tsx",
-	"src/routes/_app/sessions/new.tsx",
-	"src/routes/_app/sessions/$sessionId.tsx",
-	"src/routes/_app/agents/index.tsx",
-	"src/routes/_app/agents/new.tsx",
-	"src/routes/_app/agents/$agentId.tsx",
-	"src/routes/_app/environments/index.tsx",
-	"src/routes/_app/environments/new.tsx",
-	"src/routes/_app/environments/$environmentId.tsx",
-	"src/routes/_app/automations/index.tsx",
-	"src/routes/_app/automations/new.tsx",
-	"src/routes/_app/automations/$automationId.tsx",
-	"src/routes/_app/artifacts/index.tsx",
-	"src/routes/_app/artifacts/$artifactId.tsx",
-	"src/routes/_app/vaults/index.tsx",
-	"src/routes/_app/vaults/new.tsx",
-	"src/routes/_app/vaults/$vaultId.tsx",
-]
+const NON_SCREEN_ROUTES = new Set([
+	"src/routes/__root.tsx", // Root outlet.
+	"src/routes/_app.tsx", // Signed-in layout, measured with each child screen.
+	"src/routes/_app/index.tsx", // Redirects to sessions.
+])
+
+const isScreenRoute = (path: string): boolean =>
+	path.startsWith("src/routes/") &&
+	/\.[jt]sx?$/u.test(path) &&
+	!path.split("/").some((segment) => segment.startsWith(".") || segment.startsWith("-")) &&
+	!NON_SCREEN_ROUTES.has(path)
+
+const ROUTES = readdirSync(join(root, "src/routes"), { recursive: true, withFileTypes: true })
+	.filter((entry) => entry.isFile())
+	.map((entry) => relative(root, join(entry.parentPath, entry.name)).replaceAll(sep, "/"))
+	.filter(isScreenRoute)
+	.sort()
 
 describe("first view", () => {
+	it("measures every screen in the production manifest", () => {
+		const compiled = Object.keys(manifest)
+			.map((key) => key.split("?", 1)[0] ?? key)
+			.filter(isScreenRoute)
+		expect(ROUTES).toEqual([...new Set(compiled)].sort())
+	})
+
 	it.each(ROUTES)("keeps a cold load of %s within budget", (route) => {
 		const entry = closure(Object.keys(manifest).filter((key) => manifest[key]?.isEntry))
 		const own = chunksOf(route)
-		expect(own.length).toBeGreaterThan(0)
+		expect(own.length, `No manifest chunks for ${route}`).toBeGreaterThan(0)
 		const layouts = route.startsWith("src/routes/_app/") ? chunksOf("src/routes/_app.tsx") : []
 		const routeChunks = [...own, ...layouts]
 		const cold = closure([...entry, ...routeChunks])
