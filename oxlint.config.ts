@@ -43,15 +43,45 @@ const OWNED = [
 	},
 ]
 
-const confined = (exempt?: string): NonNullable<OxlintConfig["rules"]> => {
+const DOMAIN = "packages/domain/src/"
+const SDK_CONTRACTS = ["ArtifactAccess", "Limits", "Schemas", "WebhookUrl"]
+const SDK_CONTRACT_MESSAGE =
+	"The domain imports only the SDK contract modules: ArtifactAccess, Limits, Schemas, and WebhookUrl."
+
+const confined = ({
+	exempt,
+	domain = false,
+}: { readonly exempt?: string; readonly domain?: boolean } = {}): NonNullable<
+	OxlintConfig["rules"]
+> => {
 	const enforced = OWNED.filter(({ owner }) => owner !== exempt)
 	return {
 		"no-restricted-imports": [
 			"error",
 			{
-				paths: enforced.flatMap(({ message, imports }) =>
-					imports.map((path) => ({ ...path, allowTypeImports: true, message })),
-				),
+				paths: [
+					...enforced.flatMap(({ message, imports }) =>
+						imports.map((path) => ({ ...path, allowTypeImports: true, message })),
+					),
+					...(domain ? [{ name: "@checkfu/sdk", message: SDK_CONTRACT_MESSAGE }] : []),
+				],
+				...(domain
+					? {
+							patterns: [
+								{
+									group: [
+										"@checkfu/sdk/*",
+										...SDK_CONTRACTS.map((name) => `!@checkfu/sdk/${name}`),
+									],
+									message: SDK_CONTRACT_MESSAGE,
+								},
+								{
+									regex: String.raw`^(?:\.{1,2}/)+(?:packages/)?sdk(?:/|$)`,
+									message: "Use SDK package contract imports at the domain boundary.",
+								},
+							],
+						}
+					: {}),
 			},
 		],
 		"no-restricted-properties": [
@@ -239,7 +269,14 @@ export default defineConfig({
 				"unicorn/prefer-string-raw": "off",
 			},
 		},
-		...OWNED.map(({ owner }) => ({ files: [owner], rules: confined(owner) })),
+		{
+			files: [`${DOMAIN}**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}`],
+			rules: confined({ domain: true }),
+		},
+		...OWNED.map(({ owner }) => ({
+			files: [owner],
+			rules: confined({ exempt: owner, domain: owner.startsWith(DOMAIN) }),
+		})),
 		{
 			files: ["**/*.story.{test,spec}.ts"],
 			rules: {
