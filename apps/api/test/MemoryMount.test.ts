@@ -3,12 +3,15 @@ import { makeMemoryMount } from "../src/Workspace/MemoryMount.ts"
 import { withCallSignal } from "../src/Workspace/CallSignal.ts"
 import { makeSessionMemory } from "../src/Workspace/SessionMemory.ts"
 import type {
+	MemoryMountInfo,
 	MemoryOutcome,
 	MemoryReceipt,
 	PendingReceiptStore,
 	PendingReceipts,
 	SessionMemory,
 } from "../src/Workspace/SessionMemory.ts"
+
+const utf8 = new TextEncoder()
 
 const fakeMemory = (
 	files: Map<string, string>,
@@ -26,8 +29,18 @@ const fakeMemory = (
 		mounts: () => Promise.resolve([{ name: "notes", access }]),
 		list: () =>
 			Promise.resolve(
-				[...files].map(([path, content]) => ({ path, size: content.length, updated_at: 1 })),
+				[...files].map(([path, content]) => ({
+					path,
+					size: utf8.encode(content).byteLength,
+					updated_at: 1,
+				})),
 			),
+		stat: (_name, path) => {
+			const content = files.get(path)
+			return Promise.resolve(
+				content === undefined ? null : { size: utf8.encode(content).byteLength, updated_at: 1 },
+			)
+		},
 		read: (_name, path) => {
 			calls.push(`read ${path}`)
 			const content = files.get(path)
@@ -100,6 +113,56 @@ describe("memory mount", () => {
 		expect(await code(mount.readdir("notes/todo.md", {}))).toBe("ENOTDIR")
 	})
 
+	it("stats UTF-8 bytes without reading memory content", async () => {
+		const calls: Array<string> = []
+		const mount = mountOver(new Map([["/note.md", "雪🌱"]]), { calls })
+		expect(await mount.stat("notes/note.md")).toMatchObject({ type: "file", size: 7, mtime: 1 })
+		expect(calls).toEqual([])
+	})
+
+	it("stats an overwritten file by its committed metadata while the listing is behind", async () => {
+		const receipt = { stream: "note", version: 1 }
+		const inner = fakeMemory(new Map())
+		let updated = false
+		const mount = makeMemoryMount(
+			makeSessionMemory(
+				{
+					...inner,
+					read: async () => {
+						throw new Error("stat must not read the content")
+					},
+					stat: async () => (updated ? { size: 7, updated_at: 42 } : { size: 3, updated_at: 1 }),
+					list: async () => {
+						throw new Error("the listing is behind")
+					},
+					write: async () => {
+						updated = true
+						return { ok: true, content_sha256: "digest", receipt }
+					},
+				},
+				heldIn(),
+			),
+		)
+		expect(await mount.stat("notes/note.md")).toMatchObject({ type: "file", size: 3, mtime: 1 })
+		await mount.writeFile?.("notes/note.md", body("雪🌱"), {})
+		expect(await mount.stat("notes/note.md")).toMatchObject({ type: "file", size: 7, mtime: 42 })
+	})
+
+	it("checks fresh access for mount operations that do not issue a write", async () => {
+		let access: MemoryMountInfo["access"] = "read_write"
+		const inner = fakeMemory(new Map([["/note.md", "note"]]))
+		const mount = makeMemoryMount(
+			makeSessionMemory(
+				{ ...inner, mounts: async () => [{ name: "notes", access }] },
+				heldIn(),
+				() => 0,
+			),
+		)
+		expect(await mount.stat("notes")).toMatchObject({ mode: 0o755 })
+		access = "read_only"
+		expect(await code(mount.mkdir?.("notes/new", {}))).toBe("EROFS")
+		expect(await code(mount.rename?.("notes/note.md", "notes/note.md", {}))).toBe("EROFS")
+	})
 	it("removes a directory only with its memories, and never a store's own directory", async () => {
 		const files = new Map([
 			["/team/a.md", "A."],
@@ -265,6 +328,55 @@ describe("memory mount", () => {
 })
 
 describe("session memory", () => {
+	it("shares the mounted stores across file stats until the cached list expires", async () => {
+		let now = 0
+		let reads = 0
+		const inner = fakeMemory(new Map())
+		const mount = makeMemoryMount(
+			makeSessionMemory(
+				{
+					...inner,
+					mounts: () => {
+						reads += 1
+						return inner.mounts()
+					},
+				},
+				heldIn(),
+				() => now,
+			),
+		)
+		for (let index = 0; index < 20; index += 1) {
+			await mount.stat(`notes/file-${index}.md`)
+		}
+		expect(reads).toBe(1)
+		now += 11_000
+		await mount.stat("notes/after.md")
+		expect(reads).toBe(2)
+	})
+
+	it("shares one pending mount lookup across callers and retries a failed lookup", async () => {
+		const pending = Promise.withResolvers<ReadonlyArray<MemoryMountInfo>>()
+		const inner = fakeMemory(new Map())
+		let reads = 0
+		const memory = makeSessionMemory(
+			{
+				...inner,
+				mounts: () => {
+					reads += 1
+					return reads === 1 ? pending.promise : inner.mounts()
+				},
+			},
+			heldIn(),
+		)
+		const results = Promise.allSettled([memory.mounts(), memory.mounts()])
+		await Promise.resolve()
+		expect(reads).toBe(1)
+		pending.reject(new Error("try again"))
+		expect((await results).map((answer) => answer.status)).toEqual(["rejected", "rejected"])
+		expect(await memory.mounts()).toEqual([{ name: "notes", access: "read_write" }])
+		expect(reads).toBe(2)
+	})
+
 	it("asks each listing for the writes it was acknowledged for, until a listing has shown them", async () => {
 		const asked: Array<ReadonlyArray<MemoryReceipt>> = []
 		let lagging = false
@@ -273,6 +385,7 @@ describe("session memory", () => {
 			{
 				mounts: () => Promise.resolve([]),
 				read: () => Promise.resolve(null),
+				stat: () => Promise.resolve(null),
 				remove: () => Promise.resolve({ ok: true, content_sha256: "", receipt: null }),
 				list: (_, after) => {
 					asked.push(after)
@@ -314,6 +427,7 @@ describe("session memory", () => {
 		const calls = {
 			mounts: () => Promise.resolve([]),
 			read: () => Promise.resolve(null),
+			stat: () => Promise.resolve(null),
 			remove: () => Promise.resolve({ ok: true as const, content_sha256: "", receipt: null }),
 			list: (_: string, after: ReadonlyArray<MemoryReceipt>) => {
 				asked.push(after)

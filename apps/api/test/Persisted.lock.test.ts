@@ -570,6 +570,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 						"memoryMounts",
 						"memoryRead",
 						"memoryRemove",
+						"memoryStat",
 						"memoryWrite",
 					].flatMap((method) => [`api-call:Api.${method}/args`, `api-call:Api.${method}/result`]),
 				].toSorted(),

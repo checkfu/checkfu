@@ -23,6 +23,7 @@ import { ToolConfirmation } from "@checkfu/domain/Session/ToolConfirmation.aggre
 import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
+import { MAX_MEMORIES_PER_STORE, MAX_MEMORY_CONTENT_BYTES } from "@checkfu/sdk/Schemas"
 import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
 import * as Cause from "effect/Cause"
 import {
@@ -255,7 +256,7 @@ export const describeMounts = (
 			? []
 			: [
 					[
-						"Memory stores mounted in your workspace. Each is a directory of files that outlasts this session; what you write there is saved as you write it:",
+						`Memory stores mounted in your workspace outlast this session. What you write there is saved as you write it. Each file holds at most ${MAX_MEMORY_CONTENT_BYTES} bytes of UTF-8 text, and each store holds at most ${MAX_MEMORIES_PER_STORE} files.`,
 						...stores.map(describeStore),
 					].join("\n"),
 				]),

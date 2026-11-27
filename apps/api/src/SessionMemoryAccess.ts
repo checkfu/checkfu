@@ -88,6 +88,17 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 			return MemoryStoreId.make(store.memory_store_id)
 		})
 
+	const mountedMemory = (sessionId: string, name: string, path: string) =>
+		Effect.gen(function* () {
+			const store = yield* storeNamed(sessionId, name)
+			if (store === undefined || !isMemoryPath(path) || !isLive(yield* statusOf(store))) {
+				return null
+			}
+			const storeId = MemoryStoreId.make(store.memory_store_id)
+			const memoryId = MemoryId.make(yield* memoryIdOf(digest, storeId, path))
+			return yield* access.read(storeId, memoryId)
+		})
+
 	return {
 		memoryMounts: (sessionId: string) =>
 			Effect.flatMap(attached(sessionId), (all) =>
@@ -114,25 +125,25 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 					updated_at: DateTime.toEpochMillis(entry.updated_at),
 				}))
 			}),
+		memoryStat: (sessionId: string, name: string, path: string) =>
+			Effect.map(mountedMemory(sessionId, name, path), (found) =>
+				found === null
+					? null
+					: {
+							size: found.content_size_bytes,
+							updated_at: DateTime.toEpochMillis(found.updated_at),
+						},
+			),
 		memoryRead: (sessionId: string, name: string, path: string) =>
-			Effect.gen(function* () {
-				const store = yield* storeNamed(sessionId, name)
-				if (store === undefined || !isMemoryPath(path) || !isLive(yield* statusOf(store))) {
-					return null
-				}
-				const storeId = MemoryStoreId.make(store.memory_store_id)
-				const found = yield* access.read(
-					storeId,
-					MemoryId.make(yield* memoryIdOf(digest, storeId, path)),
-				)
-				return found === null
+			Effect.map(mountedMemory(sessionId, name, path), (found) =>
+				found === null
 					? null
 					: {
 							content: found.content,
 							content_sha256: found.content_sha256,
 							updated_at: DateTime.toEpochMillis(found.updated_at),
-						}
-			}),
+						},
+			),
 		memoryWrite: (
 			sessionId: string,
 			name: string,

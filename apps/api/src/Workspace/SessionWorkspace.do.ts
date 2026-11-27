@@ -20,7 +20,6 @@ import {
 import { ApiWorker } from "../Api.ts"
 import { ARTIFACT_MOUNT_ROOT, SKILL_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
 import { makeArtifactMount } from "./ArtifactMount.ts"
-import { makeMemoryMount } from "./MemoryMount.ts"
 import { makeSandboxMount, makeSandboxOutputFiles } from "./SandboxMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
@@ -159,6 +158,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					{
 						mounts: () => call(api.memoryMounts(sessionId)),
 						list: (name, after) => call(api.memoryList(sessionId, name, after)),
+						stat: (name, path) => call(api.memoryStat(sessionId, name, path)),
 						read: (name, path) => call(api.memoryRead(sessionId, name, path)),
 						write: (name, path, content, exclusive) =>
 							call(api.memoryWrite(sessionId, name, path, content, exclusive)),
@@ -176,20 +176,22 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					read: (mountPath, path, offset, length) =>
 						call(api.artifactRead(sessionId, mountPath, path, offset, length)),
 				}
-				const mounts = (walkLimit: number) => ({
-					[MEMORY_ROOT]: makeMemoryMount(memory),
-					[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts, walkLimit),
-					[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
-				})
 				const allowedHosts = (): ReadonlyArray<string> | null => {
 					const allowed = storage.kv.get<ReadonlyArray<string> | null>(ALLOWED_HOSTS)
 					return allowed === undefined ? [] : allowed
 				}
 				const open = async () => {
-					const [{ Workspace, PASSTHROUGH_WALK_LIMIT }, { createPiTools }] = await Promise.all([
-						import("@cloudflare/computer"),
-						import("@cloudflare/computer/tools/pi-ai"),
-					])
+					const [{ Workspace, PASSTHROUGH_WALK_LIMIT }, { createPiTools }, { makeMemoryMount }] =
+						await Promise.all([
+							import("@cloudflare/computer"),
+							import("@cloudflare/computer/tools/pi-ai"),
+							import("./MemoryMount.ts"),
+						])
+					const mounts = (walkLimit: number) => ({
+						[MEMORY_ROOT]: makeMemoryMount(memory),
+						[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts, walkLimit),
+						[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
+					})
 					const local = new Workspace({ storage, mounts: mounts(PASSTHROUGH_WALK_LIMIT) })
 					const { fs } = local
 					let overMachine: Files | undefined

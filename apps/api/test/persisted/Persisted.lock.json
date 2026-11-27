@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T13:34:32.822Z",
+			"cut_at": "2026-11-27T13:50:09.610Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -325,6 +325,8 @@
 				"api-call:Api.memoryMounts/result": "d31f7155797f878788a2b70bd92640df0f57594bdacd8275ccc8c5a6b9174a4c",
 				"api-call:Api.memoryList/args": "7ff824b326822bc239f2a7a8c32e8b2854507c67ed4d295864bbf040a8baa700",
 				"api-call:Api.memoryList/result": "0615ac174eecd67ab54f2aaebedad93c248736dc1f3ef62b60b33c3299dbd6f8",
+				"api-call:Api.memoryStat/args": "76c19a333893f8313f2913195317f2513df7c51761ce29f4a586c304a1241dd9",
+				"api-call:Api.memoryStat/result": "29102859bed3a5bf92208ea078dd7e75317831d1ffd38fc78183fd3f1d4772df",
 				"api-call:Api.memoryRead/args": "76c19a333893f8313f2913195317f2513df7c51761ce29f4a586c304a1241dd9",
 				"api-call:Api.memoryRead/result": "ebc1e3b0bfc66d7b359178b30c7187ac82f6f0d269fc1ea62c56ede58f50f99f",
 				"api-call:Api.memoryWrite/args": "932b42a1e15f674c5ec2c3d662a5f25490228fb9802da90f7dc224a5d77b2eac",
@@ -18381,6 +18383,73 @@
 							"updated_at": 0
 						}
 					]
+				],
+				"api-call:Api.memoryStat/args": [
+					[
+						"ymO0\"\"H-",
+						")b",
+						"\udc00"
+					],
+					[
+						"r",
+						"",
+						""
+					],
+					[
+						"f\\YP8z$f",
+						"D+!!Q:TeY",
+						" "
+					],
+					[
+						"8;eO0j8;.;",
+						"__proto__",
+						"0"
+					],
+					[
+						"WX3]Z_",
+						"",
+						"\udc00"
+					],
+					[
+						"__proto__",
+						"prototype",
+						""
+					],
+					[
+						" ",
+						"4294967295",
+						"\u0000"
+					],
+					[
+						"bb#|T2OK|B",
+						"^zUjIZ?@`O",
+						"-1"
+					]
+				],
+				"api-call:Api.memoryStat/result": [
+					{
+						"size": 99,
+						"updated_at": 0
+					},
+					{
+						"size": 6,
+						"updated_at": 5
+					},
+					{
+						"size": 6,
+						"updated_at": 44
+					},
+					null,
+					null,
+					{
+						"size": 94,
+						"updated_at": 13
+					},
+					{
+						"size": 29,
+						"updated_at": 43
+					},
+					null
 				],
 				"api-call:Api.memoryRead/args": [
 					[

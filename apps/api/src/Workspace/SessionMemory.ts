@@ -9,11 +9,10 @@ export const MemoryMountInfo = Schema.Struct({
 })
 export type MemoryMountInfo = typeof MemoryMountInfo.Type
 
-export const MemoryFileInfo = Schema.Struct({
-	path: Schema.String,
-	size: Count,
-	updated_at: Count,
-})
+const MemoryStat = Schema.Struct({ size: Count, updated_at: Count })
+type MemoryStat = typeof MemoryStat.Type
+
+export const MemoryFileInfo = Schema.Struct({ path: Schema.String, ...MemoryStat.fields })
 export type MemoryFileInfo = typeof MemoryFileInfo.Type
 
 export const MemoryContent = Schema.Struct({
@@ -57,6 +56,10 @@ export const SessionMemoryCalls = {
 		args: Schema.Tuple([Session, StoreName, Schema.Array(MemoryReceipt)]),
 		result: Schema.Array(MemoryFileInfo),
 	},
+	memoryStat: {
+		args: Schema.Tuple([Session, StoreName, Path]),
+		result: Schema.NullOr(MemoryStat),
+	},
 	memoryRead: {
 		args: Schema.Tuple([Session, StoreName, Path]),
 		result: Schema.NullOr(MemoryContent),
@@ -72,7 +75,8 @@ export const SessionMemoryCalls = {
 }
 
 export interface SessionMemory {
-	readonly mounts: () => Promise<ReadonlyArray<MemoryMountInfo>>
+	readonly mounts: (fresh?: boolean) => Promise<ReadonlyArray<MemoryMountInfo>>
+	readonly stat: (name: string, path: string) => Promise<MemoryStat | null>
 	readonly list: (name: string) => Promise<ReadonlyArray<MemoryFileInfo>>
 	readonly read: (name: string, path: string) => Promise<MemoryContent | null>
 	readonly write: (
@@ -85,7 +89,8 @@ export interface SessionMemory {
 }
 
 export interface SessionMemoryCalls {
-	readonly mounts: SessionMemory["mounts"]
+	readonly mounts: () => ReturnType<SessionMemory["mounts"]>
+	readonly stat: SessionMemory["stat"]
 	readonly list: (
 		name: string,
 		after: ReadonlyArray<MemoryReceipt>,
@@ -102,10 +107,36 @@ export interface PendingReceiptStore {
 	readonly put: (pending: PendingReceipts) => void
 }
 
+const MOUNTS_FRESH_MS = 10_000
+
 export const makeSessionMemory = (
 	calls: SessionMemoryCalls,
 	store: PendingReceiptStore,
+	now: () => number = Date.now,
 ): SessionMemory => {
+	let cached: ReturnType<SessionMemory["mounts"]> | undefined
+	let expiresAt = 0
+	const mounts: SessionMemory["mounts"] = (fresh) => {
+		if (fresh === true) {
+			return calls.mounts()
+		}
+		if (cached === undefined || now() >= expiresAt) {
+			expiresAt = Infinity
+			cached = Promise.resolve()
+				.then(() => calls.mounts())
+				.then(
+					(value) => {
+						expiresAt = now() + MOUNTS_FRESH_MS
+						return value
+					},
+					(error: unknown) => {
+						cached = undefined
+						throw error
+					},
+				)
+		}
+		return cached
+	}
 	const pendingFor = (name: string): ReadonlyArray<MemoryReceipt> => {
 		const held = store.get() ?? {}
 		return Object.hasOwn(held, name) ? (held[name] ?? []) : []
@@ -115,7 +146,8 @@ export const makeSessionMemory = (
 		store.put(Object.fromEntries(receipts.length === 0 ? others : [...others, [name, receipts]]))
 	}
 	return {
-		mounts: calls.mounts,
+		mounts,
+		stat: calls.stat,
 		read: calls.read,
 		remove: (name, path, expected) => {
 			throwIfCallStopped()

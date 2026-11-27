@@ -613,6 +613,7 @@ export const makePiDurableTestLayer = (
 	const sessionMemoryCalls = (sessionId: string): SessionMemoryCalls => ({
 		mounts: () => run((access) => access.memoryMounts(sessionId)),
 		list: (name, after) => run((access) => access.memoryList(sessionId, name, after)),
+		stat: (name, path) => run((access) => access.memoryStat(sessionId, name, path)),
 		read: (name, path) => run((access) => access.memoryRead(sessionId, name, path)),
 		write: (name, path, content, exclusive) =>
 			run((access) => access.memoryWrite(sessionId, name, path, content, exclusive)),

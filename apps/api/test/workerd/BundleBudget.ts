@@ -185,7 +185,7 @@ export const CONTENT_WORKER_BUDGET = {
 
 export const PI_HARNESS_WORKER_BUDGET = {
 	eagerBytes: 2_190_000,
-	totalBytes: 3_220_000,
+	totalBytes: 3_221_000,
 	startupCpuMs: 500,
 } as const
 

@@ -818,6 +818,9 @@ describe("Memory stores in a session", () => {
 				yield* sendAndSettle(apiFetch, readOnly.id, ["Edit the rules."], 1)
 				expect(outcomes).toEqual(["EROFS", "EROFS", "EROFS"])
 				expect(systems[0]).toContain(`- ${MOUNT} (read-only): Team Notes.`)
+				expect(systems[0]).toContain(
+					"Each file holds at most 100000 bytes of UTF-8 text, and each store holds at most 1000 files.",
+				)
 				expect(yield* stored).toEqual({ "/rules.md": "Be kind." })
 
 				const readWrite = yield* json<{ id: string }>(

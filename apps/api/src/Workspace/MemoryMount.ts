@@ -76,15 +76,15 @@ const nested = (
 }
 
 export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
-	const locate = async (rel: string): Promise<Located | undefined> => {
+	const locate = async (rel: string, fresh = false): Promise<Located | undefined> => {
 		const [name, ...rest] = rel.split("/")
-		const mount = (await memory.mounts()).find((mounted) => mounted.name === name)
+		const mount = (await memory.mounts(fresh)).find((mounted) => mounted.name === name)
 		return mount === undefined
 			? undefined
 			: { mount, path: rest.length === 0 ? "" : `/${rest.join("/")}` }
 	}
-	const writable = async (rel: string): Promise<Located> => {
-		const at = await locate(rel)
+	const writable = async (rel: string, fresh = false): Promise<Located> => {
+		const at = await locate(rel, fresh)
 		if (at === undefined) {
 			throw failure("EROFS", "Only an attached memory store can be written to.")
 		}
@@ -116,11 +116,13 @@ export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 			if (at.path === "") {
 				return dirStat(at.mount)
 			}
-			const file = await read(at)
+			const file = await memory.stat(at.mount.name, at.path)
 			if (file !== null) {
-				return fileStat(at.mount, encoder.encode(file.content).byteLength, file.updated_at)
+				return fileStat(at.mount, file.size, file.updated_at)
 			}
-			return below(await memory.list(at.mount.name), at.path).length > 0 ? dirStat(at.mount) : null
+			return (await memory.list(at.mount.name)).some(({ path }) => path.startsWith(`${at.path}/`))
+				? dirStat(at.mount)
+				: null
 		},
 		readdir: async (rel, options) => {
 			if (rel === "") {
@@ -180,8 +182,8 @@ export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 			await write(at, decode(bytes, rel), options.exclusive === true)
 		},
 		mkdir: async (rel) => {
-			const at = await writable(rel)
-			if (at.path !== "" && (await read(at)) !== null) {
+			const at = await writable(rel, true)
+			if (at.path !== "" && (await memory.stat(at.mount.name, at.path)) !== null) {
 				throw failure("EEXIST", `A memory is there: ${rel}`)
 			}
 		},
@@ -212,6 +214,7 @@ export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 				throw failure("EBUSY", `An attached memory store cannot be renamed: ${from}`)
 			}
 			if (source.mount.name === target.mount.name && source.path === target.path) {
+				await writable(from, true)
 				return
 			}
 			const file = await read(source)
