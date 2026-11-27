@@ -171,21 +171,8 @@ export const measureBundle = async (
 	}
 }
 
-export const API_WORKER_BUDGET = {
-	eagerBytes: 1_753_000,
-	totalBytes: 1_794_000,
-	startupCpuMs: 500,
-} as const
-
-export const CONTENT_WORKER_BUDGET = {
-	eagerBytes: 633_000,
-	totalBytes: 633_000,
-	startupCpuMs: 500,
-} as const
-
-export const PI_HARNESS_WORKER_BUDGET = {
-	eagerBytes: 2_201_000,
-	totalBytes: 3_240_000,
+export const WORKER_LIMITS = {
+	totalBytes: 16 * 1024 * 1024,
 	startupCpuMs: 500,
 } as const
 
@@ -200,8 +187,11 @@ export const describeEager = (worker: string, measured: BundleMeasurement): stri
 		),
 	].join("\n")
 
-export const EAGER_BYTES_HELP =
-	"Every isolate, each Durable Object's included, parses and runs this code before its first event. Before raising the budget, look at the largest sources below: data belongs in a static asset or storage, and code only one path needs belongs behind that path or in its own Worker. Lower the budget if the bundle shrank."
+export const TOTAL_BYTES_HELP =
+	"Cloudflare's limit for a Worker is 64 MiB uncompressed. One at a quarter of that carries something that is not code: put data in a static asset or storage."
 
 export const STARTUP_HELP =
-	"Cloudflare rejects a Worker whose global scope needs more than one second of CPU (error 10021); the budget is half that. Keep schema and layer construction out of module scope."
+	"Cloudflare rejects a Worker whose global scope needs more than one second of CPU (error 10021), and one upload of the same code can read half again above the usual, so the limit here is half a second. Do not raise it. Take work out of start-up instead: build on first use what only some calls need, load the HTTP routes on the first request, or host a model's Durable Objects in their own Worker. The largest sources below show where the code is."
+
+export const describeMeasured = (worker: string, measured: BundleMeasurement): string =>
+	`${worker}: start-up ${Math.round(measured.startupCpuMs)} ms of CPU, ${measured.eagerBytes} bytes loaded at start-up, ${measured.totalBytes} bytes in all.`
