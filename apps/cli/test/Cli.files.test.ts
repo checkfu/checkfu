@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
@@ -90,6 +91,24 @@ describe("CLI files", () => {
 					expect(again.exitCode).toBe(1)
 					expect(again.errorMessage).toContain("already exists")
 
+					const raced = path.join(root, "raced.csv")
+					const racedDownload = yield* cli.run(
+						["files", "download", "--file-id", file.id, "--output", raced],
+						{
+							fileSystem: NodeFileSystem.layer,
+							interceptFetch: async (next, request) => {
+								if (request.url.endsWith("/content")) {
+									await writeFile(raced, "another writer")
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(racedDownload.exitCode).toBe(1)
+					expect(racedDownload.errorMessage).toContain("already exists")
+					expect(yield* fs.readFileString(raced)).toBe("another writer")
+					yield* fs.remove(raced)
+
 					const cut = yield* cli.run(
 						["files", "download", "--file-id", file.id, "--output", path.join(root, "cut.csv")],
 						{
@@ -121,9 +140,54 @@ describe("CLI files", () => {
 					expect(cut.exitCode).not.toBe(0)
 					expect(yield* fs.readDirectory(root)).toEqual(["copy.csv", "report.csv"])
 
+					const physical = path.join(root, "physical")
+					const child = path.join(physical, "child")
+					const alias = path.join(root, "alias")
+					yield* fs.makeDirectory(child, { recursive: true })
+					yield* fs.symlink(child, alias)
+					const throughAlias = `${alias}${path.sep}..${path.sep}copy.csv`
+					const sameParent = Layer.succeed(FileSystem.FileSystem, {
+						...fs,
+						link: (partial, target) => {
+							const directory = path.basename(path.dirname(partial))
+							const adjacent = path.join(physical, directory, path.basename(partial))
+							return fs.stat(adjacent).pipe(Effect.andThen(fs.link(partial, target)))
+						},
+					})
+					const aliased = yield* cli.run(
+						["files", "download", "--file-id", file.id, "--output", throughAlias],
+						{ fileSystem: sameParent },
+					)
+					expect(aliased.stderr).toBe("")
+					expect(new Uint8Array(yield* fs.readFile(path.join(physical, "copy.csv")))).toEqual(data)
+					expect((yield* fs.readDirectory(physical)).sort()).toEqual(["child", "copy.csv"])
+
 					const missing = yield* run("files", "upload", path.join(root, "absent.txt"))
 					expect(missing.exitCode).toBe(1)
 					expect(missing.errorMessage).toContain("no such file")
+
+					const growing = Layer.succeed(FileSystem.FileSystem, {
+						...fs,
+						stat: (filePath) =>
+							fs
+								.stat(filePath)
+								.pipe(
+									Effect.tap(() =>
+										filePath === source
+											? fs.writeFile(source, new Uint8Array(data.byteLength + 1))
+											: Effect.void,
+									),
+								),
+					})
+					const grew = yield* cli.run(["files", "upload", source], {
+						fileSystem: growing,
+						interceptFetch: (next, request) => {
+							expect(request.method).not.toBe("POST")
+							return next(request)
+						},
+					})
+					expect(grew.exitCode).toBe(1)
+					expect(grew.errorMessage).toContain("grew while it was being read")
 
 					expect((yield* run("files", "delete", "--file-id", file.id)).exitCode).toBe(0)
 					expect(

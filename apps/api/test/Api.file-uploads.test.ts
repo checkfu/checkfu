@@ -49,7 +49,7 @@ const withFiles = <A>(
 		readonly call: (method: string, path: string) => Effect.Effect<Response>
 		readonly upload: (
 			query: string,
-			bytes: Uint8Array,
+			body: Uint8Array | ReadableStream<Uint8Array>,
 			headers?: Record<string, string>,
 		) => Effect.Effect<Response>
 	}) => Effect.Effect<A>,
@@ -63,28 +63,35 @@ const withFiles = <A>(
 			return yield* run({
 				store: fileStore,
 				call: (method, path) => sendRequest(apiFetch, { method, path, headers: AUTH_HEADERS }),
-				upload: (query, bytes, headers) =>
-					Effect.map(
+				upload: (query, body, headers) => {
+					const requestHeaders = new Headers({
+						...AUTH_HEADERS,
+						"content-type": "application/octet-stream",
+						...headers,
+					})
+					const isBytes = ArrayBuffer.isView(body)
+					if (isBytes && !requestHeaders.has("content-length")) {
+						requestHeaders.set("content-length", String(body.byteLength))
+					}
+					const options = {
+						method: "POST",
+						headers: requestHeaders,
+						body: isBytes ? new Blob([new Uint8Array(body)]) : body,
+						duplex: "half",
+					}
+					return Effect.map(
 						apiFetch.pipe(
 							Effect.provideService(
 								HttpServerRequest.HttpServerRequest,
 								HttpServerRequest.fromWeb(
-									new Request(`http://localhost/v1/files?${query}`, {
-										method: "POST",
-										headers: {
-											...AUTH_HEADERS,
-											"content-type": "application/octet-stream",
-											"content-length": String(bytes.byteLength),
-											...headers,
-										},
-										body: new Blob([new Uint8Array(bytes)]),
-									}),
+									new Request(`http://localhost/v1/files?${query}`, options),
 								),
 							),
 							Effect.provideService(RuntimeContext, TEST_RUNTIME),
 						),
 						HttpServerResponse.toWeb,
-					),
+					)
+				},
 			})
 		}).pipe(Effect.scoped, Effect.provide(layer), Effect.ensuring(Effect.promise(closeAll))),
 	)
@@ -173,6 +180,35 @@ describe("Files API", () => {
 			}),
 		))
 
+	it("stops reading when a streamed upload exceeds its declared length", () =>
+		withFiles(({ upload, store }) =>
+			Effect.gen(function* () {
+				let pulled = 0
+				let cancelled = false
+				const body = new ReadableStream<Uint8Array>(
+					{
+						pull(controller) {
+							pulled += 1
+							if (pulled > 1) {
+								controller.error(new Error("Unexpected additional read"))
+								return
+							}
+							controller.enqueue(bytesOf(1))
+						},
+						cancel() {
+							cancelled = true
+						},
+					},
+					{ highWaterMark: 0 },
+				)
+				const response = yield* upload("filename=empty.txt", body, { "content-length": "0" })
+				expect(response.status).toBe(400)
+				expect(pulled).toBe(1)
+				expect(cancelled).toBe(true)
+				expect(store.writes()).toBe(0)
+			}),
+		))
+
 	it("refuses a missing or unsafe filename, a missing length, and a body over the limit", () =>
 		withFiles(({ upload, store }) =>
 			Effect.gen(function* () {
@@ -193,6 +229,8 @@ describe("Files API", () => {
 				const short = yield* upload("filename=a.txt", bytesOf(8), { "content-length": "9" })
 				expect(short.status).toBe(400)
 				expect((yield* json<ErrorBody>(short)).error.message).toContain("8 bytes, not the 9")
+				const nonempty = yield* upload("filename=a.txt", bytesOf(8), { "content-length": "0" })
+				expect(nonempty.status).toBe(400)
 				expect(store.objects.size).toBe(0)
 			}),
 		))
@@ -209,6 +247,14 @@ describe("Files API", () => {
 				expect(store.writes()).toBe(1)
 				expect(store.objects.has(contentKey(first.id))).toBe(true)
 
+				const mismatched = yield* upload("filename=report.pdf", data, {
+					...key,
+					"content-length": "4999",
+				})
+				expect(mismatched.status).toBe(400)
+				expect((yield* json<ErrorBody>(mismatched)).error.message).toContain(
+					"5000 bytes, not the 4999",
+				)
 				expect((yield* upload("filename=report.pdf", bytesOf(5000, 7), key)).status).toBe(409)
 				expect((yield* upload("filename=other.pdf", data, key)).status).toBe(409)
 				expect(store.writes()).toBe(1)

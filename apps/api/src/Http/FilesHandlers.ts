@@ -120,7 +120,17 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 									Effect.map((reserved): number | null => reserved.reply.reservation),
 									Effect.catchTag("FileAlreadyExists", () => Effect.succeed(null)),
 								)
+					let received = 0
+					const lengthMismatch = (actual: number) =>
+						reject(
+							400,
+							`The body was ${actual} bytes, not the ${size} its Content-Length declared.`,
+						)
 					const body = request.stream.pipe(
+						Stream.takeUntil((chunk) => {
+							received += chunk.byteLength
+							return received > size
+						}),
 						Stream.mapError((cause) => new FileStoreError({ cause })),
 					)
 					const bytes = yield* stored(
@@ -129,13 +139,12 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 						Effect.catchTags({
 							BytesPurged: () => interrupted,
 							ReservationStale: () => interrupted,
-							FileSizeMismatch: (mismatch) =>
-								reject(
-									400,
-									`The body was ${mismatch.received} bytes, not the ${mismatch.declared} its Content-Length declared.`,
-								),
+							FileSizeMismatch: (mismatch) => lengthMismatch(mismatch.received),
 						}),
 					)
+					if (bytes.size !== size) {
+						return yield* lengthMismatch(bytes.size)
+					}
 					if (reservation !== null) {
 						yield* files
 							.send(

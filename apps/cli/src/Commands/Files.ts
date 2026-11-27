@@ -1,10 +1,10 @@
 import { FileId, FileName, MAX_FILE_BYTES } from "@checkfu/sdk/Schemas"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
-import * as Flag from "effect/cli/Flag"
 import * as SecureRandom from "effect/crypto/SecureRandom"
-import * as Effect from "effect/Effect"
 import * as Hex from "effect/encoding/Hex"
+import * as Flag from "effect/cli/Flag"
+import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -49,13 +49,18 @@ const uploadCommand = Command.make(
 			if (stat.type !== "File") {
 				return yield* usageError(`${input.path}: expected a file.`)
 			}
-			if (Number(stat.size) > MAX_FILE_BYTES) {
+			const size = Number(stat.size)
+			if (size > MAX_FILE_BYTES) {
 				return yield* usageError(`${input.path}: a file may be at most ${MAX_FILE_BYTES} bytes.`)
 			}
-			const chunks = yield* Stream.runCollect(fs.stream(input.path)).pipe(
-				Effect.mapError((error) => usageError(`${input.path}: ${error.message}`)),
-			)
-			const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+			const chunks = yield* Stream.runCollect(
+				fs.stream(input.path, { bytesToRead: size + 1 }),
+			).pipe(Effect.mapError((error) => usageError(`${input.path}: ${error.message}`)))
+			const received = chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
+			if (received > size) {
+				return yield* usageError(`${input.path}: the file grew while it was being read. Try again.`)
+			}
+			const bytes = new Uint8Array(received)
 			let offset = 0
 			for (const chunk of chunks) {
 				bytes.set(chunk, offset)
@@ -96,6 +101,7 @@ const downloadCommand = Command.make(
 	(input) =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
+			const path = yield* Path.Path
 			const client = yield* getClient
 			const file_id = yield* Schema.decodeEffect(FileId)(input.fileId).pipe(
 				Effect.mapError(() => usageError("--file-id must not be empty.")),
@@ -106,23 +112,37 @@ const downloadCommand = Command.make(
 			const target = Option.getOrElse(input.output, () => file.filename)
 			const unwritable = (error: PlatformError.PlatformError) =>
 				usageError(`${target}: ${error.message}`)
+			const targetExists = () =>
+				usageError(`${target} already exists; pass --output to write somewhere else.`)
 			if (yield* Effect.mapError(fs.exists(target), unwritable)) {
-				return yield* usageError(`${target} already exists; pass --output to write somewhere else.`)
+				return yield* targetExists()
 			}
 			const body = yield* client.api.files
 				.content({ params: { file_id } })
 				.pipe(Effect.mapError(formatClientError))
 			const random = yield* SecureRandom.SecureRandom
-			const partial = `${target}.${Hex.encode(yield* random.randomBytes(6))}.tmp`
+			const suffix = Hex.encode(yield* random.randomBytes(12))
+			const parent = path.dirname(target)
+			const separator = parent.endsWith(path.sep) ? "" : path.sep
+			// Preserve the destination's parent through symlinks and `..` segments.
+			const temporary = `${parent}${separator}checkfu-download-${suffix}`
+			yield* Effect.acquireRelease(fs.makeDirectory(temporary, { mode: 0o700 }), () =>
+				Effect.orDie(fs.remove(temporary, { recursive: true, force: true })),
+			).pipe(Effect.mapError(unwritable))
+			const partial = `${temporary}${path.sep}content`
 			yield* Stream.run(
 				Stream.mapError(body, (error) => formatClientError(error)),
 				Sink.mapError(fs.sink(partial, { flag: "wx" }), unwritable),
-			).pipe(
-				Effect.andThen(Effect.mapError(fs.rename(partial, target), unwritable)),
-				Effect.onError(() => Effect.ignore(fs.remove(partial))),
 			)
+			yield* fs
+				.link(partial, target)
+				.pipe(
+					Effect.mapError((error) =>
+						error.reason._tag === "AlreadyExists" ? targetExists() : unwritable(error),
+					),
+				)
 			yield* renderOutput({ id: file.id, path: target, size: file.size })
-		}),
+		}).pipe(Effect.scoped),
 ).pipe(Command.withDescription("Download a file's bytes to a local path"))
 
 export const filesCommands = [uploadCommand, downloadCommand] as const
