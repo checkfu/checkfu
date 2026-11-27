@@ -83,7 +83,7 @@ import {
 	providerError,
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
-import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { createInMemoryPiDurableBackend, storedWrites } from "./helpers/InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend, InMemoryStorage } from "./helpers/InMemoryPiBackend.ts"
 import {
 	measurePause,
@@ -3230,6 +3230,247 @@ describe("turn engine", () => {
 			await backend.close()
 		}
 	})
+	it.each([1, 5, 10, 30])(
+		"counts cleanup before admission across %i unpublished turns",
+		async (streak) => {
+			const repetitions = process.env["CHECKFU_MEASURE_PI_CLEANUP"] === "1" ? 5 : 1
+			let timing: { readonly admissionMs: number; readonly lockMs: number } | undefined
+			for (let sample = 0; sample < repetitions; sample += 1) {
+				const contexts: Array<string> = []
+				const backend = await createInMemoryPiDurableBackend(
+					makeScriptedPiModels(async (model, context) => {
+						contexts.push(
+							context.messages
+								.filter(({ role }) => role === "user")
+								.map((message) =>
+									typeof message.content === "string"
+										? message.content
+										: message.content
+												.map((part) => (part.type === "text" ? part.text : ""))
+												.join(""),
+								)
+								.join("|"),
+						)
+						return makeAssistantReply(model, null, "ok", 1, 1)
+					}),
+				)
+				let admission:
+					| {
+							from: number
+							to: number
+							submittedAt: number
+							enterAt: number
+							operationId: string
+							historicalInputReads: number
+							currentInputReads: number
+							inputSubmissions: number
+							markerReads: number
+							priorWaits: number
+					  }
+					| undefined
+				const inputLookup = backend.storage.submissionByRequest.bind(backend.storage)
+				const pi = await backend.pi()
+				const markerIds = new Set<Parameters<typeof pi.submission>[0]>()
+				vi.spyOn(backend.storage, "submissionByRequest").mockImplementation(
+					async (id, requestId, context) => {
+						const record = await inputLookup(id, requestId, context)
+						if (admission !== undefined) {
+							if (requestId.startsWith("omit:turn:")) {
+								admission.markerReads += 1
+								if (record !== undefined) {
+									markerIds.add(record.id)
+								}
+							} else if (requestId === admission.operationId) {
+								admission.currentInputReads += 1
+							} else if (requestId.startsWith("turn:")) {
+								admission.historicalInputReads += 1
+							}
+						}
+						return record
+					},
+				)
+				const lookupSubmission = pi.submission.bind(pi)
+				const observed = new WeakSet()
+				vi.spyOn(pi, "submission").mockImplementation(async (...args) => {
+					const handle = await lookupSubmission(...args)
+					if (handle !== undefined && markerIds.has(args[0]) && !observed.has(handle)) {
+						observed.add(handle)
+						const wait = handle.wait.bind(handle)
+						vi.spyOn(handle, "wait").mockImplementation((...options) => {
+							if (admission !== undefined) {
+								admission.priorWaits += 1
+							}
+							return wait(...options)
+						})
+					}
+					return handle
+				})
+				const measured: PiDurableBackend = {
+					...backend,
+					withLock: (effect) =>
+						backend.withLock(
+							Effect.gen(function* () {
+								const start = performance.now()
+								const result = yield* effect
+								if (admission !== undefined && admission.enterAt >= start) {
+									admission.from = start
+									admission.to = performance.now()
+								}
+								return result
+							}),
+						),
+					enterWorkspace: (turn) => {
+						if (admission !== undefined) {
+							admission.enterAt = performance.now()
+						}
+						return backend.enterWorkspace(turn)
+					},
+					submit: (text, operationId) => {
+						if (admission !== undefined) {
+							admission.submittedAt = performance.now()
+							admission.inputSubmissions += 1
+						}
+						return backend.submit(text, operationId)
+					},
+				}
+				try {
+					const costs = []
+					for (let turn = 1; turn <= streak + 1; turn += 1) {
+						const historical = turn > streak ? 0 : turn - 1
+						const request = {
+							...turnRequest(turn, `turn-${turn}`),
+							unpublishedOperationIds: Array.from(
+								{ length: historical },
+								(_, index) => `turn:${index + 1}`,
+							),
+						}
+						const written = storedWrites.length
+						const start = performance.now()
+						const metrics = {
+							from: 0,
+							to: 0,
+							enterAt: -1,
+							submittedAt: 0,
+							operationId: request.operationId,
+							historicalInputReads: 0,
+							currentInputReads: 0,
+							inputSubmissions: 0,
+							markerReads: 0,
+							priorWaits: 0,
+						}
+						admission = metrics
+						const outcome = await Effect.runPromise(runPiDurableTurn(measured, request))
+						admission = undefined
+						expect(outcome.ok).toBe(true)
+						expect(metrics.from).toBeGreaterThanOrEqual(start)
+						expect(metrics.submittedAt).toBeGreaterThanOrEqual(metrics.from)
+						expect(metrics.to).toBeGreaterThanOrEqual(metrics.submittedAt)
+						const omissionWrites = storedWrites
+							.slice(written)
+							.filter(({ kind }) => kind === "checkfu.omit_unanswered").length
+						costs.push({
+							historical,
+							historicalInputReads: metrics.historicalInputReads,
+							currentInputReads: metrics.currentInputReads,
+							inputSubmissions: metrics.inputSubmissions,
+							markerReads: metrics.markerReads,
+							priorWaits: metrics.priorWaits,
+							omissionWrites,
+						})
+						if (turn === streak) {
+							timing = {
+								admissionMs: metrics.submittedAt - start,
+								lockMs: metrics.to - metrics.from,
+							}
+						}
+					}
+					if (process.env["CHECKFU_MEASURE_PI_CLEANUP"] === "1") {
+						process.stdout.write(`${JSON.stringify({ streak, sample, costs, timing })}\n`)
+					}
+					expect(costs.reduce((sum, row) => sum + row.historical, 0)).toBe(
+						(streak * (streak - 1)) / 2,
+					)
+					expect(
+						costs.every(
+							({ historical, historicalInputReads, currentInputReads, inputSubmissions }) =>
+								historicalInputReads === historical &&
+								currentInputReads === 5 &&
+								inputSubmissions === 1,
+						),
+					).toBe(true)
+					expect(costs.map(({ markerReads }) => markerReads)).toEqual(
+						Array.from({ length: streak + 1 }, (_, index) =>
+							index === 0 || index === streak ? 0 : index + 1,
+						),
+					)
+					expect(costs.map(({ priorWaits }) => priorWaits)).toEqual(
+						Array.from({ length: streak + 1 }, (_, index) =>
+							index === streak ? 0 : Math.max(0, index - 1),
+						),
+					)
+					expect(costs.map(({ omissionWrites }) => omissionWrites)).toEqual(
+						Array.from({ length: streak + 1 }, (_, index) => (index > 0 && index < streak ? 1 : 0)),
+					)
+					expect(contexts.slice(0, streak)).toEqual(
+						Array.from({ length: streak }, (_, index) => `turn-${index + 1}`),
+					)
+					expect(contexts.at(-1)).toBe(`turn-${streak}|turn-${streak + 1}`)
+				} finally {
+					vi.restoreAllMocks()
+					await backend.close()
+				}
+			}
+		},
+	)
+
+	it("resumes historical cleanup after the session object changes", async () => {
+		const seen: Array<string> = []
+		const models = makeScriptedPiModels(async (model, context) => {
+			seen.push(
+				context.messages
+					.filter(({ role }) => role === "user")
+					.map((message) =>
+						typeof message.content === "string"
+							? message.content
+							: message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+					)
+					.join("|"),
+			)
+			return makeAssistantReply(model, null, "ok", 1, 1)
+		})
+		const first = await createInMemoryPiDurableBackend(models)
+		const readMarker = (turn: number) =>
+			first.storage.submissionByRequest(
+				ROOT_CONVERSATION_ID,
+				`omit:turn:${turn}`,
+				BACKGROUND_CONTEXT,
+			)
+		const send = (backend: PiDurableBackend, turn: number, history: ReadonlyArray<number>) =>
+			Effect.runPromise(
+				runPiDurableTurn(backend, {
+					...turnRequest(turn, `turn-${turn}`),
+					unpublishedOperationIds: history.map((previous) => `turn:${previous}`),
+				}),
+			)
+		expect((await send(first, 1, [])).ok).toBe(true)
+		expect((await send(first, 2, [1])).ok).toBe(true)
+		const complete = await readMarker(1)
+		expect(complete).toMatchObject({ status: "done" })
+		expect(await readMarker(2)).toBeUndefined()
+		first.retire()
+		const restarted = await createInMemoryPiDurableBackend(models, 1, undefined, undefined, {
+			storage: first.storage,
+		})
+		try {
+			expect((await send(restarted, 3, [1, 2])).ok).toBe(true)
+			expect(await readMarker(1)).toEqual(complete)
+			expect(await readMarker(2)).toMatchObject({ status: "done" })
+			expect(seen).toEqual(["turn-1", "turn-2", "turn-3"])
+		} finally {
+			await restarted.close()
+		}
+	})
+
 	it("makes a recovery probe wait while the same turn's admission waits for a predecessor to drain", async () => {
 		let releaseFirst: () => void = () => undefined
 		const firstHeld = new Promise<void>((resolve) => {
