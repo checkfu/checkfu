@@ -44,7 +44,6 @@ import { WebhookEventsLive } from "./Webhooks/WebhookEventsLive.ts"
 import { WebhookFanoutContinuationDo, WebhookFanoutLive } from "./Webhooks/WebhookFanout.do.ts"
 import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
 import { SessionArtifactAccess } from "./SessionArtifactAccess.ts"
-
 import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 import { SkillReader } from "./Skills/SkillReader.ts"
 
@@ -349,10 +348,10 @@ export default ApiWorker.make(
 				Effect.orDie(artifacts.artifactFiles(sessionId, mountPath)),
 			artifactRead: (sessionId, mountPath, path, offset, length) =>
 				Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
-			sessionFileSave: (sessionId, turn, path, bytes) =>
-				Effect.flatMap(saves, (loaded) => loaded.sessionFileSave(sessionId, turn, path, bytes)),
-			sessionArtifactSave: (sessionId, name, entries) =>
-				Effect.flatMap(saves, (loaded) => loaded.sessionArtifactSave(sessionId, name, entries)),
+			sessionFileSave: (...args) =>
+				Effect.flatMap(saves, (service) => service.sessionFileSave(...args)),
+			sessionArtifactSave: (...args) =>
+				Effect.flatMap(saves, (service) => service.sessionArtifactSave(...args)),
 		})
 	}),
 )

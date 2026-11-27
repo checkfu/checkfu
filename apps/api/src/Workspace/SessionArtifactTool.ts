@@ -1,5 +1,9 @@
 import * as Schema from "effect/Schema"
 
+export const MAX_TOOL_ARTIFACT_FILES = 256
+export const MAX_TOOL_ARTIFACT_FILE_BYTES = 8 * 1024 * 1024
+export const MAX_TOOL_ARTIFACT_TOTAL_BYTES = 64 * 1024 * 1024
+
 const Session = Schema.String
 const Turn = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
@@ -31,7 +35,7 @@ export const SessionArtifactToolCalls = {
 		result: SavedSessionFile,
 	},
 	sessionArtifactSave: {
-		args: Schema.Tuple([Session, Schema.String, Schema.Array(SessionArtifactEntry)]),
+		args: Schema.Tuple([Session, Turn, Schema.String, Schema.Array(SessionArtifactEntry)]),
 		result: SavedSessionArtifact,
 	},
 }

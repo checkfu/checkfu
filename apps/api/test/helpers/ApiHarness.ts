@@ -617,20 +617,25 @@ export const makePiDurableTestLayer = (
 		return saveArtifact(
 			{ name, directory },
 			{
-				find: async (root) => {
-					const inside = [...files.keys()].filter((path) => path.startsWith(`${root}/`))
-					if (inside.length === 0) {
-						throw new Error("ENOENT")
-					}
-					return inside.map((path) => ({ path, type: "file" }))
-				},
-				size: async (path) => encoder.encode(files.get(path) ?? "").byteLength,
-				stopped: () => false,
-				read: async (path) => encoder.encode(files.get(path) ?? ""),
+				capture: (root) => ({
+					list: async () => {
+						const inside = [...files.keys()].filter((path) => path.startsWith(`${root}/`))
+						if (inside.length === 0) {
+							throw Object.assign(new Error("Directory is missing."), { code: "ENOENT" })
+						}
+						return inside.map((path) => ({
+							path: path.slice(root.length + 1),
+							type: "file",
+							size: encoder.encode(files.get(path) ?? "").byteLength,
+						}))
+					},
+					read: async (path, limit) =>
+						encoder.encode(files.get(`${root}/${path}`) ?? "").subarray(0, limit),
+				}),
 				saveFile: (path, bytes) =>
 					built().run(built().saves.sessionFileSave(sessionId, turn, path, bytes)),
 				saveArtifact: (artifactName, entries) =>
-					built().run(built().saves.sessionArtifactSave(sessionId, artifactName, entries)),
+					built().run(built().saves.sessionArtifactSave(sessionId, turn, artifactName, entries)),
 			},
 		)
 	}

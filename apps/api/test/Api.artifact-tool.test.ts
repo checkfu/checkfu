@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
@@ -41,15 +42,29 @@ const withSessions = async (
 			| "sessionArtifactSaves"
 			| "runInWorld"
 			| "artifactStore"
+			| "fileStore"
 		> & {
 			readonly createSession: Effect.Effect<{ readonly id: string }>
 			readonly save: (sessionId: string, name: string, directory: string) => Effect.Effect<string>
 		},
 	) => Effect.Effect<void>,
 ) => {
-	const { layer, closeAll, ...world } = makePiDurableTestLayer(async (model) =>
-		makeAssistantReply(model, null, "ok", 1, 1),
-	)
+	const pending = Promise.withResolvers<void>()
+	const { layer, closeAll, ...world } = makePiDurableTestLayer(async (model, _context, signal) => {
+		await new Promise<void>((done) => {
+			if (signal?.aborted) {
+				done()
+				return
+			}
+			const finish = () => {
+				signal?.removeEventListener("abort", finish)
+				done()
+			}
+			signal?.addEventListener("abort", finish, { once: true })
+			void pending.promise.then(finish)
+		})
+		return makeAssistantReply(model, null, "ok", 1, 1)
+	})
 	try {
 		await Effect.runPromise(
 			Effect.gen(function* () {
@@ -62,23 +77,32 @@ const withSessions = async (
 				)
 				yield* run(apiFetch, {
 					...world,
-					createSession: Effect.flatMap(
-						request(apiFetch, "POST", "/v1/sessions", {
-							agent: agent.id,
-							environment_id: environment.id,
-						}),
-						(res) => json<{ id: string }>(res),
-					),
+					createSession: Effect.gen(function* () {
+						const session = yield* json<{ id: string }>(
+							yield* request(apiFetch, "POST", "/v1/sessions", {
+								agent: agent.id,
+								environment_id: environment.id,
+							}),
+						)
+						const posted = yield* request(apiFetch, "POST", `/v1/sessions/${session.id}/events`, {
+							events: [
+								{ type: "user.message", content: [{ type: "text", text: "Save these files." }] },
+							],
+						})
+						expect(posted.status).toBe(200)
+						return session
+					}),
 					save: (sessionId, name, directory) =>
 						Effect.map(
 							Effect.promise(() => world.saveSessionArtifact(sessionId, 1, name, directory)),
 							(result) =>
 								result.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
 						),
-				})
+				}).pipe(Effect.ensuring(Effect.sync(pending.resolve)))
 			}).pipe(Effect.scoped, Effect.provide(layer)),
 		)
 	} finally {
+		pending.resolve()
 		await closeAll()
 	}
 }
@@ -163,7 +187,7 @@ describe("An artifact the agent saves", () => {
 					)
 					expect(stolen.ok).toBe(true)
 					const refused = yield* run(
-						saves.sessionArtifactSave(mine.id, "Report", [
+						saves.sessionArtifactSave(mine.id, 1, "Report", [
 							{ path: "secret.txt", file_id: stolen.ok ? stolen.file_id : "" },
 						]),
 					)
@@ -173,7 +197,7 @@ describe("An artifact the agent saves", () => {
 					})
 					expect(
 						yield* run(
-							saves.sessionArtifactSave(mine.id, "Report", [
+							saves.sessionArtifactSave(mine.id, 1, "Report", [
 								{ path: "x.txt", file_id: "file_missing" },
 							]),
 						),
@@ -181,46 +205,85 @@ describe("An artifact the agent saves", () => {
 					expect(
 						yield* run(saves.sessionFileSave(mine.id, 1, "../up.txt", new Uint8Array(1))),
 					).toMatchObject({ ok: false })
-					expect(yield* run(saves.sessionArtifactSave(mine.id, "", []))).toMatchObject({
+					expect(yield* run(saves.sessionArtifactSave(mine.id, 1, "", []))).toMatchObject({
 						ok: false,
 					})
 				}),
 		))
 
-	it("gives two saves racing for one name a version each that holds what that call sent", () =>
-		withSessions((apiFetch, { sessionArtifactSaves, runInWorld, createSession }) =>
+	it("gives each competing first save its own version and bytes", () =>
+		withSessions((apiFetch, { artifactStore, createSession, workspaceFiles, save }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const files = workspaceFiles(session.id)
+				files.set("/workspace/first/a.txt", "first")
+				files.set("/workspace/second/a.txt", "second")
+
+				const staged = Promise.withResolvers<void>()
+				const resume = Promise.withResolvers<void>()
+				let stages = 0
+				artifactStore.setAfterStage(
+					Effect.suspend(() => {
+						stages += 1
+						if (stages !== 2) {
+							return Effect.void
+						}
+						staged.resolve()
+						return Effect.promise(() => resume.promise)
+					}),
+				)
+				const first = yield* Effect.forkChild(save(session.id, "Report", "/workspace/first"))
+				const second = yield* Effect.gen(function* () {
+					yield* Effect.promise(() => staged.promise)
+					return yield* save(session.id, "Report", "/workspace/second")
+				}).pipe(Effect.ensuring(Effect.sync(resume.resolve)))
+				const id = idIn(second)
+				expect(second).toContain(`as artifact ${id}, version 1`)
+				expect(yield* Fiber.join(first)).toContain(`as artifact ${id}, version 2`)
+				const content = yield* request(
+					apiFetch,
+					"GET",
+					`/v1/artifacts/${id}/versions/1/content?file=a.txt`,
+				)
+				expect(yield* Effect.promise(() => content.text())).toBe("second")
+			}),
+		))
+
+	it("shares a file reservation between concurrent saves of the same path and bytes", () =>
+		withSessions((_apiFetch, { createSession, fileStore, runInWorld, sessionArtifactSaves }) =>
 			Effect.gen(function* () {
 				const session = yield* createSession
 				const saves = sessionArtifactSaves()
-				const run = <A>(effect: Effect.Effect<A>) => Effect.promise(() => runInWorld(effect))
-				const fileOf = (text: string) =>
-					Effect.map(
-						run(saves.sessionFileSave(session.id, 1, "page.html", new TextEncoder().encode(text))),
-						(saved) => (saved.ok ? saved.file_id : ""),
-					)
-				const contents = ["<p>first</p>", "<p>second</p>", "<p>third</p>"]
-				const ids = yield* Effect.forEach(contents, fileOf)
-				const outcomes = yield* Effect.forEach(
-					ids,
-					(file_id) =>
-						run(saves.sessionArtifactSave(session.id, "Page", [{ path: "page.html", file_id }])),
-					{ concurrency: "unbounded" },
+				const contents = new TextEncoder().encode("shared")
+				const save = Effect.promise(() =>
+					runInWorld(saves.sessionFileSave(session.id, 1, "assets/common.txt", contents)),
 				)
-				expect(outcomes.map((outcome) => outcome.ok)).toEqual([true, true, true])
-				const versions = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.version] : []))
-				expect(versions.toSorted((left, right) => left - right)).toEqual([1, 2, 3])
-				const artifactId = outcomes[0]?.ok === true ? outcomes[0].artifact_id : ""
-				for (const [index, version] of versions.entries()) {
-					const page = yield* request(
-						apiFetch,
-						"GET",
-						`/v1/artifacts/${artifactId}/versions/${version}/content?file=page.html`,
-					)
-					expect([version, yield* Effect.promise(() => page.text())]).toEqual([
-						version,
-						contents[index],
-					])
-				}
+				const firstStaged = Promise.withResolvers<void>()
+				const secondStaged = Promise.withResolvers<void>()
+				const resumeFirst = Promise.withResolvers<void>()
+				const resumeSecond = Promise.withResolvers<void>()
+				let staged = 0
+				fileStore.setAfterPut(
+					Effect.suspend(() => {
+						staged += 1
+						if (staged === 1) {
+							firstStaged.resolve()
+							return Effect.promise(() => resumeFirst.promise)
+						}
+						secondStaged.resolve()
+						return Effect.promise(() => resumeSecond.promise)
+					}),
+				)
+				const first = yield* Effect.forkChild(save)
+				yield* Effect.promise(() => firstStaged.promise)
+				const second = yield* Effect.forkChild(save)
+				const winner = yield* Effect.gen(function* () {
+					yield* Effect.promise(() => secondStaged.promise)
+					resumeFirst.resolve()
+					return yield* Fiber.join(first)
+				}).pipe(Effect.ensuring(Effect.sync(resumeSecond.resolve)))
+				expect(winner.ok).toBe(true)
+				expect(yield* Fiber.join(second)).toEqual(winner)
 			}),
 		))
 
@@ -252,6 +315,67 @@ describe("An artifact the agent saves", () => {
 			}),
 		))
 
+	it("does not register a file when the turn is interrupted during upload", () =>
+		withSessions((apiFetch, { createSession, fileStore, workspaceFiles, save }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				workspaceFiles(session.id).set("/workspace/out/a.txt", "some bytes")
+
+				const storing = Promise.withResolvers<void>()
+				const resume = Promise.withResolvers<void>()
+				fileStore.setBeforeStore(
+					Effect.sync(storing.resolve).pipe(Effect.andThen(Effect.promise(() => resume.promise))),
+				)
+				const saving = yield* Effect.forkChild(save(session.id, "Report", "/workspace/out"))
+				yield* Effect.gen(function* () {
+					yield* Effect.promise(() => storing.promise)
+					const interrupted = yield* request(
+						apiFetch,
+						"POST",
+						`/v1/sessions/${session.id}/events`,
+						{
+							events: [{ type: "user.interrupt" }],
+						},
+					)
+					expect(interrupted.status).toBe(200)
+				}).pipe(Effect.ensuring(Effect.sync(resume.resolve)))
+				expect(yield* Fiber.join(saving)).toBe("The turn is no longer running.")
+				const listed = yield* json<{ data: ReadonlyArray<unknown> }>(
+					yield* request(apiFetch, "GET", "/v1/files"),
+				)
+				expect(listed.data).toEqual([])
+			}),
+		))
+
+	it("refuses malformed, oversized, and stale save requests at the API boundary", () =>
+		withSessions((_apiFetch, { createSession, runInWorld, sessionArtifactSaves }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const saves = sessionArtifactSaves()
+				const run = <A>(effect: Effect.Effect<A>) => Effect.promise(() => runInWorld(effect))
+				expect(yield* run(saves.sessionFileSave(session.id, 0, "a.txt", new Uint8Array()))).toEqual(
+					{
+						ok: false,
+						message: "Invalid session file save.",
+					},
+				)
+				expect(yield* run(saves.sessionFileSave(session.id, 2, "a.txt", new Uint8Array()))).toEqual(
+					{
+						ok: false,
+						message: "The turn is no longer running.",
+					},
+				)
+				expect(
+					yield* run(
+						saves.sessionFileSave(session.id, 1, "a.txt", new Uint8Array(8 * 1024 * 1024 + 1)),
+					),
+				).toEqual({
+					ok: false,
+					message: "The file exceeds the artifact file size limit.",
+				})
+			}),
+		))
+
 	it("refuses to save once the artifact was deleted or the session has ended", () =>
 		withSessions(
 			(apiFetch, { workspaceFiles, sessionArtifactSaves, runInWorld, createSession, save }) =>
@@ -277,7 +401,7 @@ describe("An artifact the agent saves", () => {
 					expect(
 						yield* Effect.promise(() =>
 							runInWorld(
-								saves.sessionArtifactSave(session.id, "Other", [
+								saves.sessionArtifactSave(session.id, 1, "Other", [
 									{ path: "b.txt", file_id: "file_any" },
 								]),
 							),

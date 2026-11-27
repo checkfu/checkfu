@@ -37,7 +37,11 @@ export const MAX_OUTPUT_FILE_BYTES = 1024 * 1024
 export const MAX_OUTPUT_TOTAL_BYTES = 4 * 1024 * 1024
 export const MAX_OUTPUT_ENTRIES = 8 * MAX_OUTPUT_FILES
 
-export const OutputEntry = Schema.Struct({ path: Schema.String, type: Schema.String })
+export const OutputEntry = Schema.Struct({
+	path: Schema.String,
+	type: Schema.String,
+	size: NonNegativeInt,
+})
 
 export interface OutputFiles {
 	readonly list: (limit: number) => Promise<ReadonlyArray<typeof OutputEntry.Type>>
@@ -47,7 +51,10 @@ export interface OutputFiles {
 
 const isArtifactPath = Schema.is(ArtifactPath)
 
-export const makeStoredOutputFiles = (workspace: Workspace): OutputFiles => {
+export const makeStoredOutputFiles = (
+	workspace: Workspace,
+	root = SESSION_OUTPUTS_PATH,
+): OutputFiles => {
 	const provider = workspace.provider()
 	const directory = (path: string): void => {
 		if (!provider.lstatSync(path).isDirectory()) {
@@ -56,7 +63,7 @@ export const makeStoredOutputFiles = (workspace: Workspace): OutputFiles => {
 	}
 	const outputRoot = (): void => {
 		let path = ""
-		for (const part of SESSION_OUTPUTS_PATH.slice(1).split("/")) {
+		for (const part of root.slice(1).split("/")) {
 			path += `/${part}`
 			directory(path)
 		}
@@ -64,11 +71,29 @@ export const makeStoredOutputFiles = (workspace: Workspace): OutputFiles => {
 	return {
 		list: async (limit) => {
 			outputRoot()
-			const entries = await workspace.fs.find(SESSION_OUTPUTS_PATH, undefined, { limit })
-			return entries.map(({ path, type }) => ({
-				path: path.slice(SESSION_OUTPUTS_PATH.length + 1),
-				type,
-			}))
+			const entries: Array<typeof OutputEntry.Type> = []
+			const walk = (parent: string) => {
+				for (const { name, type } of provider.readdirEntriesSync(`${root}${parent}`)) {
+					const relative = `${parent}/${name}`
+					const stat = type === "file" ? provider.lstatSync(`${root}${relative}`) : undefined
+					entries.push({
+						path: relative.slice(1),
+						type: stat !== undefined && stat.nlink !== 1 ? "other" : type,
+						size: stat?.size ?? 0,
+					})
+					if (entries.length === limit) {
+						return
+					}
+					if (type === "dir") {
+						walk(relative)
+						if (entries.length === limit) {
+							return
+						}
+					}
+				}
+			}
+			walk("")
+			return entries
 		},
 		read: async (path, limit) => {
 			if (!isArtifactPath(path)) {
@@ -77,12 +102,12 @@ export const makeStoredOutputFiles = (workspace: Workspace): OutputFiles => {
 			// The checks and bounded range read run synchronously on the local SQLite store.
 			outputRoot()
 			const parts = path.split("/")
-			let parent = SESSION_OUTPUTS_PATH
+			let parent = root
 			for (const part of parts.slice(0, -1)) {
 				parent += `/${part}`
 				directory(parent)
 			}
-			const file = `${SESSION_OUTPUTS_PATH}/${path}`
+			const file = `${root}/${path}`
 			const stat = provider.lstatSync(file)
 			if (!stat.isFile() || stat.nlink !== 1) {
 				throw Object.assign(new Error("Expected a regular output file."), { code: "EAGAIN" })
@@ -120,7 +145,12 @@ const changedDuringCapture = (error: unknown): boolean =>
 const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
 	Hex.encode(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
 
-export const makeSessionOutputs = (files: OutputFiles) => ({
+export const makeSessionOutputs = (files: {
+	readonly list: (
+		limit: number,
+	) => Promise<ReadonlyArray<Pick<typeof OutputEntry.Type, "path" | "type">>>
+	readonly read: OutputFiles["read"]
+}) => ({
 	list: async (): Promise<OutputsListing> => {
 		const entries = await files.list(MAX_OUTPUT_ENTRIES + 1).catch((error: unknown) => {
 			if (hasCode(error, "ENOENT")) {

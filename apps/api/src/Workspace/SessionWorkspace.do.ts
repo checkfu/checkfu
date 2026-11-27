@@ -24,7 +24,6 @@ import {
 	SKILL_MOUNT_ROOT,
 } from "@checkfu/domain/Session/SessionResource"
 import { makeArtifactMount, makeFilesMount } from "./ArtifactMount.ts"
-import { ARTIFACT_TOOL, readUpTo, saveArtifact } from "./ArtifactTool.ts"
 import { makeSandboxMount, makeSandboxOutputFiles } from "./SandboxMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
@@ -34,7 +33,7 @@ import {
 	makeStoredOutputFiles,
 	SESSION_OUTPUTS_PATH,
 } from "./SessionOutputs.ts"
-import type { OutputBytes, OutputRead, OutputsListing } from "./SessionOutputs.ts"
+import type { OutputBytes, OutputFiles, OutputRead, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { FencedTurn, TurnToken } from "./WorkspaceFence.ts"
 import { makeSavedDisk } from "./SavedDisk.ts"
@@ -43,6 +42,7 @@ import { makeWorkspaceMachine } from "./WorkspaceMachine.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./WorkspaceShapes.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
 import {
+	ARTIFACT_TOOL,
 	BASH_SECONDS,
 	BASH_TOOL,
 	WORKSPACE_TOOL_OPTIONS,
@@ -83,6 +83,7 @@ interface Files {
 	readonly fs: Workspace["fs"]
 	readonly tools: ReturnType<typeof createPiTools>
 	readonly outputs: ReturnType<typeof makeSessionOutputs>
+	readonly capture: (root: string, signal: AbortSignal) => OutputFiles
 }
 
 const writeFileIn = async (
@@ -207,6 +208,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 							fs,
 							tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } }),
 							outputs: makeSessionOutputs(makeStoredOutputFiles(local)),
+							capture: (root: string) => makeStoredOutputFiles(local, root),
 						},
 						shared: (): Files => {
 							if (overMachine === undefined) {
@@ -222,6 +224,10 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 									},
 								})
 								overMachine = {
+									capture: (root, signal) =>
+										makeSandboxOutputFiles(root, (operation) =>
+											machine.inMachine(operation, signal),
+										),
 									fs: over.fs,
 									tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs: over.fs } }),
 									outputs: makeSessionOutputs(
@@ -411,20 +417,27 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						return runBash(call.arguments, signal)
 					}
 					if (call.name === ARTIFACT_TOOL.name) {
-						return withCallSignal(signal, () =>
-							onActive((on) =>
-								saveArtifact(call.arguments, {
-									find: (directory, limit) => on.fs.find(directory, undefined, { limit }),
-									size: async (path) => (await on.fs.lstat(path)).size,
-									stopped: () => signal.aborted,
-									read: async (path, limit) => readUpTo(await on.fs.readFile(path), limit),
+						const { saveArtifact } = await import("./ArtifactTool.ts")
+						return onActive((on) =>
+							saveArtifact(
+								call.arguments,
+								{
+									capture: (directory) => on.capture(directory, signal),
 									saveFile: (path, bytes) =>
 										askApi(api.sessionFileSave(sessionId, turn, path, bytes), { signal }),
 									saveArtifact: (name, entries) =>
-										askApi(api.sessionArtifactSave(sessionId, name, entries), { signal }),
-								}),
+										askApi(api.sessionArtifactSave(sessionId, turn, name, entries), { signal }),
+								},
+								signal,
 							),
-						)
+						).catch((error: unknown) => {
+							if (signal.aborted) {
+								return failed(
+									"The turn was interrupted while saving the artifact. Save it again to check the result.",
+								)
+							}
+							return failed(messageOf(error))
+						})
 					}
 					return withCallSignal(signal, () =>
 						onActive((on) => on.tools.execute(asLiteral(call), { abortSignal: signal })),

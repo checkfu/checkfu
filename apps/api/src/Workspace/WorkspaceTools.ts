@@ -9,7 +9,11 @@ import {
 	SESSION_OUTPUTS_PATH,
 } from "./SessionOutputs.ts"
 import * as Schema from "effect/Schema"
-import { ARTIFACT_TOOL } from "./ArtifactTool.ts"
+import {
+	MAX_TOOL_ARTIFACT_FILE_BYTES,
+	MAX_TOOL_ARTIFACT_FILES,
+	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
+} from "./SessionArtifactTool.ts"
 
 export type WorkspaceTool = PiTool
 export type WorkspaceToolCall = Required<PiToolCall>
@@ -37,6 +41,20 @@ export const BASH_TOOL: WorkspaceTool = {
 			timeout: { type: "integer", minimum: 1, maximum: MAX_BASH_SECONDS },
 		},
 		required: ["command"],
+		additionalProperties: false,
+	},
+}
+
+export const ARTIFACT_TOOL: WorkspaceTool = {
+	name: "save_artifact",
+	description: `Save a directory of your workspace as an artifact: a named set of files the user can open, share by link or publish, kept after the session ends. \`directory\` is an absolute directory in /workspace or /mnt/session/outputs whose contents become the artifact's files, and \`name\` is what the user sees. Saving again with the same name adds a new version of the same artifact, and saving unchanged files changes nothing. A page should have an index.html at the top of the directory. At most ${MAX_TOOL_ARTIFACT_FILES} files, ${MAX_TOOL_ARTIFACT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_TOOL_ARTIFACT_TOTAL_BYTES / MEBIBYTE} MiB in total, all regular files.`,
+	parameters: {
+		type: "object",
+		properties: {
+			name: { type: "string" },
+			directory: { type: "string" },
+		},
+		required: ["name", "directory"],
 		additionalProperties: false,
 	},
 }

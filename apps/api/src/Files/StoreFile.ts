@@ -36,19 +36,31 @@ export const makeStoreFile = Effect.gen(function* () {
 	const files = yield* File
 	const store = yield* FileStore
 
-	return Effect.fn("Files.store")(function* (file: NewFile) {
+	return Effect.fn("Files.store")(function* <E = never>(
+		file: NewFile,
+		options?: {
+			readonly beforeCommit?: Effect.Effect<void, E>
+			readonly contentAddressed?: true
+		},
+	) {
 		const { id, origin } = file
 		const existing = yield* files.get(id)
 		if (existing.status === "deleted") {
 			return taken
 		}
-		const reservation =
-			existing.status === "ready"
-				? null
-				: yield* files.send(new ReserveFile({ file_id: id })).pipe(
-						Effect.map((reserved): number | null => reserved.reply.reservation),
-						Effect.catchTag("FileAlreadyExists", () => Effect.succeed(null)),
-					)
+		const reserve = files
+			.send(
+				new ReserveFile({ file_id: id }),
+				options?.contentAddressed === true
+					? { commandId: `reserve-content-file:${existing.reservations}` }
+					: undefined,
+			)
+			.pipe(
+				Effect.map((reserved): number | null => reserved.reply.reservation),
+				Effect.catchTag("FileAlreadyExists", () => Effect.succeed(null)),
+			)
+		const open = options?.contentAddressed === true ? existing.open_reservation : 0
+		const reservation = existing.status === "ready" ? null : open || (yield* reserve)
 		const written = yield* (
 			reservation === null
 				? store.measure(file.body)
@@ -75,6 +87,7 @@ export const makeStoreFile = Effect.gen(function* () {
 			return mismatch
 		}
 		if (reservation !== null) {
+			yield* options?.beforeCommit ?? Effect.void
 			const created = yield* files
 				.send(
 					new CreateFile({
