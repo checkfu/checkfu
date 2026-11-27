@@ -1,11 +1,13 @@
 import { IsSupportedAgentModel } from "@checkfu/api/Http/AgentsHandlers"
 import { agentProjectFiles } from "@checkfu/authoring/document"
+import { ProjectLockfile, formatProjectLockfile } from "@checkfu/authoring/lockfile"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 import { makeTestServer } from "./helpers/CliHarness.ts"
 import type { CliRunResult } from "./helpers/CliHarness.ts"
 
@@ -21,6 +23,61 @@ const plan = (result: CliRunResult) => {
 }
 
 describe("YAML projects", () => {
+	it("refuses duplicate owners in a project lock before reading or changing a resource", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeProjectTestServer()
+					const fs = yield* FileSystem.FileSystem
+					const path = yield* Path.Path
+					const root = yield* fs.makeTempDirectoryScoped()
+					const lock = path.join(root, "checkfu-lock.json")
+					const active = "./agents/live.md"
+					const missing = "./agents/removed.md"
+					yield* fs.makeDirectory(path.join(root, "agents"))
+					yield* fs.writeFileString(
+						path.join(root, active),
+						"---\nname: Maintained\nmodel: fixture-model\n---\n\nAnswer clearly.\n",
+					)
+					const apply = ["apply", "--lock-file", lock]
+					const created = plan(
+						yield* cli.run([...apply, "--yes", root], { fileSystem: NodeFileSystem.layer }),
+					)
+					expect(created).toMatchObject([{ file: active, action: "create" }])
+					const settled = yield* Schema.decodeEffect(ProjectLockfile)(
+						yield* fs.readFileString(lock),
+					)
+					const entry = settled.resources[active]
+					if (entry === undefined) {
+						throw new Error("The project did not record the agent")
+					}
+					const contents = formatProjectLockfile({
+						...settled,
+						resources: { ...settled.resources, [missing]: entry },
+					})
+					yield* fs.writeFileString(lock, contents)
+					const requests: Array<string> = []
+					for (const flags of [[], ["--dry-run"], ["--yes", "--prune", "--force"]]) {
+						const result = yield* cli.run([...apply, ...flags, root], {
+							fileSystem: NodeFileSystem.layer,
+							interceptFetch: (next, request) => {
+								requests.push(new URL(request.url).pathname)
+								return next(request)
+							},
+						})
+						expect(result.exitCode).toBe(1)
+						expect(result.stderr).toContain(
+							`agent ${entry.id} is owned by both ${active} and ${missing}.`,
+						)
+						expect(yield* fs.readFileString(lock)).toBe(contents)
+					}
+					expect(requests).toEqual([])
+					expect(yield* fs.exists(`${lock}.apply-lock`)).toBe(false)
+				}).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, Path.layer))),
+			),
+		)
+	})
+
 	it("validates locally, creates dependencies first, and reconciles the same resource IDs", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
@@ -317,6 +374,25 @@ describe("YAML projects", () => {
 						},
 					}
 					expect((yield* cli.run(attempts, options)).exitCode).toBe(1)
+					const pendingText = yield* fs.readFileString(lockFile)
+					const pendingLock = yield* Schema.decodeEffect(ProjectLockfile)(pendingText)
+					const original = "./agent.yaml"
+					const copied = "./copy.yaml"
+					const pending = pendingLock.pending_creates?.[original]
+					if (pending === undefined) {
+						throw new Error("The lock did not retain the pending create")
+					}
+					const duplicatePending = formatProjectLockfile({
+						...pendingLock,
+						pending_creates: { [original]: pending, [copied]: pending },
+					})
+					yield* fs.writeFileString(lockFile, duplicatePending)
+					const duplicate = yield* cli.run(attempts, options)
+					expect(duplicate.exitCode).toBe(1)
+					expect(duplicate.stderr).toContain(`is owned by both ${original} and ${copied}.`)
+					expect(yield* fs.readFileString(lockFile)).toBe(duplicatePending)
+					expect(keys).toHaveLength(1)
+					yield* fs.writeFileString(lockFile, pendingText)
 					yield* fs.writeFileString(file, "name: Different\nmodel: fixture-model\n")
 					expect((yield* cli.run(attempts, options)).stderr).toContain("awaiting confirmation")
 					yield* fs.writeFileString(file, "name: Support\nmodel: fixture-model\n")
@@ -327,6 +403,28 @@ describe("YAML projects", () => {
 					expect(JSON.parse(yield* fs.readFileString(lockFile))).not.toHaveProperty(
 						"pending_creates",
 					)
+					const settled = yield* Schema.decodeEffect(ProjectLockfile)(
+						yield* fs.readFileString(lockFile),
+					)
+					const id = settled.resources[original]?.id
+					if (id === undefined) {
+						throw new Error("The original path did not settle")
+					}
+					yield* fs.rename(file, path.join(root, copied))
+					const copiedPending = formatProjectLockfile({
+						...settled,
+						pending_creates: { [copied]: pending },
+					})
+					yield* fs.writeFileString(lockFile, copiedPending)
+					const outcome = yield* cli.run(
+						["apply", "--yes", "--prune", "--force", "--lock-file", lockFile, root],
+						options,
+					)
+					expect(outcome.exitCode).toBe(1)
+					expect(outcome.stderr).toContain(`agent ${id}, already owned by ${original}.`)
+					expect(yield* fs.readFileString(lockFile)).toBe(copiedPending)
+					const retrieved = yield* cli.run(["agents", "retrieve", "--agent-id", id])
+					expect(JSON.parse(retrieved.stdout)).toMatchObject({ id, archived_at: null })
 				}).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, Path.layer))),
 			),
 		)
