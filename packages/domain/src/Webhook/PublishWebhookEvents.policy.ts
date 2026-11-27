@@ -88,10 +88,18 @@ interface WebhookNotification {
 	readonly automation_id?: string
 }
 
-const notificationOf = ({
+type PolicyEvent = Policy.TriggerOf<typeof PublishWebhookEvents>["event"]
+type AutomationRunEvent = Extract<PolicyEvent, { readonly run: number; readonly trigger: string }>
+
+export const notificationOf = ({
 	source,
 	event,
-}: Policy.TriggerOf<typeof PublishWebhookEvents>): WebhookNotification | undefined => {
+}: {
+	readonly source: { readonly id: string }
+	readonly event:
+		| Pick<Exclude<PolicyEvent, AutomationRunEvent>, "_tag">
+		| Pick<AutomationRunEvent, "_tag" | "trigger" | "run">
+}): WebhookNotification | undefined => {
 	switch (event._tag) {
 		case "agent.created":
 		case "agent.updated":

@@ -1,5 +1,6 @@
 import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
+import { WEBHOOK_EVENT_TYPES } from "@checkfu/sdk/Schemas"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -24,6 +25,7 @@ import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
 import { CredentialId } from "../src/Vault/Credential.id.ts"
 import { VaultId } from "../src/Vault/Vault.id.ts"
 import { Vaults, VaultsApi, VaultsHandlersLive } from "../src/Vaults.model.ts"
+import { PublishWebhookEvents, notificationOf } from "../src/Webhook/PublishWebhookEvents.policy.ts"
 import { WebhookEvents } from "../src/Webhook/WebhookEvents.external.ts"
 import type { WebhookEventPublication } from "../src/Webhook/WebhookEvents.external.ts"
 
@@ -44,6 +46,32 @@ const HarnessStubLayer = Harness.toLayer(
 )
 
 describe("PublishWebhookEvents policy", () => {
+	it("covers the documented types together with vault publishing and the test-delivery endpoint", () => {
+		const produced = PublishWebhookEvents.definition.on.map(({ tag }) => {
+			const event =
+				tag === "automation.fired" ||
+				tag === "automation.run_started" ||
+				tag === "automation.run_failed"
+					? { _tag: tag, trigger: "schedule" as const, run: 1 }
+					: { _tag: tag }
+			const notification = notificationOf({ source: { id: "fixture" }, event })
+			expect(notification, tag).toBeDefined()
+			return notification?.event_type
+		})
+		expect(
+			new Set([
+				...produced,
+				"vault.created",
+				"vault.archived",
+				"vault.deleted",
+				"vault_credential.created",
+				"vault_credential.archived",
+				"vault_credential.deleted",
+				"webhook.test",
+			]),
+		).toEqual(new Set(WEBHOOK_EVENT_TYPES))
+	})
+
 	it.effect(
 		"forwards committed lifecycle events with deterministic ids and omits artifact publish tokens and agent system prompts",
 		() => {

@@ -121,8 +121,14 @@ export const authoredProjectJourney = async (options: {
 		)
 		const info = await cli<{ readonly system: string }>("agent", "info", agentFile)
 		expect(info.system).toBe("Keep the original report instructions.")
+		const resourceIds = async () =>
+			(await Promise.all([sdk.agents.list(), sdk.environments.list(), sdk.automations.list()])).map(
+				(page) => page.data.map(({ id }) => id).toSorted(),
+			)
+		const beforePreview = await resourceIds()
 		const preview = await cli<ReadonlyArray<PlanRow>>("apply", ".", "--dry-run")
 		expect(preview.map((row) => row.action)).toEqual(["create", "create", "create"])
+		expect(await resourceIds()).toEqual(beforePreview)
 		await expect(readFile(join(project, "checkfu-lock.json"))).rejects.toMatchObject({
 			code: "ENOENT",
 		})
@@ -223,6 +229,7 @@ export const authoredProjectJourney = async (options: {
 		expect((await sdk.agents.retrieve(agentId)).name).toBe("A teammate's edit")
 		await cli("apply", "--yes", "--force")
 		const before = await sdk.agents.retrieve(agentId)
+		expect(before.name).toBe("Report writer")
 		const [fromCli, fromMcp] = await Promise.all([
 			cli<JsonAgent>(
 				"agents",
@@ -265,6 +272,10 @@ export const authoredProjectJourney = async (options: {
 		)
 		// Restore the authored configuration before pruning; drift must not be silently overwritten by prune.
 		await cli("apply", "--yes", "--force")
+		expect(await sdk.agents.retrieve(agentId)).toMatchObject({
+			name: "Report writer",
+			description: null,
+		})
 		for (const file of [automationFile, agentFile, environmentFile]) {
 			await unlink(file)
 		}
