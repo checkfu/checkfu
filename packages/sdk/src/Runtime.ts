@@ -1,10 +1,12 @@
 import * as Clock from "effect/Clock"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { CheckfuApi, ClientEventId } from "./Api.ts"
@@ -406,17 +408,15 @@ export const executeWithRetries = <A, E>(
 					return attempt
 				}
 				return attempt.pipe(
-					Effect.timeoutOption(effectiveTimeout),
-					Effect.flatMap((maybeResult) =>
-						Effect.fromOption(maybeResult).pipe(
-							Effect.mapError(
-								() =>
-									new APIConnectionTimeoutError({
-										message: `Request timed out after ${Duration.format(effectiveTimeout)}.`,
-									}),
+					Effect.timeoutOrElse({
+						duration: effectiveTimeout,
+						orElse: () =>
+							Effect.fail(
+								new APIConnectionTimeoutError({
+									message: `Request timed out after ${Duration.format(effectiveTimeout)}.`,
+								}),
 							),
-						),
-					),
+					}),
 				)
 			})
 
@@ -648,6 +648,15 @@ const isResourceReadyForMutation = <T>(
 	return typeof current === "number" && current >= readiness.minVersion
 }
 
+class PendingNotReady extends Data.TaggedError("PendingNotReady") {}
+
+const isRetryablePendingRead = (error: CheckfuSdkError): boolean =>
+	error._tag === "ServiceUnavailableError" ||
+	error._tag === "NotFoundError" ||
+	error._tag === "RateLimitError" ||
+	error._tag === "APIConnectionTimeoutError" ||
+	(error._tag === "APIConnectionError" && error.retryable)
+
 export const pollPending = <T>(
 	pending: PendingResource,
 	fetchResource: (id: string, opts?: RequestOptions) => Effect.Effect<T, CheckfuSdkError>,
@@ -699,45 +708,32 @@ export const pollPending = <T>(
 			})
 		}
 
-		const pollLoop = Effect.gen(function* () {
-			let delayMs = initialDelayMs
-			for (;;) {
-				const outcome = yield* Effect.result(fetchResource(pending.id, options?.requestOptions))
-				if (outcome._tag === "Success") {
-					if (
-						isResourceReadyForMutation(outcome.success, readiness) &&
-						(options?.until === undefined || options.until(outcome.success))
-					) {
-						return outcome.success
-					}
-				} else {
-					const err = outcome.failure
-					const retryablePending =
-						err._tag === "ServiceUnavailableError" ||
-						err._tag === "NotFoundError" ||
-						err._tag === "RateLimitError" ||
-						err._tag === "APIConnectionTimeoutError" ||
-						(err._tag === "APIConnectionError" && err.retryable)
-					if (!retryablePending) {
-						return yield* err
-					}
-				}
-				yield* Effect.sleep(Duration.millis(delayMs))
-				delayMs = Math.min(delayMs * 2, maxDelayMs)
+		const poll = Effect.gen(function* () {
+			const resource = yield* fetchResource(pending.id, options?.requestOptions)
+			if (
+				isResourceReadyForMutation(resource, readiness) &&
+				(options?.until === undefined || options.until(resource))
+			) {
+				return resource
 			}
+			return yield* new PendingNotReady()
 		})
 
-		return yield* pollLoop.pipe(
-			Effect.timeoutOption(timeoutDuration),
-			Effect.flatMap((maybeResult) =>
-				Effect.fromOption(maybeResult).pipe(
-					Effect.mapError(
-						() =>
-							new APIConnectionTimeoutError({
-								message: `Timed out waiting for pending ${pending.type} "${pending.id}" after ${Duration.format(timeoutDuration)}.`,
-							}),
-					),
-				),
-			),
+		const timedOut = () =>
+			Effect.fail(
+				new APIConnectionTimeoutError({
+					message: `Timed out waiting for pending ${pending.type} "${pending.id}" after ${Duration.format(timeoutDuration)}.`,
+				}),
+			)
+		return yield* poll.pipe(
+			Effect.retry({
+				while: (error) => error._tag === "PendingNotReady" || isRetryablePendingRead(error),
+				schedule: Schedule.min([
+					Schedule.exponential(Duration.millis(initialDelayMs)),
+					Schedule.spaced(Duration.millis(maxDelayMs)),
+				]),
+			}),
+			Effect.timeoutOrElse({ duration: timeoutDuration, orElse: timedOut }),
+			Effect.catchTag("PendingNotReady", timedOut),
 		)
 	}).pipe(Effect.withSpan("checkfu.waitForPending"))

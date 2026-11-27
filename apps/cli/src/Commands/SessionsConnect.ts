@@ -146,24 +146,22 @@ const sendConnectEventsWithRetry = <A>(
 ): Effect.Effect<A, SendEventsFailure> =>
 	Effect.gen(function* () {
 		let hadUnconfirmedAttempt = false
-		for (let attempt = 0; ; attempt++) {
-			const res = yield* Effect.result(send)
-			if (res._tag === "Success") {
-				return res.success
-			}
-			const err = res.failure
-			if (isUnconfirmedSendError(err)) {
-				hadUnconfirmedAttempt = true
-			}
-			if (isRetryableSendError(err) && attempt < MAX_CONNECT_SEND_RETRIES) {
-				yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
-				continue
-			}
-			return yield* Effect.fail({
+		return yield* send.pipe(
+			Effect.tapError((err) =>
+				Effect.sync(() => {
+					hadUnconfirmedAttempt ||= isUnconfirmedSendError(err)
+				}),
+			),
+			Effect.retry({
+				while: isRetryableSendError,
+				times: MAX_CONNECT_SEND_RETRIES,
+				schedule: Schedule.exponential(Duration.millis(CONNECT_SEND_RETRY_BASE_MS)),
+			}),
+			Effect.mapError((err) => ({
 				failure: formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt),
 				confirmedPerMessageRejection: !hadUnconfirmedAttempt && isConfirmedPerMessageRejection(err),
-			})
-		}
+			})),
+		)
 	})
 
 const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId) =>
