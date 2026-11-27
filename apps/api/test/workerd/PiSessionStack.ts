@@ -197,7 +197,7 @@ export const piSessionHelpers = (at: {
 }
 
 export const startPiSessionStack = async () => {
-	const cleanup: Array<() => unknown> = []
+	const cleanup: Array<() => Promise<void>> = []
 	try {
 		const fakeOpenAI = await startFakeOpenAIResponsesServer((req) => ({
 			kind: "reply",
