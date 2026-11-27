@@ -1,4 +1,5 @@
 import { FileId, FileName, MAX_FILE_BYTES } from "@checkfu/sdk/Schemas"
+import { createHash } from "node:crypto"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -135,10 +136,30 @@ const downloadCommand = Command.make(
 				Effect.orDie(fs.remove(temporary, { recursive: true, force: true })),
 			).pipe(Effect.mapError(unwritable))
 			const partial = `${temporary}${path.sep}content`
-			yield* Stream.run(
-				Stream.mapError(body, (error) => formatClientError(error)),
-				Sink.mapError(fs.sink(partial, { flag: "wx" }), unwritable),
+			const mismatch = (reason: string) =>
+				usageError(`${target}: downloaded file failed integrity verification. ${reason}`)
+			const hash = createHash("sha256")
+			let received = 0
+			const verified = body.pipe(
+				Stream.mapError(formatClientError),
+				Stream.tap((chunk) =>
+					Effect.suspend(() => {
+						received += chunk.byteLength
+						if (received > file.size) {
+							return mismatch(`The response exceeds the expected ${file.size} bytes.`)
+						}
+						hash.update(chunk)
+						return Effect.void
+					}),
+				),
 			)
+			yield* Stream.run(verified, Sink.mapError(fs.sink(partial, { flag: "wx" }), unwritable))
+			if (received !== file.size) {
+				return yield* mismatch(`Expected ${file.size} bytes and received ${received}.`)
+			}
+			if (hash.digest("hex") !== file.sha256) {
+				return yield* mismatch("The SHA-256 digest differs from the file metadata.")
+			}
 			yield* fs
 				.link(partial, target)
 				.pipe(
@@ -146,7 +167,7 @@ const downloadCommand = Command.make(
 						error.reason._tag === "AlreadyExists" ? targetExists() : unwritable(error),
 					),
 				)
-			yield* renderOutput({ id: file.id, path: target, size: file.size })
+			yield* renderOutput({ id: file.id, path: target, size: received })
 		}).pipe(Effect.scoped),
 ).pipe(Command.withDescription("Download a file's bytes to a local path"))
 
