@@ -38,4 +38,21 @@ const program = Effect.gen(function* () {
 	yield* effectClient.agents.create(body, { idempotencyKey: "type-check" })
 	return { id: delivery.data.id, status: delivery.status }
 })
-export { CheckfuApi, created, yielded, program, redeliveryForbidsKey, responseType }
+const vaultErased = async (vaultId: string): Promise<boolean> => {
+	const vault = await client.vaults.delete(vaultId)
+	return vault.secrets === "erased"
+}
+const credentialErased = async (vaultId: string, credentialId: string): Promise<boolean> => {
+	const credential = await client.vaults.credentials.delete(vaultId, credentialId)
+	return credential.custody === "erased"
+}
+export {
+	CheckfuApi,
+	created,
+	yielded,
+	program,
+	redeliveryForbidsKey,
+	responseType,
+	vaultErased,
+	credentialErased,
+}

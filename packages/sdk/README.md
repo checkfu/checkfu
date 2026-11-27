@@ -13,7 +13,7 @@ Create an agent and an environment, then create a session that references both. 
 - **Single-source contract:** shares `CheckfuApi` (`effect/http-api/HttpApi`) and Effect `Schema` definitions directly with the Checkfu API server.
 - **Forge-generated resources:** resource classes (`EffectResources` / `PromiseResources`), `CheckfuOperations` (`Op<Id>` / `BodyOf` / `QueryOf` / `ResultOf`), and `SDK_OPERATION_BINDINGS` are generated directly from `openapi.json` via `@cloudflare/forge` in lockstep with the CLI.
 - **Core clients:** use `effect` and standard Web APIs (`fetch`, `ReadableStream`, `AbortController`, WebCrypto).
-- Resources include `agents`, `environments`, `sessions`, `automations`, and `artifacts`. Use `waitForPending` when a mutation returns a `202` response and you need the completed resource.
+- Resources include `agents`, `environments`, `sessions`, `automations`, and `artifacts`. Use `waitForPending` when a mutation returns a resource receipt with `pending: true` and you need the completed resource.
 
 Use a model ID configured for your deployment in the examples below.
 
@@ -131,6 +131,27 @@ const { data, status, request_id, requestId } = await client.agents
 ```
 
 Pass `agent: agent.id` when creating a session to pin the latest agent version. To pin a specific version, pass `agent: { type: "agent", id: agent.id, version: agent.version }`.
+
+## Confirming vault and credential erasure
+
+Deleting a vault returns a `vault_deleted` receipt. Read `secrets` to tell
+whether storage confirmed every secret is gone. Deleting one credential returns
+a `vault_credential_deleted` receipt. Read its `custody` field to tell whether
+storage confirmed that secret is gone.
+
+```ts
+const vault = await client.vaults.delete(vaultId)
+const vaultErased = vault.secrets === "erased"
+
+const credential = await client.vaults.credentials.delete(otherVaultId, credentialId)
+const credentialErased = credential.custody === "erased"
+```
+
+Treat `erasing` as still in progress. The original deletion has been recorded
+and erasure continues in the background. Issue the same DELETE later to check
+its current result. If your wait ends while the receipt still says `erasing`,
+report that erasure is still in progress. Use `waitForPending` for resources
+returned with `pending: true`.
 
 ## Operation type helpers
 
