@@ -1,0 +1,35 @@
+{
+	"version": 1,
+	"rules": {
+		"Machine": {
+			"IdleMachinesHaveNoIncarnation": {
+				"kind": "invariant",
+				"source": "(state) =>\n\t\t\t(state.phase !== \"local\" && state.phase !== \"asleep\") || state.incarnation === \"\""
+			},
+			"AnAwakeMachineHasAnIncarnation": {
+				"kind": "invariant",
+				"source": "(state) => state.phase !== \"awake\" || state.incarnation !== \"\""
+			},
+			"ALocalMachineHasNoNotice": {
+				"kind": "invariant",
+				"source": "(state) => state.phase !== \"local\" || !state.notice"
+			},
+			"AStartEndsWithItsResult": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.phase !== \"starting\" ||\n\t\t\t(after.phase !== \"starting\") ===\n\t\t\t\t[command._tag === \"RecordMachineStarted\", command._tag === \"RecordMachineStartFailed\"].some(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t)"
+			},
+			"AReplacementRaisesTheNotice": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (before.notice) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (command._tag !== \"RecordMachineStarted\") {\n\t\t\t\treturn !after.notice\n\t\t\t}\n\t\t\treturn (\n\t\t\t\tafter.notice ===\n\t\t\t\t[\n\t\t\t\t\tbefore.phase === \"starting\",\n\t\t\t\t\tbefore.incarnation !== \"\",\n\t\t\t\t\tbefore.incarnation !== command.incarnation,\n\t\t\t\t].every((ok) => ok)\n\t\t\t)\n\t\t}"
+			},
+			"OnlyReadingClearsTheNotice": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t!before.notice || after.notice || command._tag === \"ReadMachineNotice\""
+			},
+			"OnlyAnAwakeMachineSleeps": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordMachineSlept\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn before.phase === \"awake\"\n\t\t\t\t? after.phase === \"asleep\"\n\t\t\t\t: [\n\t\t\t\t\t\tafter.phase === before.phase,\n\t\t\t\t\t\tafter.incarnation === before.incarnation,\n\t\t\t\t\t\tafter.notice === before.notice,\n\t\t\t\t\t].every((ok) => ok)\n\t\t}"
+			}
+		}
+	}
+}

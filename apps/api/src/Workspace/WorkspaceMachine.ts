@@ -1,5 +1,15 @@
+import {
+	MachineLifecycle,
+	initialMachine,
+	machineNoticeRead,
+	machineSlept,
+	machineStartFailed,
+	machineStartRequested,
+	machineStarted,
+} from "@checkfu/domain/Workspace/MachineLifecycle"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { TIMED_OUT } from "../Sandbox/Sandboxes.ts"
 import type { Sandbox, Sandboxes } from "../Sandbox/Sandboxes.ts"
 import type { InSandbox } from "./SandboxMount.ts"
@@ -198,11 +208,9 @@ export async function* archiveOf(
 }
 
 const MACHINE = "machine"
-interface MachineRecord {
-	readonly incarnation?: string
-	readonly notice?: string
-	readonly starting?: true
-}
+const decodeMachine = Schema.decodeUnknownSync(MachineLifecycle)
+const REPLACEMENT_NOTICE =
+	"The session's machine was replaced. The workspace and outputs were restored from the last sleep, or from before the first command. Later changes, running processes and other files are gone. Check the files before continuing."
 
 const COMMAND = `dir=$1; seconds=$2; bytes=$3; lines=$4; call=${CALLS}/$5; root=$6; shift 6
 mkdir -p ${CALLS}; [ -e "$call.stop" ] && { rm -f -- "$call.stop"; echo "0 0" >&2; exit 143; }
@@ -254,7 +262,17 @@ export const makeWorkspaceMachine = (options: {
 	readonly touched: () => void
 }) => {
 	const extraDirectories = options.extraDirectories ?? []
-	const record = (): MachineRecord | undefined => options.store.get<MachineRecord>(MACHINE)
+	const record = (): MachineLifecycle => {
+		const stored = options.store.get<unknown>(MACHINE)
+		return stored === undefined ? initialMachine : decodeMachine(stored)
+	}
+	const write = (state: MachineLifecycle): void => {
+		if (state.phase === "local") {
+			options.store.delete(MACHINE)
+		} else {
+			options.store.put(MACHINE, state)
+		}
+	}
 	let attached: Sandbox | undefined
 	const calls = new Set<Promise<unknown>>()
 	let active = 0
@@ -268,32 +286,23 @@ export const makeWorkspaceMachine = (options: {
 	const abandon = async (): Promise<void> => {
 		await run(options.sandboxes.remove(options.key))
 		const now = record()
-		const kept: MachineRecord = {
-			...(now?.incarnation === undefined ? {} : { incarnation: now.incarnation }),
-			...(now?.notice === undefined ? {} : { notice: now.notice }),
-		}
-		if (
-			kept.incarnation === undefined &&
-			kept.notice === undefined &&
-			options.disk.read() === undefined
-		) {
-			options.store.delete(MACHINE)
-		} else {
-			options.store.put(MACHINE, kept)
-		}
+		const hasSavedDisk = now.incarnation === "" && !now.notice && options.disk.read() !== undefined
+		write(machineStartFailed(now, hasSavedDisk))
 	}
 
 	const settle = async (): Promise<{ readonly sandbox: Sandbox; readonly fresh: boolean }> => {
 		const before = record()
+		let pending = before
 		const starting = (): void => {
-			options.store.put(MACHINE, { ...before, starting: true } satisfies MachineRecord)
+			pending = machineStartRequested(before)
+			write(pending)
 		}
-		if (before?.incarnation === undefined) {
+		if (before.incarnation === "") {
 			starting()
 		}
 		try {
 			const sandbox = await run(options.sandboxes.open(options.key))
-			const fresh = sandbox.incarnation !== before?.incarnation
+			const fresh = sandbox.incarnation !== before.incarnation
 			if (fresh) {
 				starting()
 				const saved = options.disk.read()
@@ -312,17 +321,10 @@ export const makeWorkspaceMachine = (options: {
 					await unpackInto(sandbox, options.directory, saved, extraDirectories)
 				}
 			}
-			const notice =
-				fresh && before?.incarnation !== undefined
-					? "The session's machine was replaced. The workspace and outputs were restored from the last sleep, or from before the first command. Later changes, running processes and other files are gone. Check the files before continuing."
-					: before?.notice
-			options.store.put(MACHINE, {
-				incarnation: sandbox.incarnation,
-				...(notice === undefined ? {} : { notice }),
-			} satisfies MachineRecord)
+			write(machineStarted(pending, sandbox.incarnation))
 			return { sandbox, fresh }
 		} catch (error) {
-			if (record()?.starting === true) {
+			if (record().phase === "starting") {
 				await abandon().catch(() => undefined)
 			}
 			throw error
@@ -331,11 +333,11 @@ export const makeWorkspaceMachine = (options: {
 
 	const rest = async (): Promise<void> => {
 		const now = record()
-		if (now?.starting === true) {
+		if (now.phase === "starting") {
 			await abandon()
 			return
 		}
-		if (now?.incarnation === undefined) {
+		if (now.incarnation === "") {
 			return
 		}
 		attached = undefined
@@ -348,11 +350,7 @@ export const makeWorkspaceMachine = (options: {
 			})
 		}
 		await run(options.sandboxes.remove(options.key))
-		const after = record()
-		options.store.put(
-			MACHINE,
-			(after?.notice === undefined ? {} : { notice: after.notice }) satisfies MachineRecord,
-		)
+		write(machineSlept(record()))
 	}
 
 	const attach = (): Promise<Sandbox> =>
@@ -366,10 +364,9 @@ export const makeWorkspaceMachine = (options: {
 	const forCall = async (): Promise<Sandbox> => {
 		const sandbox = await attach()
 		const now = record()
-		if (now?.notice !== undefined) {
-			const { notice: _notice, ...kept } = now
-			options.store.put(MACHINE, kept)
-			throw new Error(now.notice)
+		if (now.notice) {
+			write(machineNoticeRead(now))
+			throw new Error(REPLACEMENT_NOTICE)
 		}
 		return sandbox
 	}
@@ -406,7 +403,7 @@ export const makeWorkspaceMachine = (options: {
 
 	return {
 		inMachine: inMachine satisfies InSandbox,
-		engaged: (): boolean => record() !== undefined,
+		engaged: (): boolean => record().phase !== "local",
 		busy: (): boolean => active > 0,
 		command: async (
 			argv: ReadonlyArray<string>,
@@ -473,13 +470,13 @@ export const makeWorkspaceMachine = (options: {
 		},
 		sleep: (): Promise<boolean> =>
 			inTurn(async () => {
-				const awake = record()?.incarnation !== undefined
+				const awake = record().incarnation !== ""
 				await rest()
 				return awake
 			}),
 		remove: (): Promise<boolean> =>
 			inTurn(async () => {
-				if (record() === undefined) {
+				if (record().phase === "local") {
 					return false
 				}
 				attached = undefined
