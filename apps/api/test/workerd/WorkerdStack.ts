@@ -294,7 +294,6 @@ export const startAlchemyDev = async (
 	delete childEnv.CHECKFU_GITHUB_BASE_URL
 	delete childEnv.CHECKFU_MACHINE_IDLE
 	delete childEnv.CHECKFU_LOCAL_DEV
-	delete childEnv.CHECKFU_WEBHOOK_LOCAL_DEV
 	delete childEnv.CHECKFU_WEBHOOK_LOCAL_RUNTIME
 	delete childEnv.CHECKFU_WEBHOOK_EGRESS_URL
 	delete childEnv.CHECKFU_WEBHOOK_EGRESS_TOKEN

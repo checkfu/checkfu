@@ -159,6 +159,7 @@ const runTurn = async (rounds: ReadonlyArray<PlannedRound>) => {
 	const ran: Array<Ran> = []
 	const request: PiTurnRequest = {
 		operationId: "turn:1",
+		unpublishedOperationIds: [],
 		turn: 1,
 		provider: "openai",
 		modelId: "gpt-4o-mini",

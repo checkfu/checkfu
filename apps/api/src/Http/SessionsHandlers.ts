@@ -113,7 +113,7 @@ import { ArtifactManifestAt } from "../Artifacts/ResolveArtifactVersion.ts"
 import { PinnedArtifact } from "../Artifacts/PinnedArtifact.ts"
 import { SkillReader } from "../Skills/SkillReader.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
-import { artifactReads } from "./ArtifactsHandlers.ts"
+import { artifactReads, stored } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, apiError, statusOf } from "./Api.ts"
 import type {
@@ -713,7 +713,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				const invalid = (reason: string) =>
 					reject(400, `Artifact ${pinned.artifact_id} is not a skill: ${reason}.`)
 				const gone = reject(404, `Artifact ${pinned.artifact_id} not found.`)
-				const manifest = yield* pinnedArtifact.manifest(pinned.artifact_id, pinned.manifest)
+				const manifest = yield* stored(pinnedArtifact.manifest(pinned.artifact_id, pinned.manifest))
 				if (manifest === null) {
 					return yield* gone
 				}
@@ -726,7 +726,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						`its ${SKILL_FILE} is ${file.size} bytes; the limit is ${MAX_SKILL_FILE_BYTES}`,
 					)
 				}
-				const bytes = yield* pinnedArtifact.blob(pinned.artifact_id, file.sha256)
+				const bytes = yield* stored(pinnedArtifact.blob(pinned.artifact_id, file.sha256))
 				if (bytes === null) {
 					return yield* gone
 				}

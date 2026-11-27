@@ -186,6 +186,26 @@ describe("Skills in a session", () => {
 			}),
 		))
 
+	it("answers 503 when skill storage is temporarily unavailable", () =>
+		withSessions((_apiFetch, { artifactStore, createSession, createArtifact }) =>
+			Effect.gen(function* () {
+				const artifact = yield* createArtifact("Skill", [{ path: "SKILL.md", content: PDF_SKILL }])
+				const resources = [{ type: "skill", artifact_id: artifact.id }]
+				expect((yield* createSession(resources)).status).toBe(201)
+
+				artifactStore.setFailing(true)
+				const unavailable = yield* createSession(resources)
+				const body = yield* json<{ error: { message: string } }>(unavailable)
+				expect([unavailable.status, body.error.message]).toEqual([
+					503,
+					"Artifact storage is unavailable. Retry the request.",
+				])
+
+				artifactStore.setFailing(false)
+				expect((yield* createSession(resources)).status).toBe(201)
+			}),
+		))
+
 	it("refuses an artifact that is not a skill, and two skills with one name", () =>
 		withSessions((apiFetch, { createSession, createArtifact }) =>
 			Effect.gen(function* () {

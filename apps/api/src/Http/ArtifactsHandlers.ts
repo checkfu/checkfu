@@ -80,7 +80,7 @@ const encodeContent = (bytes: Uint8Array) => {
 	}
 }
 
-const stored = <A, E extends { readonly _tag: string }, R>(
+export const stored = <A, E extends { readonly _tag: string }, R>(
 	effect: Effect.Effect<A, E | ArtifactStoreError, R>,
 ) =>
 	effect.pipe(

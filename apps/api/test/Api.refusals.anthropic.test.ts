@@ -646,6 +646,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			const result = await Effect.runPromise(
 				runPiDurableTurn(backend1, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "anthropic",
 					modelId: "claude-sonnet-4-5",
@@ -676,6 +677,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			const result = await Effect.runPromise(
 				runPiDurableTurn(backend2, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "anthropic",
 					modelId: "claude-sonnet-4-5",
@@ -772,6 +774,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			const result1 = await Effect.runPromise(
 				runPiDurableTurn(backend3, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "anthropic",
 					modelId: "claude-sonnet-4-5",
@@ -791,6 +794,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			const result2 = await Effect.runPromise(
 				runPiDurableTurn(backend3, {
 					operationId: "turn:2",
+					unpublishedOperationIds: [],
 					turn: 2,
 					provider: "anthropic",
 					modelId: "claude-sonnet-4-5",
@@ -894,6 +898,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				const turn1 = await Effect.runPromise(
 					runPiDurableTurn(backend, {
 						operationId: "turn:1",
+						unpublishedOperationIds: [],
 						turn: 1,
 						provider: "anthropic",
 						modelId: "claude-sonnet-4-5",
@@ -913,6 +918,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				const turn2 = await Effect.runPromise(
 					runPiDurableTurn(backend, {
 						operationId: "turn:2",
+						unpublishedOperationIds: [],
 						turn: 2,
 						provider: "anthropic",
 						modelId: "claude-sonnet-4-5",

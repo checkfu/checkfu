@@ -558,7 +558,7 @@ const admitPiTurnUnderWay = (
 					if ((await backend.publishMcp?.(request)) === true && !discovered) {
 						return "discover" as const
 					}
-					for (const unpublished of request.unpublishedOperationIds ?? []) {
+					for (const unpublished of request.unpublishedOperationIds) {
 						await omitTurnEntries(pi, unpublished, restoredLimit)
 					}
 					if (backend.isCancelled(operationId)) {

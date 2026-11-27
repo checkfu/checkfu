@@ -797,6 +797,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			const result = await Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "openai",
 					modelId: "gpt-4o-mini",
@@ -825,6 +826,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 describe("turn engine", () => {
 	const turnRequest = (turn: number, text: string): PiTurnRequest => ({
 		operationId: `turn:${turn}`,
+		unpublishedOperationIds: [],
 		turn,
 		provider: "openai",
 		modelId: "gpt-4o-mini",
@@ -2420,6 +2422,7 @@ describe("turn engine", () => {
 		)
 		const turn = (number: number): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",
@@ -2580,6 +2583,7 @@ describe("turn engine", () => {
 						const turnFiber = yield* Effect.forkChild(
 							runPiDurableTurn(backend, {
 								operationId: "turn:1",
+								unpublishedOperationIds: [],
 								turn: 1,
 								provider: "openai",
 								modelId: "gpt-4o-mini",
@@ -2802,6 +2806,7 @@ describe("turn engine", () => {
 			})
 		const turn = (number: number, text: string): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",
@@ -2857,6 +2862,7 @@ describe("turn engine", () => {
 		)
 		const turn = (number: number, text: string): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",
@@ -2933,6 +2939,7 @@ describe("turn engine", () => {
 		}
 		const turn = (number: number, text: string, allowed: string): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",
@@ -3016,6 +3023,7 @@ describe("turn engine", () => {
 			const running = Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "openai",
 					modelId: "gpt-4o-mini",
@@ -3042,6 +3050,7 @@ describe("turn engine", () => {
 		)
 		const turn = (number: number, text: string): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",
@@ -3101,6 +3110,7 @@ describe("turn engine", () => {
 			const originalTurn = Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "openai",
 					modelId: "gpt-4o-mini",
@@ -3254,6 +3264,7 @@ describe("turn engine", () => {
 		}
 		const turn = (number: number, text: string): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",
@@ -3328,6 +3339,7 @@ describe("turn engine", () => {
 		}
 		const turn = (number: number, text: string): PiTurnRequest => ({
 			operationId: `turn:${number}`,
+			unpublishedOperationIds: [],
 			turn: number,
 			provider: "openai",
 			modelId: "gpt-4o-mini",

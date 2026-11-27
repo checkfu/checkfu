@@ -31,6 +31,7 @@ import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
 import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
+import type * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -43,6 +44,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
@@ -128,6 +130,7 @@ export interface CliRunOptions {
 		readonly stdout?: string
 	}
 	readonly terminalReads?: ReadonlyArray<Effect.Effect<string, Terminal.QuitError>>
+	readonly terminalInputs?: ReadonlyArray<Terminal.UserInput>
 	readonly sigintController?: SigintController
 	readonly clock?: Clock.Clock
 	readonly onStdoutChunk?: (chunk: string) => Effect.Effect<void>
@@ -417,7 +420,12 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						columns: Effect.succeed(80),
 						rows: Effect.succeed(24),
 						size: Effect.die("unused"),
-						readInput: Effect.die("unused"),
+						readInput: Effect.gen(function* () {
+							const queue = yield* Queue.unbounded<Terminal.UserInput, Cause.Done>()
+							yield* Queue.offerAll(queue, options?.terminalInputs ?? [])
+							yield* Queue.end(queue)
+							return queue
+						}),
 						readLine: Effect.suspend(() => {
 							const next = reads[readIndex++]
 							return next ?? Effect.fail(new Terminal.QuitError())

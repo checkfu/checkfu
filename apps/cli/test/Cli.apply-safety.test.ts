@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ProjectLockfile } from "@checkfu/authoring/lockfile"
@@ -105,6 +106,50 @@ const standardProject = ({ write }: Fixture) =>
 		yield* write(reporter, agentSource("Reporter"))
 		yield* write(report, reportSource("Morning report"))
 	})
+
+it.each([
+	{ choice: "Cancel", exitCode: 0, message: "Cancelled. Nothing was applied." },
+	{
+		choice: "end of input",
+		exitCode: 1,
+		message:
+			"The confirmation prompt was interrupted. Nothing was applied. Use --yes to apply without a prompt.",
+	},
+])(
+	"reports $choice at the apply confirmation without making writes",
+	({ choice, exitCode, message }) =>
+		Effect.runPromise(
+			testProject(({ apply, file, fs, write }) =>
+				Effect.gen(function* () {
+					yield* write(reporter, agentSource("Reporter"))
+					const writes: Array<string> = []
+					const result = yield* apply([reporter], [], {
+						stdinIsTerminal: true,
+						stdoutIsTerminal: true,
+						terminalInputs:
+							choice === "Cancel"
+								? [
+										{
+											input: Option.none(),
+											key: { name: "return", ctrl: false, meta: false, shift: false },
+										},
+									]
+								: [],
+						interceptFetch: (next, request) => {
+							if (request.method !== "GET") {
+								writes.push(request.method)
+							}
+							return next(request)
+						},
+					})
+					expect(result.exitCode).toBe(exitCode)
+					expect(result.stderr).toContain(message)
+					expect(writes).toEqual([])
+					expect(yield* fs.exists(file("checkfu-lock.json"))).toBe(false)
+				}),
+			),
+		),
+)
 
 it("prunes only tracked files under the selected directory or explicitly named", () =>
 	Effect.runPromise(

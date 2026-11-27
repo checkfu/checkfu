@@ -26,6 +26,7 @@ import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
 
 const makeTurnRequest = (turn: number, provider = "openai"): PiTurnRequest => ({
 	operationId: `turn:${turn}`,
+	unpublishedOperationIds: [],
 	turn,
 	provider,
 	modelId: "gpt-4o-mini",

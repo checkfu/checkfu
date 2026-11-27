@@ -117,6 +117,7 @@ describe("a turn whose calls wait past its limit", () => {
 			const paused = await Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "openai" as const,
 					modelId: "gpt-4o-mini",

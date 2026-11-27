@@ -88,6 +88,7 @@ describe("workspace tool output", () => {
 			const outcome = await Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:1",
+					unpublishedOperationIds: [],
 					turn: 1,
 					provider: "openai",
 					modelId: "gpt-4o-mini",

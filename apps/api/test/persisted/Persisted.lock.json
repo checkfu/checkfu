@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T10:45:21.284Z",
+			"cut_at": "2026-11-27T11:18:01.535Z",
 			"schemas": {
 				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -250,7 +250,7 @@
 				"pi-doc:checkfu.session-system-context": "f45e9316164abe2de7d601016d6598c9bd2696418fbe3c860823b553f53d8550",
 				"harness-call:PiHarness.recoverTurn/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
 				"harness-call:PiHarness.recoverTurn/result": "ab844d9e009da845d9d0a1d6507dadc10077b79298a8d9db17917332a40ac07f",
-				"harness-call:PiHarness.runTurn/args": "52b59f8c26ca8dbd03aa1688852b6a899bf2a894890516d91e19e55b0eb35ff3",
+				"harness-call:PiHarness.runTurn/args": "af87c81ded180920be34f6340682edd4f77659c9b6df80eb5b7d635a4c155f1f",
 				"harness-call:PiHarness.runTurn/result": "c16e1594beeaa496667d318536709cc438f34cc4140790b826073f1fbca64c43",
 				"harness-call:PiHarness.abortTurn/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
 				"harness-call:PiHarness.abortTurn/result": "b1d9840fedc4cbfc93f17bd28b384777654f2b7afdb086f525bed2b01533da3f",
@@ -12862,12 +12862,12 @@
 						"",
 						{
 							"operationId": "",
-							"turn": 1.9651284372427148e-275,
-							"provider": "V)",
-							"modelId": "prototype",
-							"system": null,
+							"turn": 1.7976931348623151e+308,
+							"provider": "__proto__",
+							"modelId": "",
+							"system": "prototype",
 							"systemContext": "shau_M}!}i",
-							"text": "\ud800",
+							"text": "",
 							"unpublishedOperationIds": [
 								"",
 								"X5sy:}f",
@@ -12886,9 +12886,9 @@
 					[
 						"o|2!'dE6",
 						{
-							"operationId": "",
-							"turn": -1.5e-323,
-							"provider": "\t",
+							"operationId": "prototype",
+							"turn": -4.4e-323,
+							"provider": ")",
 							"modelId": "",
 							"system": "\n",
 							"text": "vquvb5F,O7",
@@ -12980,20 +12980,32 @@
 							"provider": "prototype",
 							"modelId": "\n",
 							"system": null,
-							"text": "m>"
+							"text": "m>",
+							"unpublishedOperationIds": [
+								"{2q/[VK",
+								"",
+								"",
+								"",
+								"+caFK0=XWz",
+								" ",
+								" "
+							]
 						}
 					],
 					[
 						"\udc00",
 						{
-							"operationId": "",
-							"turn": -6.873648458369519e-34,
-							"provider": "mNH'299",
-							"modelId": "\n",
-							"system": "prototype",
-							"systemContext": "",
-							"text": "cWqu,]\")?~",
-							"tools": "4294967295"
+							"operationId": "4294967295",
+							"turn": 1.7976931348623135e+308,
+							"provider": "bmNH'29",
+							"modelId": "\t",
+							"system": "\u0000",
+							"systemContext": "SP!",
+							"text": "EcWq",
+							"unpublishedOperationIds": [
+								"?~=TXn&Y;R"
+							],
+							"tools": "prototype"
 						}
 					],
 					[
@@ -13004,48 +13016,131 @@
 							"provider": "4294967295",
 							"modelId": "0",
 							"system": "j~]WC)I\"pm",
-							"text": "😀"
+							"text": "😀",
+							"unpublishedOperationIds": [
+								"",
+								"\n",
+								"I#>^-rKh\\8",
+								"\"Njn",
+								"kN=DCH5#8H",
+								"__proto__",
+								"tt0VXC4w3S",
+								"\n",
+								"\u0000",
+								"toString"
+							]
 						}
 					],
 					[
 						"xE#%YR",
 						{
-							"operationId": " ",
-							"turn": 1.7976931348623147e+308,
-							"provider": "KGn}{!?ih5",
-							"modelId": "4294967295",
-							"system": "jyRLl=Gy",
-							"systemContext": "0LaEwr",
-							"text": "!]z",
+							"operationId": ",cLS0fKGn}",
+							"turn": -3.280142755038166e+294,
+							"provider": "EO:",
+							"modelId": "jyRLl=Gy",
+							"system": null,
+							"systemContext": "prototype",
+							"text": "",
 							"unpublishedOperationIds": [
-								"<8e:RRk\\\"'",
-								"ekLj\\FS@/G",
-								"*8pZ_Qs!0W",
-								""
+								"0LaEwr",
+								"",
+								"8e:",
+								"\\\"'}(Cek",
+								"\ud800",
+								"@/G[&O*8pZ",
+								"!0WzV'LC ",
+								"-1",
+								"-1",
+								"4294967295"
 							],
-							"tools": "0"
+							"mcp": {
+								"servers": [
+									{
+										"name": "S",
+										"url": "~2",
+										"credential_id": null,
+										"vault_id": null
+									},
+									{
+										"name": "b",
+										"url": "4294967295",
+										"credential_id": null,
+										"vault_id": " "
+									},
+									{
+										"name": "sl_Ea",
+										"url": " ",
+										"credential_id": null,
+										"vault_id": "O"
+									},
+									{
+										"name": "3",
+										"url": "`dz8haNAOm",
+										"credential_id": null,
+										"vault_id": null
+									},
+									{
+										"name": "2",
+										"url": "😀",
+										"credential_id": null,
+										"vault_id": null
+									},
+									{
+										"name": "53w4ihT_eF",
+										"url": "\udc00",
+										"credential_id": null,
+										"vault_id": null
+									},
+									{
+										"name": "Os66fgXi_3",
+										"url": "\ud800",
+										"credential_id": null,
+										"vault_id": "😀"
+									},
+									{
+										"name": "e_9rZ_a_D",
+										"url": "t=H%_",
+										"credential_id": null,
+										"vault_id": null
+									},
+									{
+										"name": "s6QJ_l",
+										"url": "__proto__",
+										"credential_id": null,
+										"vault_id": "__proto__"
+									},
+									{
+										"name": "5",
+										"url": "hJ",
+										"credential_id": null,
+										"vault_id": "LMU'"
+									}
+								],
+								"networking": null
+							}
 						}
 					],
 					[
 						"SMKXII9M2d",
 						{
-							"operationId": "😀",
-							"turn": -2.106507428421316e-126,
-							"provider": "prototype",
-							"modelId": "-1",
-							"system": "😀",
-							"text": "\t",
+							"operationId": "\n",
+							"turn": 2.011716841985928e-132,
+							"provider": "(",
+							"modelId": " ",
+							"system": "D[&)K0g?u]",
+							"systemContext": "toString",
+							"text": "prototype",
 							"unpublishedOperationIds": [
-								" ",
-								"\t",
-								"]?_8^-KD9v",
-								"0N:39YMc}$",
-								"4294967295",
+								"-1",
+								"\n",
+								"",
+								":39YMc}$\"U",
 								"",
 								"\udc00",
 								"",
 								"0",
-								"M*n=\\gk@}b"
+								"M*n=\\gk@}b",
+								"s7~*<"
 							]
 						}
 					],
@@ -13053,7 +13148,7 @@
 						"",
 						{
 							"operationId": "",
-							"turn": 248717017536.31976,
+							"turn": -1e-323,
 							"provider": "O^!PK",
 							"modelId": "8UQ^[FY!M<",
 							"system": null,

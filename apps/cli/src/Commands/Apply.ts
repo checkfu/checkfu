@@ -102,8 +102,15 @@ const runApply = (lockFile: string, options: Command.Command.Config.Infer<typeof
 						{ title: "Show details", value: "details" },
 						{ title: "Apply changes", value: "apply" },
 					],
-				}).pipe(Effect.orElseSucceed(() => "cancel" as const))
+				}).pipe(
+					Effect.mapError(() =>
+						usageError(
+							"The confirmation prompt was interrupted. Nothing was applied. Use --yes to apply without a prompt.",
+						),
+					),
+				)
 				if (decision === "cancel") {
+					yield* writeStderrLine("Cancelled. Nothing was applied.")
 					return
 				}
 				if (decision === "apply") {

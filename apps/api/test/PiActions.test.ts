@@ -122,6 +122,7 @@ describe("an operation that waits on a custom tool", () => {
 	}
 	const request = {
 		operationId: "turn:1",
+		unpublishedOperationIds: [],
 		turn: 1,
 		provider: "openai" as const,
 		modelId: "gpt-4o-mini",
