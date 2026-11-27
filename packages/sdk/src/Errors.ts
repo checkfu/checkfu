@@ -1,3 +1,4 @@
+import type * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as HttpClientError from "effect/http/HttpClientError"
 import * as Predicate from "effect/Predicate"
@@ -40,10 +41,22 @@ export interface ApiStatusErrorFields<Status extends number = number> {
 	readonly unconfirmedIndex?: number | undefined
 }
 
+type ApiStatusErrorInstance<Tag extends string, Status extends number> = Cause.YieldableError &
+	ApiStatusErrorFields<Status> & {
+		readonly _tag: Tag
+		readonly requestID: string | undefined
+		readonly error: ApiErrorBody
+		readonly retryable: boolean
+	}
+
+type ApiStatusErrorConstructor<Tag extends string, Status extends number> = new (
+	fields: ApiStatusErrorFields<Status>,
+) => ApiStatusErrorInstance<Tag, Status>
+
 const ApiStatusError = <const Tag extends string, Status extends number>(
 	tag: Tag,
 	retryable: (status: Status) => boolean,
-) =>
+): ApiStatusErrorConstructor<Tag, Status> =>
 	class extends Data.TaggedError(tag)<ApiStatusErrorFields<Status>> {
 		get requestID(): string | undefined {
 			return this.requestId
