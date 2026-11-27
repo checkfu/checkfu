@@ -23,6 +23,7 @@ import {
 import type { PiSessionProviders } from "../src/Pi/PiProviderRuntime.ts"
 import { PiSession, PiSessionLive, makePiHarnessBackend } from "../src/Pi/PiSession.do.ts"
 import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
+import { ApiWorker } from "../src/Api.ts"
 
 const makeTurnRequest = (turn: number, provider = "openai"): PiTurnRequest => ({
 	operationId: `turn:${turn}`,
@@ -229,7 +230,10 @@ describe("PiProviderRuntime", () => {
 							providers: Cloudflare.providers(),
 							state: Alchemy.localState(),
 						},
-						Effect.asVoid(PiHarnessWorker).pipe(Effect.provide(worker)),
+						Effect.gen(function* () {
+							yield* Cloudflare.Worker(ApiWorker.LogicalId, { main: import.meta.url })
+							yield* PiHarnessWorker
+						}).pipe(Effect.provide(worker)),
 					)
 					return Alchemist.plan({
 						stack,
