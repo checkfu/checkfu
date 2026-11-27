@@ -61,6 +61,7 @@ import {
 	RecordInitialMessagesLive,
 } from "./Session/RecordInitialMessages.policy.ts"
 import { AdmitSessionWithMessagesDecision } from "./Session/AdmitSessionWithMessages.decision.ts"
+import { AdmitMountedSessionDecision } from "./Session/AdmitMountedSession.decision.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
 import { SaveSessionOutputs, SaveSessionOutputsLive } from "./Session/SaveSessionOutputs.policy.ts"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
@@ -99,6 +100,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		CreateAgentDecision,
 		UpdateAgentDecision,
 		AdmitSessionDecision,
+		AdmitMountedSessionDecision,
 		AdmitSessionWithMessagesDecision,
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,

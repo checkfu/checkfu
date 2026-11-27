@@ -81,6 +81,7 @@ import {
 	BoundedAgentId,
 	BoundedEnvironmentId,
 } from "../src/Session/AdmitSession.command.ts"
+import { AdmitMountedSessionDecision } from "../src/Session/AdmitMountedSession.decision.ts"
 import { AdmitSessionDecision } from "../src/Session/AdmitSession.decision.ts"
 
 class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
@@ -95,17 +96,18 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 	views: ["AgentView", "AgentVersionByNumberView", "EnvironmentView", "SessionView"],
 }) {}
 
-// The archive decisions add preconditions to existing archive events. Their variable
-// participant lists have separate bounded proofs and an end-to-end Workerd race test.
+// Variable-participant admissions and guarded archives have dedicated verification and integration tests.
 const CheckfuProofBase: Model.Any & (new (_: never) => object) = Checkfu
 class CheckfuInductiveModel extends CheckfuProofBase {
 	static override readonly decisions = Checkfu.decisions.filter(
 		(decision) =>
+			decision !== AdmitMountedSessionDecision &&
 			decision !== ArchiveAgentIfCurrentDecision &&
 			decision !== ArchiveEnvironmentIfCurrentDecision,
 	)
 	static override readonly commands = Checkfu.commands.filter(
 		(command) =>
+			command !== AdmitMountedSessionDecision.command &&
 			command !== ArchiveAgentIfCurrentDecision.command &&
 			command !== ArchiveEnvironmentIfCurrentDecision.command,
 	)

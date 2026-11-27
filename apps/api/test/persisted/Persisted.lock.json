@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "prerelease-session-artifact-sources",
-			"cut_at": "2026-11-27T20:26:30.458Z",
+			"label": "mounted-session-files",
+			"cut_at": "2026-11-27T20:46:43.048Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -147,6 +147,7 @@
 				"command-reply:Checkfu/CreateAgent": "97506d720f7740b90ea82a50e4676cc0c88ba90d774fe016a2f4114175cb4c34",
 				"command-reply:Checkfu/UpdateAgent": "97506d720f7740b90ea82a50e4676cc0c88ba90d774fe016a2f4114175cb4c34",
 				"command-reply:Checkfu/AdmitSession": "69f55f6957f8cd4b91f68e3f86920ad49d7bd0d1e6734ceab2180288c9e8d72b",
+				"command-reply:Checkfu/AdmitMountedSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/AdmitSessionWithMessages": "69f55f6957f8cd4b91f68e3f86920ad49d7bd0d1e6734ceab2180288c9e8d72b",
 				"command-reply:Checkfu/AdmitAutomation": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/OpenAutomationSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
@@ -7605,6 +7606,16 @@
 					{
 						"agent_version": 24
 					}
+				],
+				"command-reply:Checkfu/AdmitMountedSession": [
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null
 				],
 				"command-reply:Checkfu/AdmitSessionWithMessages": [
 					{
