@@ -43,6 +43,7 @@ const STANDING = {
 	"WebhookEndpoint.StaleSecretExpiryLeavesPreviousSecretUntouched": "proved",
 	"WebhookEndpoint.ClaimingKeyChangesNoState": "proved",
 	"WebhookEndpoint.UpdateKeepsWhatItDoesNotName": "proved",
+	"WebhookEndpoint.UnchangedUpdateKeepsDeliveryHealth": "proved",
 	"WebhookEndpoint.PredatingSuccessLeavesFailureWindowUntouched": "proved",
 	"WebhookEndpoint.ActiveGracePeriodNotOverwritten": "proved",
 	"Webhooks.AnEndpointIsCreated": "reached",

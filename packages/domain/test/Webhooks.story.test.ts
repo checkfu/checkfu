@@ -287,6 +287,90 @@ describe("Webhooks model stories", () => {
 	)
 
 	it.effect(
+		"keeps delivery health and the existing revision when an update changes nothing",
+		() => {
+			const endpoint = WebhookEndpoint.ref(WebhookId.make("whe_unchanged"))
+			const definition = {
+				url: "https://hooks.example.com/unchanged",
+				description: "Delivery endpoint",
+				event_types: "*",
+			}
+			const failedAt = t0Ms + 1000
+			const health = {
+				definition_revision: 1,
+				failure_window_started_at: failedAt,
+				last_failure_at: failedAt,
+				consecutive_failures: 1,
+				updated_at: t0Ms,
+			}
+			return story(
+				Story.clock(t0),
+				Story.when(
+					new CreateWebhookEndpoint({
+						webhook_id: endpoint.id,
+						...definition,
+						secret_salt: SALT_1,
+					}),
+				),
+				Story.then(endpoint, new WebhookEndpointCreated({ ...definition, secret_salt: SALT_1 })),
+				Story.when(
+					new RecordWebhookOutcome({
+						webhook_id: endpoint.id,
+						definition_revision: 1,
+						outcome: "failed",
+						observed_at: failedAt,
+					}),
+				),
+				Story.then(
+					endpoint,
+					new WebhookHealthDegraded({ window_started_at: failedAt, last_failure_at: failedAt }),
+				),
+				Story.clock(at("2026-01-01T00:00:05.000Z")),
+				Story.when(
+					new UpdateWebhookEndpoint({
+						webhook_id: endpoint.id,
+						url: null,
+						description: null,
+						event_types: null,
+						reactivate: false,
+					}),
+				),
+				Story.then(endpoint),
+				Story.state(endpoint, health),
+				Story.when(
+					new UpdateWebhookEndpoint({ webhook_id: endpoint.id, ...definition, reactivate: true }),
+				),
+				Story.then(endpoint),
+				Story.state(endpoint, health),
+				Story.when(
+					new RecordWebhookOutcome({
+						webhook_id: endpoint.id,
+						definition_revision: 1,
+						outcome: "failed",
+						observed_at: t0Ms + 2000,
+					}),
+				),
+				Story.then(
+					endpoint,
+					new WebhookHealthDegraded({ window_started_at: failedAt, last_failure_at: t0Ms + 2000 }),
+				),
+				Story.state(endpoint, { definition_revision: 1, consecutive_failures: 2 }),
+				Story.when(new PauseWebhookEndpoint({ webhook_id: endpoint.id })),
+				Story.then(endpoint, new WebhookEndpointPaused()),
+				Story.when(
+					new UpdateWebhookEndpoint({ webhook_id: endpoint.id, ...definition, reactivate: true }),
+				),
+				Story.then(endpoint, new WebhookEndpointUpdated({ ...definition, reactivated: true })),
+				Story.state(endpoint, {
+					status: "active",
+					definition_revision: 2,
+					consecutive_failures: 0,
+				}),
+			)
+		},
+	)
+
+	it.effect(
 		"enforces redirect disable, sustained failure disable, re-anchoring on late success, recovery, and delete",
 		() => {
 			const endpoint = WebhookEndpoint.ref(WebhookId.make("whe_health_1"))

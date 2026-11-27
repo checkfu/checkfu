@@ -2,6 +2,10 @@
 	"version": 1,
 	"rules": {
 		"Webhooks": {
+			"WebhookEndpoint.UnchangedUpdateKeepsDeliveryHealth": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"UpdateWebhookEndpoint\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tconst unchanged = [\n\t\t\t\t(command.url ?? before.url) === before.url,\n\t\t\t\t(command.description ?? before.description) === before.description,\n\t\t\t\t(command.event_types ?? before.event_types) === before.event_types,\n\t\t\t\tcommand.reactivate === false || before.status === \"active\",\n\t\t\t].every((ok) => ok)\n\t\t\treturn [\n\t\t\t\t!unchanged,\n\t\t\t\t[\n\t\t\t\t\tafter.definition_revision === before.definition_revision,\n\t\t\t\t\tafter.updated_at === before.updated_at,\n\t\t\t\t\tafter.failure_window_started_at === before.failure_window_started_at,\n\t\t\t\t\tafter.last_failure_at === before.last_failure_at,\n\t\t\t\t\tafter.consecutive_failures === before.consecutive_failures,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
 			"WebhookEndpoint.StatusIsKnown": {
 				"kind": "invariant",
 				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"paused\",\n\t\t\t\ts.status === \"disabled_redirect\",\n\t\t\t\ts.status === \"disabled_sustained_failure\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
