@@ -33,7 +33,6 @@ export interface StoredFiles {
 export async function* packDirectories(
 	files: StoredFiles,
 	directories: ReadonlyArray<string>,
-	root: string,
 ): AsyncGenerator<Uint8Array> {
 	const { createTarPacker } = await import("modern-tar")
 	const { readable, controller } = createTarPacker()
@@ -68,10 +67,6 @@ export async function* packDirectories(
 	}
 	const packed = (async () => {
 		for (const directory of directories) {
-			if (directory === root) {
-				await add(directory, "")
-				continue
-			}
 			const stat = await files.lstat(directory).catch((error: unknown) => {
 				if (Predicate.hasProperty(error, "code") && error.code === "ENOENT") {
 					return undefined
@@ -81,7 +76,7 @@ export async function* packDirectories(
 			if (stat !== undefined) {
 				await entry(
 					directory,
-					directory.slice(root === "/" ? 1 : root.length + 1),
+					directory.slice(1),
 					stat.isDirectory === true,
 					stat.isSymbolicLink === true,
 				)
@@ -106,12 +101,8 @@ export async function* packDirectories(
 	await packed
 }
 
-export const packDirectory = (files: StoredFiles, directory: string, root: string) =>
-	packDirectories(files, [directory], root)
-
 const PART_BYTES = 4 * 1024 * 1024
-const UNPACK = `mkdir -p "$2" || exit 1
-cat "$1"/* | if [ "$3" = zstd ]; then zstd -dc; else cat; fi | tar -x -C "$2" \${4:+--skip-old-files}
+const UNPACK = `cat "$1"/* | if [ "$2" = zstd ]; then zstd -dc; else cat; fi | tar -x -C /
 for code in "\${PIPESTATUS[@]}"; do [ "$code" -eq 0 ] || exit 1; done`
 const CALLS = "/tmp/checkfu-calls"
 const COMMAND_MARK = "CHECKFU_COMMAND=1"
@@ -120,15 +111,12 @@ for signal in STOP STOP KILL; do for pid in $(marked); do kill -"$signal" "$pid"
 sleep 0.2
 directory=$1; staging=$2; bytes=$3
 mkdir -p -- "$directory" "$staging" || exit 1
-root=$directory; paths=(.)
-if [ "$#" -gt 3 ]; then
-	root=/; paths=("\${directory#/}"); shift 3
-	for directory; do
-		[ -e "$directory" ] || [ -L "$directory" ] || mkdir -p -- "$directory" || exit 1
-		paths+=("\${directory#/}")
-	done
-fi
-tar -c -C "$root" -- "\${paths[@]}" | zstd -q -1 | split -b "$bytes" -a 6 -d - "$staging/"
+paths=("\${directory#/}"); shift 3
+for extra; do
+	[ -e "$extra" ] || [ -L "$extra" ] || mkdir -p -- "$extra" || exit 1
+	paths+=("\${extra#/}")
+done
+tar -c -C / -- "\${paths[@]}" | zstd -q -1 | split -b "$bytes" -a 6 -d - "$staging/"
 codes=("\${PIPESTATUS[@]}")
 [ "\${#codes[@]}" -eq 3 ] && [ "\${codes[0]}" -eq 0 ] && [ "\${codes[1]}" -eq 0 ] && [ "\${codes[2]}" -eq 0 ] || exit 1
 ls "$staging" | wc -l`
@@ -144,7 +132,6 @@ export const unpackInto = async (
 	sandbox: Sandbox,
 	directory: string,
 	archive: Archive,
-	keepExisting = false,
 ): Promise<void> => {
 	const staging = `/tmp/checkfu-unpack-${crypto.randomUUID()}`
 	try {
@@ -154,19 +141,9 @@ export const unpackInto = async (
 			part += 1
 		}
 		const unpacked = await run(
-			sandbox.exec(
-				[
-					"bash",
-					"-c",
-					UNPACK,
-					"bash",
-					staging,
-					archive.rooted === true ? "/" : directory,
-					archive.compressed ? "zstd" : "plain",
-					...(keepExisting ? ["keep"] : []),
-				],
-				{ timeout: ARCHIVE_MS },
-			),
+			sandbox.exec(["bash", "-c", UNPACK, "bash", staging, archive.compressed ? "zstd" : "plain"], {
+				timeout: ARCHIVE_MS,
+			}),
 		)
 		if (unpacked.exitCode !== 0) {
 			throw new Error(`Could not unpack ${directory} in the machine: ${unpacked.stderr.trim()}`)
@@ -208,11 +185,7 @@ interface MachineRecord {
 	readonly incarnation?: string
 	readonly notice?: string
 	readonly starting?: true
-	readonly directories?: ReadonlyArray<string>
 }
-
-const REPLACED =
-	"The session's machine stopped and a new one took its place. /workspace is as it was when the machine last slept, or as it was before the first command if it never did: changes since then are gone, with every running process and everything outside /workspace. Check the files before you go on."
 
 const COMMAND = `dir=$1; seconds=$2; bytes=$3; lines=$4; call=${CALLS}/$5; root=$6; shift 6
 mkdir -p ${CALLS}; [ -e "$call.stop" ] && { rm -f -- "$call.stop"; echo 0 >&2; exit 143; }
@@ -261,7 +234,6 @@ export const makeWorkspaceMachine = (options: {
 	readonly touched: () => void
 }) => {
 	const extraDirectories = options.extraDirectories ?? []
-	const rooted = extraDirectories.length > 0
 	const record = (): MachineRecord | undefined => options.store.get<MachineRecord>(MACHINE)
 	let attached: Sandbox | undefined
 	const calls = new Set<Promise<unknown>>()
@@ -308,56 +280,19 @@ export const makeWorkspaceMachine = (options: {
 				if (saved === undefined) {
 					await options.settled()
 					await unpackInto(sandbox, options.directory, {
-						chunks: packDirectories(
-							options.stored,
-							[options.directory, ...extraDirectories],
-							rooted ? "/" : options.directory,
-						),
+						chunks: packDirectories(options.stored, [options.directory, ...extraDirectories]),
 						compressed: false,
-						...(rooted ? { rooted: true as const } : {}),
 					})
 				} else {
 					await unpackInto(sandbox, options.directory, saved)
-					if (rooted && saved.rooted !== true) {
-						await options.settled()
-						await unpackInto(
-							sandbox,
-							"/",
-							{
-								chunks: packDirectories(options.stored, extraDirectories, "/"),
-								compressed: false,
-								rooted: true,
-							},
-							true,
-						)
-					}
 				}
-			}
-			const added = fresh
-				? []
-				: extraDirectories.filter((path) => !before?.directories?.includes(path))
-			if (added.length > 0) {
-				await options.settled()
-				await unpackInto(
-					sandbox,
-					"/",
-					{
-						chunks: packDirectories(options.stored, added, "/"),
-						compressed: false,
-						rooted: true,
-					},
-					true,
-				)
 			}
 			const notice =
 				fresh && before?.incarnation !== undefined
-					? rooted
-						? "The session's machine was replaced. The workspace and outputs were restored from the last sleep, or from before the first command. Later changes, running processes and other files are gone. Check the files before continuing."
-						: REPLACED
+					? "The session's machine was replaced. The workspace and outputs were restored from the last sleep, or from before the first command. Later changes, running processes and other files are gone. Check the files before continuing."
 					: before?.notice
 			options.store.put(MACHINE, {
 				incarnation: sandbox.incarnation,
-				...(rooted ? { directories: extraDirectories } : {}),
 				...(notice === undefined ? {} : { notice }),
 			} satisfies MachineRecord)
 			return { sandbox, fresh }
@@ -385,7 +320,6 @@ export const makeWorkspaceMachine = (options: {
 			await options.disk.replace({
 				chunks: archiveOf(sandbox, options.directory, extraDirectories),
 				compressed: true,
-				...(rooted ? { rooted: true as const } : {}),
 			})
 		}
 		await run(options.sandboxes.remove(options.key))

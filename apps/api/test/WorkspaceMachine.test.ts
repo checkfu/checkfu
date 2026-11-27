@@ -64,12 +64,14 @@ const makePlatform = () => {
 						if (state.failUnpack) {
 							return done("", 1)
 						}
-						const [staging = "", , format] = args
+						expect(script).toContain("tar -x -C /")
+						const [staging = "", format] = args
 						const unpacked = joined(stagedUnder(disk, staging))
 						disk.content = format === "zstd" ? unpacked : SEEDED
 						return done()
 					}
 					if (script.includes("tar -c")) {
+						expect(script).toContain("tar -c -C /")
 						disk.staged.set(`${args[1]}/000000`, bytesOf(disk.content))
 						return done("1\n")
 					}
@@ -130,6 +132,7 @@ const makeStored = () => {
 		["/workspace", ["seed.txt", "api", "docs"]],
 		["/workspace/api", ["README.md"]],
 		["/workspace/docs", ["README.md"]],
+		["/mnt/session/outputs", []],
 	])
 	const stored: StoredFiles = {
 		readdir: (path) => {
@@ -229,6 +232,7 @@ const makeMachine = () => {
 		},
 		disk,
 		directory: "/workspace",
+		extraDirectories: ["/mnt/session/outputs"],
 		stored,
 		settled: () => {
 			settled += 1
@@ -428,7 +432,9 @@ describe("workspace machine", () => {
 		await content(machine)
 		state.disk!.content = "not saved"
 		kill()
-		await expect(content(machine)).rejects.toThrow("a new one took its place")
+		await expect(content(machine)).rejects.toThrow(
+			"workspace and outputs were restored from the last sleep",
+		)
 		expect(await content(machine)).toBe("saved")
 		expect(state.opened.length).toBe(3)
 	})
@@ -461,7 +467,9 @@ describe("workspace machine", () => {
 		kill()
 		await machine.sleep()
 		expect([savedContent(), state.disk]).toEqual(["saved", undefined])
-		await expect(content(machine)).rejects.toThrow("a new one took its place")
+		await expect(content(machine)).rejects.toThrow(
+			"workspace and outputs were restored from the last sleep",
+		)
 		expect(await content(machine)).toBe("saved")
 	})
 

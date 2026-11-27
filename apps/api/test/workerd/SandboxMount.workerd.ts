@@ -19,11 +19,10 @@ import type { InSandbox } from "../../src/Workspace/SandboxMount.ts"
 import {
 	archiveOf,
 	makeWorkspaceMachine,
-	packDirectory,
+	packDirectories,
 	unpackInto,
 } from "../../src/Workspace/WorkspaceMachine.ts"
 import type { StoredFiles } from "../../src/Workspace/WorkspaceMachine.ts"
-import type { Archive } from "../../src/Workspace/SavedDisk.ts"
 
 const IMAGE = resolve(import.meta.dirname, "../../src/Sandbox/image")
 
@@ -217,6 +216,7 @@ describe("a session's machine, in a container of its image", () => {
 	it("copies a stored directory in whole: nested, empty, executable, linked, and larger than one part", async () => {
 		const large = patterned(9 * 1024 * 1024 + 5)
 		const tree = new Map<string, Stored>([
+			["/workspace", { kind: "dir", mode: 0o755 }],
 			["/workspace/repo", { kind: "dir", mode: 0o755 }],
 			["/workspace/repo/README.md", { kind: "file", mode: 0o644, content: text("# Repo\n") }],
 			["/workspace/repo/bin", { kind: "dir", mode: 0o755 }],
@@ -234,12 +234,12 @@ describe("a session's machine, in a container of its image", () => {
 			["/workspace/nothing", { kind: "file", mode: 0o644, content: new Uint8Array() }],
 		])
 		await unpackInto(sandbox, "/workspace", {
-			chunks: packDirectory(storedFiles(tree), "/workspace", "/workspace"),
+			chunks: packDirectories(storedFiles(tree), ["/workspace"]),
 			compressed: false,
 		})
 		await sh("rm -rf /workspace/repo/bin")
 		await unpackInto(sandbox, "/workspace", {
-			chunks: packDirectory(storedFiles(tree), "/workspace/repo/bin", "/workspace"),
+			chunks: packDirectories(storedFiles(tree), ["/workspace/repo/bin"]),
 			compressed: false,
 		})
 		expect(await sh("cd /workspace && find . -mindepth 1 | sort")).toBe(
@@ -276,203 +276,51 @@ describe("a session's machine, in a container of its image", () => {
 		}
 		expect(chunks.length).toBeGreaterThan(2)
 		expect(chunks.every((chunk) => chunk.byteLength <= 4 * 1024 * 1024)).toBe(true)
-		await unpackInto(sandbox, "/workspace/restored", {
+		await sh("rm -rf /workspace/save")
+		await unpackInto(sandbox, "/workspace/save", {
 			chunks: (async function* () {
 				yield* chunks
 			})(),
 			compressed: true,
 		})
-		const after = await Effect.runPromise(
-			sandbox.exec(["sh", "-c", listing, "/workspace/restored"]),
-		)
+		const after = await Effect.runPromise(sandbox.exec(["sh", "-c", listing, "/workspace/save"]))
 		expect(after.stdout).toBe(before.stdout)
+		expect(before.stdout).toContain("repo/latest l 777 10 bin/run.sh")
+		expect(await sh("/workspace/save/repo/latest")).toBe("ran\n")
+		for await (const chunk of archiveOf(sandbox, "/workspace/save")) {
+			expect(chunk.byteLength).toBeGreaterThan(0)
+			break
+		}
 		const corrupt = chunks.map((chunk, index) =>
 			index === chunks.length - 1
 				? Uint8Array.from(chunk, (byte, at) => (at === chunk.byteLength - 1 ? byte ^ 0xff : byte))
 				: chunk,
 		)
+		await sh("rm -rf /workspace/save")
 		await expect(
-			unpackInto(sandbox, "/workspace/corrupt", {
+			unpackInto(sandbox, "/workspace/save", {
 				chunks: (async function* () {
 					yield* corrupt
 				})(),
 				compressed: true,
 			}),
 		).rejects.toThrow("Could not unpack")
-		await sh("rm -rf /workspace/corrupt")
-		expect(before.stdout).toContain("repo/latest l 777 10 bin/run.sh")
-		expect(await sh("/workspace/restored/repo/latest")).toBe("ran\n")
-		for await (const chunk of archiveOf(sandbox, "/workspace/save")) {
-			expect(chunk.byteLength).toBeGreaterThan(0)
-			break
-		}
+		await sh("rm -rf /workspace/save")
 		expect(await sh("ls /tmp | grep checkfu- | grep -vc '^checkfu-calls$' || true")).toBe("0\n")
-		await sh("rm -rf /workspace/save /workspace/restored")
 
 		const gone: Array<Uint8Array> = []
 		for await (const chunk of archiveOf(sandbox, "/workspace/gone")) {
 			gone.push(chunk)
 		}
-		await unpackInto(sandbox, "/workspace/back", {
+		await sh("rm -rf /workspace/gone")
+		await unpackInto(sandbox, "/workspace/gone", {
 			chunks: (async function* () {
 				yield* gone
 			})(),
 			compressed: true,
 		})
-		expect(await sh("ls -A /workspace/back | wc -l")).toBe("0\n")
-		await sh("rm -rf /workspace/gone /workspace/back")
-	}, 120_000)
-
-	it("upgrades a legacy workspace snapshot and saves outputs with the workspace across sleep", async () => {
-		const directory = "/workspace/output-upgrade"
-		const outputs = "/mnt/session/outputs/upgrade"
-		const kept = new Map<string, unknown>()
-		let saved: { parts: ReadonlyArray<Uint8Array>; compressed: boolean; rooted?: true } | undefined
-		const save = async (archive: Archive) => {
-			const parts: Array<Uint8Array> = []
-			for await (const part of archive.chunks) {
-				parts.push(part)
-			}
-			saved = {
-				parts,
-				compressed: archive.compressed,
-				...(archive.rooted ? { rooted: true as const } : {}),
-			}
-		}
-		const tree = new Map<string, Stored>([
-			[outputs, { kind: "dir", mode: 0o755 }],
-			[`${outputs}/original.txt`, { kind: "file", mode: 0o644, content: text("STORED\n") }],
-		])
-		const make = () =>
-			makeWorkspaceMachine({
-				sandboxes: {
-					open: () => Effect.succeed(sandbox),
-					remove: () =>
-						Effect.promise(async () => {
-							await sh(`rm -rf -- ${directory} ${outputs}`)
-						}),
-				},
-				key: "outputs-upgrade",
-				store: {
-					get: <A>(key: string) => kept.get(key) as A | undefined,
-					put: (key, value) => {
-						kept.set(key, value)
-					},
-					delete: (key) => {
-						kept.delete(key)
-					},
-				},
-				disk: {
-					read: () => {
-						const image = saved
-						return image === undefined
-							? undefined
-							: {
-									chunks: (async function* () {
-										yield* image.parts
-									})(),
-									compressed: image.compressed,
-									...(image.rooted ? { rooted: true as const } : {}),
-								}
-					},
-					replace: save,
-				},
-				directory,
-				extraDirectories: [outputs],
-				stored: storedFiles(tree),
-				settled: () => Promise.resolve(),
-				touched: () => undefined,
-			})
-		const run = async (machine: ReturnType<typeof make>, command: string) => {
-			const result = await machine.command(
-				["bash", "-c", command],
-				{ cwd: directory, seconds: 20 },
-				undefined,
-			)
-			expect(result.isError).toBe(false)
-			return result.content[0]?.type === "text" ? result.content[0].text : ""
-		}
-		try {
-			await sh(`mkdir -p ${directory}; printf 'LEGACY\\n' > ${directory}/legacy.txt`)
-			await save({ chunks: archiveOf(sandbox, directory), compressed: true })
-			await sh(`rm -rf -- ${directory} ${outputs}`)
-			const first = make()
-			expect(await run(first, `cat legacy.txt ${outputs}/original.txt`)).toBe("LEGACY\nSTORED")
-			await run(
-				first,
-				`printf 'AFTER\\n' > new.txt; printf 'NEW\\n' > ${outputs}/current.txt; rm ${outputs}/original.txt`,
-			)
-			await first.sleep()
-			expect(saved?.rooted).toBe(true)
-			expect(await sh(`[ -e ${directory} ] || [ -e ${outputs} ]; echo $?`)).toBe("1\n")
-			const again = make()
-			expect(
-				await run(
-					again,
-					`cat legacy.txt new.txt ${outputs}/current.txt; test ! -e ${outputs}/original.txt`,
-				),
-			).toBe("LEGACY\nAFTER\nNEW")
-		} finally {
-			await sh(`rm -rf -- ${directory} ${outputs}`)
-		}
-	}, 120_000)
-
-	it("imports stored outputs into an already running machine without overwriting its files or reviving later deletions", async () => {
-		const directory = "/workspace/warm-output-upgrade"
-		const outputs = "/mnt/session/outputs/warm-upgrade"
-		const kept = new Map<string, unknown>([["machine", { incarnation: sandbox.incarnation }]])
-		const tree = new Map<string, Stored>([
-			[outputs, { kind: "dir", mode: 0o755 }],
-			[`${outputs}/conflict.txt`, { kind: "file", mode: 0o644, content: text("STORED_OLD\n") }],
-			[`${outputs}/imported.txt`, { kind: "file", mode: 0o644, content: text("IMPORTED\n") }],
-		])
-		const make = () =>
-			makeWorkspaceMachine({
-				sandboxes: { open: () => Effect.succeed(sandbox), remove: () => Effect.void },
-				key: "warm-output-upgrade",
-				store: {
-					get: <A>(key: string) => kept.get(key) as A | undefined,
-					put: (key, value) => {
-						kept.set(key, value)
-					},
-					delete: (key) => {
-						kept.delete(key)
-					},
-				},
-				disk: { read: () => undefined, replace: async () => undefined },
-				directory,
-				extraDirectories: [outputs],
-				stored: storedFiles(tree),
-				settled: () => Promise.resolve(),
-				touched: () => undefined,
-			})
-		try {
-			await sh(
-				`mkdir -p ${directory} ${outputs}; printf 'MACHINE_NEW\\n' > ${outputs}/conflict.txt`,
-			)
-			const first = make()
-			const seen = await first.command(
-				["cat", `${outputs}/conflict.txt`, `${outputs}/imported.txt`],
-				{ cwd: directory, seconds: 20 },
-				undefined,
-			)
-			expect(seen.isError).toBe(false)
-			expect(seen.content).toEqual([{ type: "text", text: "MACHINE_NEW\nIMPORTED" }])
-			await first.command(
-				["rm", `${outputs}/imported.txt`],
-				{ cwd: directory, seconds: 20 },
-				undefined,
-			)
-			const again = make()
-			const absent = await again.command(
-				["test", "!", "-e", `${outputs}/imported.txt`],
-				{ cwd: directory, seconds: 20 },
-				undefined,
-			)
-			expect(absent.isError).toBe(false)
-		} finally {
-			await sh(`rm -rf -- ${directory} ${outputs}`)
-		}
+		expect(await sh("test -d /workspace/gone && ls -A /workspace/gone | wc -l")).toBe("0\n")
+		await sh("rm -rf /workspace/gone")
 	}, 120_000)
 
 	it("captures exact publication limits from the machine's output directory", async () => {

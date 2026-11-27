@@ -1,7 +1,6 @@
 export interface Archive {
 	readonly chunks: AsyncIterable<Uint8Array>
 	readonly compressed: boolean
-	readonly rooted?: true
 }
 
 export interface SavedDisk {
@@ -57,7 +56,6 @@ export const makeSavedDisk = (sql: DiskSql): SavedDisk => {
 	const sealed = (): ReadonlyArray<{
 		readonly generation: number
 		readonly compressed: boolean
-		readonly rooted: boolean
 	}> =>
 		[
 			...sql.exec(
@@ -66,10 +64,8 @@ export const makeSavedDisk = (sql: DiskSql): SavedDisk => {
 			),
 		].flatMap((row) => {
 			const generation = row["generation"]
-			const flags = bytesOf(row["bytes"])?.[0] ?? 0
-			return typeof generation === "number"
-				? [{ generation, compressed: (flags & 1) !== 0, rooted: (flags & 2) !== 0 }]
-				: []
+			const compressed = ((bytesOf(row["bytes"])?.[0] ?? 0) & 1) !== 0
+			return typeof generation === "number" ? [{ generation, compressed }] : []
 		})
 	async function* rows(generation: number): AsyncGenerator<Uint8Array> {
 		for (let part = 0; ; part += 1) {
@@ -101,7 +97,7 @@ export const makeSavedDisk = (sql: DiskSql): SavedDisk => {
 				"INSERT INTO machine_disk VALUES (?, ?, ?)",
 				next,
 				SEAL,
-				Uint8Array.of((archive.compressed ? 1 : 0) | (archive.rooted === true ? 2 : 0)),
+				Uint8Array.of(archive.compressed ? 1 : 0),
 			)
 			sql.exec("DELETE FROM machine_disk WHERE generation < ?", next)
 		})
@@ -114,7 +110,6 @@ export const makeSavedDisk = (sql: DiskSql): SavedDisk => {
 				: {
 						chunks: rows(last.generation),
 						compressed: last.compressed,
-						...(last.rooted ? { rooted: true as const } : {}),
 					}
 		},
 		replace,
