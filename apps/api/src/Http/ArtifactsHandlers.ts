@@ -10,6 +10,7 @@ import {
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { File } from "@checkfu/domain/File/File.aggregate"
+import type { FileState } from "@checkfu/domain/File/File.aggregate"
 import type { FileId } from "@checkfu/domain/File/File.id"
 import {
 	ArtifactPublicationConflict,
@@ -291,6 +292,37 @@ export const startedFrom = (from: ArtifactId, manifest: ArtifactManifest, own: R
 		return merged
 	})
 
+export const resolveFiles = (
+	entries: ReadonlyArray<ArtifactVersionFileInput>,
+	states: ReadonlyMap<FileId, FileState>,
+) =>
+	Effect.gen(function* () {
+		const resolved: Array<ArtifactVersionEntry> = []
+		const unavailable = Array.from(states).find(([, file]) => file.status === "deleted")?.[0]
+		const sources = new Map<string, FileSource>()
+		for (const entry of entries) {
+			if (!("file_id" in entry)) {
+				resolved.push(entry)
+				continue
+			}
+			const file = states.get(entry.file_id)
+			if (file === undefined || file.status === "") {
+				return yield* reject(404, `File ${entry.file_id} not found.`)
+			}
+			sources.set(file.sha256, {
+				file_id: entry.file_id,
+				size: file.size,
+			})
+			resolved.push({
+				path: entry.path,
+				sha256: file.sha256,
+				size: file.size,
+				content_type: entry.content_type ?? file.content_type,
+			})
+		}
+		return { files: resolved, sources, unavailable }
+	})
+
 export const artifactWrites = Effect.gen(function* () {
 	const store = yield* ArtifactStore
 	const files = yield* File
@@ -303,43 +335,21 @@ export const artifactWrites = Effect.gen(function* () {
 			Effect.catchTag("InvalidArtifactFiles", (error) => reject(400, error.message)),
 		)
 
-	const fromFiles = (entries: ReadonlyArray<ArtifactVersionFileInput>) =>
+	const loadFiles = (ids: ReadonlyArray<FileId>) =>
 		Effect.gen(function* () {
-			const named = [
-				...new Set(entries.flatMap((entry) => ("file_id" in entry ? [entry.file_id] : []))),
-			]
-			const states = new Map(
+			return new Map(
 				yield* Effect.forEach(
-					named,
+					new Set(ids),
 					(file_id) => Effect.map(files.get(file_id), (state) => [file_id, state] as const),
 					{ concurrency: 8 },
 				),
 			)
-			const resolved: Array<ArtifactVersionEntry> = []
-			const unavailable = named.find((file_id) => states.get(file_id)?.status === "deleted")
-			const sources = new Map<string, FileSource>()
-			for (const entry of entries) {
-				if (!("file_id" in entry)) {
-					resolved.push(entry)
-					continue
-				}
-				const file = states.get(entry.file_id)
-				if (file === undefined || file.status === "") {
-					return yield* reject(404, `File ${entry.file_id} not found.`)
-				}
-				sources.set(file.sha256, {
-					file_id: entry.file_id,
-					size: file.size,
-				})
-				resolved.push({
-					path: entry.path,
-					sha256: file.sha256,
-					size: file.size,
-					content_type: entry.content_type ?? file.content_type,
-				})
-			}
-			return { files: resolved, sources, unavailable }
 		})
+
+	const fromFiles = (entries: ReadonlyArray<ArtifactVersionFileInput>) =>
+		loadFiles(entries.flatMap((entry) => ("file_id" in entry ? [entry.file_id] : []))).pipe(
+			Effect.flatMap((states) => resolveFiles(entries, states)),
+		)
 
 	const copyIn = (
 		id: ArtifactId,
@@ -482,7 +492,16 @@ export const artifactWrites = Effect.gen(function* () {
 				: yield* declaredBy(sent)
 		})
 
-	return { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf, loadManifest }
+	return {
+		build,
+		loadFiles,
+		fromFiles,
+		copyIn,
+		stage,
+		keptIn,
+		capabilitiesOf,
+		loadManifest,
+	}
 })
 
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
