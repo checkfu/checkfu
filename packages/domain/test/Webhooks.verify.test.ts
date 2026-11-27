@@ -73,6 +73,14 @@ describe("Webhooks model Z3 formal verification", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
+				yield* Effect.logInfo(Verify.render(report))
+				expect(report.explored.followed).toEqual([])
+				expect(report.explored.idle).toEqual([])
+				expect(report.explored.sagas).toEqual([])
+				expect(report.explored.unstarted).toEqual([])
+				expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual([
+					"ExpirePreviousWebhookSecrets",
+				])
 				expect(report.explored.truncated).toBe(false)
 				expect(report.explored.complete).toBe(3)
 				expect(report.explored.disagreements).toEqual([])

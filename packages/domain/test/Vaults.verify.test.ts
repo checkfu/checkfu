@@ -98,6 +98,14 @@ describe("Vaults Z3 formal verification", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
+				yield* Effect.logInfo(Verify.render(report))
+				expect(report.explored.followed).toEqual([
+					"RetireReleasedCredentials",
+					"SettleCredentialSecret",
+				])
+				expect(report.explored.idle).toEqual([])
+				expect(report.explored.sagas).toEqual([])
+				expect(report.explored.unstarted).toEqual([])
 				expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual([
 					"PublishVaultWebhookEvents",
 				])

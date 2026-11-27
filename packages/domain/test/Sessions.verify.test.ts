@@ -39,6 +39,16 @@ describe("Sessions Z3 formal verification", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
+				yield* Effect.logInfo(Verify.render(report))
+				expect(report.explored.followed).toEqual([
+					"StartTurn",
+					"DiscardWorkspace",
+					"StopModelRequest",
+				])
+				expect(report.explored.idle).toEqual([])
+				expect(report.explored.sagas).toEqual(["RunTurn"])
+				expect(report.explored.unstarted).toEqual([])
+				expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual([])
 				expect(report.explored.aside).toEqual([
 					{
 						kind: "view",
