@@ -114,7 +114,7 @@ jobs:
       matrix:
         shard:
           - name: rest
-            args: --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --exclude test/AutomationRuns.verify.test.ts
+            args: --exclude test/Checkfu.verify.test.ts --exclude test/Checkfu.story.test.ts --exclude test/EnsureTurnStarted.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --exclude test/AutomationRuns.verify.test.ts
           - name: sessions
             args: test/Sessions.verify.test.ts
           - name: sessions-replay
@@ -157,7 +157,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain-checkfu
-      - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts
+      - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts test/Checkfu.story.test.ts test/EnsureTurnStarted.test.ts
         env:
           CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}

@@ -504,6 +504,7 @@ describe("Checkfu unified hosted model stories", () => {
 					result: { status: "completed" },
 				}),
 				Story.state(sessionV1, { _tag: "Idle", turn: 1 }),
+				Story.view(TurnInput, sessionV1, { last_reply_turn: 1 }),
 				Story.view(SessionView, sessionV1, {
 					id: sessionV1.id,
 					type: "session",
