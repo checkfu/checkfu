@@ -324,6 +324,12 @@ export default ApiWorker.make(
 		)
 		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
 		const artifacts = yield* SessionArtifactAccess.pipe(Effect.provide(services))
+		const saves = yield* Effect.cached(
+			Effect.promise(() => import("./SessionArtifactSaves.ts")).pipe(
+				Effect.flatMap(({ SessionArtifactSaves }) => SessionArtifactSaves),
+				Effect.provide(services),
+			),
+		)
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
@@ -342,6 +348,10 @@ export default ApiWorker.make(
 				Effect.orDie(artifacts.artifactFiles(sessionId, mountPath)),
 			artifactRead: (sessionId, mountPath, path, offset, length) =>
 				Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
+			sessionFileSave: (...args) =>
+				Effect.flatMap(saves, (service) => service.sessionFileSave(...args)),
+			sessionArtifactSave: (...args) =>
+				Effect.flatMap(saves, (service) => service.sessionArtifactSave(...args)),
 		})
 	}),
 )

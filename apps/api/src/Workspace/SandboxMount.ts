@@ -289,7 +289,7 @@ def list_outputs(root, limit, max_path):
                     kind = "file"
                 else:
                     kind = "other"
-                entries.append({"path": path, "type": kind})
+                entries.append({"path": path, "type": kind, "size": metadata.st_size if kind == "file" else 0})
                 if len(entries) >= limit:
                     return
                 if kind == "dir" and len(path) <= max_path:

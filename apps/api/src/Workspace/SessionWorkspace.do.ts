@@ -33,7 +33,7 @@ import {
 	makeStoredOutputFiles,
 	SESSION_OUTPUTS_PATH,
 } from "./SessionOutputs.ts"
-import type { OutputBytes, OutputRead, OutputsListing } from "./SessionOutputs.ts"
+import type { OutputBytes, OutputFiles, OutputRead, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { FencedTurn, TurnToken } from "./WorkspaceFence.ts"
 import { makeSavedDisk } from "./SavedDisk.ts"
@@ -42,6 +42,7 @@ import { makeWorkspaceMachine } from "./WorkspaceMachine.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./WorkspaceShapes.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
 import {
+	ARTIFACT_TOOL,
 	BASH_SECONDS,
 	BASH_TOOL,
 	WORKSPACE_TOOL_OPTIONS,
@@ -82,6 +83,7 @@ interface Files {
 	readonly fs: Workspace["fs"]
 	readonly tools: ReturnType<typeof createPiTools>
 	readonly outputs: ReturnType<typeof makeSessionOutputs>
+	readonly capture: (root: string, signal: AbortSignal) => OutputFiles
 }
 
 const writeFileIn = async (
@@ -206,6 +208,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 							fs,
 							tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } }),
 							outputs: makeSessionOutputs(makeStoredOutputFiles(local)),
+							capture: (root: string) => makeStoredOutputFiles(local, root),
 						},
 						shared: (): Files => {
 							if (overMachine === undefined) {
@@ -221,6 +224,10 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 									},
 								})
 								overMachine = {
+									capture: (root, signal) =>
+										makeSandboxOutputFiles(root, (operation) =>
+											machine.inMachine(operation, signal),
+										),
 									fs: over.fs,
 									tools: createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs: over.fs } }),
 									outputs: makeSessionOutputs(
@@ -399,12 +406,38 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					return inMachine ? work(files.shared()) : onStored(() => work(files.local))
 				}
 
+				const askApi = call
+
 				const answer = async (
 					call: WorkspaceToolCall,
 					signal: AbortSignal,
+					turn: number,
 				): Promise<WorkspaceToolResult> => {
 					if (call.name === BASH_TOOL.name) {
 						return runBash(call.arguments, signal)
+					}
+					if (call.name === ARTIFACT_TOOL.name) {
+						const { saveArtifact } = await import("./ArtifactTool.ts")
+						return onActive((on) =>
+							saveArtifact(
+								call.arguments,
+								{
+									capture: (directory) => on.capture(directory, signal),
+									saveFile: (path, bytes) =>
+										askApi(api.sessionFileSave(sessionId, turn, path, bytes), { signal }),
+									saveArtifact: (name, entries) =>
+										askApi(api.sessionArtifactSave(sessionId, turn, name, entries), { signal }),
+								},
+								signal,
+							),
+						).catch((error: unknown) => {
+							if (signal.aborted) {
+								return failed(
+									"The turn was interrupted while saving the artifact. Save it again to check the result.",
+								)
+							}
+							return failed(messageOf(error))
+						})
 					}
 					return withCallSignal(signal, () =>
 						onActive((on) => on.tools.execute(asLiteral(call), { abortSignal: signal })),
@@ -477,7 +510,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								.run(token, async (turn): Promise<WorkspaceToolResult> => {
 									const signal = AbortSignal.any([stopping.signal, turn])
 									await initialize((await workspace()).fs)
-									const { content, isError } = await answer(call, signal)
+									const { content, isError } = await answer(call, signal, token.turn)
 									return boundWorkspaceResult(call.name, { content, isError })
 								})
 								.finally(() => {

@@ -9,6 +9,7 @@ import type { Sandbox } from "../../src/Sandbox/Sandboxes.ts"
 import { cloneCommand } from "../../src/Workspace/Repositories.ts"
 import type { RepositoryMount } from "../../src/Workspace/WorkspaceShapes.ts"
 import { WRITE_FILE } from "../../src/Sandbox/WriteFile.ts"
+import { saveArtifact } from "../../src/Workspace/ArtifactTool.ts"
 import { makeSandboxMount, makeSandboxOutputFiles } from "../../src/Workspace/SandboxMount.ts"
 import {
 	MAX_OUTPUT_FILE_BYTES,
@@ -361,6 +362,42 @@ describe("a session's machine, in a container of its image", () => {
 			expect(withAlias.ok && withAlias.skipped).toEqual([
 				{ path: "alias.txt", reason: "Not a regular file." },
 			])
+		} finally {
+			await sh(`rm -rf -- ${root}`)
+		}
+	}, 45_000)
+
+	it("captures a workspace artifact through the guarded machine reader", async () => {
+		const root = "/workspace/artifact-capture"
+		const input = { name: "Report", directory: `${root}/./` }
+		const saved = new Map<string, string>()
+		const capture = () =>
+			saveArtifact(input, {
+				capture: (directory) => makeSandboxOutputFiles(directory, inContainer),
+				saveFile: async (path, bytes) => {
+					saved.set(path, new TextDecoder().decode(bytes))
+					return { ok: true, file_id: path }
+				},
+				saveArtifact: async () => ({
+					ok: true,
+					artifact_id: "art_example",
+					version: 1,
+					changed: true,
+				}),
+			})
+		try {
+			await sh(`mkdir -p -- ${root}/assets; printf hello > ${root}/assets/a.txt`)
+			expect((await capture()).isError).toBe(false)
+			expect(Object.fromEntries(saved)).toEqual({ "assets/a.txt": "hello" })
+			saved.clear()
+			await sh(`ln -s assets/a.txt ${root}/alias.txt`)
+			const refused = await capture()
+			expect(refused.isError).toBe(true)
+			expect(refused.content[0]).toEqual({
+				type: "text",
+				text: "alias.txt is not a regular file. Remove it or save a different directory.",
+			})
+			expect(saved.size).toBe(0)
 		} finally {
 			await sh(`rm -rf -- ${root}`)
 		}

@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T14:18:53.745Z",
+			"cut_at": "2026-11-27T15:24:08.310Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -336,7 +336,11 @@
 				"api-call:Api.artifactFiles/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
 				"api-call:Api.artifactFiles/result": "b8d570353fd5a7163ea22d9446f83f2d8a67da7363fbaab629060624b5ccbe49",
 				"api-call:Api.artifactRead/args": "96e05fa19519d18635f01d7bf70f88a873166919aea8aec1dbfe52d5b1c8b046",
-				"api-call:Api.artifactRead/result": "f214bbedb0a7063b9d2f4ee91e509ebea6cdfd1453854f0170c721de7681ec3c"
+				"api-call:Api.artifactRead/result": "f214bbedb0a7063b9d2f4ee91e509ebea6cdfd1453854f0170c721de7681ec3c",
+				"api-call:Api.sessionFileSave/args": "6a66c561a71d417886ff0bbd0317525d61df1bae2c1f5fdaae13af96429ea87a",
+				"api-call:Api.sessionFileSave/result": "5202d677d6d59fe97ce65457968dd7b6729c47c2db5e846dc9956cdf74968ea5",
+				"api-call:Api.sessionArtifactSave/args": "409457eef36d9784817a886ee43bf6346d4f5070b69612d8ee5e1996615c7bd3",
+				"api-call:Api.sessionArtifactSave/result": "2ca6647ffdcd0a316b8320cac832fcd24bb9da67620dd674adda4718917724e3"
 			},
 			"shapes": {
 				"state:Checkfu.Agent": [
@@ -19190,6 +19194,394 @@
 					"/+4AhABxOg==",
 					"",
 					null
+				],
+				"api-call:Api.sessionFileSave/args": [
+					[
+						"\ud800",
+						87,
+						"\t",
+						"BgQE/fgH/zlp/w=="
+					],
+					[
+						"\u0000",
+						101,
+						"😀",
+						"/3wFAwIO0wXTAA=="
+					],
+					[
+						"\ud800",
+						97,
+						"9 V=3#",
+						""
+					],
+					[
+						"\\9$'",
+						95,
+						"__proto__",
+						"qsMF+gD6Fpfs+Q=="
+					],
+					[
+						"toString",
+						6,
+						"",
+						""
+					],
+					[
+						"Kg\"i&cyY+=",
+						49,
+						"",
+						"EgAElwM="
+					],
+					[
+						"H9Sao0",
+						89,
+						"kK@p~UD\\kz",
+						"JjkG"
+					],
+					[
+						"\t",
+						16,
+						"toString",
+						""
+					]
+				],
+				"api-call:Api.sessionFileSave/result": [
+					{
+						"ok": false,
+						"message": " "
+					},
+					{
+						"ok": true,
+						"file_id": "@$PlVT\\^"
+					},
+					{
+						"ok": true,
+						"file_id": "toString"
+					},
+					{
+						"ok": false,
+						"message": "\u0000"
+					},
+					{
+						"ok": true,
+						"file_id": ""
+					},
+					{
+						"ok": false,
+						"message": ""
+					},
+					{
+						"ok": false,
+						"message": "\t"
+					},
+					{
+						"ok": false,
+						"message": "`tt>7Kg2.]"
+					}
+				],
+				"api-call:Api.sessionArtifactSave/args": [
+					[
+						" ",
+						9,
+						"_{Tq:^d,l:",
+						[
+							{
+								"path": ".Lx:W/I%",
+								"file_id": "😀"
+							},
+							{
+								"path": "\t",
+								"file_id": "__proto__"
+							},
+							{
+								"path": "\t",
+								"file_id": "u2u';"
+							},
+							{
+								"path": "😀",
+								"file_id": "-1"
+							},
+							{
+								"path": "MO%4m`iT4`",
+								"file_id": "gu["
+							},
+							{
+								"path": "",
+								"file_id": "__proto__"
+							},
+							{
+								"path": "M*6yQ4l9WQ",
+								"file_id": "CTaUQ~5)P6"
+							},
+							{
+								"path": "S",
+								"file_id": "😀"
+							},
+							{
+								"path": "F^",
+								"file_id": ""
+							},
+							{
+								"path": "9o_HDF",
+								"file_id": "[-VY"
+							}
+						]
+					],
+					[
+						"\t",
+						39,
+						"sT(?",
+						[
+							{
+								"path": "j",
+								"file_id": "\udc00"
+							},
+							{
+								"path": "\t",
+								"file_id": ""
+							},
+							{
+								"path": "😀",
+								"file_id": ""
+							},
+							{
+								"path": "\n",
+								"file_id": "b{+XyUz"
+							},
+							{
+								"path": "T19",
+								"file_id": "\t"
+							},
+							{
+								"path": "h*@pTx CGZ",
+								"file_id": ""
+							},
+							{
+								"path": "=7m]\\YcNma",
+								"file_id": "toString"
+							},
+							{
+								"path": "HZ$Un+pH(=",
+								"file_id": "V<!2"
+							},
+							{
+								"path": "",
+								"file_id": ""
+							}
+						]
+					],
+					[
+						"%a@",
+						6,
+						"L@z\\]cP",
+						[
+							{
+								"path": "\\/$U\\-En`G",
+								"file_id": "/ S1tGBJ,:"
+							},
+							{
+								"path": "\\",
+								"file_id": "iPz8jQZ6"
+							},
+							{
+								"path": "\ud800",
+								"file_id": "0"
+							},
+							{
+								"path": "-1",
+								"file_id": "prototype"
+							},
+							{
+								"path": "\u0000",
+								"file_id": "😀"
+							},
+							{
+								"path": "Y:;zcq1YT",
+								"file_id": ""
+							},
+							{
+								"path": "4294967295",
+								"file_id": "|E%5[qi\"U8"
+							},
+							{
+								"path": "",
+								"file_id": ""
+							},
+							{
+								"path": "%2sS\"a'R",
+								"file_id": "w2"
+							},
+							{
+								"path": "\udc00",
+								"file_id": "toString"
+							}
+						]
+					],
+					[
+						"tA+K!3nZ6",
+						2,
+						"=3pdv0rT~u",
+						[]
+					],
+					[
+						"",
+						7,
+						"prototype",
+						[]
+					],
+					[
+						"-1",
+						101,
+						"\n",
+						[
+							{
+								"path": "B(.[XKY3'M",
+								"file_id": "4294967295"
+							},
+							{
+								"path": "\u0000",
+								"file_id": ""
+							},
+							{
+								"path": "\ud800",
+								"file_id": "toString"
+							},
+							{
+								"path": "\t",
+								"file_id": "\u0000"
+							},
+							{
+								"path": "-1",
+								"file_id": "Kqdp`.8:<T"
+							},
+							{
+								"path": "f/=E89B",
+								"file_id": ""
+							},
+							{
+								"path": "-1",
+								"file_id": "4294967295"
+							},
+							{
+								"path": "$[=(;fK/}=",
+								"file_id": " "
+							},
+							{
+								"path": "",
+								"file_id": "o0+Y[J>hMY"
+							},
+							{
+								"path": "",
+								"file_id": "d"
+							}
+						]
+					],
+					[
+						"😀",
+						5,
+						"4294967295",
+						[
+							{
+								"path": "K1?mj_p_7O",
+								"file_id": "\ud800"
+							}
+						]
+					],
+					[
+						"-1",
+						4,
+						"4294967295",
+						[
+							{
+								"path": "toString",
+								"file_id": "0"
+							},
+							{
+								"path": "zDEOhv3e3",
+								"file_id": "toString"
+							},
+							{
+								"path": "",
+								"file_id": "\ud800"
+							},
+							{
+								"path": "\"X%23",
+								"file_id": "+Lvmtaq{BS"
+							},
+							{
+								"path": "toString",
+								"file_id": "2x:"
+							},
+							{
+								"path": "V",
+								"file_id": "0"
+							},
+							{
+								"path": "",
+								"file_id": "\n"
+							},
+							{
+								"path": "u",
+								"file_id": "aL,=[_"
+							},
+							{
+								"path": "b>B, r.X$R",
+								"file_id": ""
+							},
+							{
+								"path": "g]1NBz]gly",
+								"file_id": "NN\"#q.[skF"
+							}
+						]
+					]
+				],
+				"api-call:Api.sessionArtifactSave/result": [
+					{
+						"ok": true,
+						"artifact_id": "",
+						"version": -5,
+						"changed": false
+					},
+					{
+						"ok": true,
+						"artifact_id": "X'?",
+						"version": -4,
+						"changed": true
+					},
+					{
+						"ok": true,
+						"artifact_id": "~n9%/Oe_n%",
+						"version": -34,
+						"changed": true
+					},
+					{
+						"ok": true,
+						"artifact_id": "\t",
+						"version": -87,
+						"changed": true
+					},
+					{
+						"ok": true,
+						"artifact_id": "\u0000",
+						"version": -1,
+						"changed": true
+					},
+					{
+						"ok": true,
+						"artifact_id": "4294967295",
+						"version": -85,
+						"changed": true
+					},
+					{
+						"ok": true,
+						"artifact_id": ".COm",
+						"version": 1,
+						"changed": true
+					},
+					{
+						"ok": false,
+						"message": ".*ZgzA~PBf"
+					}
 				]
 			}
 		}

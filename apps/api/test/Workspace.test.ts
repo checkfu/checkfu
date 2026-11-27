@@ -150,7 +150,7 @@ describe("session workspace", () => {
 			description: name,
 			parameters: { type: "object", properties: {} },
 		})
-		const names = ["read", "ls", "find", "grep", "write", "edit", "delete", "bash"]
+		const names = ["read", "ls", "find", "grep", "write", "edit", "delete", "bash", "save_artifact"]
 		const { tools } = workspaceExtension(names.map(tool), () =>
 			Promise.resolve({ content: [], isError: false }),
 		)
@@ -163,6 +163,7 @@ describe("session workspace", () => {
 			edit: "unsafe",
 			delete: "unsafe",
 			bash: "unsafe",
+			save_artifact: "unsafe",
 		})
 	})
 
@@ -177,6 +178,7 @@ describe("session workspace", () => {
 			"edit",
 			"delete",
 			"bash",
+			"save_artifact",
 		])
 		expect(
 			declared.map(({ name }) => name).filter((name) => !RESERVED_TOOL_NAMES.includes(name)),
