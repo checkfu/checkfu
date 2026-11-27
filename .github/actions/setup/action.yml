@@ -1,5 +1,5 @@
 name: Set up
-description: Install Bun, Node and dependencies, and restore the turbo cache for one job.
+description: Install Bun and dependencies, and restore the turbo cache for one job.
 
 inputs:
   turbo-cache:
@@ -18,31 +18,22 @@ runs:
       with:
         bun-version-file: package.json
 
+    # The runner image ships Node 24. This fails when an image update changes the major version,
+    # so moving to a new one is a deliberate change here.
     - id: node
-      uses: actions/setup-node@v5
-      with:
-        node-version: 24
+      shell: bash
+      run: |
+        version="$(node -v)"
+        case "$version" in v24.*) ;; *) echo "::error::expected Node 24 on the runner image, found $version"; exit 1 ;; esac
+        echo "node-version=$version" >> "$GITHUB_OUTPUT"
 
-    # Only main saves the Bun cache: a pull request's cache can be read by that pull request alone,
-    # and each copy is about 460 MB of the repository's 10 GB. A pull request restores main's.
-    - id: bun-cache
-      uses: actions/cache/restore@v4
-      with:
-        path: ~/.bun/install/cache
-        key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-        restore-keys: bun-${{ runner.os }}-
-
+    # No cache for Bun's packages: a cold install takes about 4 seconds on a hosted runner, and
+    # restoring the 444 MB cache took 6 to 9.
     - run: bun install --frozen-lockfile
       shell: bash
 
-    - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v4
-      with:
-        path: ~/.bun/install/cache
-        key: ${{ steps.bun-cache.outputs.cache-primary-key }}
-
     - if: ${{ inputs.turbo-cache != '' }}
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .turbo/cache
         key: turbo-${{ inputs.turbo-cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-${{ github.sha }}
