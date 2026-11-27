@@ -174,6 +174,19 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
+  trial-cold-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: node -v && time bun install --frozen-lockfile
+      - run: rm -rf node_modules ~/.bun/install/cache && time bun install --frozen-lockfile
+
   trial-vitest-doctor:
     runs-on: ubuntu-latest
     timeout-minutes: 30
