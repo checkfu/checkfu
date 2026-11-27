@@ -861,11 +861,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						new UpdateAutomation({
 							automation_id: automationRef.id,
 							expected_revision: 1,
-							changed: true,
-							reschedule: true,
-							agent_id_changed: false,
-							previous_agent_version: 2,
-							environment_changed: false,
+							content_changed: true,
 							name: "Updated Automation",
 							description: "Moved to noon.",
 							agent_id: BoundedAgentId.make(agentRef.id),

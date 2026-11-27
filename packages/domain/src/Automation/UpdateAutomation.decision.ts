@@ -6,7 +6,7 @@ import { AutomationScheduleUnusable } from "./AdmitAutomation.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { AutomationArchivedError } from "./AutomationArchived.rejection.ts"
 import { AutomationNotFound } from "./AutomationNotFound.rejection.ts"
-import { isUsableSchedule } from "./Schedule.ts"
+import { isUsableSchedule, sameSchedule } from "./Schedule.ts"
 import {
 	AutomationRevisionConflict,
 	AutomationUpdated,
@@ -36,8 +36,13 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 			})
 		}
 		const agentVersion = cmd.agent_version ?? agent.state.version
-		const agentChanged = cmd.agent_id_changed || agentVersion !== cmd.previous_agent_version
-		if (!cmd.changed && !agentChanged) {
+		const agentChanged = cmd.agent_id !== current.agent_id || agentVersion !== current.agent_version
+		const environmentChanged = cmd.environment_id !== current.environment_id
+		const scheduleChanged = !sameSchedule(cmd.schedule, {
+			expression: current.schedule_expression,
+			timezone: current.schedule_timezone,
+		})
+		if (!cmd.content_changed && !agentChanged && !environmentChanged && !scheduleChanged) {
 			return []
 		}
 		if (!isUsableSchedule(cmd.schedule.expression, cmd.schedule.timezone)) {
@@ -47,11 +52,11 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 		if (agentRefused !== undefined) {
 			return agentRefused
 		}
-		const environmentRefused = cmd.environment_changed ? environmentRefusal(environment) : undefined
+		const environmentRefused = environmentChanged ? environmentRefusal(environment) : undefined
 		if (environmentRefused !== undefined) {
 			return environmentRefused
 		}
-		const rescheduled = [current.status === "active", cmd.reschedule].every((ok) => ok)
+		const rescheduled = [current.status === "active", scheduleChanged].every((ok) => ok)
 		return [
 			automation.record(
 				new AutomationUpdated({
@@ -74,8 +79,8 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 			[
 				after.automation.revision === before.automation.revision,
 				[
-					!command.agent_id_changed,
-					(command.agent_version ?? before.agent.version) === command.previous_agent_version,
+					command.agent_id === before.automation.agent_id,
+					(command.agent_version ?? before.agent.version) === before.automation.agent_version,
 				].every((ok) => ok),
 				[
 					before.agent.status === "active",
@@ -85,7 +90,7 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 		AChangedEnvironmentIsActive: ({ before, after, command }) =>
 			[
 				after.automation.revision === before.automation.revision,
-				!command.environment_changed,
+				command.environment_id === before.automation.environment_id,
 				before.environment.status === "active",
 			].some((ok) => ok),
 		AnUpdateStoresOnlyAUsableSchedule: ({ before, after, command }) =>
@@ -105,7 +110,8 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 			after.automation.activation ===
 			([
 				before.automation.status === "active",
-				command.reschedule,
+				command.schedule.expression !== before.automation.schedule_expression ||
+					command.schedule.timezone !== before.automation.schedule_timezone,
 				after.automation.revision > before.automation.revision,
 			].every((ok) => ok)
 				? before.automation.activation + 1

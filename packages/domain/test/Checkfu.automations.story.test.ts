@@ -56,7 +56,6 @@ import {
 	AutomationUpdated,
 	UpdateAutomation,
 } from "../src/Automation/UpdateAutomation.command.ts"
-import { sameSchedule } from "../src/Automation/Schedule.ts"
 import { AutomationRunFailed } from "../src/Automation/RecordAutomationRunFailed.command.ts"
 import { AutomationRunStarted } from "../src/Automation/RecordAutomationRunStarted.command.ts"
 import { AutomationFired, RunAutomation } from "../src/Automation/RunAutomation.command.ts"
@@ -169,13 +168,8 @@ const update = (changes: Partial<typeof config>, expected_revision = 1, base = c
 		...next,
 		agent_id: BoundedAgentId.make(next.agent_id),
 		environment_id: BoundedEnvironmentId.make(next.environment_id),
-		changed: Object.keys(changes).some(
-			(key) => next[key as keyof typeof next] !== base[key as keyof typeof base],
-		),
-		reschedule: !sameSchedule(next.schedule, base.schedule),
-		agent_id_changed: next.agent_id !== base.agent_id,
-		previous_agent_version: base.agent_version,
-		environment_changed: next.environment_id !== base.environment_id,
+		content_changed:
+			next.name !== base.name || next.description !== base.description || next.text !== base.text,
 	})
 }
 

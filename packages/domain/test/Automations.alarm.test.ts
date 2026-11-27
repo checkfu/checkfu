@@ -126,11 +126,7 @@ describe("Automation alarms", () => {
 				new UpdateAutomation({
 					automation_id: id,
 					expected_revision: 1,
-					changed: true,
-					reschedule: true,
-					agent_id_changed: false,
-					previous_agent_version: 1,
-					environment_changed: false,
+					content_changed: false,
 					name: "Morning report",
 					description: null,
 					agent_id: BoundedAgentId.make("agent_alarm"),

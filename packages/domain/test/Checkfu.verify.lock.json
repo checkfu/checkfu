@@ -320,7 +320,7 @@
 			},
 			"UpdateAutomation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tafter.automation.activation ===\n\t\t\t([\n\t\t\t\tbefore.automation.status === \"active\",\n\t\t\t\tcommand.reschedule,\n\t\t\t\tafter.automation.revision > before.automation.revision,\n\t\t\t].every((ok) => ok)\n\t\t\t\t? before.automation.activation + 1\n\t\t\t\t: before.automation.activation)"
+				"source": "({ before, after, command }) =>\n\t\t\tafter.automation.activation ===\n\t\t\t([\n\t\t\t\tbefore.automation.status === \"active\",\n\t\t\t\tcommand.schedule.expression !== before.automation.schedule_expression ||\n\t\t\t\t\tcommand.schedule.timezone !== before.automation.schedule_timezone,\n\t\t\t\tafter.automation.revision > before.automation.revision,\n\t\t\t].every((ok) => ok)\n\t\t\t\t? before.automation.activation + 1\n\t\t\t\t: before.automation.activation)"
 			},
 			"Automation.AnUpdateLeavesRunsAlone": {
 				"kind": "transition",
@@ -736,11 +736,11 @@
 			},
 			"UpdateAutomation.AChangedAgentIsActiveAndHasThePinnedVersion": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.automation.revision === before.automation.revision,\n\t\t\t\t[\n\t\t\t\t\t!command.agent_id_changed,\n\t\t\t\t\t(command.agent_version ?? before.agent.version) === command.previous_agent_version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\t\t(command.agent_version ?? before.agent.version) <= before.agent.version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.automation.revision === before.automation.revision,\n\t\t\t\t[\n\t\t\t\tcommand.agent_id === before.automation.agent_id,\n\t\t\t\t(command.agent_version ?? before.agent.version) === before.automation.agent_version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\t\t(command.agent_version ?? before.agent.version) <= before.agent.version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
 			"UpdateAutomation.AChangedEnvironmentIsActive": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.automation.revision === before.automation.revision,\n\t\t\t\t!command.environment_changed,\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.automation.revision === before.automation.revision,\n\t\t\tcommand.environment_id === before.automation.environment_id,\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t].some((ok) => ok)"
 			},
 			"UpdateAutomation.AnUpdateStoresOnlyAUsableSchedule": {
 				"kind": "transition",

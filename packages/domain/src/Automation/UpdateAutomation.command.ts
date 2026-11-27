@@ -55,12 +55,8 @@ export class UpdateAutomation extends Domain.Command("UpdateAutomation", {
 		...AutomationConfiguration,
 		agent_id: BoundedAgentId,
 		environment_id: BoundedEnvironmentId,
-		changed: Schema.Boolean,
-		reschedule: Schema.Boolean,
-		agent_id_changed: Schema.Boolean,
+		content_changed: Schema.Boolean,
 		agent_version: Schema.NullOr(PositiveInt),
-		previous_agent_version: PositiveInt,
-		environment_changed: Schema.Boolean,
 	},
 	events: [AutomationUpdated],
 	rejects: [

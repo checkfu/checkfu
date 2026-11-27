@@ -373,15 +373,13 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 								timezone: payload.schedule?.timezone ?? current.schedule.timezone,
 							},
 						}
-						const reschedule = !sameSchedule(next.schedule, current.schedule)
-						if (reschedule && !isUsableSchedule(next.schedule.expression, next.schedule.timezone)) {
+						if (
+							!sameSchedule(next.schedule, current.schedule) &&
+							!isUsableSchedule(next.schedule.expression, next.schedule.timezone)
+						) {
 							return yield* rejectUnusableSchedule()
 						}
-						const agent_id_changed = next.agent_id !== current.agent_id
-						const environment_changed = next.environment_id !== current.environment_id
-						const changed = [
-							reschedule,
-							environment_changed,
+						const content_changed = [
 							next.name !== current.name,
 							next.description !== current.description,
 							next.text !== current.text,
@@ -391,11 +389,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 								automation_id: id,
 								expected_revision: current.revision,
 								...next,
-								changed,
-								reschedule,
-								agent_id_changed,
-								previous_agent_version: current.agent_version,
-								environment_changed,
+								content_changed,
 							}),
 						)
 						return commitForStream(receipt.commits, `Automation/${id}`)

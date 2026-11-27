@@ -33,6 +33,11 @@ export const AutomationState = Schema.Struct({
 	last_scheduled_at: NonNegativeInt,
 	activation: NonNegativeInt,
 	revision: NonNegativeInt,
+	agent_id: Schema.String,
+	agent_version: NonNegativeInt,
+	environment_id: Schema.String,
+	schedule_expression: Schema.String,
+	schedule_timezone: Schema.String,
 })
 export type AutomationState = typeof AutomationState.Type
 
@@ -66,6 +71,11 @@ export class Automation extends Domain.Aggregate("Automation", {
 		last_scheduled_at: 0,
 		activation: 0,
 		revision: 0,
+		agent_id: "",
+		agent_version: 0,
+		environment_id: "",
+		schedule_expression: "",
+		schedule_timezone: "",
 	},
 	commands: [
 		CreateAutomation,
@@ -296,8 +306,19 @@ export class Automation extends Domain.Aggregate("Automation", {
 		RunAutomation: (state) => ({ run: state.runs }),
 	},
 	evolve: {
-		"automation.created": (state) =>
-			state.status === "" ? { ...state, status: "active" as const, revision: 1 } : state,
+		"automation.created": (state, e) =>
+			state.status === ""
+				? {
+						...state,
+						status: "active" as const,
+						revision: 1,
+						agent_id: e.agent_id,
+						agent_version: e.agent_version,
+						environment_id: e.environment_id,
+						schedule_expression: e.schedule.expression,
+						schedule_timezone: e.schedule.timezone,
+					}
+				: state,
 		"automation.paused": (state) =>
 			state.status === "active" ? { ...state, status: "paused" as const } : state,
 		"automation.unpaused": (state, e) =>
@@ -306,7 +327,16 @@ export class Automation extends Domain.Aggregate("Automation", {
 				: state,
 		"automation.updated": (state, e) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)
-				? { ...state, revision: e.revision, activation: e.activation }
+				? {
+						...state,
+						revision: e.revision,
+						activation: e.activation,
+						agent_id: e.agent_id,
+						agent_version: e.agent_version,
+						environment_id: e.environment_id,
+						schedule_expression: e.schedule.expression,
+						schedule_timezone: e.schedule.timezone,
+					}
 				: state,
 		"automation.archived": (state) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)

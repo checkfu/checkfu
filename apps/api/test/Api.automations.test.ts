@@ -143,11 +143,12 @@ type Hosted = Layer.Success<ReturnType<typeof makePiDurableTestLayer>["layer"]>
 
 const run = async <A>(
 	body: (apiFetch: ApiFetch) => Effect.Effect<A, never, Hosted | Scope.Scope>,
+	platform = InMemory.make({ now: () => Date.parse(NOW) }),
 ): Promise<A> => {
 	const { layer, closeAll } = makePiDurableTestLayer(
 		async (model, context) =>
 			makeAssistantReply(model, null, `Done: ${extractLastUserText(context)}`, 4, 2),
-		{ platform: InMemory.make({ now: () => Date.parse(NOW) }).layer },
+		{ platform: platform.layer },
 	)
 	try {
 		return await Effect.runPromise(
@@ -1122,6 +1123,136 @@ describe("Automations API", () => {
 				).toEqual(["Write the noon report."])
 			}),
 		))
+
+	it("arms only the edited active schedule and commits each guarded edit at most once", () => {
+		let now = Date.parse(NOW)
+		const platform = InMemory.make({ now: () => now })
+		return run(
+			(apiFetch) =>
+				Effect.gen(function* () {
+					const first = yield* prerequisites(apiFetch)
+					const second = yield* prerequisites(apiFetch)
+					const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+						name: "Report",
+						agent: first.agentId,
+						environment_id: first.environmentId,
+						initial_events: message("Write the report."),
+						schedule: { type: "cron", expression: "0 15 * * *", timezone: "UTC" },
+					})
+					expect(created.status).toBe(201)
+					const id = AutomationId.make(created.body.id)
+					const path = `/v1/automations/${id}`
+					const automations = yield* Automation
+					const commitCount = () =>
+						platform.control.commits.filter(
+							(commit) => commit.aggregate === Automation.aggregateName && commit.id === id,
+						).length
+					const cases = [
+						{ label: "name", body: { name: "Renamed" }, revision: 2, activation: 0 },
+						{ label: "description", body: { description: "Daily" }, revision: 3, activation: 0 },
+						{
+							label: "environment",
+							body: { environment_id: second.environmentId },
+							revision: 4,
+							activation: 0,
+						},
+						{
+							label: "agent",
+							body: { agent: second.agentId },
+							revision: 5,
+							activation: 0,
+						},
+						{
+							label: "agent version",
+							body: { agent: { type: "agent", id: second.agentId, version: 2 } },
+							revision: 6,
+							activation: 0,
+						},
+						{
+							label: "timezone",
+							body: { schedule: { timezone: "Europe/Paris" } },
+							revision: 7,
+							activation: 1,
+						},
+						{
+							label: "expression",
+							body: { schedule: { expression: "0 14 * * *" } },
+							revision: 8,
+							activation: 2,
+						},
+						{
+							label: "unchanged schedule",
+							body: { schedule: { expression: "0 14 * * *", timezone: "Europe/Paris" } },
+							revision: 8,
+							activation: 2,
+						},
+					] as const
+					let revision = created.body.revision
+					for (const expected of cases) {
+						if (expected.label === "agent version") {
+							const upgraded = yield* call(apiFetch, "POST", `/v1/agents/${second.agentId}`, {
+								version: 1,
+								system: "Use the current data.",
+							})
+							expect(upgraded.status).toBe(200)
+						}
+						const before = commitCount()
+						const next = yield* call<AutomationBody>(apiFetch, "POST", path, {
+							revision,
+							...expected.body,
+						})
+						expect([next.status, next.body.revision], expected.label).toEqual([
+							200,
+							expected.revision,
+						])
+						expect(yield* automations.get(id), expected.label).toMatchObject({
+							revision: expected.revision,
+							activation: expected.activation,
+						})
+						expect(commitCount() - before, expected.label).toBe(expected.revision - revision)
+						revision = expected.revision
+					}
+					const stale = yield* call(apiFetch, "POST", path, {
+						revision: revision - 1,
+						schedule: { expression: "0 16 * * *" },
+					})
+					expect(stale.status).toBe(409)
+					expect(commitCount()).toBe(revision)
+					yield* platform.control.drain
+					now = Date.parse("2026-01-05T13:00:00.000Z")
+					yield* platform.control.drain
+					const runs = yield* settledRuns(apiFetch, id, 1)
+					expect(runs.body.data).toMatchObject([
+						{
+							trigger: { type: "schedule", scheduled_at: "2026-01-05T13:00:00.000Z" },
+							agent: { id: second.agentId, version: 2 },
+						},
+					])
+					now = Date.parse("2026-01-05T15:00:00.000Z")
+					yield* platform.control.drain
+					expect((yield* automations.get(id)).runs).toBe(1)
+
+					const paused = yield* call<AutomationBody>(apiFetch, "POST", `${path}/pause`)
+					const pausedEdit = yield* call<AutomationBody>(apiFetch, "POST", path, {
+						revision: paused.body.revision,
+						schedule: { expression: "30 14 * * *" },
+					})
+					expect([
+						pausedEdit.status,
+						pausedEdit.body.status,
+						pausedEdit.body.upcoming_runs_at,
+					]).toEqual([200, "paused", []])
+					now = Date.parse("2026-01-06T13:30:00.000Z")
+					yield* platform.control.drain
+					expect(yield* automations.get(id)).toMatchObject({
+						revision: revision + 1,
+						activation: 2,
+						runs: 1,
+					})
+				}),
+			platform,
+		)
+	})
 
 	it("keeps both of two concurrent updates that change different fields", () =>
 		run((apiFetch) =>
