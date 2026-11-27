@@ -216,8 +216,8 @@ export function VaultView({ vault: given }: { readonly vault: JsonVault }): Reac
 					breadcrumb={<Link to="/vaults">Vaults</Link>}
 				/>
 				<Callout>
-					This vault is deleted. Its secrets are still being erased; this finishes on its own, and
-					until it does a session already using one of them may keep using it.{" "}
+					This vault is deleted. Its secrets are still being erased in the background. New requests
+					using these credentials are refused.{" "}
 					<Button variant="ghost" size="sm" onClick={leave}>
 						Back to vaults
 					</Button>
@@ -257,7 +257,7 @@ export function VaultView({ vault: given }: { readonly vault: JsonVault }): Reac
 					{erasure.owed === 1
 						? "1 secret is still being erased."
 						: `${erasure.owed} secrets are still being erased.`}{" "}
-					This finishes on its own; until it does, a session already holding one can still use it.
+					Erasure continues in the background. New requests using these credentials are refused.
 				</Callout>
 			)}
 			<DescriptionList>

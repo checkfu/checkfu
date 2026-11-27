@@ -3654,7 +3654,7 @@ const vaultsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0.",
+		"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Resend the archive to check for a 200 confirmation. Reading the vault shows the archived_at timestamp and outstanding credential records.",
 	),
 )
 
@@ -3728,7 +3728,7 @@ const vaultsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsDeleteCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
+		"Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 	),
 )
 
@@ -3902,7 +3902,7 @@ const vaultsCredentialsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the credential again until archived_at is set and custody is erased.",
+		"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Read the credential again until archived_at is set and custody is erased.",
 	),
 )
 
@@ -3997,7 +3997,7 @@ const vaultsCredentialsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsDeleteCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
+		"Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Sending the delete again returns the current state.",
 	),
 )
 

@@ -25,6 +25,8 @@ const STANDING = {
 	"Vault.DeletedStaysDeleted": "proved",
 	"Vault.OnlyRenamingChangesTheName": "proved",
 	"Vault.OnlyAnEndedVaultReleasesCredentials": "proved",
+	"Vault.OnlyAnEndedVaultIsSealed": "proved",
+	"Vault.ASealedVaultStaysSealed": "proved",
 	"Vault.AnEndedVaultKeepsWhatItAttachedLast": "proved",
 	"Vault.AnEndingVaultStillOwesEverySecretItHeld": "proved",
 	"Credential.StatusIsKnown": "proved",
@@ -65,8 +67,10 @@ const STANDING = {
 	"Vaults.CredentialViewMatchesCredential": "checked",
 	"Vaults.EveryActiveCredentialIsHeldByItsVault": "checked",
 	"Vaults.AVaultCountsItsActiveCredentials": "checked",
-	"Vaults.AnArchivedOrDeletedCredentialIsErased": "checked",
-	"Vaults.NoVaultIsLeftOwingASecret": "checked",
+	"Vaults.AVaultCountsEveryUnconfirmedErasure": "checked",
+	"Vaults.AnErasureRemainsPending": "reached",
+	"Vaults.ASealRetryRuns": "reached",
+	"Vaults.AVaultIsSealed": "reached",
 	"Vaults.AVaultHoldsACredential": "reached",
 	"Vaults.ACredentialIsArchived": "reached",
 	"Vaults.ACredentialIsDeleted": "reached",
@@ -101,6 +105,7 @@ describe("Vaults Z3 formal verification", () => {
 				yield* Effect.logInfo(Verify.render(report))
 				expect(report.explored.followed).toEqual([
 					"RetireReleasedCredentials",
+					"SealEndedVault",
 					"SettleCredentialSecret",
 				])
 				expect(report.explored.idle).toEqual([])
@@ -123,6 +128,8 @@ describe("Vaults Z3 formal verification", () => {
 					{ kind: "query", name: "ListVaults", reason: "what a query answers is not checked" },
 					{ kind: "query", name: "ListCredentials", reason: "what a query answers is not checked" },
 				])
+				expect(report.explored.failures).toEqual([])
+				expect(report.explored.unsettled).toBe(0)
 				expect(report.explored.truncated).toBe(false)
 				expect(report.explored.complete).toBe(3)
 				expect(report.explored.disagreements).toEqual([])

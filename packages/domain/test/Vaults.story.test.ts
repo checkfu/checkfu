@@ -11,6 +11,10 @@ import {
 	CredentialDetached,
 } from "../src/Vault/ArchiveCredential.command.ts"
 import { ArchiveVault, VaultArchived } from "../src/Vault/ArchiveVault.command.ts"
+import { VaultSecretsSealed } from "../src/Vault/ConfirmVaultSealed.command.ts"
+import { CredentialErasureRetryDue } from "../src/Vault/RetryCredentialErasure.command.ts"
+import { VaultSealRetryDue } from "../src/Vault/RetryVaultSeal.command.ts"
+import { SealEndedVaultLive } from "../src/Vault/SealEndedVault.policy.ts"
 import {
 	ConfirmCredentialErased,
 	CredentialErasureCounted,
@@ -75,6 +79,7 @@ const story = Story.make(Vaults, {
 const redeliveryStory = Story.make(Vaults, {
 	layer: Layer.mergeAll(
 		RetireReleasedCredentialsLive,
+		SealEndedVaultLive,
 		PublishVaultWebhookEventsLive.pipe(Layer.provide(WebhookEventsNoop)),
 		SettleCredentialSecret.toLayer(SettleCredentialSecret, { retry: Schedule.recurs(1) }).pipe(
 			Layer.provide(SettleCredentialSecretLive),
@@ -187,7 +192,7 @@ describe("Vaults", () => {
 			Story.clock(t2),
 			Story.when(new ArchiveVault({ vault_id: vault.id })),
 			...sealed,
-			Story.then(vault, new VaultArchived({ next: "" })),
+			Story.then(vault, new VaultArchived({ next: "" }), new VaultSecretsSealed()),
 			Story.view(VaultView, vault, { archived_at: t2, updated_at: t2 }),
 			Story.when(new ArchiveVault({ vault_id: vault.id })),
 			Story.then(vault),
@@ -683,6 +688,7 @@ describe("Vaults", () => {
 				Story.then(second, new CredentialSecretErased()),
 				Story.then(
 					vault,
+					new VaultSecretsSealed(),
 					new CredentialErasureCounted({ credential_id: credential.id }),
 					new CredentialErasureCounted({ credential_id: second.id }),
 				),
@@ -720,6 +726,8 @@ describe("Vaults", () => {
 				Story.then(second),
 				Story.then(credential, new CredentialArchived({ vault_id: vault.id })),
 				...erased(credential),
+				...sealed,
+				Story.then(vault, new VaultSecretsSealed()),
 				Story.state(vault, { held: 0, erasing: 0, releasing: "" }),
 				Story.state(credential, { custody: "erased" }),
 				Story.when(new RetireCredential({ vault_id: vault.id, credential_id: second.id })),
@@ -767,6 +775,7 @@ describe("Vaults", () => {
 				Story.then(credential, new CredentialSecretErased()),
 				Story.then(
 					vault,
+					new VaultSecretsSealed(),
 					new CredentialErasureCounted({ credential_id: second.id }),
 					new CredentialErasureCounted({ credential_id: credential.id }),
 				),
@@ -790,6 +799,7 @@ describe("Vaults", () => {
 					new VaultDeleted({ next: credential.id }),
 					new CredentialReleased({ credential_id: credential.id, next: "" }),
 				),
+				Story.then(vault, new VaultSecretsSealed()),
 				Story.then(credential, new CredentialDeleted({ vault_id: vault.id })),
 				Story.call(CredentialSecrets.erase, { vault_id: vault.id, credential_id: credential.id }),
 				Story.die(CredentialSecrets.erase, new Error("custody unreachable")),
@@ -799,5 +809,60 @@ describe("Vaults", () => {
 				Story.state(credential, { status: "deleted", vault_id: vault.id, custody: "erased" }),
 				Story.state(vault, { status: "deleted", erasing: 0 }),
 			),
+	)
+	it.effect("keeps an erasure pending across outages and only records a successful retry", () =>
+		story(
+			created,
+			...holding(credential, GITHUB),
+			Story.when(archive(credential, GITHUB)),
+			Story.then(vault, new CredentialDetached({ credential_id: credential.id, custody: "held" })),
+			Story.then(credential, new CredentialArchived({ vault_id: vault.id })),
+			Story.then(urlOf(GITHUB), new CredentialUrlFreed()),
+			Story.call(CredentialSecrets.erase, { vault_id: vault.id, credential_id: credential.id }),
+			Story.fail(CredentialSecrets.erase, { _tag: "CredentialSecretsUnavailable" }),
+			Story.then(credential),
+			Story.state(credential, { status: "archived", custody: "erasing" }),
+			Story.state(vault, { erasing: 1 }),
+			Story.advance("5 seconds"),
+			Story.then(credential, new CredentialErasureRetryDue({ vault_id: vault.id })),
+			Story.call(CredentialSecrets.erase, { vault_id: vault.id, credential_id: credential.id }),
+			Story.fail(CredentialSecrets.erase, { _tag: "CredentialSecretsUnavailable" }),
+			Story.advance("5 seconds"),
+			Story.then(credential, new CredentialErasureRetryDue({ vault_id: vault.id })),
+			...erased(credential),
+			Story.advance("5 seconds"),
+			Story.then(credential),
+			Story.state(vault, { erasing: 0 }),
+		),
+	)
+
+	it.effect("retires credentials even while the vault seal is unavailable", () =>
+		story(
+			created,
+			...holding(credential, GITHUB),
+			Story.when(new ArchiveVault({ vault_id: vault.id })),
+			Story.call(CredentialSecrets.seal, { vault_id: vault.id }),
+			Story.fail(CredentialSecrets.seal, { _tag: "CredentialSecretsUnavailable" }),
+			Story.then(
+				vault,
+				new VaultArchived({ next: credential.id }),
+				new CredentialReleased({ credential_id: credential.id, next: "" }),
+			),
+			Story.then(credential, new CredentialArchived({ vault_id: vault.id })),
+			...erased(credential),
+			Story.state(vault, { status: "archived", erasing: 0, releasing: "", sealed: false }),
+			Story.advance("5 seconds"),
+			Story.then(vault, new VaultSealRetryDue()),
+			Story.call(CredentialSecrets.seal, { vault_id: vault.id }),
+			Story.fail(CredentialSecrets.seal, { _tag: "CredentialSecretsUnavailable" }),
+			Story.state(vault, { sealed: false, releasing: "" }),
+			Story.advance("5 seconds"),
+			Story.then(vault, new VaultSealRetryDue()),
+			...sealed,
+			Story.then(vault, new VaultSecretsSealed()),
+			Story.state(vault, { sealed: true }),
+			Story.advance("5 seconds"),
+			Story.then(vault),
+		),
 	)
 })

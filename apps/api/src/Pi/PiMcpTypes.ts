@@ -62,14 +62,14 @@ export const mcpTimedOut = (ms: number): McpFailure => ({
 	message: `The MCP server did not answer within ${ms / 1000} seconds.`,
 })
 
-export const withMcpListDeadline = (
-	list: (signal: AbortSignal) => Promise<McpListOutcome>,
+export const withMcpDeadline = <A>(
+	request: (signal: AbortSignal) => Promise<A>,
 	signal: AbortSignal | undefined,
 	ms = MCP_LIST_TIMEOUT_MS,
-): Promise<McpListOutcome> =>
+): Promise<A | McpFailure> =>
 	Effect.runPromise(
 		Effect.promise((deadline) =>
-			list(signal === undefined ? deadline : AbortSignal.any([signal, deadline])),
+			request(signal === undefined ? deadline : AbortSignal.any([signal, deadline])),
 		).pipe(Effect.timeoutOption(ms), Effect.map(Option.getOrElse(() => mcpTimedOut(ms)))),
 	)
 

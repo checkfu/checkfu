@@ -3,6 +3,7 @@ import type { AgentTool, McpServerBinding } from "@checkfu/domain/Mcp/McpServers
 import type { Extension } from "@earendil-works/pi-durable"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import type { CredentialAccess } from "../Api.ts"
 import {
 	MAX_TOOL_LIST_BYTES,
 	cacheableTools,
@@ -15,11 +16,13 @@ import type { McpDispatch, McpRegistry, McpServerTools } from "./PiMcp.ts"
 import type { McpCaller, McpPeer } from "./PiMcpCaller.ts"
 import {
 	MAX_MCP_RESPONSE_BYTES,
+	MCP_CALL_TIMEOUT_MS,
+	MCP_CREDENTIAL_EMPTY,
 	MCP_CREDENTIAL_ENDED,
 	McpCallOutcome,
 	McpListOutcome,
 	mcpCallScope,
-	withMcpListDeadline,
+	withMcpDeadline,
 } from "./PiMcpTypes.ts"
 import type { McpFailure, McpToolDescriptor } from "./PiMcpTypes.ts"
 import { MCP_TURN_KEY, McpTurn } from "./PiTurn.ts"
@@ -96,44 +99,60 @@ const unreached = (): McpFailure => ({
 export const vaultsOver = (
 	remote: (vaultId: string) => VaultMcpRemote,
 	sessionKey: string,
+	authorize: (
+		vaultId: string,
+		credentialId: string,
+		signal: AbortSignal | undefined,
+	) => Promise<CredentialAccess>,
 ): SessionVaults => {
 	const asked = async <A>(
 		vaultId: string,
+		credentialId: string,
 		signal: AbortSignal | undefined,
 		decode: (answer: Schema.Json) => Option.Option<A>,
 		ask: (vault: VaultMcpRemote, callId: string) => Promise<Schema.Json>,
 	): Promise<A | McpFailure> => {
+		const { promise: gaveUp, resolve } = Promise.withResolvers<McpFailure>()
+		let cancel: (() => void) | undefined
+		const giveUp = () => {
+			cancel?.()
+			resolve(INTERRUPTED)
+		}
+		const perform = async (): Promise<A | McpFailure> => {
+			const access = await authorize(vaultId, credentialId, signal)
+			if (signal?.aborted === true) {
+				return INTERRUPTED
+			}
+			if (access !== "held") {
+				return {
+					ok: false,
+					message: access === "empty" ? MCP_CREDENTIAL_EMPTY : MCP_CREDENTIAL_ENDED,
+				}
+			}
+			const vault = remote(vaultId)
+			const callId = crypto.randomUUID()
+			cancel = () => {
+				vault.mcpCancel(callId).catch(() => undefined)
+			}
+			return Option.getOrElse(decode(await ask(vault, callId)), unreadable)
+		}
 		if (signal?.aborted === true) {
 			return INTERRUPTED
 		}
-		const vault = remote(vaultId)
-		const callId = crypto.randomUUID()
-		const answered = ask(vault, callId).then(
-			(answer): A | McpFailure => Option.getOrElse(decode(answer), unreadable),
-			unreached,
-		)
-		if (signal === undefined) {
-			return answered
-		}
-		const { promise: gaveUp, resolve } = Promise.withResolvers<McpFailure>()
-		const giveUp = () => {
-			vault.mcpCancel(callId).catch(() => undefined)
-			resolve(INTERRUPTED)
-		}
-		signal.addEventListener("abort", giveUp, { once: true })
+		signal?.addEventListener("abort", giveUp, { once: true })
 		try {
-			return await Promise.race([answered, gaveUp])
+			return await Promise.race([perform().catch(unreached), gaveUp])
 		} finally {
-			signal.removeEventListener("abort", giveUp)
+			signal?.removeEventListener("abort", giveUp)
 		}
 	}
 	return {
 		list: (vaultId, credentialId, url, limit, signal) =>
-			asked(vaultId, signal, decodeList, (vault, callId) =>
+			asked(vaultId, credentialId, signal, decodeList, (vault, callId) =>
 				vault.mcpList(credentialId, sessionKey, url, limit, callId),
 			),
 		call: (vaultId, credentialId, url, tool, args, signal) =>
-			asked(vaultId, signal, decodeCall, (vault, callId) =>
+			asked(vaultId, credentialId, signal, decodeCall, (vault, callId) =>
 				vault.mcpCall(credentialId, sessionKey, url, tool, args, callId),
 			),
 	}
@@ -210,7 +229,7 @@ export const makeSessionMcp = (options: {
 		const { vault_id, credential_id, url } = binding
 		return vault_id === null
 			? { ok: false, message: MCP_CREDENTIAL_ENDED }
-			: withMcpListDeadline(
+			: withMcpDeadline(
 					(deadline) =>
 						options.vaults.list(vault_id, credential_id, url, MAX_TOOL_LIST_BYTES, deadline),
 					signal,
@@ -273,15 +292,13 @@ export const makeSessionMcp = (options: {
 			const scope = mcpCallScope(turn, MAX_MCP_RESPONSE_BYTES, signal)
 			return (await loaded()).call(binding.name, peerOf(binding), scope, tool, args)
 		}
-		return binding.vault_id === null
+		const { vault_id, credential_id, url } = binding
+		return vault_id === null
 			? { ok: false, message: MCP_CREDENTIAL_ENDED }
-			: options.vaults.call(
-					binding.vault_id,
-					binding.credential_id,
-					binding.url,
-					tool,
-					args,
+			: withMcpDeadline(
+					(deadline) => options.vaults.call(vault_id, credential_id, url, tool, args, deadline),
 					signal,
+					MCP_CALL_TIMEOUT_MS,
 				)
 	}
 

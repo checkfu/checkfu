@@ -16,6 +16,7 @@ import {
 	PublishVaultWebhookEventsLive,
 } from "./Vault/PublishVaultWebhookEvents.policy.ts"
 import { RetireCredentialDecision } from "./Vault/RetireCredential.decision.ts"
+import { SealEndedVault, SealEndedVaultLive } from "./Vault/SealEndedVault.policy.ts"
 import { RotateCredentialDecision } from "./Vault/RotateCredential.decision.ts"
 import {
 	RetireReleasedCredentials,
@@ -45,7 +46,12 @@ export class Vaults extends Domain.Model("Vaults", {
 	views: [VaultView, CredentialView],
 	projections: [VaultListing, CredentialListing],
 	queries: [ListVaults, ListCredentials],
-	policies: [RetireReleasedCredentials, SettleCredentialSecret, PublishVaultWebhookEvents],
+	policies: [
+		RetireReleasedCredentials,
+		SettleCredentialSecret,
+		SealEndedVault,
+		PublishVaultWebhookEvents,
+	],
 	invariants: {
 		VaultViewMatchesVault: (m) =>
 			[
@@ -121,6 +127,15 @@ export class Vaults extends Domain.Model("Vaults", {
 					),
 				].some((ok) => ok),
 			),
+		AVaultCountsEveryUnconfirmedErasure: (m) =>
+			m.Vault.every(
+				(vault) =>
+					vault.state.erasing ===
+					m.Credential.filter(
+						(credential) =>
+							credential.state.vault_id === vault.id && credential.state.custody === "erasing",
+					).length,
+			),
 		AVaultCountsItsActiveCredentials: (m) =>
 			m.Vault.every((vault) =>
 				[
@@ -185,18 +200,12 @@ export class Vaults extends Domain.Model("Vaults", {
 				].some((ok) => ok),
 		}),
 	},
-	eventually: {
-		AnArchivedOrDeletedCredentialIsErased: (m) =>
-			m.Credential.every((credential) =>
-				[
-					credential.state.status === "",
-					credential.state.status === "active",
-					credential.state.custody === "erased",
-				].some((ok) => ok),
-			),
-		NoVaultIsLeftOwingASecret: (m) => m.Vault.every((vault) => vault.state.erasing === 0),
-	},
 	sometimes: {
+		AnErasureRemainsPending: (m) =>
+			m.Credential.some((credential) => credential.state.custody === "erasing"),
+		ASealRetryRuns: (m) =>
+			m.Vault.some((vault) => vault.events.some((event) => event._tag === "vault.seal_retry_due")),
+		AVaultIsSealed: (m) => m.Vault.some((vault) => vault.state.sealed),
 		AVaultHoldsACredential: (m) => m.Vault.some((vault) => vault.state.held >= 1),
 		ACredentialIsArchived: (m) =>
 			m.Credential.some((credential) => credential.state.status === "archived"),
@@ -212,6 +221,7 @@ export class Vaults extends Domain.Model("Vaults", {
 export const VaultsHandlersLive = Layer.mergeAll(
 	RetireReleasedCredentialsLive,
 	SettleCredentialSecretLive,
+	SealEndedVaultLive,
 	PublishVaultWebhookEventsLive,
 	VaultListingLive,
 	ListVaultsLive,

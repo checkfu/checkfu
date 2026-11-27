@@ -3,11 +3,13 @@ import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { CredentialDetached } from "./ArchiveCredential.command.ts"
 import { ArchiveVault, VaultArchived } from "./ArchiveVault.command.ts"
+import { ConfirmVaultSealed, VaultSecretsSealed } from "./ConfirmVaultSealed.command.ts"
 import { CredentialErasureCounted } from "./ConfirmCredentialErased.command.ts"
 import { CredentialStorageCounted } from "./ConfirmCredentialStored.command.ts"
 import { CredentialAttached } from "./CreateCredential.command.ts"
 import { CreateVault, VaultAlreadyExists, VaultCreated } from "./CreateVault.command.ts"
 import { DeleteVault, VaultDeleted } from "./DeleteVault.command.ts"
+import { RetryVaultSeal, VaultSealRetryDue } from "./RetryVaultSeal.command.ts"
 import { CredentialReleased } from "./RetireCredential.command.ts"
 import { UpdateVault, VaultRenamed } from "./UpdateVault.command.ts"
 import { VaultId } from "./Vault.id.ts"
@@ -23,6 +25,7 @@ export const VaultState = Schema.Struct({
 	erasing: Schema.Int,
 	last_attached: Schema.String,
 	releasing: Schema.String,
+	sealed: Schema.Boolean,
 })
 export type VaultState = typeof VaultState.Type
 
@@ -44,8 +47,16 @@ export class Vault extends Domain.Aggregate("Vault", {
 		erasing: 0,
 		last_attached: "",
 		releasing: "",
+		sealed: false,
 	},
-	commands: [CreateVault, UpdateVault, ArchiveVault, DeleteVault],
+	commands: [
+		CreateVault,
+		UpdateVault,
+		ArchiveVault,
+		DeleteVault,
+		ConfirmVaultSealed,
+		RetryVaultSeal,
+	],
 	events: [
 		CredentialAttached,
 		CredentialDetached,
@@ -74,6 +85,8 @@ export class Vault extends Domain.Aggregate("Vault", {
 		HoldsAtMostTheCredentialLimit: (s) =>
 			[s.held >= 0, s.storing >= 0, s.held + s.storing <= MAX_VAULT_CREDENTIALS].every((ok) => ok),
 		NeverCountsFewerThanNoSecretsErasing: (s) => s.erasing >= 0,
+		OnlyAnEndedVaultIsSealed: (s) =>
+			[!s.sealed, s.status === "archived", s.status === "deleted"].some((ok) => ok),
 		OnlyAnEndedVaultReleasesCredentials: (s) =>
 			[s.status === "archived", s.status === "deleted", s.releasing === ""].some((ok) => ok),
 	},
@@ -84,6 +97,7 @@ export class Vault extends Domain.Aggregate("Vault", {
 			[before.status !== "archived", after.status === "archived", after.status === "deleted"].some(
 				(ok) => ok,
 			),
+		ASealedVaultStaysSealed: ({ before, after }) => !before.sealed || after.sealed,
 		DeletedStaysDeleted: ({ before, after }) =>
 			[before.status !== "deleted", after.status === "deleted"].some((ok) => ok),
 		OnlyRenamingChangesTheName: ({ before, after, command }) =>
@@ -144,8 +158,27 @@ export class Vault extends Domain.Aggregate("Vault", {
 			}
 			return [new VaultDeleted({ next: state.last_attached })]
 		},
+		ConfirmVaultSealed: (state) =>
+			[
+				!state.sealed,
+				[state.status === "archived", state.status === "deleted"].some((ended) => ended),
+			].every((ok) => ok)
+				? [new VaultSecretsSealed()]
+				: [],
+		RetryVaultSeal: (state) =>
+			[
+				!state.sealed,
+				[state.status === "archived", state.status === "deleted"].some((ended) => ended),
+			].every((ok) => ok)
+				? [new VaultSealRetryDue()]
+				: [],
 	},
 	evolve: {
+		"vault.seal_retry_due": (state) => state,
+		"vault.secrets_sealed": (state) =>
+			[state.status === "archived", state.status === "deleted"].some((ended) => ended)
+				? { ...state, sealed: true }
+				: state,
 		"vault.created": (state, e) =>
 			state.status === ""
 				? {
@@ -156,6 +189,7 @@ export class Vault extends Domain.Aggregate("Vault", {
 						erasing: 0,
 						last_attached: "",
 						releasing: "",
+						sealed: false,
 					}
 				: state,
 		"vault.renamed": (state, e) =>

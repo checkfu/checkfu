@@ -18,6 +18,7 @@ import { CredentialView } from "@checkfu/domain/Vault/CredentialView.view"
 import { DeleteCredential } from "@checkfu/domain/Vault/DeleteCredential.command"
 import { DeleteCredentialDecision } from "@checkfu/domain/Vault/DeleteCredential.decision"
 import { DeleteVault } from "@checkfu/domain/Vault/DeleteVault.command"
+import { makeSealVaultSecrets } from "@checkfu/domain/Vault/SealVaultSecrets"
 import { makeRevokeCredentialSecret } from "@checkfu/domain/Vault/RevokeCredentialSecret"
 import { RotateCredential } from "@checkfu/domain/Vault/RotateCredential.command"
 import { RotateCredentialDecision } from "@checkfu/domain/Vault/RotateCredential.decision"
@@ -76,6 +77,7 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 		const secrets = yield* CredentialSecrets
 		const inRuntime = Effect.provideService(RuntimeContext, yield* RuntimeContext)
 		const revokeSecret = yield* makeRevokeCredentialSecret
+		const sealSecrets = yield* makeSealVaultSecrets
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeVaultListers
@@ -159,24 +161,34 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 		}
 
 		const revoked = (vaultId: VaultId, id: CredentialId) =>
-			revokeSecret(vaultId, id).pipe(
-				inRuntime,
-				Effect.as(true),
-				Effect.catchDefect((defect) =>
-					Effect.as(
-						Effect.logWarning("Credential secret erasure left to its policy", id, defect),
-						false,
-					),
-				),
+			Effect.flatMap(credentials.get(id), ({ custody }) =>
+				custody === "erased"
+					? Effect.succeed(true)
+					: revokeSecret(vaultId, id).pipe(
+							inRuntime,
+							Effect.as(true),
+							Effect.catchTag("CredentialSecretsUnavailable", () => Effect.succeed(false)),
+							Effect.catchDefect((defect) =>
+								Effect.as(
+									Effect.logWarning("Credential secret erasure left to its policy", id, defect),
+									false,
+								),
+							),
+						),
 			)
 
 		const sealed = (id: VaultId) =>
-			secrets.seal({ vault_id: id }).pipe(
-				inRuntime,
-				Effect.as(true),
-				Effect.catchDefect((defect) =>
-					Effect.as(Effect.logWarning("Vault seal left to its policy", id, defect), false),
-				),
+			Effect.flatMap(vaults.get(id), (state) =>
+				state.sealed
+					? Effect.succeed(true)
+					: sealSecrets(id).pipe(
+							inRuntime,
+							Effect.as(true),
+							Effect.catchTag("CredentialSecretsUnavailable", () => Effect.succeed(false)),
+							Effect.catchDefect((defect) =>
+								Effect.as(Effect.logWarning("Vault seal left to its policy", id, defect), false),
+							),
+						),
 			)
 
 		const erasedCredential = (vaultId: VaultId, id: CredentialId, confirmed: boolean) =>
@@ -286,9 +298,8 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.vault_id
-					const receipt = yield* vaults.send(new DeleteVault({ vault_id: id }))
+					yield* vaults.send(new DeleteVault({ vault_id: id }))
 					const confirmed = yield* sealed(id)
-					yield* vaultViews.get(Vault.ref(id), { atLeast: receipt }).pipe(bestEffortAfterCommit)
 					const { storing, held, erasing } = yield* vaults.get(id)
 					return {
 						id,
@@ -304,6 +315,13 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 					const receipt = yield* vaults.send(new ArchiveVault({ vault_id: id }))
 					if (!(yield* sealed(id))) {
 						return { id, type: "vault" as const, pending: true as const }
+					}
+					if (receipt.events.length === 0) {
+						yield* requireVault(id)
+						const projected = Option.getOrNull(yield* vaultViews.get(Vault.ref(id)))
+						return projected?.archived_at
+							? projected
+							: { id, type: "vault" as const, pending: true as const }
 					}
 					const result = yield* vaultAfter(id, receipt)
 					if (isPending(result)) {

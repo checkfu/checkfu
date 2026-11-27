@@ -19,6 +19,7 @@ import {
 	ConnectionCallFailed,
 	ConnectionExecutor,
 	CredentialSecretsLive,
+	credentialAccessInVault,
 } from "./Connection/CredentialCustody.ts"
 import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
@@ -348,6 +349,8 @@ export default ApiWorker.make(
 		)
 		return ApiWorker.of({
 			...handler,
+			credentialAccess: (vaultId, credentialId) =>
+				credentialAccessInVault(vaultId, credentialId).pipe(Effect.provide(services)),
 			artifactData: (address, call) => Effect.flatMap(visitorData, (serve) => serve(address, call)),
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
 			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),

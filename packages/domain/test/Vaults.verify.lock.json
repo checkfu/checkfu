@@ -170,14 +170,6 @@
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Vault.every((vault) =>\n\t\t\t\t[\n\t\t\t\t\tvault.state.held ===\n\t\t\t\t\t\tm.Credential.filter((credential) =>\n\t\t\t\t\t\t\t[\n\t\t\t\t\t\t\t\tcredential.state.vault_id === vault.id,\n\t\t\t\t\t\t\t\tcredential.state.status === \"active\",\n\t\t\t\t\t\t\t\tcredential.state.custody === \"held\",\n\t\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t\t).length,\n\t\t\t\t\tvault.state.storing ===\n\t\t\t\t\t\tm.Credential.filter((credential) =>\n\t\t\t\t\t\t\t[\n\t\t\t\t\t\t\t\tcredential.state.vault_id === vault.id,\n\t\t\t\t\t\t\t\tcredential.state.status === \"active\",\n\t\t\t\t\t\t\t\tcredential.state.custody === \"storing\",\n\t\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t\t).length,\n\t\t\t\t].every((ok) => ok),\n\t\t\t)"
 			},
-			"Vaults.AnArchivedOrDeletedCredentialIsErased": {
-				"kind": "eventually",
-				"source": "(m) =>\n\t\t\tm.Credential.every((credential) =>\n\t\t\t\t[\n\t\t\t\t\tcredential.state.status === \"\",\n\t\t\t\t\tcredential.state.status === \"active\",\n\t\t\t\t\tcredential.state.custody === \"erased\",\n\t\t\t\t].some((ok) => ok),\n\t\t\t)"
-			},
-			"Vaults.NoVaultIsLeftOwingASecret": {
-				"kind": "eventually",
-				"source": "(m) => m.Vault.every((vault) => vault.state.erasing === 0)"
-			},
 			"Vaults.AVaultHoldsACredential": {
 				"kind": "sometimes",
 				"source": "(m) => m.Vault.some((vault) => vault.state.held >= 1)"
@@ -233,6 +225,30 @@
 			"ConfirmCredentialStored.AConfirmedStorageIsCountedAtMostOnce": {
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tafter.vault.held === before.vault.held,\n\t\t\t\t\tafter.vault.storing === before.vault.storing,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.custody === \"storing\",\n\t\t\t\t\tafter.credential.custody === \"held\",\n\t\t\t\t\tafter.vault.held === before.vault.held + 1,\n\t\t\t\t\tafter.vault.storing === before.vault.storing - 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Vault.OnlyAnEndedVaultIsSealed": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[!s.sealed, s.status === \"archived\", s.status === \"deleted\"].some((ok) => ok)"
+			},
+			"Vault.ASealedVaultStaysSealed": {
+				"kind": "transition",
+				"source": "({ before, after }) => !before.sealed || after.sealed"
+			},
+			"Vaults.AVaultCountsEveryUnconfirmedErasure": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.Vault.every(\n\t\t\t\t(vault) =>\n\t\t\t\t\tvault.state.erasing ===\n\t\t\t\t\tm.Credential.filter(\n\t\t\t\t\t\t(credential) =>\n\t\t\t\t\t\t\tcredential.state.vault_id === vault.id && credential.state.custody === \"erasing\",\n\t\t\t\t\t).length,\n\t\t\t)"
+			},
+			"Vaults.AnErasureRemainsPending": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Credential.some((credential) => credential.state.custody === \"erasing\")"
+			},
+			"Vaults.ASealRetryRuns": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Vault.some((vault) => vault.events.some((event) => event._tag === \"vault.seal_retry_due\"))"
+			},
+			"Vaults.AVaultIsSealed": {
+				"kind": "sometimes",
+				"source": "(m) => m.Vault.some((vault) => vault.state.sealed)"
 			}
 		}
 	}

@@ -21,8 +21,10 @@ export class CredentialSecrets extends Domain.ExternalSystem("CredentialSecrets"
 	},
 	erase: {
 		args: { vault_id: VaultId, credential_id: CredentialId },
+		error: CredentialSecretsUnavailable,
 	},
 	seal: {
 		args: { vault_id: VaultId },
+		error: CredentialSecretsUnavailable,
 	},
 }) {}

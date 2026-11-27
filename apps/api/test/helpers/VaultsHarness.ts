@@ -13,6 +13,7 @@ import {
 	SettleCredentialSecret,
 	SettleCredentialSecretLive,
 } from "@checkfu/domain/Vault/SettleCredentialSecret.policy"
+import { SealEndedVault, SealEndedVaultLive } from "@checkfu/domain/Vault/SealEndedVault.policy"
 import { VaultListingLive } from "@checkfu/domain/Vault/VaultListing.projection"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
@@ -40,6 +41,7 @@ const NOTHING: CustodyRows = { secrets: [], tombstones: [], sealed: false }
 
 const StalledPoliciesLive = Layer.mergeAll(
 	RetireReleasedCredentials.toLayer(Effect.succeed(() => Effect.never)),
+	SealEndedVault.toLayer(Effect.succeed(() => Effect.never)),
 	SettleCredentialSecret.toLayer(Effect.succeed(() => Effect.never)),
 	PublishVaultWebhookEvents.toLayer(Effect.succeed(() => Effect.void)),
 	VaultListingLive,
@@ -50,6 +52,7 @@ const StalledPoliciesLive = Layer.mergeAll(
 
 const RedeliveredPoliciesLive = (retry: Schedule.Schedule<unknown, unknown>) =>
 	Layer.mergeAll(
+		SealEndedVaultLive,
 		RetireReleasedCredentials.toLayer(RetireReleasedCredentials, { retry }).pipe(
 			Layer.provide(RetireReleasedCredentialsLive),
 		),
@@ -98,13 +101,14 @@ export const makeVaultsTestLayer = (
 		vaultId: string,
 		credentialId: string | null,
 		run: (custody: SecretCustody) => A | Promise<A>,
+		blocked = false,
 	): Effect.Effect<A, ConnectionCallFailed> =>
 		Effect.suspend(() => {
 			calls.push({ operation, vaultId, credentialId })
 			if (credentialId !== null) {
 				vaultOf.set(credentialId, vaultId)
 			}
-			return unreachable.has(vaultId)
+			return blocked || unreachable.has(vaultId)
 				? Effect.fail(new ConnectionCallFailed({ cause: "unreachable in test" }))
 				: Effect.promise(async () => run(open(vaultId).custody))
 		})
@@ -138,9 +142,7 @@ export const makeVaultsTestLayer = (
 						custody.put(id, secret, target, mode),
 					),
 				erase: (vaultId, id) =>
-					eraseBlocked.has(id)
-						? Effect.fail(new ConnectionCallFailed({ cause: "erase blocked in test" }))
-						: call("erase", vaultId, id, (custody) => custody.erase(id)),
+					call("erase", vaultId, id, (custody) => custody.erase(id), eraseBlocked.has(id)),
 				seal: (vaultId) => call("seal", vaultId, null, (custody) => custody.seal()),
 				usable: (vaultId, id) => call("usable", vaultId, id, (custody) => custody.usable(id)),
 			}),

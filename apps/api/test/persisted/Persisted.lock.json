@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "pre-release",
-			"cut_at": "2026-11-27T18:45:25.813Z",
+			"label": "prerelease-vault-recovery",
+			"cut_at": "2026-11-27T19:05:31.553Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -217,11 +217,13 @@
 				"command-reply:Webhooks/DeleteWebhookEndpoint": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Webhooks/ClaimWebhookIdempotencyKey": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"policy-delivery:Webhooks.ExpirePreviousWebhookSecrets/WebhookEndpoint": "868e59b051a72ae9b7f7f60b0a9d5cfd36d5ed7c6b3997fb54a5498dd696c6ef",
-				"state:Vaults.Vault": "84cc33191de008ef82a9a29883f24fb84592ba5d70f8754c1c8d6867f42e8da8",
+				"state:Vaults.Vault": "a3629c857c5bdc582566086a57929ba44ad7ed94651d97a6ba56d8fd73b8273a",
 				"event:Vaults.Vault/vault.created": "2733b73079af265d8c8e7f39ec43d62673c146d29596e0f98b53d459ace552d3",
 				"event:Vaults.Vault/vault.renamed": "ebb9861dc217e650cbb75953f1d61929346d9187cf9a12d5dddac09d3a344648",
 				"event:Vaults.Vault/vault.archived": "7bf6fc06e548ca382ef92b84a8ced79d68fbb6571c813442f8d48cb20302e6c4",
 				"event:Vaults.Vault/vault.deleted": "280b64f83c20575a7e6241fcbaf6f0fe803ab10d27cfdf0935320538b6892aef",
+				"event:Vaults.Vault/vault.secrets_sealed": "a700c8bf8089ca57af823bbb07d9f017e24c2915c9adcd90123a4f4d2d4bf7cb",
+				"event:Vaults.Vault/vault.seal_retry_due": "28a6b94d1fe9c62d8d1b543ba9593befb3507ba62cbeb445f6b25d1bbb7fe8e4",
 				"event:Vaults.Vault/vault.credential_attached": "ee48611f3219f5ce4fee3aa21c98057c17ae1e510036d7128f6288209fe7d474",
 				"event:Vaults.Vault/vault.credential_detached": "89f8a09e89b2157012ca433a7f0378605ba949a15b093598d0d788fead618bc4",
 				"event:Vaults.Vault/vault.credential_storage_counted": "a4e85bec740732b2c8df86d00056740d546f046e2ebf3ab6a92b124d6ed01cec",
@@ -231,7 +233,12 @@
 				"command-reply:Vaults/UpdateVault": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Vaults/ArchiveVault": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Vaults/DeleteVault": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
+				"command-reply:Vaults/ConfirmVaultSealed": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
+				"scheduled-command:Vaults.Vault/ConfirmVaultSealed": "39e58d5ccb24957d1233c943710015cd69856c7fcba6b6f6d722d4e6a620807d",
+				"command-reply:Vaults/RetryVaultSeal": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
+				"scheduled-command:Vaults.Vault/RetryVaultSeal": "13a8da589405291917e143657fa7f3a4717f4aa46b59c1335518dcb628016dc4",
 				"state:Vaults.Credential": "1d52288474c2c9db5cb8363af4a07c5a8f8cb5fb87aa2fd31f5931bf2534f1f7",
+				"event:Vaults.Credential/vault_credential.erasure_retry_due": "19853b37f1ef258458895b3aac0b825fafbe004e48b79b0fcf4c4bfac9b6d163",
 				"event:Vaults.Credential/vault_credential.created": "247c98c85fe9cc090d6f5766fd31efc5f8cad2823044e1aa2335cfbe43b8ba64",
 				"event:Vaults.Credential/vault_credential.renamed": "9eb1eb9f7c92acdb9e0b377381e0fbc60eea7410a57ab2f1838b6271cc361a6c",
 				"event:Vaults.Credential/vault_credential.rotated": "a8bb10c84121528eb8f1d14eb46d1afe5c1dfa634e4010568837fa1a8d29b0e2",
@@ -239,6 +246,8 @@
 				"event:Vaults.Credential/vault_credential.deleted": "3c698a521ba035f4c62b9ff2ca436f36b64856c20fdb314161a39c83fbf9e2f4",
 				"event:Vaults.Credential/vault_credential.secret_erased": "c7251807a66dd9448bbe66d3d4c26dc30acb58f2ce1b72a235979cb9593ea2a3",
 				"event:Vaults.Credential/vault_credential.secret_stored": "42a9a768e93ef04746ab52bae8c2c6fafe5c1013fd17cbc0a92a8d09cdfe93f4",
+				"command-reply:Vaults/RetryCredentialErasure": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
+				"scheduled-command:Vaults.Credential/RetryCredentialErasure": "11c6209574c3f63a254c1fad6f64389e5952338a523cb148b16bbec75ae12a64",
 				"state:Vaults.CredentialUrlClaim": "1824b0647e61c1f1379ca4f4f337b9b98b81604aeab33722b34fd7f7049536dc",
 				"event:Vaults.CredentialUrlClaim/vault_credential_url.claimed": "dafa8bfab609ac2d7712e1817760da4721ececace2779e0daaa2424ef5c6f24f",
 				"event:Vaults.CredentialUrlClaim/vault_credential_url.freed": "d748dd74c0e3d08149d025c4e2b28d3f55095baa383666bd2cd77935e9d39158",
@@ -253,7 +262,8 @@
 				"view:Vaults.VaultView@v0": "9538828b23881b16c803fadcc84da14478ca8cc6c6bc7ec6908a8f56feae793d",
 				"view:Vaults.CredentialView@v0": "4ca23f7c777b52fa88113863346fac20e63c34cec0cc196d37de789cc6fb27ba",
 				"policy-delivery:Vaults.RetireReleasedCredentials/Vault": "99c74eb1c88f27bc411292c9726e31cee4fc634c8a4ae70d4ad9150564212a23",
-				"policy-delivery:Vaults.SettleCredentialSecret/Credential": "eb72a08bee2430b4b113236567d195be5b12117584d90c9db79ae3e21566c611",
+				"policy-delivery:Vaults.SettleCredentialSecret/Credential": "15a90870cf0cf7abe5ba8c5f72d8f8e9289e98fc0ec26d463b62e95d83d3867c",
+				"policy-delivery:Vaults.SealEndedVault/Vault": "ff7ed59d57964bc2022c89a9d8f11399d9fd6c7776cc4523fc8b4721964b3405",
 				"policy-delivery:Vaults.PublishVaultWebhookEvents/Vault": "c63218df1b0a30b459b85e90ddbb989fda7fbd4aab437590b3ae12a5bbca73c7",
 				"policy-delivery:Vaults.PublishVaultWebhookEvents/Credential": "c63218df1b0a30b459b85e90ddbb989fda7fbd4aab437590b3ae12a5bbca73c7",
 				"saga-step:Checkfu.RunTurn/start-model-request": "ff3c38d848945e78f6c08ee43fc0abab0a91803cc94c0584fd95bf0c9b614302",
@@ -317,6 +327,8 @@
 				"artifact-marks:ArtifactObjects/marks": "9a4479672513953d36a3a251b5b8a587a32072053f5b328e271ddb9e0f78e078",
 				"artifact-marks:FileObjects/marks": "9a4479672513953d36a3a251b5b8a587a32072053f5b328e271ddb9e0f78e078",
 				"signed-link:ArtifactLink/claims": "3b41f2427ee48e75df932685fec24ac94e9d2edeb0bcd6b5833cd27eb5a4ba72",
+				"api-call:Api.credentialAccess/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
+				"api-call:Api.credentialAccess/result": "69ebc61707c6549ecbca4a8155de1b261246b4cf87bb5485bc90ef961dd7c0ad",
 				"api-call:Api.resolveArtifactVersion/args": "42aedf4c2a50de3a59ca84dc04fdea89bd158d6447ecdd0422886a87a283944b",
 				"api-call:Api.resolveArtifactVersion/result": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
 				"api-call:Api.resolveArtifactVersion/error": "dea19cb7c26cdf15f483e9ac4a9021a7b30c42dadc6a6ac12edb9ca2592b99fd",
@@ -11636,7 +11648,8 @@
 							"held": -28,
 							"erasing": -2,
 							"last_attached": "😀",
-							"releasing": ""
+							"releasing": "",
+							"sealed": true
 						}
 					},
 					{
@@ -11648,7 +11661,8 @@
 							"held": -6,
 							"erasing": 0,
 							"last_attached": "Z+7( 1)m/",
-							"releasing": "Pa"
+							"releasing": "Pa",
+							"sealed": true
 						}
 					},
 					{
@@ -11660,7 +11674,8 @@
 							"held": -29,
 							"erasing": 0,
 							"last_attached": " ",
-							"releasing": "}~R1'"
+							"releasing": "}~R1'",
+							"sealed": false
 						}
 					},
 					{
@@ -11672,7 +11687,8 @@
 							"held": -4,
 							"erasing": -95,
 							"last_attached": "toString",
-							"releasing": " "
+							"releasing": " ",
+							"sealed": false
 						}
 					},
 					{
@@ -11684,7 +11700,8 @@
 							"held": 2,
 							"erasing": 34,
 							"last_attached": "y=:2t[",
-							"releasing": "toString"
+							"releasing": "toString",
+							"sealed": true
 						}
 					},
 					{
@@ -11696,7 +11713,8 @@
 							"held": -1,
 							"erasing": 60,
 							"last_attached": "j;_9SGt3Zp",
-							"releasing": "-1"
+							"releasing": "-1",
+							"sealed": false
 						}
 					},
 					{
@@ -11708,7 +11726,8 @@
 							"held": 20,
 							"erasing": 0,
 							"last_attached": "0",
-							"releasing": "\ud800"
+							"releasing": "\ud800",
+							"sealed": true
 						}
 					},
 					{
@@ -11720,7 +11739,8 @@
 							"held": 6,
 							"erasing": 98,
 							"last_attached": ">2@7[c#G/,",
-							"releasing": "$"
+							"releasing": "$",
+							"sealed": true
 						}
 					}
 				],
@@ -11858,6 +11878,58 @@
 					{
 						"_tag": "vault.deleted",
 						"next": ""
+					}
+				],
+				"event:Vaults.Vault/vault.secrets_sealed": [
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					},
+					{
+						"_tag": "vault.secrets_sealed"
+					}
+				],
+				"event:Vaults.Vault/vault.seal_retry_due": [
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
+					},
+					{
+						"_tag": "vault.seal_retry_due"
 					}
 				],
 				"event:Vaults.Vault/vault.credential_attached": [
@@ -12086,6 +12158,94 @@
 					null,
 					null
 				],
+				"command-reply:Vaults/ConfirmVaultSealed": [
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null
+				],
+				"scheduled-command:Vaults.Vault/ConfirmVaultSealed": [
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "😀"
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "f;K5l"
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "toString"
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": ";g7qI3ZF"
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "'JhB("
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "\t"
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "by+8EI"
+					},
+					{
+						"_tag": "ConfirmVaultSealed",
+						"vault_id": "^P#g! u-0G"
+					}
+				],
+				"command-reply:Vaults/RetryVaultSeal": [
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null
+				],
+				"scheduled-command:Vaults.Vault/RetryVaultSeal": [
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "prototype"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "-pCum<$XG8"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "__proto__"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "-1"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "\ud800"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "t"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": "ofxwcv!5|{"
+					},
+					{
+						"_tag": "RetryVaultSeal",
+						"vault_id": ")z{$y,M5w%"
+					}
+				],
 				"state:Vaults.Credential": [
 					{
 						"schema_version": 1,
@@ -12166,6 +12326,40 @@
 							"previous": "{\"h:xHQB$B",
 							"custody": "storing"
 						}
+					}
+				],
+				"event:Vaults.Credential/vault_credential.erasure_retry_due": [
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "4294967295"
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "😀"
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "~Ebb"
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "\n"
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "\udc00"
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "#"
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": " "
+					},
+					{
+						"_tag": "vault_credential.erasure_retry_due",
+						"vault_id": "6??gIJ3Q<J"
 					}
 				],
 				"event:Vaults.Credential/vault_credential.created": [
@@ -12428,6 +12622,50 @@
 					},
 					{
 						"_tag": "vault_credential.secret_stored"
+					}
+				],
+				"command-reply:Vaults/RetryCredentialErasure": [
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null
+				],
+				"scheduled-command:Vaults.Credential/RetryCredentialErasure": [
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": " "
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": "9f({`*"
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": "X"
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": "b}N"
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": "x"
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": " "
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": "😀"
+					},
+					{
+						"_tag": "RetryCredentialErasure",
+						"credential_id": ")"
 					}
 				],
 				"state:Vaults.CredentialUrlClaim": [
@@ -12820,11 +13058,11 @@
 						"vault_id": "0"
 					},
 					{
-						"_tag": "vault_credential.deleted",
+						"_tag": "vault_credential.erasure_retry_due",
 						"vault_id": "0"
 					},
 					{
-						"_tag": "vault_credential.archived",
+						"_tag": "vault_credential.deleted",
 						"vault_id": "P"
 					},
 					{
@@ -12832,20 +13070,57 @@
 						"vault_id": "😀"
 					},
 					{
-						"_tag": "vault_credential.archived",
+						"_tag": "vault_credential.deleted",
 						"vault_id": "\ud800"
 					},
 					{
-						"_tag": "vault_credential.deleted",
+						"_tag": "vault_credential.erasure_retry_due",
 						"vault_id": "-"
 					},
 					{
-						"_tag": "vault_credential.deleted",
+						"_tag": "vault_credential.erasure_retry_due",
 						"vault_id": "lv#\":=z{&'"
 					},
 					{
-						"_tag": "vault_credential.archived",
+						"_tag": "vault_credential.deleted",
 						"vault_id": "\""
+					}
+				],
+				"policy-delivery:Vaults.SealEndedVault/Vault": [
+					{
+						"_tag": "vault.archived",
+						"next": "-1"
+					},
+					{
+						"_tag": "vault.credential_released",
+						"credential_id": "0",
+						"next": "\udc00"
+					},
+					{
+						"_tag": "vault.credential_released",
+						"credential_id": "PRa*Ev ",
+						"next": ""
+					},
+					{
+						"_tag": "vault.deleted",
+						"next": "\u0000"
+					},
+					{
+						"_tag": "vault.archived",
+						"next": "[]ts07k7Yv"
+					},
+					{
+						"_tag": "vault.deleted",
+						"next": "\ud800"
+					},
+					{
+						"_tag": "vault.credential_released",
+						"credential_id": "nF2`gyjkr*",
+						"next": "__proto__"
+					},
+					{
+						"_tag": "vault.deleted",
+						"next": " "
 					}
 				],
 				"policy-delivery:Vaults.PublishVaultWebhookEvents/Vault": [
@@ -17610,6 +17885,50 @@
 					"_H1N5v99Cu.-.914514190.26.read",
 					"DhCdg-nOTo.kv8cqMmQN.10.999999999998.write",
 					"i_VA7.v.13.30.read"
+				],
+				"api-call:Api.credentialAccess/args": [
+					[
+						"\udc00",
+						"F4e"
+					],
+					[
+						"",
+						"😀"
+					],
+					[
+						"\t",
+						"4VbN,0840j"
+					],
+					[
+						"0",
+						"😀"
+					],
+					[
+						"ai",
+						"R:>Jr%uRsE"
+					],
+					[
+						"\ud800",
+						"__proto__"
+					],
+					[
+						"",
+						" "
+					],
+					[
+						"",
+						"\t"
+					]
+				],
+				"api-call:Api.credentialAccess/result": [
+					"ended",
+					"ended",
+					"empty",
+					"empty",
+					"empty",
+					"ended",
+					"held",
+					"empty"
 				],
 				"api-call:Api.resolveArtifactVersion/args": [
 					[

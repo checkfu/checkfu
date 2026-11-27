@@ -569,6 +569,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 						"artifactFiles",
 						"artifactMounts",
 						"artifactRead",
+						"credentialAccess",
 						"memoryList",
 						"memoryMounts",
 						"memoryRead",

@@ -637,7 +637,7 @@ describe("vault pages", () => {
 		await settle()
 		expect(page.container.textContent).toContain("No credentials in this vault.")
 		expect(page.container.textContent).toContain("1 secret is still being erased.")
-		expect(page.container.textContent).toContain("a session already holding one can still use it")
+		expect(page.container.textContent).toContain("New requests using these credentials are refused")
 		const polling = () =>
 			queryClient
 				.getQueryCache()
@@ -777,6 +777,7 @@ describe("vault pages", () => {
 		await click(button(header, "Delete"))
 		expect(page.router.state.location.pathname).toBe("/")
 		expect(page.container.textContent).toContain("still being erased")
+		expect(page.container.textContent).toContain("using these credentials are refused")
 		expect(page.container.querySelector("form")).toBeNull()
 		expect(page.container.querySelector("tbody")).toBeNull()
 		expect(

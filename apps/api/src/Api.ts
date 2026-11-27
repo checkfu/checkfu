@@ -37,7 +37,14 @@ export type DataCall = typeof DataCall.Type
 export const DataReply = Schema.Struct({ status: Schema.Int, body: Schema.String })
 export type DataReply = typeof DataReply.Type
 
+export const CredentialAccess = Schema.Literals(["held", "empty", "ended"])
+export type CredentialAccess = typeof CredentialAccess.Type
+
 export const ApiCalls = {
+	credentialAccess: {
+		args: Schema.Tuple([Schema.String, Schema.String]),
+		result: CredentialAccess,
+	},
 	resolveArtifactVersion: {
 		args: Schema.Tuple([Schema.String, Schema.Int]),
 		result: Schema.NullOr(Schema.String),

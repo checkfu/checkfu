@@ -11,7 +11,9 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
-import { credentialUsable } from "../src/Connection/CredentialCustody.ts"
+import { credentialAccessInVault, credentialUsable } from "../src/Connection/CredentialCustody.ts"
+import { vaultsOver } from "../src/Pi/PiMcpSession.ts"
+import { MCP_CREDENTIAL_ENDED } from "../src/Pi/PiMcpTypes.ts"
 import { makeVaultMcp } from "../src/Connection/VaultMcp.ts"
 import type { VaultMcp } from "../src/Connection/VaultMcp.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
@@ -163,6 +165,9 @@ const vaultCustody = (
 		}),
 		Effect.map((res) => (res.body as VaultBody).custody),
 	)
+
+const tags = (log: ReadonlyArray<{ readonly event: unknown }>) =>
+	log.map((entry) => (entry.event as { readonly _tag?: unknown })._tag)
 
 const settles = (condition: () => boolean) =>
 	Effect.sync(condition).pipe(
@@ -691,7 +696,7 @@ describe("Vaults", () => {
 	})
 
 	it("answers that a credential or vault ended at once, and its policies finish the erasure once storage is back, with no second request", async () => {
-		const { run, vaults } = world({ policies: { redeliver: Schedule.spaced("10 millis") } })
+		const { run, vaults } = world()
 		await run(({ call }) =>
 			Effect.gen(function* () {
 				const vault = yield* createVault(call)
@@ -699,6 +704,18 @@ describe("Vaults", () => {
 				const deleted = (yield* createCredential(call, vault.id, "https://mcp.linear.example/mcp"))
 					.body as CredentialBody
 				const base = `/v1/vaults/${vault.id}/credentials`
+				const services =
+					yield* Effect.context<Effect.Services<ReturnType<typeof credentialAccessInVault>>>()
+				const runPromise = Effect.runPromiseWith(services)
+				const sessionVaults = vaultsOver(
+					() => {
+						throw new Error("The admitted connection must not be reached after revocation")
+					},
+					"admitted-session",
+					(vaultId, credentialId, signal) =>
+						runPromise(credentialAccessInVault(vaultId, credentialId), { signal }),
+				)
+				expect(yield* credentialAccessInVault(vault.id, archived.id)).toBe("held")
 				vaults.eraseBlocked.add(archived.id)
 				vaults.eraseBlocked.add(deleted.id)
 
@@ -711,6 +728,12 @@ describe("Vaults", () => {
 					custody: "erasing",
 				})
 				expect(yield* credentialUsable(CredentialId.make(archived.id))).toBe(false)
+				expect(vaults.secretOf(archived.id)).toBe(TOKEN)
+				expect(
+					yield* Effect.promise(() =>
+						sessionVaults.list(vault.id, archived.id, archived.auth.mcp_server_url, 1, undefined),
+					),
+				).toEqual({ ok: false, message: MCP_CREDENTIAL_ENDED })
 				expect(yield* call("DELETE", `${base}/${deleted.id}`)).toEqual({
 					status: 202,
 					body: { id: deleted.id, type: "vault_credential_deleted", custody: "erasing" },
@@ -742,14 +765,56 @@ describe("Vaults", () => {
 
 				expect(yield* credentialUsable(CredentialId.make(one.id))).toBe(false)
 				expect(yield* credentialUsable(CredentialId.make(two.id))).toBe(false)
+				expect(yield* credentialAccessInVault(whole.id, one.id)).toBe("ended")
+				expect(yield* credentialAccessInVault(gone.id, two.id)).toBe("ended")
 
+				const failedAttempts = (id: string, operation: string) =>
+					vaults.calls.filter(
+						(call) => call.operation === operation && (call.credentialId ?? call.vaultId) === id,
+					).length
+				yield* Effect.sync(
+					() => failedAttempts(archived.id, "erase") >= 3 && failedAttempts(whole.id, "seal") >= 3,
+				).pipe(
+					Effect.repeat({
+						schedule: Schedule.spaced("25 millis"),
+						times: 320,
+						until: (met) => met,
+					}),
+					Effect.tap((met) =>
+						Effect.sync(() =>
+							expect(met, "Erasure and sealing retries ran during the outage").toBe(true),
+						),
+					),
+				)
+				expect(
+					(yield* call("GET", `/v1/vaults/${whole.id}/credentials/${one.id}`)).body,
+				).toMatchObject({
+					custody: "erasing",
+				})
 				const requests = vaults.calls.filter(
 					(each) => each.operation !== "erase" && each.operation !== "seal",
 				).length
 				vaults.eraseBlocked.clear()
 				vaults.unreachable.clear()
 				const ended = [archived.id, deleted.id, one.id, two.id]
-				yield* settles(() => ended.every((id) => vaults.erased(id)))
+				yield* Effect.sync(
+					() =>
+						ended.every((id) => vaults.erased(id)) &&
+						[one.id, two.id].every((id) => vaults.rowsOf(id).sealed),
+				).pipe(
+					Effect.repeat({
+						schedule: Schedule.spaced("25 millis"),
+						times: 320,
+						until: (met) => met,
+					}),
+					Effect.tap((met) =>
+						Effect.sync(() =>
+							expect(met, "Secret storage was erased and both vaults sealed after recovery").toBe(
+								true,
+							),
+						),
+					),
+				)
 				expect(ended.map((id) => vaults.secretOf(id))).toEqual([null, null, null, null])
 				expect(yield* vaultCustody(call, vault.id, (custody) => custody.erasing === 0)).toEqual({
 					storing: 0,
@@ -766,12 +831,34 @@ describe("Vaults", () => {
 				expect((yield* call("GET", `${base}/${archived.id}`)).body).toMatchObject({
 					custody: "erased",
 				})
+				for (const id of [whole.id, gone.id]) {
+					const sealed = yield* vaults.storedEvents("Vault", id).pipe(
+						Effect.map((events) => tags(events).includes("vault.secrets_sealed")),
+						Effect.repeat({
+							schedule: Schedule.spaced("25 millis"),
+							times: 320,
+							until: (met) => met,
+						}),
+					)
+					expect(sealed, `Seal was confirmed for ${id}`).toBe(true)
+				}
+				const attemptCount = vaults.calls.length
+				vaults.unreachable.add(whole.id)
+				vaults.unreachable.add(gone.id)
+				vaults.eraseBlocked.add(archived.id)
+				expect((yield* call("POST", `/v1/vaults/${whole.id}/archive`)).status).toBe(200)
+				expect(yield* call("DELETE", `/v1/vaults/${gone.id}`)).toMatchObject({
+					status: 200,
+					body: { secrets: "erased" },
+				})
+				expect((yield* call("POST", `${base}/${archived.id}/archive`)).status).toBe(200)
+				expect(vaults.calls.length).toBe(attemptCount)
 				expect(
 					vaults.calls.filter((each) => each.operation !== "erase" && each.operation !== "seal"),
 				).toHaveLength(requests)
 			}),
 		)
-	})
+	}, 35_000)
 
 	it("leaves nothing usable once an archive or delete has answered, whatever the policies have done", async () => {
 		const { run, vaults } = world({ policies: "stalled" })
@@ -1261,8 +1348,6 @@ describe("Vaults", () => {
 				yield* call("POST", `${path}/archive`)
 				yield* call("DELETE", `/v1/vaults/${vault.id}`)
 
-				const tags = (log: ReadonlyArray<{ readonly event: unknown }>) =>
-					log.map((entry) => (entry.event as { readonly _tag?: unknown })._tag)
 				const credentialLog = yield* vaults.storedEvents("Credential", credential.id).pipe(
 					Effect.repeat({
 						schedule: Schedule.spaced("5 millis"),
@@ -1282,6 +1367,7 @@ describe("Vaults", () => {
 					"vault.credential_detached",
 					"vault.credential_erasure_counted",
 					"vault.deleted",
+					"vault.secrets_sealed",
 					"vault.credential_released",
 				])
 				expect(tags(credentialLog)).toEqual([

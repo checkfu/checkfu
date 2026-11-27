@@ -15,6 +15,7 @@ import * as PubSub from "effect/PubSub"
 import * as Stream from "effect/Stream"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
+import { ApiWorker } from "../Api.ts"
 import { Connection } from "../Connection/Connection.do.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
@@ -186,15 +187,16 @@ const piSessionInit = Effect.gen(function* () {
 		: yield* loadEnvPiProviderRuntime
 	const workspaces = yield* SessionWorkspace
 	const connections = yield* Connection
+	const api = yield* Cloudflare.Workers.bindWorker(Cloudflare.Worker.ref(ApiWorker))
 	const sandboxes = yield* codemodeSandboxes
 	const where = yield* Effect.orDie(placement)
-	return { state, providerRuntime, workspaces, connections, sandboxes, where }
+	return { state, providerRuntime, workspaces, connections, api, sandboxes, where }
 })
 
 export const PiSessionLive = PiSession.make(
 	Effect.map(
 		piSessionInit,
-		({ state, providerRuntime, workspaces, connections, sandboxes, where }) =>
+		({ state, providerRuntime, workspaces, connections, api, sandboxes, where }) =>
 			Effect.gen(function* () {
 				const rawCtx = state.raw
 				const sessionId = rawCtx.id.name
@@ -258,14 +260,19 @@ export const PiSessionLive = PiSession.make(
 								rawCtx.storage.kv.put(key, value)
 							},
 						},
-						vaults: vaultsOver((vaultId) => {
-							const vault = connectionStub(vaultId)
-							return {
-								mcpList: (...asked) => runPromise(vault.mcpList(...asked)),
-								mcpCall: (...asked) => runPromise(vault.mcpCall(...asked)),
-								mcpCancel: (callId) => runPromise(vault.mcpCancel(callId)),
-							}
-						}, sessionId),
+						vaults: vaultsOver(
+							(vaultId) => {
+								const vault = connectionStub(vaultId)
+								return {
+									mcpList: (...asked) => runPromise(vault.mcpList(...asked)),
+									mcpCall: (...asked) => runPromise(vault.mcpCall(...asked)),
+									mcpCancel: (callId) => runPromise(vault.mcpCancel(callId)),
+								}
+							},
+							sessionId,
+							(vaultId, credentialId, signal) =>
+								runPromise(api.credentialAccess(vaultId, credentialId), { signal }),
+						),
 						admittedTurn,
 						agentTools,
 					})

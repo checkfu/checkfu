@@ -4196,7 +4196,7 @@ export class EffectVaultsCredentialsResource {
 		this.#runtime = runtime
 	}
 
-	/** Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the credential again until archived_at is set and custody is erased. */
+	/** Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Read the credential again until archived_at is set and custody is erased. */
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
@@ -4292,7 +4292,7 @@ export class EffectVaultsCredentialsResource {
 		)
 	}
 
-	/** Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state. */
+	/** Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
@@ -4550,7 +4550,7 @@ export class EffectVaultsResource {
 		this.credentials = new EffectVaultsCredentialsResource(runtime)
 	}
 
-	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0. */
+	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Resend the archive to check for a 200 confirmation. Reading the vault shows the archived_at timestamp and outstanding credential records. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
 		options: WithResponseRequestOptions<never>,
@@ -4630,7 +4630,7 @@ export class EffectVaultsResource {
 		)
 	}
 
-	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
+	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
 		options: WithResponseRequestOptions<never>,
@@ -6596,7 +6596,7 @@ export class VaultsCredentialsResource {
 		this.#runtime = runtime
 	}
 
-	/** Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the credential again until archived_at is set and custody is erased. */
+	/** Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Read the credential again until archived_at is set and custody is erased. */
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
@@ -6624,7 +6624,7 @@ export class VaultsCredentialsResource {
 		)
 	}
 
-	/** Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state. */
+	/** Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
@@ -6702,7 +6702,7 @@ export class VaultsResource {
 		this.credentials = new VaultsCredentialsResource(runtime)
 	}
 
-	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0. */
+	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. Resend the archive to check for a 200 confirmation. Reading the vault shows the archived_at timestamp and outstanding credential records. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
 		options?: PromiseRequestOptions<never>,
@@ -6725,7 +6725,7 @@ export class VaultsResource {
 		)
 	}
 
-	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
+	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; erasure continues in the background. Sessions cannot start new MCP requests using a revoked credential after the change is recorded. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
 		options?: PromiseRequestOptions<never>,

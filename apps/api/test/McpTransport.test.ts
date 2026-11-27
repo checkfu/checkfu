@@ -13,6 +13,8 @@ import { makeSessionMcp, vaultsOver } from "../src/Pi/PiMcpSession.ts"
 import type { SessionMcp, SessionVaults } from "../src/Pi/PiMcpSession.ts"
 import {
 	MAX_MCP_RESPONSE_BYTES,
+	MCP_CREDENTIAL_EMPTY,
+	MCP_CREDENTIAL_ENDED,
 	McpCall,
 	McpCallOutcome,
 	McpListOutcome,
@@ -444,6 +446,7 @@ describe("A session's MCP servers", () => {
 					}
 				},
 				`session-${(sessions += 1)}`,
+				async () => "held",
 			),
 			admittedTurn: () => state.turn,
 			agentTools: () => [],
@@ -461,6 +464,44 @@ describe("A session's MCP servers", () => {
 				?.description ?? ""
 		return { mcp, call, describe, kv, state, vaultsAsked }
 	}
+	it.each([
+		["ended", MCP_CREDENTIAL_ENDED],
+		["empty", MCP_CREDENTIAL_EMPTY],
+	] as const)(
+		"refuses a credential with %s access before contacting its connection",
+		async (access, message) => {
+			const denied = vaultsOver(
+				() => {
+					throw new Error("The connection must not be contacted")
+				},
+				"session",
+				async () => access,
+			)
+			const result = await denied.list("vault", "credential", "https://mcp.example", 1, undefined)
+			expect(result).toEqual({ ok: false, message })
+		},
+	)
+
+	it("interrupts a credential request even while its authorization is waiting", async () => {
+		const controller = new AbortController()
+		const authorization = Promise.withResolvers<"held">()
+		let connected = false
+		const vaults = vaultsOver(
+			() => {
+				connected = true
+				throw new Error("The connection must not be contacted")
+			},
+			"session",
+			() => authorization.promise,
+		)
+		const listing = vaults.list("vault", "credential", "https://mcp.example", 1, controller.signal)
+		controller.abort()
+		expect(await listing).toMatchObject({ ok: false, interrupted: true })
+		authorization.resolve("held")
+		await authorization.promise
+		expect(connected).toBe(false)
+	})
+
 	const turn = (
 		servers: ReadonlyArray<{
 			name: string

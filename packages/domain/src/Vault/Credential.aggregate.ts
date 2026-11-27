@@ -7,6 +7,11 @@ import { CredentialSecretStored } from "./ConfirmCredentialStored.command.ts"
 import { CredentialCreated } from "./CreateCredential.command.ts"
 import { CredentialId } from "./Credential.id.ts"
 import { CredentialDeleted } from "./DeleteCredential.command.ts"
+import {
+	CredentialErasureRetryDue,
+	RetryCredentialErasure,
+} from "./RetryCredentialErasure.command.ts"
+import { VaultId } from "./Vault.id.ts"
 import { CredentialRotated } from "./RotateCredential.command.ts"
 import { CredentialRenamed } from "./UpdateCredential.command.ts"
 
@@ -45,7 +50,7 @@ export class Credential extends Domain.Aggregate("Credential", {
 		CredentialSecretErased,
 		CredentialSecretStored,
 	],
-	commands: [],
+	commands: [RetryCredentialErasure],
 	invariants: {
 		StatusIsKnown: (s) =>
 			[
@@ -105,7 +110,15 @@ export class Credential extends Domain.Aggregate("Credential", {
 				(ok) => ok,
 			),
 	},
+	keyOf: (cmd) => cmd.credential_id,
+	decide: {
+		RetryCredentialErasure: (state) =>
+			state.custody === "erasing"
+				? [new CredentialErasureRetryDue({ vault_id: VaultId.make(state.vault_id) })]
+				: [],
+	},
 	evolve: {
+		"vault_credential.erasure_retry_due": (state) => state,
 		"vault_credential.created": (state, e) =>
 			state.status === ""
 				? {

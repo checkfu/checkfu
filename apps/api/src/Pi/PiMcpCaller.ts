@@ -21,7 +21,7 @@ import {
 	listMcpTools,
 	mcpClientEnded,
 } from "./PiMcpClient.ts"
-import { MCP_CALL_TIMEOUT_MS, McpCall, mcpTimedOut, withMcpListDeadline } from "./PiMcpTypes.ts"
+import { MCP_CALL_TIMEOUT_MS, McpCall, mcpTimedOut, withMcpDeadline } from "./PiMcpTypes.ts"
 import type {
 	McpCallOutcome,
 	McpCallScope,
@@ -220,7 +220,7 @@ export const makeMcpCaller = (options: {
 
 	return {
 		list: (key: string, peer: McpPeer, scope: McpCallScope): Promise<McpListOutcome> =>
-			withMcpListDeadline(
+			withMcpDeadline(
 				async (signal) => {
 					const listed = await run(key, peer, { ...scope, signal }, undefined, listMcpTools)
 					if (!Option.isOption(listed)) {
