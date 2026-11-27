@@ -1,5 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
-import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { ArchiveAutomation, AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { AutomationId, sessionIdOfNextRun } from "./Automation.id.ts"
@@ -36,20 +36,11 @@ export const AutomationState = Schema.Struct({
 })
 export type AutomationState = typeof AutomationState.Type
 
-export const AUTOMATION_STATE_SCHEMA_VERSION = 2 as const
-
-const AutomationStateV1 = AutomationState.mapFields(({ revision: _revision, ...fields }) => fields)
+export const AUTOMATION_STATE_SCHEMA_VERSION = 1 as const
 
 export const AutomationStateSnapshot = versionedSnapshot({
 	current: AUTOMATION_STATE_SCHEMA_VERSION,
 	schema: AutomationState,
-	previous: [
-		snapshotVersion({
-			version: 1,
-			schema: AutomationStateV1,
-			migrate: (state) => ({ ...state, revision: state.status === "" ? 0 : 1 }),
-		}),
-	],
 })
 
 const fired = (

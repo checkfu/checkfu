@@ -4,20 +4,15 @@ import {
 	TurnAbandoned,
 } from "../src/Session/AbandonTurn.command.ts"
 import * as Domain from "@alchemy.run/domain"
-import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import { Story } from "@alchemy.run/domain/Story"
 import { describe, expect, it } from "@effect/vitest"
-import { RuntimeContext } from "alchemy/RuntimeContext"
-import { storageCallbacks } from "alchemy/Workers/StorageCallbacks"
-import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
-import * as Scope from "effect/Scope"
 import {
 	ArchiveSession,
 	SessionArchived,
@@ -88,7 +83,7 @@ import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModel
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
 import { UnknownModelRequest } from "../src/Session/UnknownModelRequest.rejection.ts"
-import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { Sessions, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
 const StartTurnNoopLayer = Layer.mergeAll(
@@ -3054,7 +3049,7 @@ describe("Sessions", () => {
 		},
 	)
 
-	it("round-trips current session snapshots, migrates older versions, and rejects unknown versions", () => {
+	it("round-trips current session snapshots and rejects unknown versions", () => {
 		const encode = Schema.encodeSync(SessionStateSnapshot)
 		const decode = Schema.decodeUnknownSync(SessionStateSnapshot)
 		const running = {
@@ -3072,19 +3067,6 @@ describe("Sessions", () => {
 		const wire = encode(running)
 		expect(wire).toEqual({ schema_version: SESSION_STATE_SCHEMA_VERSION, state: running })
 		expect(decode(wire)).toEqual(running)
-		expect(decode({ schema_version: 2, state: running })).toEqual(running)
-		expect(
-			decode({
-				schema_version: 1,
-				state: {
-					_tag: "Running",
-					turn: 1,
-					open_model_request_id: "req_1",
-					model_requests_started: 1,
-					pending_user_messages: 2,
-				},
-			}),
-		).toEqual({ ...running, awaiting_calls: 0, awaiting_ids: "[]", asked_calls: 0 })
 		expect(
 			Exit.isFailure(
 				Schema.decodeExit(SessionStateSnapshot)({
@@ -3135,283 +3117,19 @@ describe("Sessions", () => {
 		)
 	})
 
-	it("lazily upgrades a v1 snapshot to v2 through the real DurableObjects storage adapter, skips migration on reopen, and rejects future versions", async () => {
-		const CounterId = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("CounterId"))
-		const V1State = Schema.Union([
-			Schema.TaggedStruct("Empty", {}),
-			Schema.TaggedStruct("Active", { count: Schema.Int }),
-		])
-		const V2State = Schema.Union([
-			Schema.TaggedStruct("Empty", {}),
-			Schema.TaggedStruct("Active", {
-				count: Schema.Int,
-				label: Schema.String,
-			}),
-		])
-
-		let migrationsRun = 0
-		const CounterSnapshot = versionedSnapshot({
-			current: 2 as const,
-			schema: V2State,
-			previous: [
-				snapshotVersion({
-					version: 1 as const,
-					schema: V1State,
-					migrate: (v1) => {
-						migrationsRun += 1
-						return v1._tag === "Empty"
-							? { _tag: "Empty" as const }
-							: { _tag: "Active" as const, count: v1.count, label: "migrated-from-v1" }
-					},
-				}),
-			],
-		})
-
-		class CounterIncremented extends Domain.Event("counter.incremented", {}) {}
-		class IncrementCounter extends Domain.Command("IncrementCounter", {
-			input: { counter_id: CounterId },
-			events: [CounterIncremented],
-		}) {}
-		class Counter extends Domain.Aggregate("Counter", {
-			id: CounterId,
-			state: CounterSnapshot,
-			initial: { _tag: "Empty" as const },
-			commands: [IncrementCounter],
-			keyOf: (cmd) => cmd.counter_id,
-			decide: {
-				IncrementCounter: () => [new CounterIncremented()],
-			},
-			evolve: {
-				"counter.incremented": (state) =>
-					state._tag === "Empty"
-						? { _tag: "Active" as const, count: 1, label: "fresh-v2" }
-						: { ...state, count: state.count + 1 },
-			},
-		}) {}
-		class Counters extends Domain.Model("Counters", {
-			aggregates: [Counter],
-		}) {}
-
-		const backingStores = new Map<string, Map<string, unknown>>()
-		const storeFor = (storageKey: string) => {
-			let data = backingStores.get(storageKey)
-			if (data === undefined) {
-				data = new Map<string, unknown>()
-				backingStores.set(storageKey, data)
-			}
-			return data
-		}
-
-		const makeObjectStorage = (data: Map<string, unknown>): DurableObjects.ObjectStorage => {
-			const put = ((keyOrEntries: unknown, value?: unknown) =>
-				Effect.sync(() => {
-					if (typeof keyOrEntries === "string") {
-						data.set(keyOrEntries, value)
-					} else if (typeof keyOrEntries === "object" && keyOrEntries !== null) {
-						for (const [k, v] of Object.entries(keyOrEntries)) {
-							data.set(k, v)
-						}
-					}
-				})) as DurableObjects.ObjectStorage["put"]
-			const del = ((keyOrKeys: string | ReadonlyArray<string>) =>
-				Effect.sync(() => {
-					if (typeof keyOrKeys === "string") {
-						return data.delete(keyOrKeys)
-					}
-					let removed = 0
-					for (const k of keyOrKeys) {
-						if (data.delete(k)) {
-							removed += 1
-						}
-					}
-					return removed
-				})) as DurableObjects.ObjectStorage["delete"]
-			return {
-				get: <T>(key: string) => Effect.succeed(data.get(key) as T | undefined),
-				put,
-				delete: del,
-				list: <T>(options?: DurableObjects.ListOptions) =>
-					Effect.sync(() => {
-						const prefix = options?.prefix ?? ""
-						let entries = [...data.entries()]
-							.filter(([k]) => k.startsWith(prefix))
-							.filter(([k]) => (options?.start === undefined ? true : k >= options.start))
-							.filter(([k]) => (options?.startAfter === undefined ? true : k > options.startAfter))
-							.filter(([k]) => (options?.end === undefined ? true : k < options.end))
-							.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-						if (options?.reverse) {
-							entries = entries.reverse()
-						}
-						if (options?.limit !== undefined) {
-							entries = entries.slice(0, options.limit)
-						}
-						return new Map(entries as ReadonlyArray<[string, T]>)
-					}),
-				transaction: (effect) => effect,
-			}
-		}
-
-		const openPlatform = () => {
-			const claim = {}
-			const host: DurableObjects.Host = {
-				claimKey: Effect.succeed(claim),
-				declare: (_model, name, impl) =>
-					Effect.succeed({
-						getByName: (key) => {
-							const data = storeFor(`${name}:${key}`)
-							const storage = makeObjectStorage(data)
-							const { callbacks } = storageCallbacks(storage, {
-								set: () => Effect.void,
-								get: Effect.succeed(null),
-							})
-							const objectState: DurableObjects.ObjectStateShape = {
-								storage,
-								exclusive: (effect) => effect,
-								waitUntil: () => Effect.void,
-							}
-							const runtimeContext = {
-								Type: "TestDurableObject",
-								id: key,
-								env: {},
-								get: () => Effect.undefined,
-								set: (id: string) => Effect.succeed(id),
-							}
-							let methodsPromise:
-								| Promise<
-										Record<string, (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown>>
-								  >
-								| undefined
-							const loadMethods = () => {
-								if (methodsPromise === undefined) {
-									methodsPromise = Effect.runPromise(
-										Effect.gen(function* () {
-											const scope = yield* Scope.make()
-											return yield* impl.pipe(
-												Effect.provideService(DurableObjects.ObjectState, objectState),
-												Effect.provideService(RuntimeContext, runtimeContext),
-												Effect.provideService(Scope.Scope, scope),
-												Effect.provide(callbacks),
-											)
-										}),
-									) as Promise<
-										Record<string, (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown>>
-									>
-								}
-								return Effect.promise(() => methodsPromise!)
-							}
-							return new Proxy(
-								{},
-								{
-									get:
-										(_target, prop: string) =>
-										(...args: ReadonlyArray<unknown>) =>
-											loadMethods().pipe(
-												Effect.flatMap((methods) => {
-													const fn = methods[prop]
-													if (typeof fn !== "function") {
-														return Effect.die(new Error(`Unknown Durable Object method: ${prop}`))
-													}
-													return fn(...args)
-												}),
-											),
-								},
-							)
-						},
-					}),
-			}
-			return DurableObjects.makePlatform(host).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
-		}
-
-		const counterId = CounterId.make("cnt_1")
-		const counterStore = storeFor("CounterAggregate:cnt_1")
-		counterStore.set("meta", {
-			version: 1,
-			state: {
-				schema_version: 1,
-				state: { _tag: "Active", count: 3 },
-			},
-		})
-
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const counters = yield* Counter
-				yield* counters.send(new IncrementCounter({ counter_id: counterId }))
-			}).pipe(Effect.provide(Counters.layer(Layer.empty).pipe(Layer.provide(openPlatform())))),
-		)
-		expect(migrationsRun).toBe(1)
-		expect(counterStore.get("meta")).toEqual({
-			version: 2,
-			state: {
-				schema_version: 2,
-				state: { _tag: "Active", count: 4, label: "migrated-from-v1" },
-			},
-		})
-
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const counters = yield* Counter
-				yield* counters.send(new IncrementCounter({ counter_id: counterId }))
-			}).pipe(Effect.provide(Counters.layer(Layer.empty).pipe(Layer.provide(openPlatform())))),
-		)
-		expect(migrationsRun).toBe(1)
-		expect(counterStore.get("meta")).toEqual({
-			version: 3,
-			state: {
-				schema_version: 2,
-				state: { _tag: "Active", count: 5, label: "migrated-from-v1" },
-			},
-		})
-
-		const futureId = CounterId.make("cnt_future")
-		const futureMeta = {
-			version: 1,
-			state: {
-				schema_version: 99,
-				state: { _tag: "Active", count: 10 },
-			},
-		}
-		const futureStore = storeFor("CounterAggregate:cnt_future")
-		futureStore.set("meta", futureMeta)
-
-		const futureExit = await Effect.runPromiseExit(
-			Effect.gen(function* () {
-				const counters = yield* Counter
-				yield* counters.send(new IncrementCounter({ counter_id: futureId }))
-			}).pipe(Effect.provide(Counters.layer(Layer.empty).pipe(Layer.provide(openPlatform())))),
-		)
-		expect(Exit.isFailure(futureExit)).toBe(true)
-		expect(futureStore.get("meta")).toEqual(futureMeta)
-	})
-
 	it("round-trips transforming fields like Schema.FiniteFromString once in versionedSnapshot", () => {
-		const V1Transformed = Schema.Struct({ rawCount: Schema.String })
-		const V2Transformed = Schema.Struct({ count: Schema.FiniteFromString })
 		const TransformedSnapshot = versionedSnapshot({
-			current: 2 as const,
-			schema: V2Transformed,
-			previous: [
-				snapshotVersion({
-					version: 1 as const,
-					schema: V1Transformed,
-					migrate: (v1) => ({ count: Number(v1.rawCount) }),
-				}),
-			],
+			current: 1,
+			schema: Schema.Struct({ count: Schema.FiniteFromString }),
 		})
 		const encode = Schema.encodeSync(TransformedSnapshot)
 		const decode = Schema.decodeUnknownSync(TransformedSnapshot)
 
 		expect(encode({ count: 3 })).toEqual({
-			schema_version: 2,
+			schema_version: 1,
 			state: { count: "3" },
 		})
-		expect(decode({ schema_version: 2, state: { count: "3" } })).toEqual({ count: 3 })
-
-		const migrated = decode({ schema_version: 1, state: { rawCount: "42" } })
-		expect(migrated).toEqual({ count: 42 })
-		expect(encode(migrated)).toEqual({
-			schema_version: 2,
-			state: { count: "42" },
-		})
+		expect(decode({ schema_version: 1, state: { count: "3" } })).toEqual({ count: 3 })
 	})
 
 	it("clamps oversized raw provider thinking and failure metadata before external schema validation so RunTurn checkpoints cleanly", async () => {

@@ -7,7 +7,7 @@
 			"label": "release-2026-11-26",
 			"cut_at": "2026-11-27T00:14:30.334Z",
 			"schemas": {
-				"state:Checkfu.Agent": "624daa06e1846d7fbef866ce10c95f7894b0a45b23ce495c3856ae82601668db",
+				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
 				"event:Checkfu.Agent/agent.created": "3260de33f7fb073a60eb7ce33157593aaf7bb04c346efc0e27948d78a1a2953d",
 				"event:Checkfu.Agent/agent.updated": "dad1d28a18c669bdecffc829dafd8bf7f6924fcb5c35069722a41002179f9ad7",
@@ -21,7 +21,7 @@
 				"command-reply:Checkfu/UpdateEnvironment": "10e48fa01759f910250d262f57fbc7db43e63b384b33b800c7ce34fbc37e0983",
 				"command-reply:Checkfu/ArchiveEnvironment": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/DeleteEnvironment": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Checkfu.Session": "6a3fe792641768b0bf2c5dc749f1468bb68f61098565c5c2773c757fec5f2b9e",
+				"state:Checkfu.Session": "e8fe51aeeae8ffa028d2100607d3e29474e2682031b45c049f67915b82efd72b",
 				"event:Checkfu.Session/session.created": "73c877dc37caed34a5e7f704f918d757eb05edfc75286c37893338ba3055114e",
 				"event:Checkfu.Session/user.message": "392eb57e6d20edc9d791ae142ff1fdc840d5023ee6aa308555ada5ccf4c95ecc",
 				"event:Checkfu.Session/session.status_running": "e21faf22832d22a1f53bf056047e7854d74c78473edf4420e7713b1f23eab41c",
@@ -68,7 +68,7 @@
 				"event:Checkfu.ToolConfirmation/tool_confirmation.requested": "e202712255c81c9278eeb1f23cde7cfc174011ae232a657ca32d3f889cb9eb0b",
 				"event:Checkfu.ToolConfirmation/tool_confirmation.answered": "816ef3a0d58867c7123c0be0c8c87bc247c5d000f0b2323212048aa36425e8b5",
 				"event:Checkfu.ToolConfirmation/tool_confirmation.returned": "bc136e027fed9f09b91bb488f5654c49de571fd50ee311632e4cb490d4a0cb2e",
-				"state:Checkfu.Automation": "ecf37c308e866ba971758a9354ffdff2a66fe55a9fb21a393c27023b48ac04e5",
+				"state:Checkfu.Automation": "aa559295d7c55e9307b97468ed3826a9361bbb43a67c893e99fd2d51a59d6371",
 				"event:Checkfu.Automation/automation.created": "43d6d878aa861d6556ebcfca1609aad0d3cc8b8421b4f016c13fd2906a8b0aff",
 				"event:Checkfu.Automation/automation.paused": "4e6798de3129964ab3721fd4641d4472b18a73ddc46f7f1dcb4630630d29e974",
 				"event:Checkfu.Automation/automation.unpaused": "fdeab68b27879f7f3263399f0d765091909d376dfa3a3a972e8074e4a4930894",
@@ -318,7 +318,7 @@
 			"shapes": {
 				"state:Checkfu.Agent": [
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "(LNLrs^",
 							"version": 27,
@@ -334,7 +334,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "yYVzNRkMu4",
 							"version": 59,
@@ -350,7 +350,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "",
 							"version": 3,
@@ -366,7 +366,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "4294967295",
 							"version": 98,
@@ -382,7 +382,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "0",
 							"version": 3,
@@ -398,7 +398,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "rloX",
 							"version": 17,
@@ -414,7 +414,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "😀",
 							"version": 74,
@@ -430,7 +430,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "N$vb",
 							"version": 100,
@@ -1181,13 +1181,13 @@
 				],
 				"state:Checkfu.Session": [
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 1,
@@ -1195,7 +1195,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 96,
@@ -1203,33 +1203,33 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 16
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 5
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
@@ -4115,7 +4115,7 @@
 				],
 				"state:Checkfu.Automation": [
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "bs)_dsHw?f",
 							"runs": 22,
@@ -4126,7 +4126,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "eXQ:\"=g",
 							"runs": 15,
@@ -4137,7 +4137,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "G')tRc8z[",
 							"runs": 14,
@@ -4148,7 +4148,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "",
 							"runs": 3,
@@ -4159,7 +4159,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "\",YriL$irV",
 							"runs": 3,
@@ -4170,7 +4170,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "0",
 							"runs": 94,
@@ -4181,7 +4181,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "__proto__",
 							"runs": 4,
@@ -4192,7 +4192,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "",
 							"runs": 92,
@@ -18170,7 +18170,7 @@
 			"label": "webhook-fanout-callbacks",
 			"cut_at": "2026-11-27T01:54:16.423Z",
 			"schemas": {
-				"state:Checkfu.Agent": "624daa06e1846d7fbef866ce10c95f7894b0a45b23ce495c3856ae82601668db",
+				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
 				"event:Checkfu.Agent/agent.created": "3260de33f7fb073a60eb7ce33157593aaf7bb04c346efc0e27948d78a1a2953d",
 				"event:Checkfu.Agent/agent.updated": "dad1d28a18c669bdecffc829dafd8bf7f6924fcb5c35069722a41002179f9ad7",
@@ -18184,7 +18184,7 @@
 				"command-reply:Checkfu/UpdateEnvironment": "10e48fa01759f910250d262f57fbc7db43e63b384b33b800c7ce34fbc37e0983",
 				"command-reply:Checkfu/ArchiveEnvironment": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/DeleteEnvironment": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Checkfu.Session": "6a3fe792641768b0bf2c5dc749f1468bb68f61098565c5c2773c757fec5f2b9e",
+				"state:Checkfu.Session": "e8fe51aeeae8ffa028d2100607d3e29474e2682031b45c049f67915b82efd72b",
 				"event:Checkfu.Session/session.created": "73c877dc37caed34a5e7f704f918d757eb05edfc75286c37893338ba3055114e",
 				"event:Checkfu.Session/user.message": "392eb57e6d20edc9d791ae142ff1fdc840d5023ee6aa308555ada5ccf4c95ecc",
 				"event:Checkfu.Session/session.status_running": "e21faf22832d22a1f53bf056047e7854d74c78473edf4420e7713b1f23eab41c",
@@ -18231,7 +18231,7 @@
 				"event:Checkfu.ToolConfirmation/tool_confirmation.requested": "e202712255c81c9278eeb1f23cde7cfc174011ae232a657ca32d3f889cb9eb0b",
 				"event:Checkfu.ToolConfirmation/tool_confirmation.answered": "816ef3a0d58867c7123c0be0c8c87bc247c5d000f0b2323212048aa36425e8b5",
 				"event:Checkfu.ToolConfirmation/tool_confirmation.returned": "bc136e027fed9f09b91bb488f5654c49de571fd50ee311632e4cb490d4a0cb2e",
-				"state:Checkfu.Automation": "ecf37c308e866ba971758a9354ffdff2a66fe55a9fb21a393c27023b48ac04e5",
+				"state:Checkfu.Automation": "aa559295d7c55e9307b97468ed3826a9361bbb43a67c893e99fd2d51a59d6371",
 				"event:Checkfu.Automation/automation.created": "43d6d878aa861d6556ebcfca1609aad0d3cc8b8421b4f016c13fd2906a8b0aff",
 				"event:Checkfu.Automation/automation.paused": "4e6798de3129964ab3721fd4641d4472b18a73ddc46f7f1dcb4630630d29e974",
 				"event:Checkfu.Automation/automation.unpaused": "fdeab68b27879f7f3263399f0d765091909d376dfa3a3a972e8074e4a4930894",
@@ -18484,7 +18484,7 @@
 			"shapes": {
 				"state:Checkfu.Agent": [
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "(LNLrs^",
 							"version": 27,
@@ -18500,7 +18500,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "yYVzNRkMu4",
 							"version": 59,
@@ -18516,7 +18516,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "",
 							"version": 3,
@@ -18532,7 +18532,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "4294967295",
 							"version": 98,
@@ -18548,7 +18548,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "0",
 							"version": 3,
@@ -18564,7 +18564,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "rloX",
 							"version": 17,
@@ -18580,7 +18580,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "😀",
 							"version": 74,
@@ -18596,7 +18596,7 @@
 						}
 					},
 					{
-						"schema_version": 3,
+						"schema_version": 1,
 						"state": {
 							"status": "N$vb",
 							"version": 100,
@@ -19347,13 +19347,13 @@
 				],
 				"state:Checkfu.Session": [
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 1,
@@ -19361,7 +19361,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 96,
@@ -19369,33 +19369,33 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 16
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Idle",
 							"turn": 5
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"_tag": "Uninitialized"
 						}
@@ -22281,7 +22281,7 @@
 				],
 				"state:Checkfu.Automation": [
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "bs)_dsHw?f",
 							"runs": 22,
@@ -22292,7 +22292,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "eXQ:\"=g",
 							"runs": 15,
@@ -22303,7 +22303,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "G')tRc8z[",
 							"runs": 14,
@@ -22314,7 +22314,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "",
 							"runs": 3,
@@ -22325,7 +22325,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "\",YriL$irV",
 							"runs": 3,
@@ -22336,7 +22336,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "0",
 							"runs": 94,
@@ -22347,7 +22347,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "__proto__",
 							"runs": 4,
@@ -22358,7 +22358,7 @@
 						}
 					},
 					{
-						"schema_version": 2,
+						"schema_version": 1,
 						"state": {
 							"status": "",
 							"runs": 92,

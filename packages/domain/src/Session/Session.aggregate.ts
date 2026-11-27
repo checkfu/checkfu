@@ -63,9 +63,9 @@ import {
 import type { StopReason, ModelUsage } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
-import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
-export const SESSION_STATE_SCHEMA_VERSION = 2 as const
+export const SESSION_STATE_SCHEMA_VERSION = 1 as const
 
 const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
 const Idle = Schema.TaggedStruct("Idle", {
@@ -73,15 +73,11 @@ const Idle = Schema.TaggedStruct("Idle", {
 	initial_messages_remaining: Schema.optionalKey(NonNegativeInt),
 })
 const Terminated = Schema.TaggedStruct("Terminated", { archived: Schema.Boolean })
-const RunningV1 = Schema.TaggedStruct("Running", {
+const Running = Schema.TaggedStruct("Running", {
 	turn: PositiveInt,
 	open_model_request_id: Schema.NullOr(NonEmptyString),
 	model_requests_started: NonNegativeInt,
 	pending_user_messages: NonNegativeInt,
-})
-
-const Running = Schema.TaggedStruct("Running", {
-	...RunningV1.fields,
 	awaiting_calls: NonNegativeInt,
 	awaiting_ids: ToolUseIdsText,
 	paused: Schema.Boolean,
@@ -95,23 +91,6 @@ export type SessionState = typeof SessionState.Type
 export const SessionStateSnapshot = versionedSnapshot({
 	current: SESSION_STATE_SCHEMA_VERSION,
 	schema: SessionState,
-	previous: [
-		snapshotVersion({
-			version: 1,
-			schema: Schema.Union([Uninitialized, Idle, RunningV1, Terminated]),
-			migrate: (state) =>
-				state._tag === "Running"
-					? {
-							...state,
-							awaiting_calls: 0,
-							awaiting_ids: NO_TOOL_USE_IDS,
-							paused: false,
-							asked_calls: 0,
-							interrupted: false,
-						}
-					: state,
-		}),
-	],
 })
 
 type ActiveState = Extract<SessionState, { readonly _tag: "Idle" | "Running" }>

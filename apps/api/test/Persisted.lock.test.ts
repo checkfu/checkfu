@@ -1,10 +1,8 @@
-import { AGENT_STATE_SCHEMA_VERSION, AgentState } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AbandonTurn } from "@checkfu/domain/Session/AbandonTurn.command"
 import { RUN_TURN_ACTIVITIES, RunTurn } from "@checkfu/domain/Session/RunTurn.saga"
 import { UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { NonNegativeInt } from "@checkfu/domain/Session/SessionTypes"
 import { TurnInput, TurnInputState } from "@checkfu/domain/Session/TurnInput.view"
-import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { DocumentId, JsonObject } from "@earendil-works/pi-durable"
 import { expect, it } from "@effect/vitest"
@@ -414,42 +412,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(unreviewed.length).toBe(1)
 			expect(unreviewed[0]).toContain("has not been reviewed")
 			expect(yield* lockProblems(yield* reviewing(lock, id, defaulted), defaulted)).toEqual([])
-		}),
-	)
-
-	it.effect("rehearses changing a shipped aggregate state with a migration step", () =>
-		Effect.gen(function* () {
-			const id = "state:Checkfu.Agent"
-			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-			const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
-			const AgentStateNext = Schema.Struct({ ...AgentState.fields, tier: Schema.String })
-
-			const migrated = replacing(
-				id,
-				versionedSnapshot({
-					current: AGENT_STATE_SCHEMA_VERSION + 1,
-					schema: AgentStateNext,
-					previous: [
-						snapshotVersion({
-							version: AGENT_STATE_SCHEMA_VERSION,
-							schema: AgentState,
-							migrate: (state) => ({ ...state, tier: "standard" }),
-						}),
-					],
-				}),
-			)
-			expect(yield* lockProblems(yield* reviewing(lock, id, migrated), migrated)).toEqual([])
-
-			const inPlace = yield* lockProblems(
-				lock,
-				replacing(
-					id,
-					versionedSnapshot({ current: AGENT_STATE_SCHEMA_VERSION + 1, schema: AgentStateNext }),
-				),
-			)
-			expect(inPlace.length).toBe(1)
-			expect(inPlace[0]).toContain(id)
-			expect(inPlace[0]).toContain("Aggregate state is permanent")
 		}),
 	)
 

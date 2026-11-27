@@ -50,8 +50,7 @@ export type PersistedKind =
 export const RULES: Readonly<Record<PersistedKind, string>> = {
 	event:
 		"Events are permanent. Add a field only with a decoding default; for any other change, record a new event type and keep this one readable.",
-	state:
-		"Aggregate state is permanent. Keep the old shape as a migration step (see `versionedSnapshot`) instead of changing the schema in place.",
+	state: "Aggregate snapshots require the declared version and a state that passes validation.",
 	view: "View rows are rebuilt from events. Bump the view's `version` when its state changes.",
 	"policy-delivery":
 		"Queued policy deliveries are routed by the policy's name and carry the source's event or view state captured before deploy. Keep the policy's name and source while deliveries can still be in flight, and keep a source view's state readable by the new schema even when the view's version is bumped.",

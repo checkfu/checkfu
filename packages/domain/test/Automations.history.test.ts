@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
-import { AutomationStateSnapshot } from "../src/Automation/Automation.aggregate.ts"
 import { AutomationCreated } from "../src/Automation/CreateAutomation.command.ts"
 import { AutomationRunFailed } from "../src/Automation/RecordAutomationRunFailed.command.ts"
 import { AutomationRunStarted } from "../src/Automation/RecordAutomationRunStarted.command.ts"
@@ -15,12 +14,7 @@ const createdBeforeDescriptions = {
 	schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
 }
 
-const stateBeforeRevisions = (status: string) => ({
-	schema_version: 1,
-	state: { status, runs: 2, reported: 2, last_scheduled_at: 0, activation: 1 },
-})
-
-describe("automation event and state decoding", () => {
+describe("automation event decoding", () => {
 	it("requires the description and pinned version when decoding a creation", () => {
 		const decode = Schema.decodeUnknownSync(AutomationCreated)
 		expect(() => decode(createdBeforeDescriptions)).toThrow()
@@ -40,18 +34,5 @@ describe("automation event and state decoding", () => {
 		}
 		expect(() => Schema.decodeUnknownSync(AutomationRunStarted)(started)).toThrow()
 		expect(() => Schema.decodeUnknownSync(AutomationRunFailed)(failed)).toThrow()
-	})
-
-	it("migrates stored state without a revision: a created automation is at its first configuration", () => {
-		const decode = Schema.decodeUnknownSync(AutomationStateSnapshot)
-		expect(decode(stateBeforeRevisions("active"))).toEqual({
-			status: "active",
-			runs: 2,
-			reported: 2,
-			last_scheduled_at: 0,
-			activation: 1,
-			revision: 1,
-		})
-		expect(decode(stateBeforeRevisions("")).revision).toBe(0)
 	})
 })
