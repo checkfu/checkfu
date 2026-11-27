@@ -248,6 +248,20 @@ describe("artifact owner", () => {
 		}),
 	)
 
+	it.effect("refuses bytes from a reservation superseded before it was released", () =>
+		Effect.gen(function* () {
+			const { owner, objects, marks } = makeOwner()
+			yield* owner.stage(ID, null, 1)
+			yield* owner.stage(ID, null, 2)
+			const blob = "a".repeat(64)
+			const stale = yield* Effect.exit(owner.putBlob(ID, blob, new Blob(["x"]).stream(), 1, 1))
+			expect(isFailure(stale, "ArtifactReservationStale")).toBe(true)
+			expect(objects.size).toBe(0)
+			expect(marks()).toEqual({ purged: false, staged: 2, released: 0 })
+			expect(yield* owner.putBlob(ID, blob, new Blob(["x"]).stream(), 1, 2)).toBe("stored")
+		}),
+	)
+
 	it.effect("writes a new digest once when two uploads of it race, and checks the second", () =>
 		Effect.gen(function* () {
 			const { owner, puts, setDuringUpload } = makeOwner()
