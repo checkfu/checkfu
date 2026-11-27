@@ -9172,7 +9172,7 @@
 						}
 					}
 				},
-				"description": "Create an agent instance in an environment. Include initial user messages to start work immediately.",
+				"description": "Create an agent instance in an environment. Include initial user messages to start work immediately. The whole request body can contain up to 2097152 UTF-8 bytes.",
 				"summary": "Create a session",
 				"requestBody": {
 					"content": {
@@ -9243,7 +9243,7 @@
 											"additionalProperties": false
 										},
 										"maxItems": 50,
-										"description": "User messages to send in order when the session is created."
+										"description": "User messages to send in order when the session is created. Each message's text blocks are joined with newlines. Each combined message can contain up to 16384 UTF-16 code units. The JSON array of combined message strings can contain up to 1048576 UTF-8 bytes. The whole request body can contain up to 2097152 UTF-8 bytes."
 									},
 									"environment_id": {
 										"type": "string",
@@ -9484,7 +9484,7 @@
 					"repeatArrayField": {
 						"field": "initial_events",
 						"flag": "initial-event",
-						"description": "Initial user message as JSON, YAML, or @file (repeatable, up to 50)"
+						"description": "Initial user message as JSON, YAML, or @file (up to 50 messages and 1048576 encoded bytes total)"
 					},
 					"examples": [
 						{
@@ -17613,7 +17613,7 @@
 										},
 										"minItems": 1,
 										"maxItems": 1,
-										"description": "Initial events sent when each run creates a session. Supply one text user.message event."
+										"description": "Initial events sent when each run creates a session. Supply one text user.message event of up to 16384 UTF-16 code units after its text blocks are joined with newlines."
 									},
 									"schedule": {
 										"type": "object",

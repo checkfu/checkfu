@@ -19,6 +19,8 @@ export const InitialMessages = Schema.Struct({
 })
 
 const InitialMessagesJson = Schema.fromJsonString(Messages)
+const utf8 = new TextEncoder()
 
 export const encodeInitialMessages = Schema.encodeSync(InitialMessagesJson)
 export const decodeInitialMessages = Schema.decodeSync(InitialMessagesJson)
+export const initialMessagesBytes = (encoded: string): number => utf8.encode(encoded).byteLength

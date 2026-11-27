@@ -4,16 +4,8 @@ import {
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
 import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
-import {
-	MAX_MEMORY_INSTRUCTIONS_LENGTH,
-	MAX_MOUNT_PATH_LENGTH,
-	MAX_REPOSITORY_TOKEN_LENGTH,
-	MAX_SESSION_ARTIFACTS,
-	MAX_SESSION_MEMORY_STORES,
-	MAX_SESSION_REPOSITORIES,
-	MAX_SESSION_SKILLS,
-} from "@checkfu/domain/Session/SessionResource"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
+import { MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
 	MAX_MCP_SERVERS_TEXT_LENGTH,
@@ -73,13 +65,6 @@ export const MAX_AGENT_BODY_BYTES =
 	16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
 export const MAX_MEMORY_BODY_BYTES = MAX_MEMORY_CONTENT_BYTES * 6 + 16 * 1024
-export const MAX_SESSION_BODY_BYTES =
-	(MAX_SESSION_REPOSITORIES * (2 * MAX_MOUNT_PATH_LENGTH + MAX_REPOSITORY_TOKEN_LENGTH) +
-		MAX_SESSION_MEMORY_STORES * (MAX_MOUNT_PATH_LENGTH + MAX_MEMORY_INSTRUCTIONS_LENGTH) +
-		(MAX_SESSION_ARTIFACTS + MAX_SESSION_SKILLS) * MAX_MOUNT_PATH_LENGTH +
-		MAX_MESSAGE_TEXT_LENGTH) *
-		6 +
-	16 * 1024
 
 const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined => {
 	switch (status) {

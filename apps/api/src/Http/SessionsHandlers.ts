@@ -13,7 +13,11 @@ import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
-import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
+import {
+	encodeInitialMessages,
+	initialMessagesBytes,
+} from "@checkfu/domain/Session/InitialMessages"
+import { MAX_SESSION_INITIAL_MESSAGES_BYTES } from "@checkfu/sdk/Limits"
 import { recordInitialMessages } from "@checkfu/domain/Session/RecordInitialMessages.policy"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendSystemMessageDecision } from "@checkfu/domain/Session/SendSystemMessage.decision"
@@ -110,7 +114,7 @@ import { SkillReader } from "../Skills/SkillReader.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
-import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
+import { CheckfuApi, CursorFromString, SessionEvent, apiError, statusOf } from "./Api.ts"
 import type {
 	ClientEventId,
 	CreateSessionResource,
@@ -123,6 +127,7 @@ import {
 	commitForStream,
 	createIdentity,
 	currentRequestId,
+	errorResponse,
 	handled,
 	idempotentCommandId,
 	idempotentId,
@@ -838,6 +843,18 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						messages.length <= 1
 							? undefined
 							: { count: messages.length, messages: encodeInitialMessages(messages) }
+					if (
+						initialPlan !== undefined &&
+						initialMessagesBytes(initialPlan.messages) > MAX_SESSION_INITIAL_MESSAGES_BYTES
+					) {
+						return yield* errorResponse(
+							apiError(
+								413,
+								`Initial messages exceed ${MAX_SESSION_INITIAL_MESSAGES_BYTES} bytes of JSON-encoded text.`,
+								yield* currentRequestId,
+							),
+						)
+					}
 					const asked = (payload.resources ?? []).map(askedResource)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",

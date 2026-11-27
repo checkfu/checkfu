@@ -2610,7 +2610,9 @@ const sessionsCreateCommand = CommandMake(
 		),
 		initialEvents: FlagString("initial-event").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("Initial user message as JSON, YAML, or @file (repeatable, up to 50)"),
+			FlagWithDescription(
+				"Initial user message as JSON, YAML, or @file (up to 50 messages and 1048576 encoded bytes total)",
+			),
 			FlagBetween(0, 50),
 		),
 		environmentId: FlagString("environment-id").pipe(
@@ -2642,7 +2644,7 @@ const sessionsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create an agent instance in an environment. Include initial user messages to start work immediately. (accepts flags and/or JSON/YAML on stdin)",
+		"Create an agent instance in an environment. Include initial user messages to start work immediately. The whole request body can contain up to 2097152 UTF-8 bytes. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{

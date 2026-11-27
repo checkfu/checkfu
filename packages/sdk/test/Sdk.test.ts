@@ -11,7 +11,14 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AgentResource, SessionResource, SessionStatusRunningEvent } from "../src/Api.ts"
+import {
+	AgentResource,
+	CreateSessionBody,
+	SessionResource,
+	SessionStatusRunningEvent,
+} from "../src/Api.ts"
+import { MAX_SESSION_BODY_BYTES, MAX_SESSION_INITIAL_MESSAGES_BYTES } from "../src/Limits.ts"
+import { MAX_MESSAGE_TEXT_LENGTH, MAX_SESSION_INITIAL_EVENTS } from "../src/Schemas.ts"
 import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
 import {
 	executePaginatedPromise,
@@ -272,6 +279,67 @@ const makeEffectLayer = (
 	})
 
 describe("Resource responses", () => {
+	it("documents the initial message budget and sends full-length messages in order", async () => {
+		const { schema } = Schema.toJsonSchemaDocument(CreateSessionBody)
+		const document = JSON.stringify(schema)
+		expect(document).toContain(`"maxItems":${MAX_SESSION_INITIAL_EVENTS}`)
+		expect(document).toContain(`${MAX_SESSION_INITIAL_MESSAGES_BYTES} UTF-8 bytes`)
+		expect(document).toContain(`${MAX_SESSION_BODY_BYTES} UTF-8 bytes`)
+		const messages = Array.from({ length: MAX_SESSION_INITIAL_EVENTS }, (_, index) =>
+			`Message ${index} `.padEnd(MAX_MESSAGE_TEXT_LENGTH, "x"),
+		)
+		const initialEvents = (texts: ReadonlyArray<string>) =>
+			texts.map((text) => ({
+				type: "user.message" as const,
+				content: [{ type: "text" as const, text }],
+			}))
+		const client = new Checkfu({
+			apiKey: "ck_test_key",
+			fetch: async (input, init) => {
+				const request = toWebRequest(input, init)
+				const body = (await request.json()) as CreateSessionBody
+				const texts = (body.initial_events ?? []).map(({ content }) =>
+					content.map(({ text }) => text).join("\n"),
+				)
+				const bytes = new TextEncoder().encode(JSON.stringify(texts)).byteLength
+				if (bytes > MAX_SESSION_INITIAL_MESSAGES_BYTES) {
+					return jsonResponse(
+						{
+							type: "error",
+							request_id: "req_size",
+							error: {
+								type: "payload_too_large",
+								message: "Initial messages exceed their byte limit.",
+							},
+						},
+						413,
+					)
+				}
+				expect(texts).toHaveLength(messages.length)
+				expect(texts.every((text, index) => text === messages[index])).toBe(true)
+				return jsonResponse(sampleSession(), 201)
+			},
+		})
+		try {
+			await expect(
+				client.sessions.create({
+					agent: "agent_1",
+					environment_id: "env_1",
+					initial_events: initialEvents(messages),
+				}),
+			).resolves.toMatchObject({ id: "sess_1" })
+			const escaped = messages.map((text) => text.replaceAll("x", '"'))
+			await expect(
+				client.sessions.create({
+					agent: "agent_1",
+					environment_id: "env_1",
+					initial_events: initialEvents(escaped),
+				}),
+			).rejects.toBeInstanceOf(PayloadTooLargeError)
+		} finally {
+			await client.close()
+		}
+	})
 	it("requires the server and tool arrays and the session's credential bindings", () => {
 		const { mcp_servers: _servers, ...withoutServers } = sampleAgent()
 		const { tools: _tools, ...withoutTools } = sampleAgent()

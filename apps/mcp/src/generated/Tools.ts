@@ -1321,7 +1321,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							minItems: 1,
 							maxItems: 1,
 							description:
-								"Initial events sent when each run creates a session. Supply one text user.message event.",
+								"Initial events sent when each run creates a session. Supply one text user.message event of up to 16384 UTF-16 code units after its text blocks are joined with newlines.",
 						},
 						schedule: {
 							type: "object",
@@ -2684,7 +2684,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_createSession",
 		title: "Create a session",
 		description:
-			"Create an agent instance in an environment. Include initial user messages to start work immediately.",
+			"Create an agent instance in an environment. Include initial user messages to start work immediately. The whole request body can contain up to 2097152 UTF-8 bytes.",
 		method: "POST",
 		path: "/v1/sessions",
 		readOnly: false,
@@ -2760,7 +2760,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								additionalProperties: false,
 							},
 							maxItems: 50,
-							description: "User messages to send in order when the session is created.",
+							description:
+								"User messages to send in order when the session is created. Each message's text blocks are joined with newlines. Each combined message can contain up to 16384 UTF-16 code units. The JSON array of combined message strings can contain up to 1048576 UTF-8 bytes. The whole request body can contain up to 2097152 UTF-8 bytes.",
 						},
 						environment_id: {
 							type: "string",

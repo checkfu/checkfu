@@ -111,7 +111,7 @@
 			},
 			"minItems": 1,
 			"maxItems": 1,
-			"description": "Initial events sent when each run creates a session. Supply one text user.message event."
+			"description": "Initial events sent when each run creates a session. Supply one text user.message event of up to 16384 UTF-16 code units after its text blocks are joined with newlines."
 		},
 		"schedule": {
 			"type": "object",

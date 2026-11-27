@@ -58,7 +58,18 @@ import {
 	MAX_ENVIRONMENT_NAME_LENGTH,
 } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
+import { AdmitSessionWithMessages } from "@checkfu/domain/Session/AdmitSession.command"
+import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
+import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
+import {
+	RecordInitialMessages,
+	RecordInitialMessagesLive,
+} from "@checkfu/domain/Session/RecordInitialMessages.policy"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionResources } from "@checkfu/domain/Session/SessionResource"
+import { TurnInput } from "@checkfu/domain/Session/TurnInput.view"
+import { MAX_SESSION_INITIAL_MESSAGES_BYTES } from "@checkfu/sdk/Limits"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import type { BaseRuntimeContext } from "alchemy/RuntimeContext"
@@ -113,6 +124,17 @@ import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
+import {
+	fullAsciiInitialMessages,
+	mixedInitialMessagesAt,
+} from "./helpers/SessionInitialMessages.ts"
+
+class SessionAdmissionStorage extends Domain.Model("SessionAdmissionStorage", {
+	aggregates: [Agent, Environment, Session],
+	decisions: [CreateAgentDecision, AdmitSessionWithMessagesDecision],
+	views: [TurnInput],
+	policies: [RecordInitialMessages],
+}) {}
 
 describe("Agent and environment lifecycle, versioning, and projection consistency", () => {
 	it("resolves arbitrary stored AgentVersionIds (not synthetic agentId:vN) and rejects missing/archived resources", async () => {
@@ -2921,14 +2943,14 @@ describe("Agent and environment field length limits", () => {
 				}),
 		}
 
-		const platform = DurableObjects.makePlatform(host).pipe(
-			Layer.provide(SecureRandom.layerWebCrypto),
-		)
-		return Layer.mergeAll(Agents.layer(Layer.empty), Environments.layer(Layer.empty)).pipe(
-			Layer.provide(platform),
-			Layer.provide(SecureRandom.layerWebCrypto),
-		)
+		return DurableObjects.makePlatform(host).pipe(Layer.provide(SecureRandom.layerWebCrypto))
 	}
+
+	const makeAgentEnvironmentLayer = (...args: Parameters<typeof makeDurableObjectsPlatform>) =>
+		Layer.mergeAll(Agents.layer(Layer.empty), Environments.layer(Layer.empty)).pipe(
+			Layer.provide(makeDurableObjectsPlatform(...args)),
+			Layer.provide(SecureRandom.layerWebCrypto),
+		)
 
 	it("keeps every persisted Durable Object value for worst-case agent decisions and environment commands below 2 MiB in V8 structured clone", async () => {
 		const DO_ROW_LIMIT_BYTES = 2 * 1024 * 1024
@@ -2945,7 +2967,7 @@ describe("Agent and environment field length limits", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const testScope = yield* Scope.Scope
-					const layer = makeDurableObjectsPlatform(testScope, new Map(), (write) => {
+					const layer = makeAgentEnvironmentLayer(testScope, new Map(), (write) => {
 						writes.push(write)
 					})
 
@@ -3107,6 +3129,121 @@ describe("Agent and environment field length limits", () => {
 		expect(largest).toBeLessThan(MAX_ROW_BYTES)
 	})
 
+	it("measures durable admission and bootstrap envelopes for maximum initial messages", async () => {
+		const ROW_LIMIT_BYTES = 8_000_000
+		const ENVELOPE_HEADROOM_BYTES = 64 * 1024
+		const writes: Array<{
+			readonly className: string
+			readonly key: string
+			readonly bytes: number
+		}> = []
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const scope = yield* Scope.Scope
+					const platform = makeDurableObjectsPlatform(scope, new Map(), (write) => {
+						writes.push(write)
+					})
+					const layer = SessionAdmissionStorage.layer(RecordInitialMessagesLive).pipe(
+						Layer.provide(platform),
+						Layer.provide(SecureRandom.layerWebCrypto),
+					)
+					yield* Effect.gen(function* () {
+						const createAgent = yield* CreateAgentDecision
+						const environments = yield* Environment
+						const admit = yield* AdmitSessionWithMessagesDecision
+						const turns = yield* TurnInput
+						const agent_id = AgentId.make("agent_initial_messages_storage")
+						const environment_id = EnvironmentId.make("env_initial_messages_storage")
+						yield* createAgent.send(
+							new CreateAgent({
+								agent_id,
+								version_id: AgentVersionId.make("aver_initial_messages_storage"),
+								name: "Reporter",
+								model: { id: "fixture-model" },
+								system: null,
+								description: null,
+							}),
+						)
+						yield* environments.send(
+							new CreateEnvironment({
+								environment_id,
+								name: "Cloud",
+								description: null,
+								config: { type: "cloud", networking: { type: "unrestricted" } },
+							}),
+						)
+						const resources = yield* Schema.decodeUnknownEffect(SessionResources)(
+							Array.from({ length: 8 }, (_, index) => ({
+								id: `sesrsc_size_${index}`,
+								type: "memory_store",
+								memory_store_id: `memst_size_${index}`,
+								access: "read_write",
+								instructions: "漢".repeat(4096),
+								name: `Reports ${index}`,
+								description: "漢".repeat(1024),
+								mount_path: `/mnt/memory/reports-${index}`,
+							})),
+						)
+						const max = MAX_SESSION_INITIAL_MESSAGES_BYTES
+						const samples = [
+							["ascii", fullAsciiInitialMessages()],
+							["under", mixedInitialMessagesAt(max - 1)],
+							["exact", mixedInitialMessagesAt(max)],
+						] as const
+						const encoder = new TextEncoder()
+						for (const [label, messages] of samples) {
+							const session_id = SessionId.make(`sess_initial_messages_${label}`)
+							const encoded = encodeInitialMessages(messages)
+							const before = writes.length
+							const receipt = yield* admit.send(
+								new AdmitSessionWithMessages({
+									session_id,
+									agent_id,
+									agent_version: 1,
+									environment_id,
+									title: "漢".repeat(1024),
+									resources,
+									mcp_server_credentials: "[]",
+									initial_messages: { count: messages.length, messages: encoded },
+								}),
+							)
+							expect(receipt.events[0]?.initial_messages?.messages === encoded, label).toBe(true)
+							const turn = yield* turns.waitFor(
+								Session.ref(session_id),
+								{ turn: 1 },
+								{ timeout: "5 seconds" },
+							)
+							expect(turn?.input.length, label).toBe(messages.length)
+							expect(
+								turn?.input.every((text, index) => text === messages[index]),
+								label,
+							).toBe(true)
+							const rows = writes.slice(before)
+							const primaryIntent = rows.find(
+								({ className, key }) => className === "AgentAggregate" && key === "intent",
+							)
+							const creation = rows.find(
+								({ className, key }) =>
+									className === "SessionAggregate" && key.startsWith("event:"),
+							)
+							expect(creation?.bytes, label).toBeGreaterThan(encoder.encode(encoded).byteLength)
+							expect(primaryIntent?.bytes, label).toBeGreaterThan(
+								2 * (creation?.bytes ?? 0) - 64 * 1024,
+							)
+							expect(Math.max(...rows.map(({ bytes }) => bytes)), label).toBeLessThan(
+								ROW_LIMIT_BYTES - ENVELOPE_HEADROOM_BYTES,
+							)
+							if (label === "exact") {
+								expect(primaryIntent?.bytes).toBeGreaterThan(4 * 1024 * 1024)
+							}
+						}
+					}).pipe(Effect.provide(layer))
+				}),
+			),
+		)
+	}, 30_000)
+
 	it("preserves reads, replay, repair updates, archive, and delete for pre-existing over-limit records", async () => {
 		const legacyAgentName = "a".repeat(MAX_AGENT_NAME_LENGTH + 1)
 		const legacyAgentDescription = "d".repeat(MAX_AGENT_DESCRIPTION_LENGTH + 1)
@@ -3203,7 +3340,7 @@ describe("Agent and environment field length limits", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const seedScope = yield* Scope.Scope
-					const seedLayer = makeDurableObjectsPlatform(seedScope, persistedStore)
+					const seedLayer = makeAgentEnvironmentLayer(seedScope, persistedStore)
 					yield* Effect.gen(function* () {
 						const agents = yield* Agent
 						const agentViews = yield* AgentView
@@ -3282,7 +3419,7 @@ describe("Agent and environment field length limits", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const upgradedScope = yield* Scope.Scope
-					const upgradedLayer = makeDurableObjectsPlatform(upgradedScope, persistedStore)
+					const upgradedLayer = makeAgentEnvironmentLayer(upgradedScope, persistedStore)
 					yield* Effect.gen(function* () {
 						const agents = yield* Agent
 						const updateAgent = yield* UpdateAgentDecision

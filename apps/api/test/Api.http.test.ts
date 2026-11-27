@@ -27,12 +27,8 @@ import * as References from "effect/References"
 import * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
-import {
-	MAX_AGENT_BODY_BYTES,
-	MAX_SESSION_BODY_BYTES,
-	handled,
-	toApiError,
-} from "../src/Http/HttpHelpers.ts"
+import { MAX_AGENT_BODY_BYTES, handled, toApiError } from "../src/Http/HttpHelpers.ts"
+import { MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
 import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableHarness.ts"
 import {

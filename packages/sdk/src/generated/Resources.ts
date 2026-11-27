@@ -3287,7 +3287,7 @@ export class EffectSessionsResource {
 		)
 	}
 
-	/** Create an agent instance in an environment. Include initial user messages to start work immediately. */
+	/** Create an agent instance in an environment. Include initial user messages to start work immediately. The whole request body can contain up to 2097152 UTF-8 bytes. */
 	create(
 		params: EndpointBody<"sessions", "create">,
 		options: WithResponseRequestOptions,
@@ -5532,7 +5532,7 @@ export class SessionsResource {
 		)
 	}
 
-	/** Create an agent instance in an environment. Include initial user messages to start work immediately. */
+	/** Create an agent instance in an environment. Include initial user messages to start work immediately. The whole request body can contain up to 2097152 UTF-8 bytes. */
 	create(
 		params: EndpointBody<"sessions", "create">,
 		options?: PromiseRequestOptions,

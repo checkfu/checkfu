@@ -63,6 +63,7 @@ import {
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
+	MAX_MESSAGE_TEXT_LENGTH,
 	MAX_SESSION_INITIAL_EVENTS,
 	CancelledEventIds,
 	RequiresActionStopReason,
@@ -121,7 +122,11 @@ import {
 	MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH,
 } from "./Schemas.ts"
 import type { AgentTool, SessionEventType } from "./Schemas.ts"
-import { MAX_SESSION_VAULTS } from "./Limits.ts"
+import {
+	MAX_SESSION_BODY_BYTES,
+	MAX_SESSION_INITIAL_MESSAGES_BYTES,
+	MAX_SESSION_VAULTS,
+} from "./Limits.ts"
 
 export const REQUEST_ID_HEADER = "request-id"
 
@@ -748,7 +753,9 @@ export const CreateSessionBody = Schema.Struct({
 	initial_events: Schema.optionalKey(
 		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
 			.check(Schema.isMaxLength(MAX_SESSION_INITIAL_EVENTS))
-			.annotate({ description: "User messages to send in order when the session is created." }),
+			.annotate({
+				description: `User messages to send in order when the session is created. Each message's text blocks are joined with newlines. Each combined message can contain up to ${MAX_MESSAGE_TEXT_LENGTH} UTF-16 code units. The JSON array of combined message strings can contain up to ${MAX_SESSION_INITIAL_MESSAGES_BYTES} UTF-8 bytes. The whole request body can contain up to ${MAX_SESSION_BODY_BYTES} UTF-8 bytes.`,
+			}),
 	),
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
@@ -804,8 +811,7 @@ export const CreateAutomationBody = Schema.Struct({
 	agent: AutomationAgentReference,
 	environment_id: ResourceId.annotate({ description: "Environment ID each run's session uses" }),
 	initial_events: AutomationInitialEvents.annotate({
-		description:
-			"Initial events sent when each run creates a session. Supply one text user.message event.",
+		description: `Initial events sent when each run creates a session. Supply one text user.message event of up to ${MAX_MESSAGE_TEXT_LENGTH} UTF-16 code units after its text blocks are joined with newlines.`,
 	}),
 	schedule: AutomationSchedule.annotate({
 		description:
@@ -2094,7 +2100,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "Create a session")
 			.annotate(
 				OpenApi.Description,
-				"Create an agent instance in an environment. Include initial user messages to start work immediately.",
+				`Create an agent instance in an environment. Include initial user messages to start work immediately. The whole request body can contain up to ${MAX_SESSION_BODY_BYTES} UTF-8 bytes.`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions",
@@ -2106,7 +2112,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					repeatArrayField: {
 						field: "initial_events",
 						flag: "initial-event",
-						description: "Initial user message as JSON, YAML, or @file (repeatable, up to 50)",
+						description: `Initial user message as JSON, YAML, or @file (up to ${MAX_SESSION_INITIAL_EVENTS} messages and ${MAX_SESSION_INITIAL_MESSAGES_BYTES} encoded bytes total)`,
 					},
 					examples: [
 						{

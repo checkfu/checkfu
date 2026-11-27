@@ -1,5 +1,6 @@
 import { Checkfu, accumulateSessionEvent } from "@checkfu/sdk"
 import type { SessionMessagePreview } from "@checkfu/sdk"
+import { MAX_SESSION_INITIAL_MESSAGES_BYTES } from "@checkfu/sdk/Limits"
 import { spawn } from "node:child_process"
 import { createHash, createHmac } from "node:crypto"
 import type { ChildProcess } from "node:child_process"
@@ -28,6 +29,7 @@ import { startScriptedMcpServer } from "./ScriptedMcpServer.ts"
 import { authoredProjectJourney } from "./UserJourneys.ts"
 import { toolUseOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
+import { asInitialEvents, mixedInitialMessagesAt } from "../helpers/SessionInitialMessages.ts"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
@@ -886,6 +888,23 @@ describe("PiSession real Durable Object under workerd", () => {
 				),
 			)
 		}
+	}, 60_000)
+
+	it("round-trips the initial message byte boundary through real Durable Objects", async () => {
+		fakeOpenAI.setHandler(() => ({ kind: "reply", text: "Received." }))
+		const messages = mixedInitialMessagesAt(MAX_SESSION_INITIAL_MESSAGES_BYTES)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			initial_events: asInitialEvents(messages),
+		})
+		await waitForSession(session.id, (resource) => resource.turn === 1)
+		const history = await listAllEvents(session.id)
+		const recorded = history.flatMap((event) =>
+			event.type === "user.message" ? [event.content?.[0]?.text] : [],
+		)
+		expect(recorded).toHaveLength(messages.length)
+		expect(recorded.every((message, index) => message === messages[index])).toBe(true)
 	}, 60_000)
 
 	it("replays a keyed session admission after its agent is archived", async () => {

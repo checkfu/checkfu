@@ -42,9 +42,16 @@ import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendU
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
+import { MAX_SESSION_INITIAL_MESSAGES_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
+import {
+	MAX_MESSAGE_TEXT_LENGTH,
+	MAX_SESSION_INITIAL_EVENTS,
+	MAX_TITLE_LENGTH,
+} from "@checkfu/sdk/Schemas"
 import { describe, expect, it } from "@effect/vitest"
 import * as Arbitrary from "effect/Arbitrary"
 import * as DateTime from "effect/DateTime"
+import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
@@ -56,6 +63,12 @@ import {
 } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { SessionEvent } from "../src/Http/Api.ts"
+import { idempotentId } from "../src/Http/HttpHelpers.ts"
+import {
+	asInitialEvents,
+	fullAsciiInitialMessages,
+	mixedInitialMessagesAt,
+} from "./helpers/SessionInitialMessages.ts"
 import {
 	AgentVersionWaitTimeout,
 	SSE_CATCHUP_PAGE_SIZE,
@@ -3107,7 +3120,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					}
 					const decision = yield* AdmitSessionWithMessagesDecision
 					const session_id = SessionId.make("sess_initial_resume")
-					const messages = ["First", "Second", "Third"]
+					const messages = mixedInitialMessagesAt(MAX_SESSION_INITIAL_MESSAGES_BYTES)
 					yield* decision.send(
 						new AdmitSessionWithMessages({
 							session_id,
@@ -3125,12 +3138,159 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const views = yield* SessionView
 					const ref = Session.ref(session_id)
 					yield* views.waitFor(ref, { turn: 1 }, { timeout: "5 seconds" })
-					const history = yield* views.list(ref, { take: 20 })
-					expect(
-						history.entries.flatMap(({ event }) =>
+					const history = yield* views.list(ref, { take: 100 })
+					const recorded = history.entries.flatMap(({ event }) =>
+						event._tag === "user.message" ? event.content.map(({ text }) => text) : [],
+					)
+					expect(recorded).toHaveLength(messages.length)
+					expect(recorded.every((message, index) => message === messages[index])).toBe(true)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("accepts full ASCII and bounded mixed initial messages before recording them in order", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const prototype = yield* createIdleSession(apiFetch)
+					const retrieved = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${prototype.id}`,
+						headers: AUTH_HEADERS,
+					})
+					const { agent } = (yield* Effect.promise(() => retrieved.json())) as {
+						agent: { id: string }
+					}
+					const encoder = new TextEncoder()
+					const latestSize = MAX_SESSION_INITIAL_MESSAGES_BYTES
+					const bodyOf = (messages: ReadonlyArray<string>) =>
+						JSON.stringify({
+							agent: agent.id,
+							environment_id: prototype.environment_id,
+							title: "漢".repeat(MAX_TITLE_LENGTH),
+							initial_events: asInitialEvents(messages),
+						})
+					const create = (key: string, rawBody: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: { ...AUTH_HEADERS, "idempotency-key": key },
+							rawBody,
+						})
+					const view = yield* SessionView
+					const sized = [
+						["ascii", fullAsciiInitialMessages(), 819_351],
+						["under", mixedInitialMessagesAt(latestSize - 1), latestSize - 1],
+						["exact", mixedInitialMessagesAt(latestSize), latestSize],
+					] as const
+					for (const [key, messages, encodedBytes] of sized) {
+						const rawBody = bodyOf(messages)
+						expect(encoder.encode(encodeInitialMessages(messages)).byteLength, key).toBe(
+							encodedBytes,
+						)
+						expect(encoder.encode(rawBody).byteLength, key).toBeGreaterThan(encodedBytes)
+						expect(encoder.encode(rawBody).byteLength, key).toBeLessThan(MAX_SESSION_BODY_BYTES)
+						const response = yield* create(key, rawBody)
+						expect(response.status, key).toBe(201)
+						const session = (yield* Effect.promise(() => response.json())) as { id: string }
+						const history = yield* view.list(Session.ref(SessionId.make(session.id)), { take: 100 })
+						const recorded = history.entries.flatMap(({ event }) =>
 							event._tag === "user.message" ? event.content.map(({ text }) => text) : [],
-						),
-					).toEqual(messages)
+						)
+						expect(recorded, key).toHaveLength(messages.length)
+						expect(
+							recorded.every((message, index) => message === messages[index]),
+							key,
+						).toBe(true)
+					}
+					const tooLarge = mixedInitialMessagesAt(latestSize + 1)
+					expect(encoder.encode(encodeInitialMessages(tooLarge)).byteLength).toBe(latestSize + 1)
+					const contentRefused = yield* create("over", bodyOf(tooLarge))
+					expect(contentRefused.status).toBe(413)
+					expect(yield* Effect.promise(() => contentRefused.json())).toMatchObject({
+						error: { message: expect.stringContaining("JSON-encoded text") },
+					})
+					const id = yield* idempotentId(yield* Digest.Digest, "sess", [
+						"create",
+						"session",
+						"id",
+						"over",
+					])
+					expect(
+						(yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${id}`,
+							headers: AUTH_HEADERS,
+						})).status,
+					).toBe(404)
+
+					const minimal = bodyOf(["Hello"])
+					const padded =
+						minimal + " ".repeat(MAX_SESSION_BODY_BYTES - encoder.encode(minimal).byteLength)
+					expect((yield* create("wire-over", padded + " ")).status).toBe(413)
+					expect((yield* create("wire-exact", padded)).status).toBe(201)
+					expect((yield* create("wire-under", padded.slice(0, -1))).status).toBe(201)
+
+					const blocks = Array.from({ length: 2000 }, () => ({ type: "text", text: "x" }))
+					const fragmented = Array.from({ length: MAX_SESSION_INITIAL_EVENTS }, () => ({
+						type: "user.message",
+						content: blocks,
+					}))
+					const joined = fragmented.map(({ content }) => content.map(({ text }) => text).join("\n"))
+					expect(encoder.encode(encodeInitialMessages(joined)).byteLength).toBeLessThan(latestSize)
+					const fragmentedBody = JSON.stringify({
+						agent: agent.id,
+						environment_id: prototype.environment_id,
+						initial_events: fragmented,
+					})
+					expect(encoder.encode(fragmentedBody).byteLength).toBeGreaterThan(MAX_SESSION_BODY_BYTES)
+					const wireRefused = yield* create("fragmented", fragmentedBody)
+					expect(wireRefused.status).toBe(413)
+					expect(yield* Effect.promise(() => wireRefused.json())).toMatchObject({
+						error: { message: "Request body is too large." },
+					})
+
+					const automationBody = (text: string) => ({
+						agent: agent.id,
+						environment_id: prototype.environment_id,
+						name: "Initial message size",
+						initial_events: asInitialEvents([text]),
+						schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+					})
+					const createAutomation = (text: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/automations",
+							headers: { ...AUTH_HEADERS, "idempotency-key": "automation-initial-message-size" },
+							body: automationBody(text),
+						})
+					const text = "漢".repeat(MAX_MESSAGE_TEXT_LENGTH)
+					const oversized = yield* createAutomation(text + "x")
+					expect(oversized.status).toBe(400)
+					expect(yield* Effect.promise(() => oversized.json())).toMatchObject({
+						error: { message: expect.stringContaining("combined text") },
+					})
+					const automated = yield* createAutomation(text)
+					expect(automated.status).toBe(201)
+					const automation = (yield* Effect.promise(() => automated.json())) as { id: string }
+					const kicked = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/automations/${automation.id}/run`,
+						headers: AUTH_HEADERS,
+					})
+					expect(kicked.status).toBe(201)
+					const automatedSession = Session.ref(SessionId.make(`sess_${automation.id}_1`))
+					yield* view.waitFor(automatedSession, { turn: 1 }, { timeout: "5 seconds" })
+					const history = yield* view.list(automatedSession, { take: 10 })
+					const initial = history.entries.find(({ event }) => event._tag === "user.message")?.event
+					expect(initial?._tag === "user.message" && initial.content[0]?.text === text).toBe(true)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
