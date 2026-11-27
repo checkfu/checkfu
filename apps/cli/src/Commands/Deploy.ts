@@ -294,13 +294,15 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+		const managedOperation =
+			target.checkout.managed && (args[0] === "deploy" || args[0] === "destroy")
 		return yield* spawner
 			.exitCode(
 				ChildProcess.make(
 					target.checkout.runtime,
 					[
 						...runtimeFlags(target.checkout),
-						target.checkout.managed && (args[0] === "deploy" || args[0] === "destroy")
+						managedOperation
 							? path.join(target.checkout.root, "apps", "cli", "scripts", "Deployment.ts")
 							: path.join(target.checkout.root, "node_modules", "alchemy", "bin", "cli.js"),
 						...args,
@@ -310,6 +312,7 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 						}),
 						"--profile",
 						target.profile,
+						...(managedOperation ? ["--log-level", "warn"] : []),
 					],
 					{ ...inCheckout(target), stdin: "inherit", stdout: "inherit", stderr: "inherit" },
 				),
