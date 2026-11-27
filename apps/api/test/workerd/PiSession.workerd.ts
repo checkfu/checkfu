@@ -2384,7 +2384,7 @@ describe("PiSession real Durable Object under workerd", () => {
 						kind: "tool_call",
 						name: "bash",
 						arguments: {
-							command: `mkdir -p ${outputs}; printf '# Late\\n' > ${outputs}/report.md`,
+							command: `printf '# Late\\n' > ${outputs}/report.md`,
 						},
 					},
 				],
@@ -2428,6 +2428,11 @@ describe("PiSession real Durable Object under workerd", () => {
 		await sleep(1000)
 		expect((await published()).status).toBe(404)
 		await turn("Write it on the machine.", 2)
+		expect(
+			(await listAllEvents(session.id)).filter(
+				(event) => event.type === "agent.tool_result" && event.is_error,
+			),
+		).toEqual([])
 		const deadline = Date.now() + 30_000
 		let current = await published()
 		while (current.status !== 200 && Date.now() < deadline) {

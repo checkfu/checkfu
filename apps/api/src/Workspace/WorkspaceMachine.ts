@@ -103,7 +103,11 @@ export async function* packDirectories(
 
 const PART_BYTES = 4 * 1024 * 1024
 const UNPACK = `cat "$1"/* | if [ "$2" = zstd ]; then zstd -dc; else cat; fi | tar -x -C /
-for code in "\${PIPESTATUS[@]}"; do [ "$code" -eq 0 ] || exit 1; done`
+for code in "\${PIPESTATUS[@]}"; do [ "$code" -eq 0 ] || exit 1; done
+shift 2
+for directory; do
+ [ -e "$directory" ] || [ -L "$directory" ] || mkdir -p -- "$directory" || exit 1
+done`
 const CALLS = "/tmp/checkfu-calls"
 const COMMAND_MARK = "CHECKFU_COMMAND=1"
 const SAVE = `marked() { for env in /proc/[0-9]*/environ; do pid=\${env#/proc/}; tr '\\0' '\\n' <"$env" 2>/dev/null | grep -qx ${COMMAND_MARK} && echo "\${pid%/environ}"; done; }
@@ -132,6 +136,7 @@ export const unpackInto = async (
 	sandbox: Sandbox,
 	directory: string,
 	archive: Archive,
+	extraDirectories: ReadonlyArray<string> = [],
 ): Promise<void> => {
 	const staging = `/tmp/checkfu-unpack-${crypto.randomUUID()}`
 	try {
@@ -141,9 +146,21 @@ export const unpackInto = async (
 			part += 1
 		}
 		const unpacked = await run(
-			sandbox.exec(["bash", "-c", UNPACK, "bash", staging, archive.compressed ? "zstd" : "plain"], {
-				timeout: ARCHIVE_MS,
-			}),
+			sandbox.exec(
+				[
+					"bash",
+					"-c",
+					UNPACK,
+					"bash",
+					staging,
+					archive.compressed ? "zstd" : "plain",
+					directory,
+					...extraDirectories,
+				],
+				{
+					timeout: ARCHIVE_MS,
+				},
+			),
 		)
 		if (unpacked.exitCode !== 0) {
 			throw new Error(`Could not unpack ${directory} in the machine: ${unpacked.stderr.trim()}`)
@@ -279,12 +296,17 @@ export const makeWorkspaceMachine = (options: {
 				const saved = options.disk.read()
 				if (saved === undefined) {
 					await options.settled()
-					await unpackInto(sandbox, options.directory, {
-						chunks: packDirectories(options.stored, [options.directory, ...extraDirectories]),
-						compressed: false,
-					})
+					await unpackInto(
+						sandbox,
+						options.directory,
+						{
+							chunks: packDirectories(options.stored, [options.directory, ...extraDirectories]),
+							compressed: false,
+						},
+						extraDirectories,
+					)
 				} else {
-					await unpackInto(sandbox, options.directory, saved)
+					await unpackInto(sandbox, options.directory, saved, extraDirectories)
 				}
 			}
 			const notice =
