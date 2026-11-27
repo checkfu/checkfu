@@ -19,8 +19,8 @@ export const TurnInputState = Schema.Struct({
 	input: Schema.Array(MessageText),
 	system_context: Schema.optionalKey(Schema.String),
 	unsent: Schema.Array(MessageText),
-	last_reply_turn: Schema.optionalKey(NonNegativeInt),
-	segment: Schema.optionalKey(PositiveInt),
+	last_reply_turn: NonNegativeInt,
+	segment: PositiveInt,
 })
 export type TurnInputState = typeof TurnInputState.Type
 
@@ -78,7 +78,7 @@ export class TurnInput extends Domain.View("TurnInput", {
 			state === null
 				? null
 				: e.turn === state.turn
-					? { ...state, segment: (state.segment ?? 1) + 1 }
+					? { ...state, segment: state.segment + 1 }
 					: { ...state, turn: e.turn, input: state.unsent, unsent: [], segment: 1 },
 		"turn.continued": (state, e) =>
 			state === null || e.turn !== state.turn ? state : { ...state, segment: e.segment },

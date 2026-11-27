@@ -3,6 +3,8 @@ import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import {
+	NO_AGENT_TOOLS,
+	NO_MCP_SERVERS,
 	decodeAgentTools,
 	decodeMcpServerCredentials,
 	decodeMcpServers,
@@ -661,6 +663,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					yield* recordStep("initial")
 					yield* createAgent.send(
 						new CreateAgent({
+							mcp_servers: NO_MCP_SERVERS,
+							tools: NO_AGENT_TOOLS,
 							agent_id: agentRef.id,
 							version_id: v1Id,
 							name: "Post-Admission Agent v1",

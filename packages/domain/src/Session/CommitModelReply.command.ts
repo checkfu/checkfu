@@ -37,7 +37,7 @@ export class SpanModelRequestEnd extends Domain.Event(
 
 export class SessionStatusIdle extends Domain.Event("session.status_idle", {
 	...SessionEventFields["session.status_idle"],
-	event_ids: Schema.optionalKey(ToolUseIdsText),
+	event_ids: ToolUseIdsText,
 }) {}
 
 export class CommitModelReply extends Domain.Command("CommitModelReply", {

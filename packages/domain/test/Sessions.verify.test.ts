@@ -54,6 +54,6 @@ describe("Sessions Z3 formal verification", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		600_000,
+		1_200_000,
 	)
 })

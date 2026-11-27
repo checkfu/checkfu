@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import {
@@ -165,6 +166,8 @@ describe("Checkfu unified hosted model stories", () => {
 
 				Story.when(
 					new CreateAgent({
+						mcp_servers: NO_MCP_SERVERS,
+						tools: NO_AGENT_TOOLS,
 						agent_id: agent.id,
 						version_id: v1,
 						name: "Verified Agent",

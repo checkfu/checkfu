@@ -19,8 +19,8 @@ export class AgentCreated extends Domain.Event("agent.created", {
 	model: AgentModel,
 	system: Schema.NullOr(Schema.String),
 	description: Schema.NullOr(Schema.String),
-	mcp_servers: Schema.optionalKey(McpServersText),
-	tools: Schema.optionalKey(AgentToolsText),
+	mcp_servers: McpServersText,
+	tools: AgentToolsText,
 }) {}
 
 export class AgentAlreadyExists extends Domain.Rejection(
@@ -37,8 +37,8 @@ export class CreateAgent extends Domain.Command("CreateAgent", {
 		model: AgentModel,
 		system: Schema.NullOr(AgentSystem),
 		description: Schema.NullOr(AgentDescription),
-		mcp_servers: Schema.optionalKey(McpServersText),
-		tools: Schema.optionalKey(AgentToolsText),
+		mcp_servers: McpServersText,
+		tools: AgentToolsText,
 	},
 	events: [AgentCreated],
 	rejects: [AgentAlreadyExists],

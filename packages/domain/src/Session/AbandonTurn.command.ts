@@ -1,5 +1,4 @@
 import * as Domain from "@alchemy.run/domain"
-import * as Schema from "effect/Schema"
 import { SessionStatusIdle, SpanModelRequestEnd } from "./CommitModelReply.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
@@ -18,7 +17,7 @@ export class AbandonTurn extends Domain.Command("AbandonTurn", {
 	input: {
 		session_id: SessionId,
 		turn: PositiveInt,
-		segment: Schema.optionalKey(PositiveInt),
+		segment: PositiveInt,
 		error_type: ErrorType,
 		message: ErrorMessage,
 	},

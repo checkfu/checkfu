@@ -521,7 +521,7 @@ describe("Sessions", () => {
 				),
 				Story.then(session, new SpanModelRequestStart({ model_request_start_id: req1 })),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
-				Story.then(session, new UserInterrupt({ turn: 1 })),
+				Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 				Story.state(session, {
 					_tag: "Running",
 					turn: 1,
@@ -1318,7 +1318,7 @@ describe("Sessions", () => {
 					turn: 1,
 				}),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
-				Story.then(session, new UserInterrupt({ turn: 1 })),
+				Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 				Story.succeed(Harness.interrupt, undefined),
 				Story.state(session, {
@@ -1384,7 +1384,7 @@ describe("Sessions", () => {
 			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Actual prompt" }] })),
 			Story.replied({ turn: 2 }),
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
-			Story.then(session, new UserInterrupt({ turn: 1 })),
+			Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.succeed(Harness.interrupt, undefined),
 			Story.fail("turn-1", Harness.runTurn, { _tag: "TurnInterrupted" }),
@@ -1508,7 +1508,7 @@ describe("Sessions", () => {
 				}),
 				Story.succeed("cleanup", Harness.interrupt, undefined),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
-				Story.then(session, new UserInterrupt({ turn: 2 })),
+				Story.then(session, new UserInterrupt({ segment: 1, turn: 2 })),
 				Story.call(Harness.interrupt, { session_id: session.id, turn: 2 }),
 				Story.succeed(Harness.interrupt, undefined),
 				Story.fail(Harness.runTurn, { _tag: "TurnInterrupted" }),
@@ -1613,7 +1613,7 @@ describe("Sessions", () => {
 				),
 				Story.call(Harness.runTurn, { session_id: session.id, turn: 1 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
-				Story.then(session, new UserInterrupt({ turn: 1 })),
+				Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.then(
@@ -1949,6 +1949,7 @@ describe("Sessions", () => {
 			Story.then(session, text("Four")),
 			Story.when(
 				new AbandonTurn({
+					segment: 1,
 					session_id: session.id,
 					turn: 3,
 					error_type: "model_request_timeout",
@@ -2161,7 +2162,7 @@ describe("Sessions", () => {
 				),
 				Story.call("first", Harness.runTurn, { turn: 1 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
-				Story.then(session, new UserInterrupt({ turn: 1 })),
+				Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 				Story.call("slow-interrupt", Harness.interrupt, { turn: 1 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
 				Story.then(session, new UserMessage({ content: [{ type: "text", text: "Next" }] })),
@@ -2225,6 +2226,7 @@ describe("Sessions", () => {
 		})
 		const abandon = (session_id: typeof unopened.id) =>
 			new AbandonTurn({
+				segment: 1,
 				session_id,
 				turn: 1,
 				error_type: "operator_abandonment",
@@ -2509,7 +2511,7 @@ describe("Sessions", () => {
 				turn: 1,
 			}),
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
-			Story.then(session, new UserInterrupt({ turn: 1 })),
+			Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.succeed(Harness.interrupt, undefined),
 			Story.succeed(Harness.runTurn, {
@@ -2683,6 +2685,8 @@ describe("Sessions", () => {
 					}),
 				)
 				const run = yield* runs.start(turnKey(session.id, 1), {
+					last_reply_turn: 0,
+					segment: 1,
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 1,
@@ -2760,6 +2764,8 @@ describe("Sessions", () => {
 					}),
 				)
 				const run = yield* runs.start(turnKey(session.id, 1), {
+					last_reply_turn: 0,
+					segment: 1,
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 1,
@@ -3501,8 +3507,13 @@ describe("Sessions", () => {
 						model_request_start_id: requestId,
 					}),
 				)
-				yield* recordToolEvents({ session_id: session.id, turn: 1, events: events.slice(0, 2) })
-				yield* recordToolEvents({ session_id: session.id, turn: 1, events })
+				yield* recordToolEvents({
+					segment: 1,
+					session_id: session.id,
+					turn: 1,
+					events: events.slice(0, 2),
+				})
+				yield* recordToolEvents({ segment: 1, session_id: session.id, turn: 1, events })
 				yield* sessions.send(
 					new CommitModelReply({
 						session_id: session.id,
@@ -3516,6 +3527,7 @@ describe("Sessions", () => {
 					}),
 				)
 				yield* recordToolEvents({
+					segment: 1,
 					session_id: session.id,
 					turn: 1,
 					events: [
@@ -3566,6 +3578,7 @@ describe("Sessions", () => {
 			archive: (session_id: SessionId) => new ArchiveSession({ session_id }),
 			deadline: (session_id: SessionId) =>
 				new AbandonTurn({
+					segment: 1,
 					session_id,
 					turn: 1,
 					error_type: "model_request_timeout",
@@ -3603,12 +3616,13 @@ describe("Sessions", () => {
 						}),
 					)
 					yield* recordToolEvents({
+						segment: 1,
 						session_id: session.id,
 						turn: 1,
 						events: events.slice(0, 2 * recorded),
 					})
 					yield* sessions.send(closings[closing](session.id))
-					yield* recordToolEvents({ session_id: session.id, turn: 1, events })
+					yield* recordToolEvents({ segment: 1, session_id: session.id, turn: 1, events })
 					const reply = yield* Effect.exit(
 						sessions.send(
 							new CommitModelReply({

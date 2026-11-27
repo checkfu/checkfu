@@ -303,7 +303,10 @@ export const makePiDurableTestLayer = (
 		if (mcpTools === undefined) {
 			return {}
 		}
-		const declared = () => decodeAgentTools(agentToolsBySession.get(sessionId))
+		const declared = () => {
+			const saved = agentToolsBySession.get(sessionId)
+			return saved === undefined ? [] : decodeAgentTools(saved)
+		}
 		const servers = [...new Set(mcpTools.map((tool) => tool.server))].map((server) => ({
 			binding: {
 				name: server,

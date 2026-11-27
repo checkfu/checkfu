@@ -381,9 +381,7 @@ export const serializeSessionEvent = (
 				...(event.truncated === true ? { truncated: true as const } : {}),
 			}
 		case "session.status_idle": {
-			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
-				toolUseEventId(id, call),
-			)
+			const unanswered = decodeToolUseIds(event.event_ids).map((call) => toolUseEventId(id, call))
 			return event.stop_reason.type === "requires_action"
 				? {
 						...base,
@@ -400,9 +398,7 @@ export const serializeSessionEvent = (
 					}
 		}
 		case "session.status_terminated": {
-			const unanswered = decodeToolUseIds(event.event_ids ?? "[]").map((call) =>
-				toolUseEventId(id, call),
-			)
+			const unanswered = decodeToolUseIds(event.event_ids).map((call) => toolUseEventId(id, call))
 			return {
 				...base,
 				type,

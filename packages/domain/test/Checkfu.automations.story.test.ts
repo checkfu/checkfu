@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import {
@@ -128,7 +129,16 @@ const config = {
 
 const world = [
 	Story.clock(at("2026-01-01T08:00:00.000Z")),
-	Story.given(agent, new AgentCreated({ version: 1, version_id: v1, ...agentFields })),
+	Story.given(
+		agent,
+		new AgentCreated({
+			mcp_servers: NO_MCP_SERVERS,
+			tools: NO_AGENT_TOOLS,
+			version: 1,
+			version_id: v1,
+			...agentFields,
+		}),
+	),
 	Story.given(
 		environment,
 		new EnvironmentCreated({
@@ -406,7 +416,16 @@ describe("Checkfu automations", () => {
 			const other = Agent.ref(AgentId.make("agent_002"))
 			return story(
 				...created(),
-				Story.given(other, new AgentCreated({ version: 1, version_id: v2, ...agentFields })),
+				Story.given(
+					other,
+					new AgentCreated({
+						mcp_servers: NO_MCP_SERVERS,
+						tools: NO_AGENT_TOOLS,
+						version: 1,
+						version_id: v2,
+						...agentFields,
+					}),
+				),
 				Story.when(new ArchiveAgent({ agent_id: agent.id })),
 				Story.then(agent, new AgentArchived()),
 				Story.when(update({ name: "Renamed" })),
@@ -475,6 +494,8 @@ describe("Checkfu automations", () => {
 			Story.given(
 				agent,
 				new AgentUpdated({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					version: 2,
 					version_id: v2,
 					...agentFields,

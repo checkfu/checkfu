@@ -38,7 +38,7 @@ export const EnsureTurnStoppedLive = EnsureTurnStopped.toLayer(
 								new AbandonTurn({
 									session_id: source.id,
 									turn,
-									segment: event.segment ?? 1,
+									segment: event.segment,
 									error_type: HARNESS_UNAVAILABLE,
 									message: HARNESS_UNAVAILABLE_MESSAGE,
 								}),

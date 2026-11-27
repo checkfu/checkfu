@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
@@ -91,6 +92,8 @@ describe("Automation alarms", () => {
 			const automations = yield* Automation
 			const settle = platform.control.drain
 			yield* domain.CreateAgent({
+				mcp_servers: NO_MCP_SERVERS,
+				tools: NO_AGENT_TOOLS,
 				agent_id: AgentId.make("agent_alarm"),
 				version_id: AgentVersionId.make("aver_alarm"),
 				name: "Reporter",

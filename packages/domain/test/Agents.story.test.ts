@@ -21,7 +21,12 @@ import {
 	UpdateAgent,
 } from "../src/Agent/UpdateAgent.command.ts"
 import { Agents } from "../src/Agents.model.ts"
-import { encodeAgentTools, encodeMcpServers } from "../src/Mcp/McpServers.ts"
+import {
+	NO_AGENT_TOOLS,
+	NO_MCP_SERVERS,
+	encodeAgentTools,
+	encodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 
 const story = Story.make(Agents)
 
@@ -163,6 +168,8 @@ describe("Agents", () => {
 			Story.clock(t0),
 			Story.when(
 				new CreateAgent({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					agent_id: agent.id,
 					version_id: v1,
 					name: "Coding Assistant",
@@ -232,6 +239,8 @@ describe("Agents", () => {
 			Story.clock(t0),
 			Story.when(
 				new CreateAgent({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					agent_id: agent.id,
 					version_id: v1,
 					name: "Reviewer",
@@ -360,6 +369,8 @@ describe("Agents", () => {
 			Story.rejected(new AgentNotFound({ agent_id: missing.id })),
 			Story.when(
 				new CreateAgent({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					agent_id: agent.id,
 					version_id: v1,
 					name: "Worker",
@@ -384,6 +395,8 @@ describe("Agents", () => {
 			Story.replied({ version: 1, version_id: v1 }),
 			Story.when(
 				new CreateAgent({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					agent_id: agent.id,
 					version_id: v2,
 					name: "Duplicate",
@@ -510,7 +523,16 @@ describe("Agents", () => {
 			})
 		return story(
 			Story.clock(t0),
-			Story.given(agent, new AgentCreated({ version: 1, version_id: v[0]!, ...configs[0] })),
+			Story.given(
+				agent,
+				new AgentCreated({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
+					version: 1,
+					version_id: v[0]!,
+					...configs[0],
+				}),
+			),
 			Story.clock(t1),
 			Story.when(update(1)),
 			Story.then(agent, updated(1)),
@@ -616,7 +638,16 @@ describe("Agents", () => {
 			})
 		return story(
 			Story.clock(t0),
-			Story.given(agent, new AgentCreated({ version: 1, version_id: v1, ...head })),
+			Story.given(
+				agent,
+				new AgentCreated({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
+					version: 1,
+					version_id: v1,
+					...head,
+				}),
+			),
 			Story.clock(t1),
 			Story.when(noOp({})),
 			Story.then(agent),
@@ -668,7 +699,16 @@ describe("Agents", () => {
 				}),
 			),
 			Story.rejected(new AgentNotFound({ agent_id: missing.id })),
-			Story.given(agent, new AgentCreated({ version: 1, version_id: v1, ...head })),
+			Story.given(
+				agent,
+				new AgentCreated({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
+					version: 1,
+					version_id: v1,
+					...head,
+				}),
+			),
 			Story.when(
 				new UpdateAgent({
 					agent_id: agent.id,

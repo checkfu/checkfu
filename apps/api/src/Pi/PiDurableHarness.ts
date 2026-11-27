@@ -180,7 +180,7 @@ const isNotRecorded = (
 	typeof error === "object" && error !== null && "_tag" in error && error._tag === "NotRecorded"
 
 export const recordSettledToolEvents = (
-	args: { readonly session_id: SessionId; readonly turn: number; readonly segment?: number },
+	args: { readonly session_id: SessionId; readonly turn: number; readonly segment: number },
 	events: ReadonlyArray<ToolEvent>,
 ) => retryRecording(recordToolEvents({ ...args, events }), args.session_id)
 
@@ -310,7 +310,7 @@ export const PiDurableHarnessLive = boundedHarness(
 		type TurnArgs = {
 			readonly session_id: SessionId
 			readonly turn: number
-			readonly segment?: number
+			readonly segment: number
 		}
 
 		const record = (args: TurnArgs, events: ReadonlyArray<ToolEvent>) =>
@@ -318,14 +318,14 @@ export const PiDurableHarnessLive = boundedHarness(
 				{
 					session_id: args.session_id,
 					turn: args.turn,
-					...(args.segment === undefined ? {} : { segment: args.segment }),
+					segment: args.segment,
 				},
 				events,
 			).pipe(Effect.provideService(Session, sessions))
 
 		const waitOn = (args: TurnArgs, calls: ReadonlyArray<PiParkedCall>) =>
 			Effect.gen(function* () {
-				const segment = args.segment ?? 1
+				const segment = args.segment
 				const requestId = `${segmentKey(args.session_id, args.turn, segment)}:req:${segment}`
 				const answers: Array<{
 					readonly tool_use_id: string
@@ -417,7 +417,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					const turnArgs = {
 						session_id: args.session_id,
 						turn: args.turn,
-						...(args.segment === undefined ? {} : { segment: args.segment }),
+						segment: args.segment,
 						conversation,
 						operationId,
 					}
@@ -551,9 +551,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						text: userText,
 						...(mcp === undefined ? {} : { mcp }),
 						...(tools === undefined ? {} : { tools }),
-						...(args.last_reply_turn === undefined
-							? {}
-							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
+						unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn),
 					}
 					const { attempts, baseDelay } = yield* HarnessLimits
 					const submitted =

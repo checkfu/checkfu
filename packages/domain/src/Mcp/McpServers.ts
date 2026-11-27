@@ -67,16 +67,16 @@ export const encodeMcpServers = checkedText(serversJson, McpServersText)
 export const encodeMcpServerCredentials = checkedText(credentialsJson, McpServerCredentialsText)
 export const encodeAgentTools = checkedText(toolsJson, AgentToolsText)
 
-export const decodeMcpServers = (text: string | undefined): ReadonlyArray<McpServer> =>
-	text === undefined ? [] : Option.getOrElse(readServers(text), () => [])
+export const decodeMcpServers = (text: string): ReadonlyArray<McpServer> =>
+	Option.getOrElse(readServers(text), () => [])
 
 export const decodeMcpServerCredentials = (
 	text: string | undefined,
 ): ReadonlyArray<McpServerCredential> =>
 	text === undefined ? [] : Option.getOrElse(readCredentials(text), () => [])
 
-export const decodeAgentTools = (text: string | undefined): ReadonlyArray<AgentTool> =>
-	text === undefined ? [] : Option.getOrElse(readTools(text), () => [])
+export const decodeAgentTools = (text: string): ReadonlyArray<AgentTool> =>
+	Option.getOrElse(readTools(text), () => [])
 
 export const mcpHostAllowed = (
 	networking: EnvironmentNetworking | null | undefined,

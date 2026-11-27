@@ -1008,6 +1008,8 @@ describe("A session's outputs", () => {
 					const modelCalls = requests.length
 					const settledAgain = yield* Effect.exit(
 						harness.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make(session.id),
 							agent_id: session.agent.id,
 							agent_version: session.agent.version,

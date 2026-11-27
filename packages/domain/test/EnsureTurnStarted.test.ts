@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import { RecordInitialMessagesLive } from "../src/Session/RecordInitialMessages.policy.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import { ExpireArtifactReservationsLive } from "../src/Artifact/ExpireArtifactReservations.policy.ts"
@@ -9,7 +10,6 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
@@ -22,12 +22,10 @@ import { ListingLive } from "../src/Listing/Listing.projection.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { ListResourcesLive } from "../src/Listing/ListResources.query.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
-import { SessionStatusTerminated } from "../src/Session/ArchiveSession.command.ts"
 import { EnsureTurnStarted, ensureTurnStarted } from "../src/Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStoppedLive } from "../src/Session/EnsureTurnStopped.policy.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, Harness } from "../src/Session/Harness.external.ts"
 import { RunTurnLive } from "../src/Session/RunTurn.saga.ts"
-import { UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
@@ -173,6 +171,8 @@ const run = <A, E, R>(
 	return Effect.gen(function* () {
 		const domain = yield* CheckfuDomainApi.clientInProcess
 		yield* domain.CreateAgent({
+			mcp_servers: NO_MCP_SERVERS,
+			tools: NO_AGENT_TOOLS,
 			agent_id: AgentId.make("agent_ensure"),
 			version_id: AgentVersionId.make("aver_ensure"),
 			name: "Agent",
@@ -414,22 +414,6 @@ describe("EnsureTurnStopped per turn", () => {
 				}),
 			),
 		)
-	})
-})
-
-describe("stop events recorded before they named a turn", () => {
-	it("read an interrupt with no turn as naming none", () => {
-		expect(
-			Schema.decodeSync(Schema.toCodecJson(UserInterrupt))({ _tag: "user.interrupt" }),
-		).toMatchObject({ turn: null })
-	})
-
-	it("read a termination with no running turn as naming none", () => {
-		expect(
-			Schema.decodeSync(Schema.toCodecJson(SessionStatusTerminated))({
-				_tag: "session.status_terminated",
-			}),
-		).toMatchObject({ running_turn: null })
 	})
 })
 

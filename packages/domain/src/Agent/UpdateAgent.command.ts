@@ -21,8 +21,8 @@ export class AgentUpdated extends Domain.Event("agent.updated", {
 	model: AgentModel,
 	system: Schema.NullOr(Schema.String),
 	description: Schema.NullOr(Schema.String),
-	mcp_servers: Schema.optionalKey(McpServersText),
-	tools: Schema.optionalKey(AgentToolsText),
+	mcp_servers: McpServersText,
+	tools: AgentToolsText,
 }) {}
 
 export class AgentVersionConflict extends Domain.Rejection(

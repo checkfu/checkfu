@@ -38,7 +38,6 @@ export const ensureTurnStarted = Effect.gen(function* () {
 				}),
 			),
 		)
-		const segment = state?.segment ?? 1
 		const unschedule = (id: string) =>
 			sessions
 				.unschedule(source.id, id)
@@ -52,12 +51,13 @@ export const ensureTurnStarted = Effect.gen(function* () {
 			return
 		}
 		if (event._tag !== "session.status_running" && event._tag !== "turn.continued") {
-			yield* unschedule(ensuredDeadline(segment))
+			yield* unschedule(ensuredDeadline(state === null ? 1 : state.segment))
 			return
 		}
 		if (state === null || state.turn !== event.turn || state.input.length === 0) {
 			return
 		}
+		const segment = state.segment
 		if (event._tag === "session.status_running" ? segment > 1 : event.segment !== segment) {
 			return
 		}
@@ -83,8 +83,8 @@ export const ensureTurnStarted = Effect.gen(function* () {
 			input: state.input,
 			resources: state.resources,
 			...(state.system_context === undefined ? {} : { system_context: state.system_context }),
-			...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
-			...(segment === 1 ? {} : { segment }),
+			last_reply_turn: state.last_reply_turn,
+			segment,
 		})
 	})
 })

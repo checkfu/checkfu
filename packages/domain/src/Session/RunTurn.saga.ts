@@ -45,8 +45,8 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
 		system_context: Schema.optionalKey(Schema.String),
-		last_reply_turn: Schema.optionalKey(NonNegativeInt),
-		segment: Schema.optionalKey(PositiveInt),
+		last_reply_turn: NonNegativeInt,
+		segment: PositiveInt,
 	},
 	result: {
 		status: Schema.Literals(["completed", "failed", "interrupted", "paused", "aborted"]),
@@ -59,7 +59,7 @@ export const RunTurnLive = RunTurn.toLayer(
 		const harness = yield* Harness
 
 		return Effect.fn(function* (payload: typeof RunTurn.workflow.payloadSchema.Type) {
-			const segment = payload.segment ?? 1
+			const segment = payload.segment
 			const requestId = `${payload.key}:req:${segment}`
 
 			const started = yield* runTurnActivity(
@@ -106,10 +106,8 @@ export const RunTurnLive = RunTurn.toLayer(
 						...(payload.system_context === undefined
 							? {}
 							: { system_context: payload.system_context }),
-						...(payload.last_reply_turn === undefined
-							? {}
-							: { last_reply_turn: payload.last_reply_turn }),
-						...(segment === 1 ? {} : { segment }),
+						last_reply_turn: payload.last_reply_turn,
+						segment,
 					})
 					.pipe(
 						Effect.map((reply) => ({

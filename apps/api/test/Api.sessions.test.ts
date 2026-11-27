@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "@checkfu/domain/Mcp/McpServers"
 import * as Domain from "@alchemy.run/domain"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
@@ -832,6 +833,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 
 					const spaceReceipt = yield* createAgent.send(
 						new CreateAgent({
+							mcp_servers: NO_MCP_SERVERS,
+							tools: NO_AGENT_TOOLS,
 							agent_id: AgentId.make("team A"),
 							version_id: AgentVersionId.make("teamA_v1"),
 							name: "Space Team",
@@ -842,6 +845,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					)
 					const literalReceipt = yield* createAgent.send(
 						new CreateAgent({
+							mcp_servers: NO_MCP_SERVERS,
+							tools: NO_AGENT_TOOLS,
 							agent_id: AgentId.make("team%20A"),
 							version_id: AgentVersionId.make("teamPct20A_v1"),
 							name: "Literal Percent Team",
@@ -2407,6 +2412,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const createAgent = yield* CreateAgentDecision
 					yield* createAgent.send(
 						new CreateAgent({
+							mcp_servers: NO_MCP_SERVERS,
+							tools: NO_AGENT_TOOLS,
 							agent_id: atLimitAgent,
 							version_id: AgentVersionId.make("aver_max_1"),
 							name: "Max Len Agent",
@@ -2576,7 +2583,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new UserInterrupt({ turn: 1 }),
+				event: new UserInterrupt({ segment: 1, turn: 1 }),
 				expectedJson: {
 					id: `sevt_${sessionId}_2`,
 					seq: 2,
@@ -2824,6 +2831,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			},
 			{
 				event: new UserToolConfirmation({
+					processed_at: at,
 					tool_use_id: "tu_21",
 					result: "deny",
 					deny_message: "No",
@@ -2841,6 +2849,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			},
 			{
 				event: new UserCustomToolResult({
+					processed_at: at,
 					custom_tool_use_id: "tu_20",
 					content: [{ type: "text", text: "shipped" }],
 					is_error: true,

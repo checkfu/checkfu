@@ -25,7 +25,7 @@ export const StartTurnLive = StartTurn.toLayer(
 			if (state === null || state.turn < 1) {
 				return
 			}
-			const segment = state.segment ?? 1
+			const segment = state.segment
 			const unschedule = (id: string) =>
 				sessions
 					.unschedule(source.id, id)
@@ -67,8 +67,8 @@ export const StartTurnLive = StartTurn.toLayer(
 				turn: state.turn,
 				input: state.input,
 				...(state.system_context === undefined ? {} : { system_context: state.system_context }),
-				...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
-				...(segment === 1 ? {} : { segment }),
+				last_reply_turn: state.last_reply_turn,
+				segment,
 			})
 		})
 	}),

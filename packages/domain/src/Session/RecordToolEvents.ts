@@ -66,11 +66,11 @@ export const toolCallsOf = (events: ReadonlyArray<ToolEvent>): Array<ToolCall> =
 export const recordToolEvents = Effect.fn("Session.recordToolEvents")(function* (args: {
 	readonly session_id: SessionId
 	readonly turn: number
-	readonly segment?: number
+	readonly segment: number
 	readonly events: ReadonlyArray<ToolEvent>
 }) {
 	const sessions = yield* Session
-	const segment = args.segment ?? 1
+	const segment = args.segment
 	const requestId = `${segmentKey(args.session_id, args.turn, segment)}:req:${segment}`
 	yield* Effect.forEach(
 		toolRecordsOf(args.events),

@@ -35,7 +35,7 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 								new AbandonTurn({
 									session_id: source.id,
 									turn: state.turn,
-									segment: state.segment ?? 1,
+									segment: state.segment,
 									error_type: HARNESS_UNAVAILABLE,
 									message: HARNESS_UNAVAILABLE_MESSAGE,
 								}),

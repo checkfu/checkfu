@@ -76,8 +76,8 @@ jobs:
   # The Z3 proofs in packages/domain take minutes, so they get a runner of their own.
   domain:
     runs-on: ubuntu-latest
-    # The two Sessions files each retain a ten-minute deadline and now run serially.
-    timeout-minutes: 25
+    # Allow the fault-exhaustive Sessions proof and the other serial proofs to finish.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
         with:
@@ -85,7 +85,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain
-      # Concurrent solver-heavy files can starve Sessions' unchanged proof deadline.
+      # Concurrent solver-heavy files can starve the Sessions proof.
       - run: bun x turbo run test --filter=@checkfu/domain -- --exclude test/Checkfu.verify.test.ts --no-file-parallelism
         env:
           CHECKFU_PROVE: "1"

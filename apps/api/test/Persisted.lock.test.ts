@@ -232,6 +232,8 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							environment_id: "env_1",
 							resources: [],
 							turn: 1,
+							last_reply_turn: 0,
+							segment: 1,
 							input: ["hi"],
 							__cause: {
 								correlationId: "corr_1",
@@ -266,6 +268,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 						_tag: "AbandonTurn",
 						session_id: "session_deadline",
 						turn: 3,
+						segment: 1,
 						error_type: "model_request_timeout",
 						message: "Model request timed out.",
 					},
@@ -655,26 +658,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(sameVersion.length).toBe(1)
 			expect(sameVersion[0]).toContain("without a new version")
 		}),
-	)
-
-	it.effect(
-		"reads TurnInput state queued before last_reply_turn existed, and drops nothing for it",
-		() =>
-			Effect.gen(function* () {
-				const queued = yield* Schema.decodeUnknownEffect(TurnInputState)({
-					agent_id: "agent_1",
-					agent_version: 1,
-					environment_id: "env_1",
-					resources: [],
-					turn: 2,
-					harness_generation: 0,
-					input: ["hi"],
-					unsent: [],
-				})
-				expect(queued.turn).toBe(2)
-				expect(queued.last_reply_turn).toBeUndefined()
-				expect(queued.resources).toEqual([])
-			}),
 	)
 
 	it.effect("blocks a view version bump whose new state breaks queued policy deliveries", () =>

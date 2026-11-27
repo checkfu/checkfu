@@ -433,6 +433,8 @@ describe("interrupted turns and turn recovery", () => {
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
 					const initialReply = yield* provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make(session.id),
 						agent_id: agent.id,
 						agent_version: 1,
@@ -470,6 +472,8 @@ describe("interrupted turns and turn recovery", () => {
 					const replayed = yield* Harness.pipe(
 						Effect.flatMap((restarted) =>
 							restarted.runTurn({
+								last_reply_turn: 0,
+								segment: 1,
 								session_id: SessionId.make(session.id),
 								agent_id: agent.id,
 								agent_version: 1,
@@ -488,6 +492,8 @@ describe("interrupted turns and turn recovery", () => {
 						Harness.pipe(
 							Effect.flatMap((restarted) =>
 								restarted.runTurn({
+									last_reply_turn: 0,
+									segment: 1,
 									session_id: SessionId.make(session.id),
 									agent_id: agent.id,
 									agent_version: 1,
@@ -507,6 +513,8 @@ describe("interrupted turns and turn recovery", () => {
 						Harness.pipe(
 							Effect.flatMap((restarted) =>
 								restarted.runTurn({
+									last_reply_turn: 0,
+									segment: 1,
 									session_id: SessionId.make(session.id),
 									agent_id: agent.id,
 									agent_version: 1,
@@ -624,6 +632,8 @@ describe("interrupted turns and turn recovery", () => {
 
 				const unavailable = yield* Effect.flip(
 					provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make(session.id),
 						agent_id: agent.id,
 						agent_version: 1,
@@ -640,6 +650,8 @@ describe("interrupted turns and turn recovery", () => {
 				recoverCalls = 0
 				recoverOnFinalProbe = true
 				const reply = yield* provider.runTurn({
+					last_reply_turn: 0,
+					segment: 1,
 					session_id: SessionId.make(session.id),
 					agent_id: agent.id,
 					agent_version: 1,
@@ -725,6 +737,8 @@ describe("interrupted turns and turn recovery", () => {
 					const turn = yield* Effect.forkChild(
 						Effect.flip(
 							provider.runTurn({
+								last_reply_turn: 0,
+								segment: 1,
 								session_id: SessionId.make("sesn_deadline"),
 								agent_id: agent.id,
 								agent_version: 1,

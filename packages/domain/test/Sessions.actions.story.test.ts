@@ -366,7 +366,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(
 					session,
-					new UserInterrupt({ turn: 1 }),
+					new UserInterrupt({ segment: 1, turn: 1 }),
 					new SessionStatusIdle({
 						stop_reason: { type: "interrupted" },
 						turn: 1,
@@ -603,7 +603,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 				}),
 			),
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
-			Story.then(session, new UserInterrupt({ turn: 1 })),
+			Story.then(session, new UserInterrupt({ segment: 1, turn: 1 })),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.succeed(Harness.interrupt, undefined),
 			Story.fail(Harness.runTurn, {
@@ -652,7 +652,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
 			Story.then(
 				session,
-				new UserInterrupt({ turn: 1 }),
+				new UserInterrupt({ segment: 1, turn: 1 }),
 				new SessionStatusIdle({
 					stop_reason: { type: "interrupted" },
 					turn: 1,
@@ -704,7 +704,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
 			Story.then(
 				session,
-				new UserInterrupt({ turn: 1 }),
+				new UserInterrupt({ segment: 1, turn: 1 }),
 				new SessionStatusIdle({
 					stop_reason: { type: "interrupted" },
 					turn: 1,
@@ -758,6 +758,7 @@ describe("Sessions: a turn that waits on its calls", () => {
 			Story.then(session),
 			Story.when(
 				new AbandonTurn({
+					segment: 1,
 					session_id: session.id,
 					turn: 1,
 					error_type: "model_request_timeout",

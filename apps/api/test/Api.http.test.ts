@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "@checkfu/domain/Mcp/McpServers"
 import { AutomationInventoryChanged } from "@checkfu/domain/Automation/GuardedArchives"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
@@ -602,6 +603,8 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 
 					const emptyTurnErr = yield* Effect.flip(
 						provider.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make("sess_missing_events"),
 							agent_id: okAgent.id,
 							agent_version: 1,
@@ -1086,6 +1089,8 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					] as const) {
 						yield* createAgent.send(
 							new CreateAgent({
+								mcp_servers: NO_MCP_SERVERS,
+								tools: NO_AGENT_TOOLS,
 								agent_id: agentId,
 								version_id: versionId,
 								name: "Long ID Agent",

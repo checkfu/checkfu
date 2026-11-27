@@ -17,7 +17,7 @@ import { ToolConfirmationNotPending } from "./ToolConfirmationNotPending.rejecti
 
 export class UserToolConfirmation extends Domain.Event("user.tool_confirmation", {
 	...SessionEventFields["user.tool_confirmation"],
-	processed_at: Schema.optionalKey(Schema.DateTimeUtc),
+	processed_at: Schema.DateTimeUtc,
 }) {}
 
 export class ConfirmTool extends Domain.Command("ConfirmTool", {

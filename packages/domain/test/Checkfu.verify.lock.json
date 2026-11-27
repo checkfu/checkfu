@@ -428,7 +428,7 @@
 			},
 			"CreateAgent.NewAgentKeepsItsDeclaredServers": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" ||\n\t\t\tafter.agent.mcp_servers === (command.mcp_servers ?? NO_MCP_SERVERS)"
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.mcp_servers === command.mcp_servers"
 			},
 			"AdmitSession.AdmissionKeepsTheCredentialsItWasGiven": {
 				"kind": "transition",
@@ -500,7 +500,7 @@
 			},
 			"CreateAgent.NewAgentKeepsItsDeclaredTools": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.tools === (command.tools ?? NO_AGENT_TOOLS)"
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.tools === command.tools"
 			},
 			"RequestToolAction.ARequestWaitsInItsOwnTurn": {
 				"kind": "transition",
@@ -536,7 +536,7 @@
 			},
 			"Session.ADeadlineAbandonsOnlyItsOwnSegment": {
 				"kind": "transition",
-				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"AbandonTurn\" ||\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tevents.length === 0 ||\n\t\t\t(command.segment ?? 1) ===\n\t\t\t\t(before.open_model_request_id === null && !before.paused\n\t\t\t\t\t? before.model_requests_started + 1\n\t\t\t\t\t: before.model_requests_started)"
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"AbandonTurn\" ||\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tevents.length === 0 ||\n\t\t\tcommand.segment ===\n\t\t\t\t(before.open_model_request_id === null && !before.paused\n\t\t\t\t\t? before.model_requests_started + 1\n\t\t\t\t\t: before.model_requests_started)"
 			},
 			"Session.AnEndedTurnStartsTheQueuedOne": {
 				"kind": "transition",

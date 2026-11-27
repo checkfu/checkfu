@@ -389,7 +389,7 @@ export class Session extends Domain.Aggregate("Session", {
 			command._tag !== "AbandonTurn" ||
 			before._tag !== "Running" ||
 			events.length === 0 ||
-			(command.segment ?? 1) ===
+			command.segment ===
 				(before.open_model_request_id === null && !before.paused
 					? before.model_requests_started + 1
 					: before.model_requests_started),
@@ -464,9 +464,7 @@ export class Session extends Domain.Aggregate("Session", {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
 			}
 			const segment = segmentOf(active)
-			const interrupt = new UserInterrupt(
-				segment === 1 ? { turn: active.turn } : { turn: active.turn, segment },
-			)
+			const interrupt = new UserInterrupt({ turn: active.turn, segment })
 			return active.paused ? [interrupt, ...endTurn(active, { type: "interrupted" })] : [interrupt]
 		},
 
@@ -709,7 +707,7 @@ export class Session extends Domain.Aggregate("Session", {
 				state._tag !== "Running" ||
 				state.turn !== cmd.turn ||
 				state.paused ||
-				segmentOf(state) !== (cmd.segment ?? 1)
+				segmentOf(state) !== cmd.segment
 			) {
 				return []
 			}

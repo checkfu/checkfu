@@ -557,6 +557,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 
 					const missingVersionErr = yield* Effect.flip(
 						provider.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make("sess_lagging_agent"),
 							agent_id: "agent_not_projected_yet",
 							agent_version: 1,

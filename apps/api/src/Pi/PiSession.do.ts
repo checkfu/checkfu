@@ -231,7 +231,10 @@ export const PiSessionLive = PiSession.make(
 				})
 				let declared: ReadonlyArray<AgentTool> | undefined
 				const agentTools = (): ReadonlyArray<AgentTool> => {
-					declared ??= decodeAgentTools(rawCtx.storage.kv.get<string>(AGENT_TOOLS))
+					if (declared === undefined) {
+						const saved = rawCtx.storage.kv.get<string>(AGENT_TOOLS)
+						declared = saved === undefined ? [] : decodeAgentTools(saved)
+					}
 					return declared
 				}
 				const keepAgentTools = (text: string): boolean => {

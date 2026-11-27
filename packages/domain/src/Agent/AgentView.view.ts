@@ -39,9 +39,8 @@ export class AgentView extends Domain.View("AgentView", {
 						model: e.model,
 						system: e.system,
 						description: e.description,
-						mcp_servers:
-							e.mcp_servers === undefined ? state.mcp_servers : decodeMcpServers(e.mcp_servers),
-						tools: e.tools === undefined ? state.tools : decodeAgentTools(e.tools),
+						mcp_servers: decodeMcpServers(e.mcp_servers),
+						tools: decodeAgentTools(e.tools),
 						updated_at: ctx.at,
 					},
 		"agent.archived": (state, _e, ctx) =>

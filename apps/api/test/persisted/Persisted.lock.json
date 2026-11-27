@@ -9,8 +9,8 @@
 			"schemas": {
 				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
-				"event:Checkfu.Agent/agent.created": "3260de33f7fb073a60eb7ce33157593aaf7bb04c346efc0e27948d78a1a2953d",
-				"event:Checkfu.Agent/agent.updated": "dad1d28a18c669bdecffc829dafd8bf7f6924fcb5c35069722a41002179f9ad7",
+				"event:Checkfu.Agent/agent.created": "577e442e70db2103263d5ba4d8b3f3d5baf8fe679959d26cfccd0ef59b0439c8",
+				"event:Checkfu.Agent/agent.updated": "1d5bf1ff72adf9890df7d5d867c8a67e44abbc04985461987c5a1b1f1265d1af",
 				"command-reply:Checkfu/ArchiveAgent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.Environment": "0c5d8220ee3f83a8422f1d67486b0b3bfe0143847474e818d326a9459abcb1f1",
 				"event:Checkfu.Environment/environment.created": "42b0e29ebeb664625fef1062a706fe9c40c183f24733d2c03f39c3f9cf89f1ca",
@@ -25,8 +25,8 @@
 				"event:Checkfu.Session/session.created": "73c877dc37caed34a5e7f704f918d757eb05edfc75286c37893338ba3055114e",
 				"event:Checkfu.Session/user.message": "392eb57e6d20edc9d791ae142ff1fdc840d5023ee6aa308555ada5ccf4c95ecc",
 				"event:Checkfu.Session/session.status_running": "e21faf22832d22a1f53bf056047e7854d74c78473edf4420e7713b1f23eab41c",
-				"event:Checkfu.Session/user.interrupt": "983d5e331d1c2dd6d38326beabdba4ab8c849ff2559c1b6fef08aa6b9861f667",
-				"event:Checkfu.Session/session.status_idle": "27c6166f68346ed641fdb82e58c814cd8c9d9d909acd38178197c86dbe8d3958",
+				"event:Checkfu.Session/user.interrupt": "5095a65a285c0b731ad562c6360a3fc23cc816c5bec2b1abe997a34697a42987",
+				"event:Checkfu.Session/session.status_idle": "62fb4ab48d0ddfb432faee20d748bd16c557af4ad287655fbc1b7ceec0e962c9",
 				"event:Checkfu.Session/span.model_request_start": "fb34a247e10fdcc0027c54c0bab9d74c224de527caed10389c6a93838285af90",
 				"event:Checkfu.Session/agent.tool_use": "892e6fc7f75540cfaa0184ef43f75ff7f446e9b7e535134dbbc1c149a091cede",
 				"event:Checkfu.Session/agent.tool_result": "7e3c9288f82821b8b2a91c035086066961924a4b230aa33393db31fc6c20d2c6",
@@ -39,12 +39,12 @@
 				"event:Checkfu.Session/agent.thinking": "6f7dfdaec528c15b740db34213e790dcad4eb2ef15830fec2e44a66f9f8e7ea0",
 				"event:Checkfu.Session/agent.message": "0cc08036c3d98d73aac9ffa84fef985689681b667d7641bf0132e5982a8d3dac",
 				"event:Checkfu.Session/turn.abandoned": "e7132abeadd655216378df3ee5958984132bcc218ca744fc897615bd12ec2900",
-				"event:Checkfu.Session/session.status_terminated": "c59f77a24301213c5a1dea030d692195c2404ffdb8501f67d21b2153b92b64c1",
+				"event:Checkfu.Session/session.status_terminated": "4104ae927415f2ed4c034730ca13485cfd90cb127ce43c65c7f27c8ba2a3f491",
 				"event:Checkfu.Session/session.archived": "b11a10f5bd0d7bebbd52678deaefa6df02ea48ddcd3bc643ebbde0b980cbcd94",
 				"event:Checkfu.Session/idempotency_key.claimed": "b57c66deb131ddfd46e73af7ca2d5e75dc2661ed80d44608dc22d5fede374a00",
 				"event:Checkfu.Session/agent.custom_tool_use": "896d39a0afdd7ec1b84cebb1878f7535a19197ec527a6a1820307f5fb3b901de",
-				"event:Checkfu.Session/user.tool_confirmation": "dc23eeff45025aac8304552a21e8b27fffb5b12726a02551ad1561173e521fab",
-				"event:Checkfu.Session/user.custom_tool_result": "e6ea221ba965e1077f52dfae578fd80d35cf711e1c2dd02cdcee139914197d38",
+				"event:Checkfu.Session/user.tool_confirmation": "a72c732903416bfb1e17515679643f86dcae5314087c215b693a3ad44726a3b1",
+				"event:Checkfu.Session/user.custom_tool_result": "72e48747b5222d85c220dfe9e48fe655027c7da0414f70d5c4c3c907d8c1fc64",
 				"event:Checkfu.Session/system.message": "edab4dea094ef272cefb072c4c24847152f68a2f1688f10788eca1af874be0fc",
 				"command-reply:Checkfu/CreateSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/SendUserMessage": "6d54d32b85d5867b2c440e7022b0fd1709ed0fd0b6e622e3ed8471f524f731a7",
@@ -59,7 +59,7 @@
 				"command-reply:Checkfu/FailModelRequest": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/InterruptModelRequest": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/AbandonTurn": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"scheduled-command:Checkfu.Session/AbandonTurn": "d84220c643a170af67f345634b0297ac76eaa786207c1e799bbb0d891f88a764",
+				"scheduled-command:Checkfu.Session/AbandonTurn": "91e092b48dcc0f0ccba7bb57be93ecb201264a5657ca604307ef08e1989713f7",
 				"command-reply:Checkfu/ArchiveSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/ClaimIdempotencyKey": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.SystemContext": "f4cfe62552a6b1f09a515e6db685d3792a3ad71dafde95208a4cc82a6b619834",
@@ -150,7 +150,7 @@
 				"view:Checkfu.EnvironmentView@v0": "e88f0b2a5e305927998bd8476a68bd0fe680620aa08decf10dd2df928a2c7e47",
 				"view:Checkfu.SessionView@v6": "812c81c7cb06296edd7d12ea159e5b5021e9e04067409d2d20eba719f7145174",
 				"view:Checkfu.SessionTurnCompletion@v1": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
-				"view:Checkfu.TurnInput@v5": "fb1a7d40fa475b45b5d8f3571790e6b2a4f3fce0a698e30b25366c115377a79c",
+				"view:Checkfu.TurnInput@v5": "41cb2d3bdb3fc00d0213f321b7772bedc91f00f1aaa7003052112f604d5563ca",
 				"view:Checkfu.AutomationView@v5": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"view:Checkfu.AutomationRunView@v1": "9ff80023b8cad6cc0d152e39941175de90e124d4bf705b5e1edfdbc476045ec1",
 				"view:Checkfu.ArtifactVersionView@v1": "cf637979987d13f9694e748e4a58f8881169a073c7a0c7d08bc80b214fe35896",
@@ -158,22 +158,22 @@
 				"view:Checkfu.MemoryView@v1": "91f90bea5f24bb78c97ee9c5ec3825652172d4cec5fb35637d1a0f907988ac72",
 				"view:Checkfu.MemoryIndex@v1": "ba2280164859cd2bfc80e0ac47a1d95b65755bb503f630b8eb08f1df359c7081",
 				"policy-delivery:Checkfu.RecordInitialMessages/Session": "5a3c59392f7a0553089708e9d0d916e4a1b6d4703da0877cfd51017bd97792b9",
-				"policy-delivery:Checkfu.StartTurn/TurnInput": "fb1a7d40fa475b45b5d8f3571790e6b2a4f3fce0a698e30b25366c115377a79c",
-				"policy-delivery:Checkfu.EnsureTurnStarted/Session": "94f4339e275b4f209fa618df15716c3bffeca543a1a9458f654f6e08a1892e08",
-				"policy-delivery:Checkfu.EnsureTurnStopped/Session": "1e59d4571c4296fdb747be72a66a7b654a66c70094ba26e96870000386dfe881",
+				"policy-delivery:Checkfu.StartTurn/TurnInput": "41cb2d3bdb3fc00d0213f321b7772bedc91f00f1aaa7003052112f604d5563ca",
+				"policy-delivery:Checkfu.EnsureTurnStarted/Session": "50972129f5a82f0c6addbdd70138b0109343d0d440e79a9808c21e20f0d7c094",
+				"policy-delivery:Checkfu.EnsureTurnStopped/Session": "911b839d3899639da37f5bcf3c7ed546b53b02bfab24fd197879d4fce48fdb8c",
 				"policy-delivery:Checkfu.ArmAutomation/AutomationView": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"policy-delivery:Checkfu.StartAutomationRun/AutomationView": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"policy-delivery:Checkfu.FreeAutomationSlot/Automation": "6cfba9900bbf7b877c1e81a9cea14bca2d73a0ae73d28242c62a54e3505fc5b5",
-				"policy-delivery:Checkfu.PublishSessionOutputs/Session": "2de076533e8bd0c2f25bc6d83ca58d9d2118554861e0bc941abacd792eed88ee",
+				"policy-delivery:Checkfu.PublishSessionOutputs/Session": "256a19cb0eed039cbea2c464dd65e825c57baf6b36b71a1cc898eeb9e7cff6da",
 				"policy-delivery:Checkfu.ExpireArtifactReservations/Artifact": "2c4debc1b87204ece46e7d374a7f51c948c9c3dd6f5ecb61ec5ab25dcecf6f46",
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"saga-input:Checkfu.RunTurn": "00c13b40cc4d4c95db1ee2b6642aad4fd33cc9658890adf2335991bc69b1bd2e",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"saga-input:Checkfu.RunTurn": "56b5422c6cc2f000891b60dfda037ee81cd6c9f86ce7ff528cc2a913eecfbfe1",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "0b173c30d84e4e7ba5f9491f5b7e1594dfb33c3dcaff8b9c8e42aa00bcd74eb5",
 				"event:Webhooks.WebhookEndpoint/webhook.created": "ee7244fa3a25a8a99d7ca1fd1b7d92271c78d6aaefe0c7f1dbf92f76d0c780c8",
@@ -475,198 +475,213 @@
 				"event:Checkfu.Agent/agent.created": [
 					{
 						"_tag": "agent.created",
-						"version": 65,
+						"version": 99,
 						"version_id": "\udc00",
 						"name": ":4G3XU]')?",
 						"model": {
 							"id": "prototype"
 						},
 						"system": null,
-						"description": ""
+						"description": "",
+						"mcp_servers": " ",
+						"tools": "0N~G~3ng#"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 5,
-						"version_id": " ",
-						"name": "p",
+						"version": 35,
+						"version_id": "-1",
+						"name": "U",
 						"model": {
-							"id": "\ud800"
+							"id": "\udc00"
 						},
 						"system": null,
-						"description": " ",
+						"description": ")-;r",
 						"mcp_servers": "[G}nH2'/)Y",
-						"tools": "\udc00"
+						"tools": "0"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 42,
-						"version_id": "prototype",
-						"name": "gRSiS+K;",
+						"version": 101,
+						"version_id": "\u0000",
+						"name": "igRSiS+K;",
 						"model": {
 							"id": "\ud800"
 						},
 						"system": null,
 						"description": "\u0000",
-						"mcp_servers": ""
+						"mcp_servers": "",
+						"tools": "L'U3K%11m+"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 84,
+						"version": 100,
 						"version_id": "\u0000",
 						"name": "\ud800",
 						"model": {
 							"id": "\udc00"
 						},
 						"system": "😀",
-						"description": null
-					},
-					{
-						"_tag": "agent.created",
-						"version": 5,
-						"version_id": "-1",
-						"name": "prototype",
-						"model": {
-							"id": "__proto__"
-						},
-						"system": "A*k68RTH'4",
 						"description": null,
-						"mcp_servers": "\u0000",
-						"tools": ""
+						"mcp_servers": "\udc00",
+						"tools": "\u0000"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 101,
-						"version_id": "FM0{Qh*`:7",
-						"name": "\t",
+						"version": 11,
+						"version_id": "-1",
+						"name": "#`!WGu2UA*",
 						"model": {
-							"id": "0yDq5"
+							"id": "R"
 						},
-						"system": "8J%rC1",
-						"description": "-1",
+						"system": null,
+						"description": "\n",
+						"mcp_servers": "s",
+						"tools": "\u0000"
+					},
+					{
+						"_tag": "agent.created",
+						"version": 4,
+						"version_id": "\udc00",
+						"name": "wFM0{Q",
+						"model": {
+							"id": ":"
+						},
+						"system": " ",
+						"description": null,
 						"mcp_servers": "",
+						"tools": "52_XZ8J%rC"
+					},
+					{
+						"_tag": "agent.created",
+						"version": 6,
+						"version_id": "w[$A>5%CLs",
+						"name": "😀",
+						"model": {
+							"id": "4294967295"
+						},
+						"system": "\n",
+						"description": null,
+						"mcp_servers": "URXp`kUn",
 						"tools": ""
 					},
 					{
 						"_tag": "agent.created",
-						"version": 70,
-						"version_id": "\n",
-						"name": "A",
+						"version": 86,
+						"version_id": "&'1J[U0",
+						"name": "M_",
 						"model": {
 							"id": "\u0000"
 						},
-						"system": "-1",
+						"system": " ",
 						"description": null,
-						"mcp_servers": "😀"
-					},
-					{
-						"_tag": "agent.created",
-						"version": 70,
-						"version_id": "1J[U0Qq,M_",
-						"name": "\u0000",
-						"model": {
-							"id": "-1"
-						},
-						"system": "",
-						"description": "",
-						"mcp_servers": "\\}Kw~[X<Z",
-						"tools": "etb"
+						"mcp_servers": "\udc00",
+						"tools": "\udc00"
 					}
 				],
 				"event:Checkfu.Agent/agent.updated": [
 					{
 						"_tag": "agent.updated",
-						"version": 5,
-						"version_id": "B",
-						"name": "Jw.:<Gc0PG",
+						"version": 97,
+						"version_id": "toString",
+						"name": "B",
 						"model": {
-							"id": "\udc00"
+							"id": "Jw.:<Gc0PG"
 						},
 						"system": "",
-						"description": "",
-						"mcp_servers": "prototype"
-					},
-					{
-						"_tag": "agent.updated",
-						"version": 4,
-						"version_id": "PHSR",
-						"name": "__proto__",
-						"model": {
-							"id": "\u0000"
-						},
-						"system": null,
-						"description": null,
-						"mcp_servers": "\ud800"
-					},
-					{
-						"_tag": "agent.updated",
-						"version": 46,
-						"version_id": "jr()",
-						"name": "toString",
-						"model": {
-							"id": "T"
-						},
-						"system": "$&Sx)G+O",
-						"description": null,
+						"description": "\n",
 						"mcp_servers": "",
-						"tools": "GEf"
+						"tools": "prototype"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 5,
-						"version_id": "4294967295",
+						"version": 99,
+						"version_id": "toString",
+						"name": "H",
+						"model": {
+							"id": "S&:qn"
+						},
+						"system": "Q`$-,2h1~1",
+						"description": null,
+						"mcp_servers": "0",
+						"tools": "__proto__"
+					},
+					{
+						"_tag": "agent.updated",
+						"version": 52,
+						"version_id": "R",
 						"name": "\ud800",
+						"model": {
+							"id": "1h~S$T'\\^m"
+						},
+						"system": "4294967295",
+						"description": null,
+						"mcp_servers": "0",
+						"tools": "4294967295"
+					},
+					{
+						"_tag": "agent.updated",
+						"version": 39,
+						"version_id": "\udc00",
+						"name": "(f/#i",
 						"model": {
 							"id": "\ud800"
 						},
 						"system": null,
-						"description": "",
-						"tools": "Gtk/0"
+						"description": "0",
+						"mcp_servers": "",
+						"tools": "prototype"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 13,
+						"version": 2,
+						"version_id": "__proto__",
+						"name": "4294967295",
+						"model": {
+							"id": "\ud800"
+						},
+						"system": "\\",
+						"description": null,
+						"mcp_servers": "__proto__",
+						"tools": "tk/0"
+					},
+					{
+						"_tag": "agent.updated",
+						"version": 95,
 						"version_id": "aIoC?07E",
 						"name": "^",
 						"model": {
 							"id": "enj[lt%P>&"
 						},
 						"system": "\t",
-						"description": null
+						"description": null,
+						"mcp_servers": "__proto__",
+						"tools": "\t"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 82,
+						"version": 100,
 						"version_id": "}}=",
 						"name": "\t",
 						"model": {
 							"id": "-1"
 						},
 						"system": "\ud800",
-						"description": "toString"
+						"description": "toString",
+						"mcp_servers": "K-]2~)M5`S",
+						"tools": "prototype"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 57,
-						"version_id": "Qy$",
-						"name": "😀",
+						"version": 66,
+						"version_id": "j7Qy$)y",
+						"name": "\t",
 						"model": {
-							"id": "\t"
+							"id": "😀"
 						},
-						"system": ">`W'-{",
-						"description": "3*{MG#n,g#",
-						"mcp_servers": "\ud800"
-					},
-					{
-						"_tag": "agent.updated",
-						"version": 5,
-						"version_id": " ",
-						"name": "\udc00",
-						"model": {
-							"id": "4294967295"
-						},
-						"system": "prototype",
-						"description": "-1",
-						"tools": ""
+						"system": null,
+						"description": null,
+						"mcp_servers": "prototype",
+						"tools": "{6T`x3*{MG"
 					}
 				],
 				"command-reply:Checkfu/ArchiveAgent": [
@@ -1588,48 +1603,100 @@
 				"event:Checkfu.Session/user.interrupt": [
 					{
 						"_tag": "user.interrupt",
-						"turn": 1
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 70,
-						"segment": 1
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": null
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 96,
-						"segment": 96
+						"turn": 3,
+						"segment": 2
 					},
 					{
 						"_tag": "user.interrupt",
 						"turn": null,
-						"segment": 1
+						"segment": 99
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": null
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": null,
+						"turn": 28,
 						"segment": 5
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": 21
+						"turn": null,
+						"segment": 7
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 47
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": 55,
+						"segment": 36
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 92
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": 96,
+						"segment": 48
 					}
 				],
 				"event:Checkfu.Session/session.status_idle": [
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
+							"type": "budget_reached"
+						},
+						"turn": 7,
+						"event_ids": " "
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "budget_reached"
+						},
+						"turn": 16,
+						"event_ids": ""
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "refusal"
+						},
+						"turn": 72,
+						"event_ids": "\u0000"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "retries_exhausted"
+						},
+						"turn": 79,
+						"event_ids": ""
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "refusal"
+						},
+						"turn": 28,
+						"event_ids": "\t"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "refusal"
+						},
+						"turn": 61,
+						"event_ids": "7fn+{X3C"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
 							"type": "interrupted"
 						},
-						"turn": 97,
+						"turn": 2,
 						"event_ids": "\u0000"
 					},
 					{
@@ -1637,54 +1704,8 @@
 						"stop_reason": {
 							"type": "budget_reached"
 						},
-						"turn": 95,
-						"event_ids": "&\\$I;Ct4K:"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "refusal"
-						},
-						"turn": 24,
-						"event_ids": "toString"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "budget_reached"
-						},
-						"turn": 84
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "refusal"
-						},
-						"turn": 2,
-						"event_ids": "RO|XT9>BoH"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "budget_reached"
-						},
-						"turn": 63,
-						"event_ids": "fn"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "refusal"
-						},
-						"turn": 3
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "interrupted"
-						},
-						"turn": 101,
-						"event_ids": "\\&sk*Lo =+"
+						"turn": 6,
+						"event_ids": "V\\&"
 					}
 				],
 				"event:Checkfu.Session/span.model_request_start": [
@@ -2887,37 +2908,43 @@
 				"event:Checkfu.Session/session.status_terminated": [
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 33,
+						"event_ids": "\ud800"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 93,
+						"event_ids": "G3;a7Tzy#y"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 86
+						"running_turn": 100,
+						"event_ids": "-1"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 56,
+						"event_ids": "wP+F)?uBZI"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 40,
+						"event_ids": "x"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 32,
+						"event_ids": "0"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 4,
-						"event_ids": "%D[9n$kX7%"
+						"running_turn": null,
+						"event_ids": " "
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 19,
-						"event_ids": "\udc00"
+						"running_turn": null,
+						"event_ids": "😀"
 					}
 				],
 				"event:Checkfu.Session/session.archived": [
@@ -3033,50 +3060,54 @@
 				"event:Checkfu.Session/user.tool_confirmation": [
 					{
 						"_tag": "user.tool_confirmation",
-						"tool_use_id": "\t",
+						"tool_use_id": " ",
 						"result": "allow",
-						"processed_at": "+092092-04-17T08:04:05.302Z"
+						"processed_at": "-271821-04-20T00:00:00.033Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "\t",
-						"result": "deny"
+						"result": "deny",
+						"processed_at": "1969-12-31T23:59:59.974Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "😀",
-						"result": "deny"
-					},
-					{
-						"_tag": "user.tool_confirmation",
-						"tool_use_id": ",",
-						"result": "allow",
-						"deny_message": "",
-						"processed_at": "1970-01-01T00:00:00.011Z"
-					},
-					{
-						"_tag": "user.tool_confirmation",
-						"tool_use_id": "__proto__",
 						"result": "deny",
-						"deny_message": "\n",
-						"processed_at": "+171226-12-30T07:50:08.669Z"
+						"processed_at": "8070-04-02T02:56:16.039Z"
+					},
+					{
+						"_tag": "user.tool_confirmation",
+						"tool_use_id": "\udc00",
+						"result": "allow",
+						"deny_message": " ",
+						"processed_at": "1969-12-31T23:59:59.998Z"
+					},
+					{
+						"_tag": "user.tool_confirmation",
+						"tool_use_id": "]K7Tiw|{wH",
+						"result": "allow",
+						"deny_message": "😀",
+						"processed_at": "-126196-11-23T17:19:58.510Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "0",
-						"result": "deny"
+						"result": "deny",
+						"processed_at": "+275760-09-12T23:59:59.992Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "😀",
-						"result": "deny"
+						"result": "deny",
+						"processed_at": "1970-01-01T00:00:00.044Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
-						"tool_use_id": "3\"t$/Ke=<M",
+						"tool_use_id": "\ud800",
 						"result": "deny",
-						"deny_message": "^i6T6Cap9{",
-						"processed_at": "-058776-08-29T08:59:30.772Z"
+						"deny_message": "Ke=<MP_Cvl",
+						"processed_at": "-151970-07-15T13:28:03.549Z"
 					}
 				],
 				"event:Checkfu.Session/user.custom_tool_result": [
@@ -3108,15 +3139,20 @@
 								"type": "text",
 								"text": "R("
 							}
-						]
+						],
+						"processed_at": "-000071-03-29T02:50:32.550Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "-1",
+						"custom_tool_use_id": " ",
 						"content": [
 							{
 								"type": "text",
-								"text": ""
+								"text": "__proto__"
+							},
+							{
+								"type": "text",
+								"text": "\n"
 							},
 							{
 								"type": "text",
@@ -3149,14 +3185,10 @@
 							{
 								"type": "text",
 								"text": " "
-							},
-							{
-								"type": "text",
-								"text": ""
 							}
 						],
 						"is_error": true,
-						"processed_at": "+185857-10-25T14:00:00.066Z"
+						"processed_at": "-143278-04-21T23:02:33.949Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
@@ -3170,36 +3202,20 @@
 								"type": "text",
 								"text": "\n"
 							}
-						]
+						],
+						"processed_at": "-082111-08-23T15:48:12.673Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "\u0000",
+						"custom_tool_use_id": "b3k?O Rw;?",
 						"content": [
 							{
 								"type": "text",
-								"text": " Rw;?zmjv3"
+								"text": "`H"
 							},
 							{
 								"type": "text",
-								"text": ""
-							}
-						],
-						"is_error": true
-					},
-					{
-						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "L:iY3P3`Kh",
-						"content": [],
-						"processed_at": "1969-12-31T23:59:59.984Z"
-					},
-					{
-						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "v",
-						"content": [
-							{
-								"type": "text",
-								"text": "ExGUR"
+								"text": "prototype"
 							},
 							{
 								"type": "text",
@@ -3207,39 +3223,118 @@
 							},
 							{
 								"type": "text",
-								"text": "\ud800"
+								"text": "H-/s,Z%H <"
+							},
+							{
+								"type": "text",
+								"text": ""
+							},
+							{
+								"type": "text",
+								"text": "4294967295"
+							},
+							{
+								"type": "text",
+								"text": "4294967295"
+							},
+							{
+								"type": "text",
+								"text": "__proto__"
+							},
+							{
+								"type": "text",
+								"text": ""
 							}
 						],
-						"is_error": false
+						"is_error": true,
+						"processed_at": "-271821-04-20T00:00:00.050Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "\udc00",
-						"content": [],
-						"is_error": false
-					},
-					{
-						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "\t",
+						"custom_tool_use_id": "😀",
 						"content": [
 							{
 								"type": "text",
-								"text": "<qhm_:kw"
+								"text": "\n"
 							},
 							{
 								"type": "text",
-								"text": "\\_0"
+								"text": "P3"
 							},
 							{
 								"type": "text",
-								"text": "*jY`"
+								"text": "c$?B@+ju,h"
 							},
 							{
 								"type": "text",
-								"text": "Sy: F!m5hv"
+								"text": "QzDHwYukgv"
+							},
+							{
+								"type": "text",
+								"text": "DR:)2v"
+							},
+							{
+								"type": "text",
+								"text": "\ud800"
+							},
+							{
+								"type": "text",
+								"text": "ZL!s}/1@>\\"
+							},
+							{
+								"type": "text",
+								"text": ""
+							},
+							{
+								"type": "text",
+								"text": "prototype"
+							},
+							{
+								"type": "text",
+								"text": "~UM 0&TJ9`"
 							}
 						],
-						"processed_at": "-271821-04-20T00:00:00.000Z"
+						"processed_at": "-271821-04-20T00:00:00.013Z"
+					},
+					{
+						"_tag": "user.custom_tool_result",
+						"custom_tool_use_id": "-vT",
+						"content": [],
+						"is_error": false,
+						"processed_at": "6749-03-05T21:34:35.109Z"
+					},
+					{
+						"_tag": "user.custom_tool_result",
+						"custom_tool_use_id": ";",
+						"content": [
+							{
+								"type": "text",
+								"text": "Vv9wUfH/C"
+							},
+							{
+								"type": "text",
+								"text": "3+jD`"
+							},
+							{
+								"type": "text",
+								"text": "N,E"
+							},
+							{
+								"type": "text",
+								"text": " "
+							},
+							{
+								"type": "text",
+								"text": "~*aM}5#\\i^"
+							}
+						],
+						"processed_at": "-271821-04-20T00:00:00.017Z"
+					},
+					{
+						"_tag": "user.custom_tool_result",
+						"custom_tool_use_id": " ",
+						"content": [],
+						"processed_at": "1970-01-01T00:00:00.019Z"
 					}
 				],
 				"event:Checkfu.Session/system.message": [
@@ -3705,60 +3800,67 @@
 				"scheduled-command:Checkfu.Session/AbandonTurn": [
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "prototype",
-						"turn": 68,
-						"error_type": "4294967295",
-						"message": "6:AA"
-					},
-					{
-						"_tag": "AbandonTurn",
-						"session_id": "nX%zUl",
-						"turn": 18,
-						"error_type": "8",
-						"message": "\t"
-					},
-					{
-						"_tag": "AbandonTurn",
-						"session_id": " ",
-						"turn": 2,
-						"error_type": "ewak.Up*s=",
-						"message": "\u0000"
-					},
-					{
-						"_tag": "AbandonTurn",
-						"session_id": " ",
+						"session_id": "-1",
 						"turn": 95,
-						"segment": 20,
-						"error_type": ")Q~f)X",
-						"message": "\n"
+						"segment": 8,
+						"error_type": "\ud800",
+						"message": ":AARH`ON29"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "\t",
-						"turn": 3,
-						"error_type": "(,Q",
-						"message": "\ud800"
+						"session_id": "toString",
+						"turn": 58,
+						"segment": 61,
+						"error_type": "😀",
+						"message": "0SN@8K(N"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "-O\"=t7^06;",
-						"turn": 96,
-						"error_type": "\u0000",
-						"message": "0"
+						"session_id": "4294967295",
+						"turn": 1,
+						"segment": 1,
+						"error_type": "toString",
+						"message": ".Up*s='9"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "\t",
-						"turn": 6,
-						"error_type": "\n",
-						"message": "\u0000"
+						"session_id": "4294967295",
+						"turn": 5,
+						"segment": 1,
+						"error_type": "toString",
+						"message": "S"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "prototype",
-						"turn": 99,
+						"session_id": "?y,{`S)Q~f",
+						"turn": 2,
+						"segment": 2,
+						"error_type": "\"5:Hl,,KK",
+						"message": "yY+L"
+					},
+					{
+						"_tag": "AbandonTurn",
+						"session_id": "-1",
+						"turn": 5,
+						"segment": 100,
 						"error_type": "\t",
-						"message": "E79R{%7PH"
+						"message": "4294967295"
+					},
+					{
+						"_tag": "AbandonTurn",
+						"session_id": "\ud800",
+						"turn": 2,
+						"segment": 3,
+						"error_type": "06;#`4@62@",
+						"message": "}"
+					},
+					{
+						"_tag": "AbandonTurn",
+						"session_id": " ",
+						"turn": 1,
+						"segment": 3,
+						"error_type": "4294967295",
+						"message": "\"(,mq2C"
 					}
 				],
 				"command-reply:Checkfu/ArchiveSession": [
@@ -7866,16 +7968,6 @@
 					null
 				],
 				"view:Checkfu.TurnInput@v5": [
-					{
-						"agent_id": ":",
-						"agent_version": 94,
-						"environment_id": "__proto__",
-						"resources": [],
-						"turn": 29,
-						"input": [],
-						"system_context": "",
-						"unsent": []
-					},
 					null,
 					{
 						"agent_id": "MKUef):",
@@ -7899,7 +7991,9 @@
 							"<pg&a{`-8V",
 							"\ud800",
 							"16[OXEhZ/$"
-						]
+						],
+						"last_reply_turn": 2,
+						"segment": 2
 					},
 					null,
 					null,
@@ -7923,7 +8017,27 @@
 							"0",
 							"prototype",
 							"&_,K"
-						]
+						],
+						"last_reply_turn": 25,
+						"segment": 73
+					},
+					{
+						"agent_id": "😀",
+						"agent_version": 69,
+						"environment_id": " ",
+						"resources": [],
+						"turn": 48,
+						"input": [],
+						"unsent": [
+							"{",
+							"\n",
+							"\u0000",
+							"67DN+Z",
+							"?2W",
+							"p"
+						],
+						"last_reply_turn": 72,
+						"segment": 47
 					}
 				],
 				"view:Checkfu.AutomationView@v5": [
@@ -8628,39 +8742,36 @@
 				],
 				"policy-delivery:Checkfu.StartTurn/TurnInput": [
 					{
-						"agent_id": "toString",
-						"agent_version": 5,
-						"environment_id": "__proto__",
+						"agent_id": "=M n]HP1",
+						"agent_version": 7,
+						"environment_id": "prototype",
 						"resources": [],
-						"turn": 63,
-						"input": [],
-						"system_context": "",
-						"unsent": []
-					},
-					null,
-					null,
-					{
-						"agent_id": "!",
-						"agent_version": 75,
-						"environment_id": "__proto__",
-						"resources": [],
-						"turn": 94,
+						"turn": 95,
 						"input": [
-							"g#; N",
-							"-v>X3k_|&m",
-							"\n",
-							"`1",
-							"sQ4@9cA]}8"
+							"iRxLc+WJ",
+							"T{e)X@7rZ",
+							">UDJb/OwxK",
+							"toString",
+							"\udc00"
 						],
+						"system_context": "VfI7t~h,1",
 						"unsent": [
-							"!",
-							"X",
+							")-",
 							"😀",
-							"-} %_J& `<"
+							" ",
+							"WaJ;8Wt]Tb",
+							"Q#;Wop^8",
+							"*M\"{",
+							"[J",
+							"__proto__",
+							"%+*OuI>`~f"
 						],
-						"last_reply_turn": 4,
-						"segment": 6
+						"last_reply_turn": 2,
+						"segment": 4
 					},
+					null,
+					null,
+					null,
 					null,
 					null,
 					null,
@@ -8670,14 +8781,15 @@
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
-							"type": "refusal"
+							"type": "end_turn"
 						},
-						"turn": 1
+						"turn": 58,
+						"event_ids": "-1"
 					},
 					{
 						"_tag": "session.status_terminated",
 						"running_turn": null,
-						"event_ids": "9WouOZM&lp"
+						"event_ids": ">9W"
 					},
 					{
 						"_tag": "session.status_running",
@@ -8700,9 +8812,10 @@
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
-							"type": "retries_exhausted"
+							"type": "interrupted"
 						},
-						"turn": 101
+						"turn": 6,
+						"event_ids": "PVu"
 					},
 					{
 						"_tag": "turn.continued",
@@ -8717,35 +8830,38 @@
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": null
+						"turn": 70,
+						"segment": 2
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": 3,
-						"segment": 4
-					},
-					{
-						"_tag": "session.status_terminated",
-						"running_turn": 22,
-						"event_ids": "😀"
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 66,
-						"segment": 6
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 1,
+						"turn": null,
 						"segment": 1
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": null,
+						"event_ids": "prototype"
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 99
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 2
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 98
+						"running_turn": 46,
+						"event_ids": "😀"
+					},
+					{
+						"_tag": "session.status_terminated",
+						"running_turn": 6,
+						"event_ids": "{TlU{"
 					}
 				],
 				"policy-delivery:Checkfu.ArmAutomation/AutomationView": [
@@ -9205,50 +9321,55 @@
 				"policy-delivery:Checkfu.PublishSessionOutputs/Session": [
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 84,
-						"event_ids": ""
-					},
-					{
-						"_tag": "session.status_terminated",
-						"running_turn": 5
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "budget_reached"
-						},
-						"turn": 36
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "requires_action"
-						},
-						"turn": 4
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "requires_action"
-						},
-						"turn": 95
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "end_turn"
-						},
-						"turn": 1,
-						"event_ids": "\udc00"
-					},
-					{
-						"_tag": "session.status_terminated",
 						"running_turn": null,
 						"event_ids": "😀"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 5,
+						"event_ids": "tmM={_bA;y"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "interrupted"
+						},
+						"turn": 96,
+						"event_ids": "prototype"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "retries_exhausted"
+						},
+						"turn": 4,
+						"event_ids": "-1"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "retries_exhausted"
+						},
+						"turn": 48,
+						"event_ids": "Y0=REm-,LA"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "requires_action"
+						},
+						"turn": 1,
+						"event_ids": "\u0000"
+					},
+					{
+						"_tag": "session.status_terminated",
+						"running_turn": null,
+						"event_ids": ""
+					},
+					{
+						"_tag": "session.status_terminated",
+						"running_turn": 98,
+						"event_ids": "4294967295"
 					}
 				],
 				"policy-delivery:Checkfu.ExpireArtifactReservations/Artifact": [
@@ -9414,15 +9535,16 @@
 					},
 					{
 						"_tag": "agent.created",
-						"version": 32,
-						"version_id": "prototype",
-						"name": "pvh>:b8&nE",
+						"version": 1,
+						"version_id": "aV0lpvh>:b",
+						"name": " ",
 						"model": {
-							"id": "/"
+							"id": ","
 						},
-						"system": null,
+						"system": "4294967295",
 						"description": null,
-						"tools": "7Zk72cGgMQ"
+						"mcp_servers": "7Zk72cGgMQ",
+						"tools": "-1"
 					},
 					{
 						"_tag": "artifact.unpublished"
@@ -9508,16 +9630,16 @@
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 40,
-						"version_id": "T",
-						"name": "P5N'}PS4[\"",
+						"version": 26,
+						"version_id": ">WT|a~P5N'",
+						"name": "4[\"ijp",
 						"model": {
-							"id": "A'\"zFwG@B"
+							"id": "\t"
 						},
-						"system": "__proto__",
-						"description": null,
-						"mcp_servers": "",
-						"tools": "\ud800"
+						"system": "G@BNIWRKo}",
+						"description": "8)I",
+						"mcp_servers": "toString",
+						"tools": ""
 					},
 					{
 						"_tag": "environment.archived"
@@ -9647,9 +9769,10 @@
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
-							"type": "refusal"
+							"type": "end_turn"
 						},
-						"turn": 3
+						"turn": 35,
+						"event_ids": "0"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -9679,28 +9802,29 @@
 				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": [
 					{
 						"_tag": "agent.created",
-						"version": 2,
-						"version_id": "w",
-						"name": "\t",
+						"version": 9,
+						"version_id": "0",
+						"name": "\ud800",
 						"model": {
-							"id": ";DY#fH#~2X"
+							"id": "\t"
 						},
-						"system": "",
-						"description": null,
-						"mcp_servers": "\u0000",
-						"tools": "{"
+						"system": null,
+						"description": "toString",
+						"mcp_servers": "\ud800",
+						"tools": "0"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 98,
-						"version_id": "tBD",
-						"name": "4\"J$WN0T{+",
+						"version": 3,
+						"version_id": "|<tBDf<d4\"",
+						"name": " ",
 						"model": {
-							"id": "QV`rm_3sWK"
+							"id": "T"
 						},
-						"system": "toString",
-						"description": "I/6eu:n]",
-						"tools": "\u0000"
+						"system": null,
+						"description": "QV`rm_3sWK",
+						"mcp_servers": "\t",
+						"tools": ""
 					},
 					{
 						"_tag": "artifact.published",
@@ -9751,177 +9875,162 @@
 				],
 				"saga-input:Checkfu.RunTurn": [
 					{
-						"key": "637yl:^XZB",
-						"session_id": "4294967295",
-						"agent_id": "%xtLRDggmU",
-						"agent_version": 18,
-						"environment_id": "__proto__",
+						"key": " ",
+						"session_id": ">",
+						"agent_id": "co",
+						"agent_version": 6,
+						"environment_id": "/`%sd",
 						"resources": [
 							{
-								"id": "(",
-								"type": "artifact",
-								"artifact_id": "\\ j!gGSvTV",
-								"version": 100,
-								"manifest": "XN",
-								"name": " ",
-								"mount_path": "/mnt/artifacts/퓓"
-							},
-							{
-								"id": " ",
+								"id": "R",
 								"type": "github_repository",
-								"url": "https://github.com/X/e",
-								"mount_path": "/workspace/m",
+								"url": "https://github.com/z/7",
+								"mount_path": "/workspace/3",
 								"checkout": {
 									"type": "commit",
-									"sha": "217e65c5a38142ab433029a006cafd1805e60e55"
-								},
-								"requires_token": true
+									"sha": "37713c5da2f371fb74bb9170ab6e19a117291d46"
+								}
 							}
 						],
-						"turn": 97,
+						"turn": 55,
 						"input": [
+							"9O]wD,aV\\r",
+							"$",
 							"\u0000",
-							"4294967295",
-							" ",
-							"1x=",
-							"7",
-							"J",
-							"A{lw\"xG_kV",
-							"\n",
-							"EqaYP",
-							"😀"
-						]
-					},
-					{
-						"key": "\ud800",
-						"session_id": "MPj5j",
-						"agent_id": "-1",
-						"agent_version": 96,
-						"environment_id": "\n",
-						"resources": [],
-						"turn": 61,
-						"input": [
 							"prototype",
-							"prototype",
-							"-1",
-							"i",
-							"/Vp%IoB7{j",
-							">+u%Tp"
-						],
-						"last_reply_turn": 70,
-						"segment": 5
-					},
-					{
-						"key": "toString",
-						"session_id": "7",
-						"agent_id": "4294967295",
-						"agent_version": 51,
-						"environment_id": "\n",
-						"resources": [],
-						"turn": 2,
-						"input": [
-							"b[e4<",
-							"prototype",
-							"e",
-							" ",
-							"Y#c}[d[r't",
-							"😀",
-							"!79",
-							"😀",
 							"4294967295"
-						]
-					},
-					{
-						"key": "G",
-						"session_id": "%",
-						"agent_id": "=",
-						"agent_version": 95,
-						"environment_id": "\udc00",
-						"resources": [],
-						"turn": 100,
-						"input": [
-							"A",
-							"\udc00",
-							"0",
-							"|0BRFhL",
-							"l^nkBA",
-							"[AxaZ.@"
 						],
-						"last_reply_turn": 1,
-						"segment": 95
+						"last_reply_turn": 0,
+						"segment": 6
 					},
 					{
-						"key": " ",
-						"session_id": "q",
-						"agent_id": "[gLnhjV=WF",
-						"agent_version": 11,
-						"environment_id": "*U*~0w1",
-						"resources": [],
-						"turn": 7,
-						"input": [
-							"\t",
-							"CJ&,lN9w_c",
-							"i",
-							"TE%|"
-						],
-						"last_reply_turn": 1,
-						"__cause": {
-							"correlationId": "\n"
-						}
-					},
-					{
-						"key": "(/Gt=R~?#4",
-						"session_id": "Zj%PP{",
-						"agent_id": "\t",
-						"agent_version": 85,
-						"environment_id": "b",
+						"key": "<{s6`6",
+						"session_id": "\t",
+						"agent_id": "😀",
+						"agent_version": 25,
+						"environment_id": "{ X6=",
 						"resources": [],
 						"turn": 3,
 						"input": [
-							"zf.}tDT",
-							"7",
+							"l",
+							"2s",
+							"C",
+							",E+CWX~'md",
+							"L",
+							"NU m^",
+							"Dfvc!DU]c?",
+							"\ud800",
+							"O",
+							"-1"
+						],
+						"last_reply_turn": 100,
+						"segment": 97
+					},
+					{
+						"key": "__proto__",
+						"session_id": "😀",
+						"agent_id": "H",
+						"agent_version": 101,
+						"environment_id": " ",
+						"resources": [],
+						"turn": 32,
+						"input": [
 							"\udc00",
-							"prototype"
+							"prototype",
+							"\n",
+							"4294967295",
+							"T",
+							">?zDA{"
 						],
-						"system_context": "^a]Eu*bvmP",
-						"segment": 93
+						"last_reply_turn": 3,
+						"segment": 10
 					},
 					{
-						"key": "0@#<;y;*C,",
-						"session_id": "%T",
-						"agent_id": ";C}P J*= ",
-						"agent_version": 30,
-						"environment_id": "7\"C",
+						"key": "aw*m>-Um>$",
+						"session_id": "c",
+						"agent_id": " ",
+						"agent_version": 96,
+						"environment_id": "\udc00",
 						"resources": [],
-						"turn": 12,
+						"turn": 15,
 						"input": [
-							"M#se(qF=8Y"
+							"{'",
+							"\\"
 						],
-						"__cause": {
-							"correlationId": "d",
-							"trace": null
-						}
+						"last_reply_turn": 4,
+						"segment": 6
 					},
 					{
-						"key": "z",
-						"session_id": "<",
-						"agent_id": "X+4V",
-						"agent_version": 88,
-						"environment_id": "/D",
+						"key": "\ud800",
+						"session_id": "[ztJ`_@o",
+						"agent_id": "v",
+						"agent_version": 4,
+						"environment_id": "Bq|U:M",
 						"resources": [],
-						"turn": 44,
-						"input": [
-							"H7I",
-							"toString",
-							"__proto__",
-							"8R~XPPDH*$",
-							"A+x",
-							"0",
-							"@",
-							"😀",
-							"KKJ\"+G5"
+						"turn": 77,
+						"input": [],
+						"last_reply_turn": 11,
+						"segment": 43
+					},
+					{
+						"key": "\udc00",
+						"session_id": "5",
+						"agent_id": "-8R 5?'Mti",
+						"agent_version": 47,
+						"environment_id": "e/vg.tL&][",
+						"resources": [
+							{
+								"id": "p",
+								"type": "memory_store",
+								"memory_store_id": "\n",
+								"access": "read_only",
+								"instructions": null,
+								"name": "",
+								"description": "7`MyUR",
+								"mount_path": "/mnt/memory/덈"
+							}
 						],
-						"last_reply_turn": 1
+						"turn": 82,
+						"input": [
+							"a",
+							"Ny&90]lE]0",
+							"&sa(u1rit",
+							"~",
+							"\u0000"
+						],
+						"last_reply_turn": 97,
+						"segment": 1
+					},
+					{
+						"key": "\t",
+						"session_id": "😀",
+						"agent_id": "rPg",
+						"agent_version": 1,
+						"environment_id": "X+SJi",
+						"resources": [],
+						"turn": 39,
+						"input": [],
+						"last_reply_turn": 26,
+						"segment": 97
+					},
+					{
+						"key": "toString",
+						"session_id": "\udc00",
+						"agent_id": "6:R*S",
+						"agent_version": 101,
+						"environment_id": "-1",
+						"resources": [],
+						"turn": 26,
+						"input": [
+							"p)wm|-KMIG",
+							"z*+]`:",
+							"JWV5Q_w",
+							"uZI$",
+							"|",
+							"G}V~\\bo3'_"
+						],
+						"last_reply_turn": 2,
+						"segment": 60
 					}
 				],
 				"saga-result:Checkfu.RunTurn": [
@@ -18172,8 +18281,8 @@
 			"schemas": {
 				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
-				"event:Checkfu.Agent/agent.created": "3260de33f7fb073a60eb7ce33157593aaf7bb04c346efc0e27948d78a1a2953d",
-				"event:Checkfu.Agent/agent.updated": "dad1d28a18c669bdecffc829dafd8bf7f6924fcb5c35069722a41002179f9ad7",
+				"event:Checkfu.Agent/agent.created": "577e442e70db2103263d5ba4d8b3f3d5baf8fe679959d26cfccd0ef59b0439c8",
+				"event:Checkfu.Agent/agent.updated": "1d5bf1ff72adf9890df7d5d867c8a67e44abbc04985461987c5a1b1f1265d1af",
 				"command-reply:Checkfu/ArchiveAgent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.Environment": "0c5d8220ee3f83a8422f1d67486b0b3bfe0143847474e818d326a9459abcb1f1",
 				"event:Checkfu.Environment/environment.created": "42b0e29ebeb664625fef1062a706fe9c40c183f24733d2c03f39c3f9cf89f1ca",
@@ -18188,8 +18297,8 @@
 				"event:Checkfu.Session/session.created": "73c877dc37caed34a5e7f704f918d757eb05edfc75286c37893338ba3055114e",
 				"event:Checkfu.Session/user.message": "392eb57e6d20edc9d791ae142ff1fdc840d5023ee6aa308555ada5ccf4c95ecc",
 				"event:Checkfu.Session/session.status_running": "e21faf22832d22a1f53bf056047e7854d74c78473edf4420e7713b1f23eab41c",
-				"event:Checkfu.Session/user.interrupt": "983d5e331d1c2dd6d38326beabdba4ab8c849ff2559c1b6fef08aa6b9861f667",
-				"event:Checkfu.Session/session.status_idle": "27c6166f68346ed641fdb82e58c814cd8c9d9d909acd38178197c86dbe8d3958",
+				"event:Checkfu.Session/user.interrupt": "5095a65a285c0b731ad562c6360a3fc23cc816c5bec2b1abe997a34697a42987",
+				"event:Checkfu.Session/session.status_idle": "62fb4ab48d0ddfb432faee20d748bd16c557af4ad287655fbc1b7ceec0e962c9",
 				"event:Checkfu.Session/span.model_request_start": "fb34a247e10fdcc0027c54c0bab9d74c224de527caed10389c6a93838285af90",
 				"event:Checkfu.Session/agent.tool_use": "892e6fc7f75540cfaa0184ef43f75ff7f446e9b7e535134dbbc1c149a091cede",
 				"event:Checkfu.Session/agent.tool_result": "7e3c9288f82821b8b2a91c035086066961924a4b230aa33393db31fc6c20d2c6",
@@ -18202,12 +18311,12 @@
 				"event:Checkfu.Session/agent.thinking": "6f7dfdaec528c15b740db34213e790dcad4eb2ef15830fec2e44a66f9f8e7ea0",
 				"event:Checkfu.Session/agent.message": "0cc08036c3d98d73aac9ffa84fef985689681b667d7641bf0132e5982a8d3dac",
 				"event:Checkfu.Session/turn.abandoned": "e7132abeadd655216378df3ee5958984132bcc218ca744fc897615bd12ec2900",
-				"event:Checkfu.Session/session.status_terminated": "c59f77a24301213c5a1dea030d692195c2404ffdb8501f67d21b2153b92b64c1",
+				"event:Checkfu.Session/session.status_terminated": "4104ae927415f2ed4c034730ca13485cfd90cb127ce43c65c7f27c8ba2a3f491",
 				"event:Checkfu.Session/session.archived": "b11a10f5bd0d7bebbd52678deaefa6df02ea48ddcd3bc643ebbde0b980cbcd94",
 				"event:Checkfu.Session/idempotency_key.claimed": "b57c66deb131ddfd46e73af7ca2d5e75dc2661ed80d44608dc22d5fede374a00",
 				"event:Checkfu.Session/agent.custom_tool_use": "896d39a0afdd7ec1b84cebb1878f7535a19197ec527a6a1820307f5fb3b901de",
-				"event:Checkfu.Session/user.tool_confirmation": "dc23eeff45025aac8304552a21e8b27fffb5b12726a02551ad1561173e521fab",
-				"event:Checkfu.Session/user.custom_tool_result": "e6ea221ba965e1077f52dfae578fd80d35cf711e1c2dd02cdcee139914197d38",
+				"event:Checkfu.Session/user.tool_confirmation": "a72c732903416bfb1e17515679643f86dcae5314087c215b693a3ad44726a3b1",
+				"event:Checkfu.Session/user.custom_tool_result": "72e48747b5222d85c220dfe9e48fe655027c7da0414f70d5c4c3c907d8c1fc64",
 				"event:Checkfu.Session/system.message": "edab4dea094ef272cefb072c4c24847152f68a2f1688f10788eca1af874be0fc",
 				"command-reply:Checkfu/CreateSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/SendUserMessage": "6d54d32b85d5867b2c440e7022b0fd1709ed0fd0b6e622e3ed8471f524f731a7",
@@ -18222,7 +18331,7 @@
 				"command-reply:Checkfu/FailModelRequest": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/InterruptModelRequest": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/AbandonTurn": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"scheduled-command:Checkfu.Session/AbandonTurn": "d84220c643a170af67f345634b0297ac76eaa786207c1e799bbb0d891f88a764",
+				"scheduled-command:Checkfu.Session/AbandonTurn": "91e092b48dcc0f0ccba7bb57be93ecb201264a5657ca604307ef08e1989713f7",
 				"command-reply:Checkfu/ArchiveSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/ClaimIdempotencyKey": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.SystemContext": "f4cfe62552a6b1f09a515e6db685d3792a3ad71dafde95208a4cc82a6b619834",
@@ -18313,7 +18422,7 @@
 				"view:Checkfu.EnvironmentView@v0": "e88f0b2a5e305927998bd8476a68bd0fe680620aa08decf10dd2df928a2c7e47",
 				"view:Checkfu.SessionView@v6": "812c81c7cb06296edd7d12ea159e5b5021e9e04067409d2d20eba719f7145174",
 				"view:Checkfu.SessionTurnCompletion@v1": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
-				"view:Checkfu.TurnInput@v5": "fb1a7d40fa475b45b5d8f3571790e6b2a4f3fce0a698e30b25366c115377a79c",
+				"view:Checkfu.TurnInput@v5": "41cb2d3bdb3fc00d0213f321b7772bedc91f00f1aaa7003052112f604d5563ca",
 				"view:Checkfu.AutomationView@v5": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"view:Checkfu.AutomationRunView@v1": "9ff80023b8cad6cc0d152e39941175de90e124d4bf705b5e1edfdbc476045ec1",
 				"view:Checkfu.ArtifactVersionView@v1": "cf637979987d13f9694e748e4a58f8881169a073c7a0c7d08bc80b214fe35896",
@@ -18321,22 +18430,22 @@
 				"view:Checkfu.MemoryView@v1": "91f90bea5f24bb78c97ee9c5ec3825652172d4cec5fb35637d1a0f907988ac72",
 				"view:Checkfu.MemoryIndex@v1": "ba2280164859cd2bfc80e0ac47a1d95b65755bb503f630b8eb08f1df359c7081",
 				"policy-delivery:Checkfu.RecordInitialMessages/Session": "5a3c59392f7a0553089708e9d0d916e4a1b6d4703da0877cfd51017bd97792b9",
-				"policy-delivery:Checkfu.StartTurn/TurnInput": "fb1a7d40fa475b45b5d8f3571790e6b2a4f3fce0a698e30b25366c115377a79c",
-				"policy-delivery:Checkfu.EnsureTurnStarted/Session": "94f4339e275b4f209fa618df15716c3bffeca543a1a9458f654f6e08a1892e08",
-				"policy-delivery:Checkfu.EnsureTurnStopped/Session": "1e59d4571c4296fdb747be72a66a7b654a66c70094ba26e96870000386dfe881",
+				"policy-delivery:Checkfu.StartTurn/TurnInput": "41cb2d3bdb3fc00d0213f321b7772bedc91f00f1aaa7003052112f604d5563ca",
+				"policy-delivery:Checkfu.EnsureTurnStarted/Session": "50972129f5a82f0c6addbdd70138b0109343d0d440e79a9808c21e20f0d7c094",
+				"policy-delivery:Checkfu.EnsureTurnStopped/Session": "911b839d3899639da37f5bcf3c7ed546b53b02bfab24fd197879d4fce48fdb8c",
 				"policy-delivery:Checkfu.ArmAutomation/AutomationView": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"policy-delivery:Checkfu.StartAutomationRun/AutomationView": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
 				"policy-delivery:Checkfu.FreeAutomationSlot/Automation": "6cfba9900bbf7b877c1e81a9cea14bca2d73a0ae73d28242c62a54e3505fc5b5",
-				"policy-delivery:Checkfu.PublishSessionOutputs/Session": "2de076533e8bd0c2f25bc6d83ca58d9d2118554861e0bc941abacd792eed88ee",
+				"policy-delivery:Checkfu.PublishSessionOutputs/Session": "256a19cb0eed039cbea2c464dd65e825c57baf6b36b71a1cc898eeb9e7cff6da",
 				"policy-delivery:Checkfu.ExpireArtifactReservations/Artifact": "2c4debc1b87204ece46e7d374a7f51c948c9c3dd6f5ecb61ec5ab25dcecf6f46",
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "4de7fa004d0d33ab3400670efd41b537615d568fb9c8b630f67d14198623b207",
-				"saga-input:Checkfu.RunTurn": "00c13b40cc4d4c95db1ee2b6642aad4fd33cc9658890adf2335991bc69b1bd2e",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"saga-input:Checkfu.RunTurn": "56b5422c6cc2f000891b60dfda037ee81cd6c9f86ce7ff528cc2a913eecfbfe1",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "0b173c30d84e4e7ba5f9491f5b7e1594dfb33c3dcaff8b9c8e42aa00bcd74eb5",
 				"event:Webhooks.WebhookEndpoint/webhook.created": "ee7244fa3a25a8a99d7ca1fd1b7d92271c78d6aaefe0c7f1dbf92f76d0c780c8",
@@ -18641,198 +18750,213 @@
 				"event:Checkfu.Agent/agent.created": [
 					{
 						"_tag": "agent.created",
-						"version": 65,
+						"version": 99,
 						"version_id": "\udc00",
 						"name": ":4G3XU]')?",
 						"model": {
 							"id": "prototype"
 						},
 						"system": null,
-						"description": ""
+						"description": "",
+						"mcp_servers": " ",
+						"tools": "0N~G~3ng#"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 5,
-						"version_id": " ",
-						"name": "p",
+						"version": 35,
+						"version_id": "-1",
+						"name": "U",
 						"model": {
-							"id": "\ud800"
+							"id": "\udc00"
 						},
 						"system": null,
-						"description": " ",
+						"description": ")-;r",
 						"mcp_servers": "[G}nH2'/)Y",
-						"tools": "\udc00"
+						"tools": "0"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 42,
-						"version_id": "prototype",
-						"name": "gRSiS+K;",
+						"version": 101,
+						"version_id": "\u0000",
+						"name": "igRSiS+K;",
 						"model": {
 							"id": "\ud800"
 						},
 						"system": null,
 						"description": "\u0000",
-						"mcp_servers": ""
+						"mcp_servers": "",
+						"tools": "L'U3K%11m+"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 84,
+						"version": 100,
 						"version_id": "\u0000",
 						"name": "\ud800",
 						"model": {
 							"id": "\udc00"
 						},
 						"system": "😀",
-						"description": null
-					},
-					{
-						"_tag": "agent.created",
-						"version": 5,
-						"version_id": "-1",
-						"name": "prototype",
-						"model": {
-							"id": "__proto__"
-						},
-						"system": "A*k68RTH'4",
 						"description": null,
-						"mcp_servers": "\u0000",
-						"tools": ""
+						"mcp_servers": "\udc00",
+						"tools": "\u0000"
 					},
 					{
 						"_tag": "agent.created",
-						"version": 101,
-						"version_id": "FM0{Qh*`:7",
-						"name": "\t",
+						"version": 11,
+						"version_id": "-1",
+						"name": "#`!WGu2UA*",
 						"model": {
-							"id": "0yDq5"
+							"id": "R"
 						},
-						"system": "8J%rC1",
-						"description": "-1",
+						"system": null,
+						"description": "\n",
+						"mcp_servers": "s",
+						"tools": "\u0000"
+					},
+					{
+						"_tag": "agent.created",
+						"version": 4,
+						"version_id": "\udc00",
+						"name": "wFM0{Q",
+						"model": {
+							"id": ":"
+						},
+						"system": " ",
+						"description": null,
 						"mcp_servers": "",
+						"tools": "52_XZ8J%rC"
+					},
+					{
+						"_tag": "agent.created",
+						"version": 6,
+						"version_id": "w[$A>5%CLs",
+						"name": "😀",
+						"model": {
+							"id": "4294967295"
+						},
+						"system": "\n",
+						"description": null,
+						"mcp_servers": "URXp`kUn",
 						"tools": ""
 					},
 					{
 						"_tag": "agent.created",
-						"version": 70,
-						"version_id": "\n",
-						"name": "A",
+						"version": 86,
+						"version_id": "&'1J[U0",
+						"name": "M_",
 						"model": {
 							"id": "\u0000"
 						},
-						"system": "-1",
+						"system": " ",
 						"description": null,
-						"mcp_servers": "😀"
-					},
-					{
-						"_tag": "agent.created",
-						"version": 70,
-						"version_id": "1J[U0Qq,M_",
-						"name": "\u0000",
-						"model": {
-							"id": "-1"
-						},
-						"system": "",
-						"description": "",
-						"mcp_servers": "\\}Kw~[X<Z",
-						"tools": "etb"
+						"mcp_servers": "\udc00",
+						"tools": "\udc00"
 					}
 				],
 				"event:Checkfu.Agent/agent.updated": [
 					{
 						"_tag": "agent.updated",
-						"version": 5,
-						"version_id": "B",
-						"name": "Jw.:<Gc0PG",
+						"version": 97,
+						"version_id": "toString",
+						"name": "B",
 						"model": {
-							"id": "\udc00"
+							"id": "Jw.:<Gc0PG"
 						},
 						"system": "",
-						"description": "",
-						"mcp_servers": "prototype"
-					},
-					{
-						"_tag": "agent.updated",
-						"version": 4,
-						"version_id": "PHSR",
-						"name": "__proto__",
-						"model": {
-							"id": "\u0000"
-						},
-						"system": null,
-						"description": null,
-						"mcp_servers": "\ud800"
-					},
-					{
-						"_tag": "agent.updated",
-						"version": 46,
-						"version_id": "jr()",
-						"name": "toString",
-						"model": {
-							"id": "T"
-						},
-						"system": "$&Sx)G+O",
-						"description": null,
+						"description": "\n",
 						"mcp_servers": "",
-						"tools": "GEf"
+						"tools": "prototype"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 5,
-						"version_id": "4294967295",
+						"version": 99,
+						"version_id": "toString",
+						"name": "H",
+						"model": {
+							"id": "S&:qn"
+						},
+						"system": "Q`$-,2h1~1",
+						"description": null,
+						"mcp_servers": "0",
+						"tools": "__proto__"
+					},
+					{
+						"_tag": "agent.updated",
+						"version": 52,
+						"version_id": "R",
 						"name": "\ud800",
+						"model": {
+							"id": "1h~S$T'\\^m"
+						},
+						"system": "4294967295",
+						"description": null,
+						"mcp_servers": "0",
+						"tools": "4294967295"
+					},
+					{
+						"_tag": "agent.updated",
+						"version": 39,
+						"version_id": "\udc00",
+						"name": "(f/#i",
 						"model": {
 							"id": "\ud800"
 						},
 						"system": null,
-						"description": "",
-						"tools": "Gtk/0"
+						"description": "0",
+						"mcp_servers": "",
+						"tools": "prototype"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 13,
+						"version": 2,
+						"version_id": "__proto__",
+						"name": "4294967295",
+						"model": {
+							"id": "\ud800"
+						},
+						"system": "\\",
+						"description": null,
+						"mcp_servers": "__proto__",
+						"tools": "tk/0"
+					},
+					{
+						"_tag": "agent.updated",
+						"version": 95,
 						"version_id": "aIoC?07E",
 						"name": "^",
 						"model": {
 							"id": "enj[lt%P>&"
 						},
 						"system": "\t",
-						"description": null
+						"description": null,
+						"mcp_servers": "__proto__",
+						"tools": "\t"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 82,
+						"version": 100,
 						"version_id": "}}=",
 						"name": "\t",
 						"model": {
 							"id": "-1"
 						},
 						"system": "\ud800",
-						"description": "toString"
+						"description": "toString",
+						"mcp_servers": "K-]2~)M5`S",
+						"tools": "prototype"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 57,
-						"version_id": "Qy$",
-						"name": "😀",
+						"version": 66,
+						"version_id": "j7Qy$)y",
+						"name": "\t",
 						"model": {
-							"id": "\t"
+							"id": "😀"
 						},
-						"system": ">`W'-{",
-						"description": "3*{MG#n,g#",
-						"mcp_servers": "\ud800"
-					},
-					{
-						"_tag": "agent.updated",
-						"version": 5,
-						"version_id": " ",
-						"name": "\udc00",
-						"model": {
-							"id": "4294967295"
-						},
-						"system": "prototype",
-						"description": "-1",
-						"tools": ""
+						"system": null,
+						"description": null,
+						"mcp_servers": "prototype",
+						"tools": "{6T`x3*{MG"
 					}
 				],
 				"command-reply:Checkfu/ArchiveAgent": [
@@ -19754,48 +19878,100 @@
 				"event:Checkfu.Session/user.interrupt": [
 					{
 						"_tag": "user.interrupt",
-						"turn": 1
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 70,
-						"segment": 1
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": null
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 96,
-						"segment": 96
+						"turn": 3,
+						"segment": 2
 					},
 					{
 						"_tag": "user.interrupt",
 						"turn": null,
-						"segment": 1
+						"segment": 99
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": null
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": null,
+						"turn": 28,
 						"segment": 5
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": 21
+						"turn": null,
+						"segment": 7
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 47
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": 55,
+						"segment": 36
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 92
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": 96,
+						"segment": 48
 					}
 				],
 				"event:Checkfu.Session/session.status_idle": [
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
+							"type": "budget_reached"
+						},
+						"turn": 7,
+						"event_ids": " "
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "budget_reached"
+						},
+						"turn": 16,
+						"event_ids": ""
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "refusal"
+						},
+						"turn": 72,
+						"event_ids": "\u0000"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "retries_exhausted"
+						},
+						"turn": 79,
+						"event_ids": ""
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "refusal"
+						},
+						"turn": 28,
+						"event_ids": "\t"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "refusal"
+						},
+						"turn": 61,
+						"event_ids": "7fn+{X3C"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
 							"type": "interrupted"
 						},
-						"turn": 97,
+						"turn": 2,
 						"event_ids": "\u0000"
 					},
 					{
@@ -19803,54 +19979,8 @@
 						"stop_reason": {
 							"type": "budget_reached"
 						},
-						"turn": 95,
-						"event_ids": "&\\$I;Ct4K:"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "refusal"
-						},
-						"turn": 24,
-						"event_ids": "toString"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "budget_reached"
-						},
-						"turn": 84
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "refusal"
-						},
-						"turn": 2,
-						"event_ids": "RO|XT9>BoH"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "budget_reached"
-						},
-						"turn": 63,
-						"event_ids": "fn"
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "refusal"
-						},
-						"turn": 3
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "interrupted"
-						},
-						"turn": 101,
-						"event_ids": "\\&sk*Lo =+"
+						"turn": 6,
+						"event_ids": "V\\&"
 					}
 				],
 				"event:Checkfu.Session/span.model_request_start": [
@@ -21053,37 +21183,43 @@
 				"event:Checkfu.Session/session.status_terminated": [
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 33,
+						"event_ids": "\ud800"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 93,
+						"event_ids": "G3;a7Tzy#y"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 86
+						"running_turn": 100,
+						"event_ids": "-1"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 56,
+						"event_ids": "wP+F)?uBZI"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 40,
+						"event_ids": "x"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 32,
+						"event_ids": "0"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 4,
-						"event_ids": "%D[9n$kX7%"
+						"running_turn": null,
+						"event_ids": " "
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 19,
-						"event_ids": "\udc00"
+						"running_turn": null,
+						"event_ids": "😀"
 					}
 				],
 				"event:Checkfu.Session/session.archived": [
@@ -21199,50 +21335,54 @@
 				"event:Checkfu.Session/user.tool_confirmation": [
 					{
 						"_tag": "user.tool_confirmation",
-						"tool_use_id": "\t",
+						"tool_use_id": " ",
 						"result": "allow",
-						"processed_at": "+092092-04-17T08:04:05.302Z"
+						"processed_at": "-271821-04-20T00:00:00.033Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "\t",
-						"result": "deny"
+						"result": "deny",
+						"processed_at": "1969-12-31T23:59:59.974Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "😀",
-						"result": "deny"
-					},
-					{
-						"_tag": "user.tool_confirmation",
-						"tool_use_id": ",",
-						"result": "allow",
-						"deny_message": "",
-						"processed_at": "1970-01-01T00:00:00.011Z"
-					},
-					{
-						"_tag": "user.tool_confirmation",
-						"tool_use_id": "__proto__",
 						"result": "deny",
-						"deny_message": "\n",
-						"processed_at": "+171226-12-30T07:50:08.669Z"
+						"processed_at": "8070-04-02T02:56:16.039Z"
+					},
+					{
+						"_tag": "user.tool_confirmation",
+						"tool_use_id": "\udc00",
+						"result": "allow",
+						"deny_message": " ",
+						"processed_at": "1969-12-31T23:59:59.998Z"
+					},
+					{
+						"_tag": "user.tool_confirmation",
+						"tool_use_id": "]K7Tiw|{wH",
+						"result": "allow",
+						"deny_message": "😀",
+						"processed_at": "-126196-11-23T17:19:58.510Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "0",
-						"result": "deny"
+						"result": "deny",
+						"processed_at": "+275760-09-12T23:59:59.992Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
 						"tool_use_id": "😀",
-						"result": "deny"
+						"result": "deny",
+						"processed_at": "1970-01-01T00:00:00.044Z"
 					},
 					{
 						"_tag": "user.tool_confirmation",
-						"tool_use_id": "3\"t$/Ke=<M",
+						"tool_use_id": "\ud800",
 						"result": "deny",
-						"deny_message": "^i6T6Cap9{",
-						"processed_at": "-058776-08-29T08:59:30.772Z"
+						"deny_message": "Ke=<MP_Cvl",
+						"processed_at": "-151970-07-15T13:28:03.549Z"
 					}
 				],
 				"event:Checkfu.Session/user.custom_tool_result": [
@@ -21274,15 +21414,20 @@
 								"type": "text",
 								"text": "R("
 							}
-						]
+						],
+						"processed_at": "-000071-03-29T02:50:32.550Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "-1",
+						"custom_tool_use_id": " ",
 						"content": [
 							{
 								"type": "text",
-								"text": ""
+								"text": "__proto__"
+							},
+							{
+								"type": "text",
+								"text": "\n"
 							},
 							{
 								"type": "text",
@@ -21315,14 +21460,10 @@
 							{
 								"type": "text",
 								"text": " "
-							},
-							{
-								"type": "text",
-								"text": ""
 							}
 						],
 						"is_error": true,
-						"processed_at": "+185857-10-25T14:00:00.066Z"
+						"processed_at": "-143278-04-21T23:02:33.949Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
@@ -21336,36 +21477,20 @@
 								"type": "text",
 								"text": "\n"
 							}
-						]
+						],
+						"processed_at": "-082111-08-23T15:48:12.673Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "\u0000",
+						"custom_tool_use_id": "b3k?O Rw;?",
 						"content": [
 							{
 								"type": "text",
-								"text": " Rw;?zmjv3"
+								"text": "`H"
 							},
 							{
 								"type": "text",
-								"text": ""
-							}
-						],
-						"is_error": true
-					},
-					{
-						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "L:iY3P3`Kh",
-						"content": [],
-						"processed_at": "1969-12-31T23:59:59.984Z"
-					},
-					{
-						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "v",
-						"content": [
-							{
-								"type": "text",
-								"text": "ExGUR"
+								"text": "prototype"
 							},
 							{
 								"type": "text",
@@ -21373,39 +21498,118 @@
 							},
 							{
 								"type": "text",
-								"text": "\ud800"
+								"text": "H-/s,Z%H <"
+							},
+							{
+								"type": "text",
+								"text": ""
+							},
+							{
+								"type": "text",
+								"text": "4294967295"
+							},
+							{
+								"type": "text",
+								"text": "4294967295"
+							},
+							{
+								"type": "text",
+								"text": "__proto__"
+							},
+							{
+								"type": "text",
+								"text": ""
 							}
 						],
-						"is_error": false
+						"is_error": true,
+						"processed_at": "-271821-04-20T00:00:00.050Z"
 					},
 					{
 						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "\udc00",
-						"content": [],
-						"is_error": false
-					},
-					{
-						"_tag": "user.custom_tool_result",
-						"custom_tool_use_id": "\t",
+						"custom_tool_use_id": "😀",
 						"content": [
 							{
 								"type": "text",
-								"text": "<qhm_:kw"
+								"text": "\n"
 							},
 							{
 								"type": "text",
-								"text": "\\_0"
+								"text": "P3"
 							},
 							{
 								"type": "text",
-								"text": "*jY`"
+								"text": "c$?B@+ju,h"
 							},
 							{
 								"type": "text",
-								"text": "Sy: F!m5hv"
+								"text": "QzDHwYukgv"
+							},
+							{
+								"type": "text",
+								"text": "DR:)2v"
+							},
+							{
+								"type": "text",
+								"text": "\ud800"
+							},
+							{
+								"type": "text",
+								"text": "ZL!s}/1@>\\"
+							},
+							{
+								"type": "text",
+								"text": ""
+							},
+							{
+								"type": "text",
+								"text": "prototype"
+							},
+							{
+								"type": "text",
+								"text": "~UM 0&TJ9`"
 							}
 						],
-						"processed_at": "-271821-04-20T00:00:00.000Z"
+						"processed_at": "-271821-04-20T00:00:00.013Z"
+					},
+					{
+						"_tag": "user.custom_tool_result",
+						"custom_tool_use_id": "-vT",
+						"content": [],
+						"is_error": false,
+						"processed_at": "6749-03-05T21:34:35.109Z"
+					},
+					{
+						"_tag": "user.custom_tool_result",
+						"custom_tool_use_id": ";",
+						"content": [
+							{
+								"type": "text",
+								"text": "Vv9wUfH/C"
+							},
+							{
+								"type": "text",
+								"text": "3+jD`"
+							},
+							{
+								"type": "text",
+								"text": "N,E"
+							},
+							{
+								"type": "text",
+								"text": " "
+							},
+							{
+								"type": "text",
+								"text": "~*aM}5#\\i^"
+							}
+						],
+						"processed_at": "-271821-04-20T00:00:00.017Z"
+					},
+					{
+						"_tag": "user.custom_tool_result",
+						"custom_tool_use_id": " ",
+						"content": [],
+						"processed_at": "1970-01-01T00:00:00.019Z"
 					}
 				],
 				"event:Checkfu.Session/system.message": [
@@ -21871,60 +22075,67 @@
 				"scheduled-command:Checkfu.Session/AbandonTurn": [
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "prototype",
-						"turn": 68,
-						"error_type": "4294967295",
-						"message": "6:AA"
-					},
-					{
-						"_tag": "AbandonTurn",
-						"session_id": "nX%zUl",
-						"turn": 18,
-						"error_type": "8",
-						"message": "\t"
-					},
-					{
-						"_tag": "AbandonTurn",
-						"session_id": " ",
-						"turn": 2,
-						"error_type": "ewak.Up*s=",
-						"message": "\u0000"
-					},
-					{
-						"_tag": "AbandonTurn",
-						"session_id": " ",
+						"session_id": "-1",
 						"turn": 95,
-						"segment": 20,
-						"error_type": ")Q~f)X",
-						"message": "\n"
+						"segment": 8,
+						"error_type": "\ud800",
+						"message": ":AARH`ON29"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "\t",
-						"turn": 3,
-						"error_type": "(,Q",
-						"message": "\ud800"
+						"session_id": "toString",
+						"turn": 58,
+						"segment": 61,
+						"error_type": "😀",
+						"message": "0SN@8K(N"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "-O\"=t7^06;",
-						"turn": 96,
-						"error_type": "\u0000",
-						"message": "0"
+						"session_id": "4294967295",
+						"turn": 1,
+						"segment": 1,
+						"error_type": "toString",
+						"message": ".Up*s='9"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "\t",
-						"turn": 6,
-						"error_type": "\n",
-						"message": "\u0000"
+						"session_id": "4294967295",
+						"turn": 5,
+						"segment": 1,
+						"error_type": "toString",
+						"message": "S"
 					},
 					{
 						"_tag": "AbandonTurn",
-						"session_id": "prototype",
-						"turn": 99,
+						"session_id": "?y,{`S)Q~f",
+						"turn": 2,
+						"segment": 2,
+						"error_type": "\"5:Hl,,KK",
+						"message": "yY+L"
+					},
+					{
+						"_tag": "AbandonTurn",
+						"session_id": "-1",
+						"turn": 5,
+						"segment": 100,
 						"error_type": "\t",
-						"message": "E79R{%7PH"
+						"message": "4294967295"
+					},
+					{
+						"_tag": "AbandonTurn",
+						"session_id": "\ud800",
+						"turn": 2,
+						"segment": 3,
+						"error_type": "06;#`4@62@",
+						"message": "}"
+					},
+					{
+						"_tag": "AbandonTurn",
+						"session_id": " ",
+						"turn": 1,
+						"segment": 3,
+						"error_type": "4294967295",
+						"message": "\"(,mq2C"
 					}
 				],
 				"command-reply:Checkfu/ArchiveSession": [
@@ -26032,16 +26243,6 @@
 					null
 				],
 				"view:Checkfu.TurnInput@v5": [
-					{
-						"agent_id": ":",
-						"agent_version": 94,
-						"environment_id": "__proto__",
-						"resources": [],
-						"turn": 29,
-						"input": [],
-						"system_context": "",
-						"unsent": []
-					},
 					null,
 					{
 						"agent_id": "MKUef):",
@@ -26065,7 +26266,9 @@
 							"<pg&a{`-8V",
 							"\ud800",
 							"16[OXEhZ/$"
-						]
+						],
+						"last_reply_turn": 2,
+						"segment": 2
 					},
 					null,
 					null,
@@ -26089,7 +26292,27 @@
 							"0",
 							"prototype",
 							"&_,K"
-						]
+						],
+						"last_reply_turn": 25,
+						"segment": 73
+					},
+					{
+						"agent_id": "😀",
+						"agent_version": 69,
+						"environment_id": " ",
+						"resources": [],
+						"turn": 48,
+						"input": [],
+						"unsent": [
+							"{",
+							"\n",
+							"\u0000",
+							"67DN+Z",
+							"?2W",
+							"p"
+						],
+						"last_reply_turn": 72,
+						"segment": 47
 					}
 				],
 				"view:Checkfu.AutomationView@v5": [
@@ -26794,39 +27017,36 @@
 				],
 				"policy-delivery:Checkfu.StartTurn/TurnInput": [
 					{
-						"agent_id": "toString",
-						"agent_version": 5,
-						"environment_id": "__proto__",
+						"agent_id": "=M n]HP1",
+						"agent_version": 7,
+						"environment_id": "prototype",
 						"resources": [],
-						"turn": 63,
-						"input": [],
-						"system_context": "",
-						"unsent": []
-					},
-					null,
-					null,
-					{
-						"agent_id": "!",
-						"agent_version": 75,
-						"environment_id": "__proto__",
-						"resources": [],
-						"turn": 94,
+						"turn": 95,
 						"input": [
-							"g#; N",
-							"-v>X3k_|&m",
-							"\n",
-							"`1",
-							"sQ4@9cA]}8"
+							"iRxLc+WJ",
+							"T{e)X@7rZ",
+							">UDJb/OwxK",
+							"toString",
+							"\udc00"
 						],
+						"system_context": "VfI7t~h,1",
 						"unsent": [
-							"!",
-							"X",
+							")-",
 							"😀",
-							"-} %_J& `<"
+							" ",
+							"WaJ;8Wt]Tb",
+							"Q#;Wop^8",
+							"*M\"{",
+							"[J",
+							"__proto__",
+							"%+*OuI>`~f"
 						],
-						"last_reply_turn": 4,
-						"segment": 6
+						"last_reply_turn": 2,
+						"segment": 4
 					},
+					null,
+					null,
+					null,
 					null,
 					null,
 					null,
@@ -26836,14 +27056,15 @@
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
-							"type": "refusal"
+							"type": "end_turn"
 						},
-						"turn": 1
+						"turn": 58,
+						"event_ids": "-1"
 					},
 					{
 						"_tag": "session.status_terminated",
 						"running_turn": null,
-						"event_ids": "9WouOZM&lp"
+						"event_ids": ">9W"
 					},
 					{
 						"_tag": "session.status_running",
@@ -26866,9 +27087,10 @@
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
-							"type": "retries_exhausted"
+							"type": "interrupted"
 						},
-						"turn": 101
+						"turn": 6,
+						"event_ids": "PVu"
 					},
 					{
 						"_tag": "turn.continued",
@@ -26883,35 +27105,38 @@
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": null
+						"turn": 70,
+						"segment": 2
 					},
 					{
 						"_tag": "user.interrupt",
-						"turn": 3,
-						"segment": 4
-					},
-					{
-						"_tag": "session.status_terminated",
-						"running_turn": 22,
-						"event_ids": "😀"
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 66,
-						"segment": 6
-					},
-					{
-						"_tag": "user.interrupt",
-						"turn": 1,
+						"turn": null,
 						"segment": 1
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": null,
+						"event_ids": "prototype"
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 99
+					},
+					{
+						"_tag": "user.interrupt",
+						"turn": null,
+						"segment": 2
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 98
+						"running_turn": 46,
+						"event_ids": "😀"
+					},
+					{
+						"_tag": "session.status_terminated",
+						"running_turn": 6,
+						"event_ids": "{TlU{"
 					}
 				],
 				"policy-delivery:Checkfu.ArmAutomation/AutomationView": [
@@ -27371,50 +27596,55 @@
 				"policy-delivery:Checkfu.PublishSessionOutputs/Session": [
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": 84,
-						"event_ids": ""
-					},
-					{
-						"_tag": "session.status_terminated",
-						"running_turn": 5
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "budget_reached"
-						},
-						"turn": 36
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "requires_action"
-						},
-						"turn": 4
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "requires_action"
-						},
-						"turn": 95
-					},
-					{
-						"_tag": "session.status_idle",
-						"stop_reason": {
-							"type": "end_turn"
-						},
-						"turn": 1,
-						"event_ids": "\udc00"
-					},
-					{
-						"_tag": "session.status_terminated",
 						"running_turn": null,
 						"event_ids": "😀"
 					},
 					{
 						"_tag": "session.status_terminated",
-						"running_turn": null
+						"running_turn": 5,
+						"event_ids": "tmM={_bA;y"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "interrupted"
+						},
+						"turn": 96,
+						"event_ids": "prototype"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "retries_exhausted"
+						},
+						"turn": 4,
+						"event_ids": "-1"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "retries_exhausted"
+						},
+						"turn": 48,
+						"event_ids": "Y0=REm-,LA"
+					},
+					{
+						"_tag": "session.status_idle",
+						"stop_reason": {
+							"type": "requires_action"
+						},
+						"turn": 1,
+						"event_ids": "\u0000"
+					},
+					{
+						"_tag": "session.status_terminated",
+						"running_turn": null,
+						"event_ids": ""
+					},
+					{
+						"_tag": "session.status_terminated",
+						"running_turn": 98,
+						"event_ids": "4294967295"
 					}
 				],
 				"policy-delivery:Checkfu.ExpireArtifactReservations/Artifact": [
@@ -27580,15 +27810,16 @@
 					},
 					{
 						"_tag": "agent.created",
-						"version": 32,
-						"version_id": "prototype",
-						"name": "pvh>:b8&nE",
+						"version": 1,
+						"version_id": "aV0lpvh>:b",
+						"name": " ",
 						"model": {
-							"id": "/"
+							"id": ","
 						},
-						"system": null,
+						"system": "4294967295",
 						"description": null,
-						"tools": "7Zk72cGgMQ"
+						"mcp_servers": "7Zk72cGgMQ",
+						"tools": "-1"
 					},
 					{
 						"_tag": "artifact.unpublished"
@@ -27674,16 +27905,16 @@
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 40,
-						"version_id": "T",
-						"name": "P5N'}PS4[\"",
+						"version": 26,
+						"version_id": ">WT|a~P5N'",
+						"name": "4[\"ijp",
 						"model": {
-							"id": "A'\"zFwG@B"
+							"id": "\t"
 						},
-						"system": "__proto__",
-						"description": null,
-						"mcp_servers": "",
-						"tools": "\ud800"
+						"system": "G@BNIWRKo}",
+						"description": "8)I",
+						"mcp_servers": "toString",
+						"tools": ""
 					},
 					{
 						"_tag": "environment.archived"
@@ -27813,9 +28044,10 @@
 					{
 						"_tag": "session.status_idle",
 						"stop_reason": {
-							"type": "refusal"
+							"type": "end_turn"
 						},
-						"turn": 3
+						"turn": 35,
+						"event_ids": "0"
 					},
 					{
 						"_tag": "artifact.version_added",
@@ -27845,28 +28077,29 @@
 				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": [
 					{
 						"_tag": "agent.created",
-						"version": 2,
-						"version_id": "w",
-						"name": "\t",
+						"version": 9,
+						"version_id": "0",
+						"name": "\ud800",
 						"model": {
-							"id": ";DY#fH#~2X"
+							"id": "\t"
 						},
-						"system": "",
-						"description": null,
-						"mcp_servers": "\u0000",
-						"tools": "{"
+						"system": null,
+						"description": "toString",
+						"mcp_servers": "\ud800",
+						"tools": "0"
 					},
 					{
 						"_tag": "agent.updated",
-						"version": 98,
-						"version_id": "tBD",
-						"name": "4\"J$WN0T{+",
+						"version": 3,
+						"version_id": "|<tBDf<d4\"",
+						"name": " ",
 						"model": {
-							"id": "QV`rm_3sWK"
+							"id": "T"
 						},
-						"system": "toString",
-						"description": "I/6eu:n]",
-						"tools": "\u0000"
+						"system": null,
+						"description": "QV`rm_3sWK",
+						"mcp_servers": "\t",
+						"tools": ""
 					},
 					{
 						"_tag": "artifact.published",
@@ -27917,177 +28150,162 @@
 				],
 				"saga-input:Checkfu.RunTurn": [
 					{
-						"key": "637yl:^XZB",
-						"session_id": "4294967295",
-						"agent_id": "%xtLRDggmU",
-						"agent_version": 18,
-						"environment_id": "__proto__",
+						"key": " ",
+						"session_id": ">",
+						"agent_id": "co",
+						"agent_version": 6,
+						"environment_id": "/`%sd",
 						"resources": [
 							{
-								"id": "(",
-								"type": "artifact",
-								"artifact_id": "\\ j!gGSvTV",
-								"version": 100,
-								"manifest": "XN",
-								"name": " ",
-								"mount_path": "/mnt/artifacts/퓓"
-							},
-							{
-								"id": " ",
+								"id": "R",
 								"type": "github_repository",
-								"url": "https://github.com/X/e",
-								"mount_path": "/workspace/m",
+								"url": "https://github.com/z/7",
+								"mount_path": "/workspace/3",
 								"checkout": {
 									"type": "commit",
-									"sha": "217e65c5a38142ab433029a006cafd1805e60e55"
-								},
-								"requires_token": true
+									"sha": "37713c5da2f371fb74bb9170ab6e19a117291d46"
+								}
 							}
 						],
-						"turn": 97,
+						"turn": 55,
 						"input": [
+							"9O]wD,aV\\r",
+							"$",
 							"\u0000",
-							"4294967295",
-							" ",
-							"1x=",
-							"7",
-							"J",
-							"A{lw\"xG_kV",
-							"\n",
-							"EqaYP",
-							"😀"
-						]
-					},
-					{
-						"key": "\ud800",
-						"session_id": "MPj5j",
-						"agent_id": "-1",
-						"agent_version": 96,
-						"environment_id": "\n",
-						"resources": [],
-						"turn": 61,
-						"input": [
 							"prototype",
-							"prototype",
-							"-1",
-							"i",
-							"/Vp%IoB7{j",
-							">+u%Tp"
-						],
-						"last_reply_turn": 70,
-						"segment": 5
-					},
-					{
-						"key": "toString",
-						"session_id": "7",
-						"agent_id": "4294967295",
-						"agent_version": 51,
-						"environment_id": "\n",
-						"resources": [],
-						"turn": 2,
-						"input": [
-							"b[e4<",
-							"prototype",
-							"e",
-							" ",
-							"Y#c}[d[r't",
-							"😀",
-							"!79",
-							"😀",
 							"4294967295"
-						]
-					},
-					{
-						"key": "G",
-						"session_id": "%",
-						"agent_id": "=",
-						"agent_version": 95,
-						"environment_id": "\udc00",
-						"resources": [],
-						"turn": 100,
-						"input": [
-							"A",
-							"\udc00",
-							"0",
-							"|0BRFhL",
-							"l^nkBA",
-							"[AxaZ.@"
 						],
-						"last_reply_turn": 1,
-						"segment": 95
+						"last_reply_turn": 0,
+						"segment": 6
 					},
 					{
-						"key": " ",
-						"session_id": "q",
-						"agent_id": "[gLnhjV=WF",
-						"agent_version": 11,
-						"environment_id": "*U*~0w1",
-						"resources": [],
-						"turn": 7,
-						"input": [
-							"\t",
-							"CJ&,lN9w_c",
-							"i",
-							"TE%|"
-						],
-						"last_reply_turn": 1,
-						"__cause": {
-							"correlationId": "\n"
-						}
-					},
-					{
-						"key": "(/Gt=R~?#4",
-						"session_id": "Zj%PP{",
-						"agent_id": "\t",
-						"agent_version": 85,
-						"environment_id": "b",
+						"key": "<{s6`6",
+						"session_id": "\t",
+						"agent_id": "😀",
+						"agent_version": 25,
+						"environment_id": "{ X6=",
 						"resources": [],
 						"turn": 3,
 						"input": [
-							"zf.}tDT",
-							"7",
+							"l",
+							"2s",
+							"C",
+							",E+CWX~'md",
+							"L",
+							"NU m^",
+							"Dfvc!DU]c?",
+							"\ud800",
+							"O",
+							"-1"
+						],
+						"last_reply_turn": 100,
+						"segment": 97
+					},
+					{
+						"key": "__proto__",
+						"session_id": "😀",
+						"agent_id": "H",
+						"agent_version": 101,
+						"environment_id": " ",
+						"resources": [],
+						"turn": 32,
+						"input": [
 							"\udc00",
-							"prototype"
+							"prototype",
+							"\n",
+							"4294967295",
+							"T",
+							">?zDA{"
 						],
-						"system_context": "^a]Eu*bvmP",
-						"segment": 93
+						"last_reply_turn": 3,
+						"segment": 10
 					},
 					{
-						"key": "0@#<;y;*C,",
-						"session_id": "%T",
-						"agent_id": ";C}P J*= ",
-						"agent_version": 30,
-						"environment_id": "7\"C",
+						"key": "aw*m>-Um>$",
+						"session_id": "c",
+						"agent_id": " ",
+						"agent_version": 96,
+						"environment_id": "\udc00",
 						"resources": [],
-						"turn": 12,
+						"turn": 15,
 						"input": [
-							"M#se(qF=8Y"
+							"{'",
+							"\\"
 						],
-						"__cause": {
-							"correlationId": "d",
-							"trace": null
-						}
+						"last_reply_turn": 4,
+						"segment": 6
 					},
 					{
-						"key": "z",
-						"session_id": "<",
-						"agent_id": "X+4V",
-						"agent_version": 88,
-						"environment_id": "/D",
+						"key": "\ud800",
+						"session_id": "[ztJ`_@o",
+						"agent_id": "v",
+						"agent_version": 4,
+						"environment_id": "Bq|U:M",
 						"resources": [],
-						"turn": 44,
-						"input": [
-							"H7I",
-							"toString",
-							"__proto__",
-							"8R~XPPDH*$",
-							"A+x",
-							"0",
-							"@",
-							"😀",
-							"KKJ\"+G5"
+						"turn": 77,
+						"input": [],
+						"last_reply_turn": 11,
+						"segment": 43
+					},
+					{
+						"key": "\udc00",
+						"session_id": "5",
+						"agent_id": "-8R 5?'Mti",
+						"agent_version": 47,
+						"environment_id": "e/vg.tL&][",
+						"resources": [
+							{
+								"id": "p",
+								"type": "memory_store",
+								"memory_store_id": "\n",
+								"access": "read_only",
+								"instructions": null,
+								"name": "",
+								"description": "7`MyUR",
+								"mount_path": "/mnt/memory/덈"
+							}
 						],
-						"last_reply_turn": 1
+						"turn": 82,
+						"input": [
+							"a",
+							"Ny&90]lE]0",
+							"&sa(u1rit",
+							"~",
+							"\u0000"
+						],
+						"last_reply_turn": 97,
+						"segment": 1
+					},
+					{
+						"key": "\t",
+						"session_id": "😀",
+						"agent_id": "rPg",
+						"agent_version": 1,
+						"environment_id": "X+SJi",
+						"resources": [],
+						"turn": 39,
+						"input": [],
+						"last_reply_turn": 26,
+						"segment": 97
+					},
+					{
+						"key": "toString",
+						"session_id": "\udc00",
+						"agent_id": "6:R*S",
+						"agent_version": 101,
+						"environment_id": "-1",
+						"resources": [],
+						"turn": 26,
+						"input": [
+							"p)wm|-KMIG",
+							"z*+]`:",
+							"JWV5Q_w",
+							"uZI$",
+							"|",
+							"G}V~\\bo3'_"
+						],
+						"last_reply_turn": 2,
+						"segment": 60
 					}
 				],
 				"saga-result:Checkfu.RunTurn": [

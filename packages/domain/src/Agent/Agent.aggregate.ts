@@ -2,7 +2,6 @@ import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { NonNegativeInt } from "./AgentTypes.ts"
-import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../Mcp/McpServers.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
 import { AgentArchived, ArchiveAgent } from "./ArchiveAgent.command.ts"
@@ -151,8 +150,8 @@ export class Agent extends Domain.Aggregate("Agent", {
 						system: e.system ?? "",
 						has_description: e.description !== null,
 						description: e.description ?? "",
-						mcp_servers: e.mcp_servers ?? NO_MCP_SERVERS,
-						tools: e.tools ?? NO_AGENT_TOOLS,
+						mcp_servers: e.mcp_servers,
+						tools: e.tools,
 					}
 				: state,
 		"agent.updated": (state, e) =>
@@ -167,8 +166,8 @@ export class Agent extends Domain.Aggregate("Agent", {
 						system: e.system ?? "",
 						has_description: e.description !== null,
 						description: e.description ?? "",
-						mcp_servers: e.mcp_servers ?? state.mcp_servers,
-						tools: e.tools ?? state.tools,
+						mcp_servers: e.mcp_servers,
+						tools: e.tools,
 					}
 				: state,
 		"agent.archived": (state) =>

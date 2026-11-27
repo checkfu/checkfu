@@ -17,9 +17,7 @@ export class SessionTurnCompletion extends Domain.View("SessionTurnCompletion", 
 				? undefined
 				: sessionTurnKey(source.id, event.turn),
 		"session.status_terminated": ({ source, event }) =>
-			event.running_turn === null || event.running_turn === undefined
-				? undefined
-				: sessionTurnKey(source.id, event.running_turn),
+			event.running_turn === null ? undefined : sessionTurnKey(source.id, event.running_turn),
 	},
 	state: Schema.NullOr(Schema.DateTimeUtc),
 	initial: null,

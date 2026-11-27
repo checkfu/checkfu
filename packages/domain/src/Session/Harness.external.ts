@@ -64,8 +64,8 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
 			system_context: Schema.optionalKey(Schema.String),
-			last_reply_turn: Schema.optionalKey(NonNegativeInt),
-			segment: Schema.optionalKey(PositiveInt),
+			last_reply_turn: NonNegativeInt,
+			segment: PositiveInt,
 		},
 		success: {
 			response_started_at: Schema.optionalKey(NonNegativeInt),
@@ -176,8 +176,8 @@ export const boundedHarness = <R = never>(
 				readonly turn: number
 				readonly input: ReadonlyArray<string>
 				readonly system_context?: string
-				readonly last_reply_turn?: number
-				readonly segment?: number
+				readonly last_reply_turn: number
+				readonly segment: number
 			}) => Effect.Effect<
 				HarnessReply,
 				TurnFailed | TurnInterrupted | TurnPaused | HarnessUnavailable

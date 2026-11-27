@@ -698,7 +698,7 @@ describe("Recording a settled turn's tool calls", () => {
 			},
 		} as unknown as Session["Service"]
 		const run = recordSettledToolEvents(
-			{ session_id: "sesn_retry" as SessionId, turn: 1 },
+			{ segment: 1, session_id: "sesn_retry" as SessionId, turn: 1 },
 			events,
 		).pipe(
 			Effect.provideService(Session, sessions),

@@ -170,12 +170,13 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				const sessions = yield* Session
 				const requestAction = yield* RequestToolActionDecision
 				return {
-					runTurn: (args: ModelTurnInput & { readonly segment?: number }) =>
+					runTurn: (args: ModelTurnInput & { readonly segment: number }) =>
 						Effect.gen(function* () {
-							const segment = args.segment ?? 1
+							const segment = args.segment
 							const asks = segment === 1 ? effective.asks(args) : []
 							if (asks.length === 0) {
 								yield* recordToolEvents({
+									segment,
 									session_id: args.session_id,
 									turn: args.turn,
 									events: effective.toolEvents(args),

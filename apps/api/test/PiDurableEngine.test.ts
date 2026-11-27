@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "@checkfu/domain/Mcp/McpServers"
 import { createServer } from "node:http"
 import { PassThrough } from "node:stream"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
@@ -123,6 +124,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					const createUnsupported = yield* CreateAgentDecision
 					yield* createUnsupported.send(
 						new CreateAgent({
+							mcp_servers: NO_MCP_SERVERS,
+							tools: NO_AGENT_TOOLS,
 							agent_id: geminiAgent.id,
 							version_id: AgentVersionId.make("aver_unsupported_model"),
 							name: "Unsupported Provider Agent",
@@ -142,6 +145,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 
 					const missingKeyErr = yield* Effect.flip(
 						provider.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make("sess_test"),
 							agent_id: openaiAgent.id,
 							agent_version: 1,
@@ -156,6 +161,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 
 					const unsupportedModelErr = yield* Effect.flip(
 						provider.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make("sess_test"),
 							agent_id: geminiAgent.id,
 							agent_version: 1,
@@ -181,6 +188,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					}
 					const missingOpenRouter = yield* Effect.flip(
 						provider.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make("sess_openrouter_missing"),
 							agent_id: openRouterAgent.id,
 							agent_version: 1,
@@ -203,6 +212,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					const gatewayAgent = (yield* Effect.promise(() => gatewayRes.json())) as { id: string }
 					const missingGateway = yield* Effect.flip(
 						provider.runTurn({
+							last_reply_turn: 0,
+							segment: 1,
 							session_id: SessionId.make("sess_gateway_missing"),
 							agent_id: gatewayAgent.id,
 							agent_version: 1,
@@ -264,6 +275,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					expect(orAgentRes.status).toBe(201)
 					const orAgent = (yield* Effect.promise(() => orAgentRes.json())) as { id: string }
 					const orReply = yield* provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make("sess_or"),
 						agent_id: orAgent.id,
 						agent_version: 1,
@@ -283,6 +296,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					expect(gwAgentRes.status).toBe(201)
 					const gwAgent = (yield* Effect.promise(() => gwAgentRes.json())) as { id: string }
 					const gwReply = yield* provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make("sess_gw"),
 						agent_id: gwAgent.id,
 						agent_version: 1,
@@ -307,6 +322,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 						id: string
 					}
 					const gwFineTuneReply = yield* provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make("sess_gw_ft"),
 						agent_id: gwFineTuneAgent.id,
 						agent_version: 1,
@@ -388,6 +405,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					expect(agentRes.status).toBe(201)
 					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
 					const reply = yield* provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make("sess_xai"),
 						agent_id: agent.id,
 						agent_version: 1,

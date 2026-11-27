@@ -18,6 +18,8 @@ import { UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
 import { Agents } from "@checkfu/domain/Agents.model"
 import {
+	NO_AGENT_TOOLS,
+	NO_MCP_SERVERS,
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
 	MAX_MCP_SERVERS_TEXT_LENGTH,
 } from "@checkfu/domain/Mcp/McpServers"
@@ -140,6 +142,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const customVersionId = AgentVersionId.make("aver_custom_001")
 					yield* createAgent.send(
 						new CreateAgent({
+							mcp_servers: NO_MCP_SERVERS,
+							tools: NO_AGENT_TOOLS,
 							agent_id: customAgentId,
 							version_id: customVersionId,
 							name: "Custom Version Agent",
@@ -305,6 +309,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
 					const turn = (number: number, text: string, last_reply_turn: number, agent_version = 1) =>
 						provider.runTurn({
+							segment: 1,
 							session_id: SessionId.make("sess_abandoned_context"),
 							agent_id: agent.id,
 							agent_version,
@@ -449,6 +454,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 
 					const reply = yield* provider.runTurn({
+						last_reply_turn: 0,
+						segment: 1,
 						session_id: SessionId.make("sess_pinned_version"),
 						agent_id: agentV1.id,
 						agent_version: 1,
@@ -3186,6 +3193,8 @@ describe("Agent and environment field length limits", () => {
 							const versionId = AgentVersionId.make(`aver_do_size_${suffix}_1`)
 							const receipt = yield* createAgent.send(
 								new CreateAgent({
+									mcp_servers: NO_MCP_SERVERS,
+									tools: NO_AGENT_TOOLS,
 									agent_id: id,
 									version_id: versionId,
 									name: char.repeat(MAX_AGENT_NAME_LENGTH),
@@ -3289,6 +3298,8 @@ describe("Agent and environment field length limits", () => {
 						const environment_id = EnvironmentId.make("env_initial_messages_storage")
 						yield* createAgent.send(
 							new CreateAgent({
+								mcp_servers: NO_MCP_SERVERS,
+								tools: NO_AGENT_TOOLS,
 								agent_id,
 								version_id: AgentVersionId.make("aver_initial_messages_storage"),
 								name: "Reporter",

@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
@@ -72,6 +73,8 @@ describe("PublishWebhookEvents policy", () => {
 				const automations = yield* Automation
 
 				yield* domain.CreateAgent({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					agent_id: agentId,
 					version_id: AgentVersionId.make("aver_pub_1"),
 					name: "Publisher Agent",

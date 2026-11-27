@@ -12,7 +12,7 @@ import { ToolConfirmationNotPending } from "./ToolConfirmationNotPending.rejecti
 
 export class UserCustomToolResult extends Domain.Event("user.custom_tool_result", {
 	...SessionEventFields["user.custom_tool_result"],
-	processed_at: Schema.optionalKey(Schema.DateTimeUtc),
+	processed_at: Schema.DateTimeUtc,
 }) {}
 
 export class ReturnCustomToolResult extends Domain.Command("ReturnCustomToolResult", {

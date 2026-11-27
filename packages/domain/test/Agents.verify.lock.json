@@ -56,11 +56,11 @@
 			},
 			"CreateAgent.NewAgentKeepsItsDeclaredServers": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" ||\n\t\t\tafter.agent.mcp_servers === (command.mcp_servers ?? NO_MCP_SERVERS)"
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.mcp_servers === command.mcp_servers"
 			},
 			"CreateAgent.NewAgentKeepsItsDeclaredTools": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.tools === (command.tools ?? NO_AGENT_TOOLS)"
+				"source": "({ before, after, command }) =>\n\t\t\tbefore.agent.status !== \"\" || after.agent.tools === command.tools"
 			},
 			"Agent.ConfigurationIsStableWithinAVersion": {
 				"kind": "transition",

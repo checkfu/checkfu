@@ -1,3 +1,4 @@
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
@@ -51,6 +52,8 @@ describe("ListResources", () => {
 			const config = { type: "cloud" as const, networking: { type: "unrestricted" as const } }
 			for (const n of [1, 2]) {
 				yield* domain.CreateAgent({
+					mcp_servers: NO_MCP_SERVERS,
+					tools: NO_AGENT_TOOLS,
 					agent_id: AgentId.make(`agent_list_${n}`),
 					version_id: AgentVersionId.make(`aver_list_${n}`),
 					name: `Agent ${n}`,
