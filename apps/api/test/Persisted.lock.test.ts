@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema"
 import { ArtifactLinkClaims, linkKey, signLink } from "../src/Content/ArtifactLink.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import { CHECKFU_PI_DOCS, SettledUsage, SettledUsageState } from "../src/Pi/PiTurnUsage.ts"
+import { FanoutPagePayload } from "../src/Webhooks/FanoutPayloads.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import {
 	PersistedServicesLive,
@@ -281,6 +282,81 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			const changed = replacing(id, Schema.Struct({ ...AbandonTurn.fields, attempt: Schema.Int }))
 			const narrowed = yield* shipBlockers(lock, changed)
 			expect(narrowed).toEqual([expect.stringContaining(`${id} can no longer read`)])
+		}),
+	)
+
+	it.effect("tracks the payloads of all scheduled webhook fan-out callbacks", () =>
+		Effect.gen(function* () {
+			const pageId = "webhook-callback:WebhookFanout/fanoutPage"
+			const retryId = "webhook-callback:WebhookFanout/retrySubscriber"
+			const cleanupId = "webhook-callback:WebhookFanout/cleanup"
+			const page = {
+				event: {
+					event_id: "evt_automation_run_arun_fixture_1",
+					event_type: "automation_run.succeeded",
+					resource_type: "automation_run",
+					resource_id: "arun_fixture",
+					occurred_at: 1_764_000_000_000,
+					automation_id: "auto_fixture",
+				},
+				cursor: "1763999999000:whe_previous",
+				step: 2,
+			}
+			const retry = {
+				event: {
+					event_id: "evt_vault_credential_vc_fixture_1",
+					event_type: "vault_credential.created",
+					resource_type: "vault_credential",
+					resource_id: "vc_fixture",
+					occurred_at: 1_764_000_000_000,
+					vault_id: "vlt_fixture",
+				},
+				webhookId: "whe_fixture",
+			}
+			const cleanup = { eventId: page.event.event_id }
+			const callbacks = persistedShapes.filter(({ kind }) => kind === "webhook-callback")
+			expect(callbacks.map(({ id }) => id)).toEqual([pageId, retryId, cleanupId])
+			expect(
+				registryProblems(persistedShapes.filter(({ kind }) => kind !== "webhook-callback")),
+			).toEqual(["no webhook-callback shape was found"])
+			const baseline = yield* cutBaseline(
+				"fan-out callbacks",
+				"2026-01-01T00:00:00.000Z",
+				callbacks,
+			)
+			const lock: PersistedLock = {
+				version: 1,
+				retired: {},
+				reviewed: {},
+				baselines: [
+					{
+						...baseline,
+						shapes: { [pageId]: [page], [retryId]: [retry], [cleanupId]: [cleanup] },
+					},
+				],
+			}
+			expect(yield* lockProblems(lock)).toEqual([])
+			const removed = persistedShapes.filter(({ id }) => id !== retryId)
+			expect(yield* shipBlockers(lock, removed)).toEqual([
+				expect.stringContaining(`${retryId} shipped`),
+			])
+			const narrowed = replacing(
+				pageId,
+				Schema.Struct({ ...FanoutPagePayload.fields, attempt: Schema.Int }),
+			)
+			expect(yield* shipBlockers(lock, narrowed)).toEqual([
+				expect.stringContaining(`${pageId} can no longer read`),
+			])
+			const withAttempt = Schema.Struct({
+				...FanoutPagePayload.fields,
+				attempt: Schema.Int.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+			})
+			const additive = replacing(pageId, withAttempt)
+			expect(yield* Schema.decodeUnknownEffect(withAttempt)(page)).toEqual({ ...page, attempt: 0 })
+			expect(yield* lockProblems(lock, additive)).toEqual([
+				expect.stringContaining("has not been reviewed"),
+			])
+			expect(yield* lockProblems(yield* reviewing(lock, pageId, additive), additive)).toEqual([])
 		}),
 	)
 

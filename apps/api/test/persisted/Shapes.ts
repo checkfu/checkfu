@@ -17,6 +17,7 @@ import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
 import { CANCELLED_OPS_TABLE } from "../../src/Pi/TurnFence.ts"
+import { WEBHOOK_FANOUT_PAYLOADS } from "../../src/Webhooks/FanoutPayloads.ts"
 import {
 	WEBHOOK_DELIVERIES_TABLE,
 	WEBHOOK_HEALTH_OUTCOMES_TABLE,
@@ -39,6 +40,7 @@ export type PersistedKind =
 	| "harness-call"
 	| "session-table"
 	| "webhook-table"
+	| "webhook-callback"
 	| "vault-table"
 	| "artifact-object"
 	| "artifact-marks"
@@ -69,6 +71,8 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"The table already exists in every session object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"webhook-table":
 		"The table already exists in every webhook deliverer object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
+	"webhook-callback":
+		"Webhook fan-out callbacks are routed by shard and callback name. Subscriber enqueue retries stop after fourteen days. Cleanup is due twenty-four hours after the scan and retries settle. Unacknowledged alarms can remain scheduled beyond either deadline. Keep names and payloads readable while those jobs can still run.",
 	"vault-table":
 		"The table already exists in every vault's connection object and holds its secrets, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"artifact-object":
@@ -482,6 +486,14 @@ const WEBHOOK_TABLES: ReadonlyArray<PersistedShape> = [
 	},
 ]
 
+const WEBHOOK_CALLBACKS: ReadonlyArray<PersistedShape> = Object.entries(
+	WEBHOOK_FANOUT_PAYLOADS,
+).map(([name, schema]): PersistedShape => ({
+	id: `webhook-callback:WebhookFanout/${name}`,
+	kind: "webhook-callback",
+	schema,
+}))
+
 const VAULT_TABLES: ReadonlyArray<PersistedShape> = Object.entries(CUSTODY_TABLES).map(
 	([name, table]): PersistedShape => ({
 		id: `vault-table:${name}`,
@@ -521,6 +533,7 @@ export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...HARNESS_CALLS,
 	...SESSION_TABLES,
 	...WEBHOOK_TABLES,
+	...WEBHOOK_CALLBACKS,
 	...VAULT_TABLES,
 	...ARTIFACT_OBJECTS,
 	...ARTIFACT_MARKS,
@@ -559,6 +572,7 @@ export const registryProblems = (
 		"harness-call",
 		"session-table",
 		"webhook-table",
+		"webhook-callback",
 		"vault-table",
 		"artifact-object",
 		"artifact-marks",

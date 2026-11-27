@@ -13,6 +13,12 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { placedStub, placement } from "../Placement.ts"
 import {
+	CLEANUP_CALLBACK,
+	FANOUT_PAGE_CALLBACK,
+	RETRY_SUBSCRIBER_CALLBACK,
+} from "./FanoutPayloads.ts"
+import type { CleanupPayload, FanoutPagePayload, RetrySubscriberPayload } from "./FanoutPayloads.ts"
+import {
 	WebhookDeliveryStore,
 	WebhookDeliveryStoreError,
 	buildWebhookEventEnvelopeJson,
@@ -53,21 +59,6 @@ export const webhookFanoutShardId = (eventId: string): string => {
 	return `shard_${(hash >>> 0) % WEBHOOK_FANOUT_SHARD_COUNT}`
 }
 
-interface FanoutPagePayload {
-	readonly event: WebhookEventPublication
-	readonly cursor: string
-	readonly step: number
-}
-
-interface RetrySubscriberPayload {
-	readonly event: WebhookEventPublication
-	readonly webhookId: WebhookId
-}
-
-interface CleanupPayload {
-	readonly eventId: string
-}
-
 export interface WebhookFanoutShape {
 	readonly enqueue: (
 		event: WebhookEventPublication,
@@ -78,10 +69,6 @@ export interface WebhookFanoutShape {
 export class WebhookFanout extends Cloudflare.DurableObject<WebhookFanout, WebhookFanoutShape>()(
 	"WebhookFanout",
 ) {}
-
-const FANOUT_PAGE_CALLBACK = "fanoutPage"
-const RETRY_SUBSCRIBER_CALLBACK = "retrySubscriber"
-const CLEANUP_CALLBACK = "cleanup"
 
 const scanJobId = (eventId: string) => `scan:${eventId}`
 const retryJobId = (eventId: string, webhookId: WebhookId) => `retry:${eventId}:${webhookId}`
