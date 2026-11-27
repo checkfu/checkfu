@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import type { Read } from "@alchemy.run/domain/Decision"
 import { PositiveInt } from "@checkfu/sdk/Schemas"
+import * as Boolean from "effect/Boolean"
 import * as Schema from "effect/Schema"
 import { AgentId } from "../Agent/Agent.id.ts"
 import { Agent } from "../Agent/Agent.aggregate.ts"
@@ -115,6 +116,17 @@ export class ArchiveAgentIfCurrentDecision extends Domain.Decision(ArchiveAgentI
 			]
 		)
 	},
+	transitions: {
+		AnArchiveHappensAtTheExpectedVersion: ({ before, command }) =>
+			before.agent.version === command.expected_version,
+		NoLiveAutomationReferencesTheAgent: ({ before, command }) =>
+			before.automations.every((automation, index) =>
+				Boolean.some([
+					command.inventory[index]?.agent_id !== command.agent_id,
+					Boolean.every([automation.status !== "active", automation.status !== "paused"]),
+				]),
+			),
+	},
 }) {}
 
 export class ArchiveEnvironmentIfCurrent extends Domain.Command("ArchiveEnvironmentIfCurrent", {
@@ -165,6 +177,17 @@ export class ArchiveEnvironmentIfCurrentDecision extends Domain.Decision(
 				) ?? [environment.record(new EnvironmentArchived())]
 			)
 		},
+		transitions: {
+			AnArchiveHappensAtTheExpectedVersion: ({ before, command }) =>
+				before.environment.version === command.expected_version,
+			NoLiveAutomationReferencesTheEnvironment: ({ before, command }) =>
+				before.automations.every((automation, index) =>
+					Boolean.some([
+						command.inventory[index]?.environment_id !== command.environment_id,
+						Boolean.every([automation.status !== "active", automation.status !== "paused"]),
+					]),
+				),
+		},
 	},
 ) {}
 
@@ -194,6 +217,13 @@ export class ArchiveAutomationIfCurrentDecision extends Domain.Decision(
 				})
 			}
 			return [automation.record(new AutomationArchived())]
+		},
+		transitions: {
+			AnArchiveHappensAtTheExpectedRevision: ({ before, after, command }) =>
+				Boolean.every([
+					before.automation.revision === command.expected_revision,
+					after.automation.status === "archived",
+				]),
 		},
 	},
 ) {}

@@ -22,6 +22,7 @@ const STANDING = {
 	"CreateAgent.NewAgentKeepsItsDeclaredServers": "proved",
 	"CreateAgent.NewAgentKeepsItsDeclaredTools": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
+	"UpdateAgent.AnExpectedVersionIsTheHeadVersion": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
 	"Agents.AgentViewMatchesAgent": "checked",

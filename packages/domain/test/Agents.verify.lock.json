@@ -65,6 +65,10 @@
 			"Agent.ConfigurationIsStableWithinAVersion": {
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tafter.version !== before.version,\n\t\t\t\t[\n\t\t\t\t\tafter.current_version_id === before.current_version_id,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t\tafter.mcp_servers === before.mcp_servers,\n\t\t\t\t\tafter.tools === before.tools,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"UpdateAgent.AnExpectedVersionIsTheHeadVersion": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tcommand.expected_version === undefined,\n\t\t\t\tbefore.agent.version === command.expected_version,\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

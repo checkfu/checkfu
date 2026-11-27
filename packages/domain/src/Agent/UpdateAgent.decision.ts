@@ -67,6 +67,11 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 		]
 	},
 	transitions: {
+		AnExpectedVersionIsTheHeadVersion: ({ before, command }) =>
+			[
+				command.expected_version === undefined,
+				before.agent.version === command.expected_version,
+			].some((ok) => ok),
 		ChangeMintsNextVersionOrNoOps: ({ before, after, command }) => {
 			const name = command.changes.name === undefined ? before.agent.name : command.changes.name
 			const modelId =

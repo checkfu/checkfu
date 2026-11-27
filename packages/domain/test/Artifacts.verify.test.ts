@@ -15,6 +15,7 @@ const STANDING = {
 	"Artifact.NameNeverChangesOnceCreated": "proved",
 	"Artifact.VersionGrowsByOneOrNotAtAll": "proved",
 	"Artifact.AddedVersionRecordsItsManifest": "proved",
+	"Artifact.ADeletedArtifactIsNotPublished": "proved",
 	"Artifact.PublishedOnlyOnceCreated": "proved",
 	"Artifact.UnpublishedHoldsNoSettings": "proved",
 	"Artifact.PinnedVersionWithinHead": "proved",

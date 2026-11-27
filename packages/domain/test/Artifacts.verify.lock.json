@@ -101,6 +101,10 @@
 			"Artifact.OpeningTakesTheOpenReservation": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"OpenArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.open_reservation !== 0, before.open_reservation === command.reservation].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.ADeletedArtifactIsNotPublished": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status !== \"deleted\", s.publication_token === \"\"].some((ok) => ok)"
 			}
 		}
 	}

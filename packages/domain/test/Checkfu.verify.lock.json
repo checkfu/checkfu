@@ -697,6 +697,30 @@
 			"ReturnCustomToolResult.AResultMatchesItsSessionAndCall": {
 				"kind": "transition",
 				"source": "({ before, command }) =>\n\t\t\tbefore.call.session_id === command.session_id &&\n\t\t\tbefore.call.tool_use_id === command.custom_tool_use_id"
+			},
+			"Artifact.ADeletedArtifactIsNotPublished": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status !== \"deleted\", s.publication_token === \"\"].some((ok) => ok)"
+			},
+			"UpdateAgent.AnExpectedVersionIsTheHeadVersion": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tcommand.expected_version === undefined,\n\t\t\t\tbefore.agent.version === command.expected_version,\n\t\t\t].some((ok) => ok)"
+			},
+			"ArchiveAutomationIfCurrent.AnArchiveHappensAtTheExpectedRevision": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t\tBoolean.every([\n\t\t\t\t\tbefore.automation.revision === command.expected_revision,\n\t\t\t\t\tafter.automation.status === \"archived\",\n\t\t\t\t])"
+			},
+			"WriteMemory.APresentPreconditionFindsTheMemory": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[command.precondition.type !== \"present\", before.memory.status === \"present\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"WriteMemory.AHashPreconditionMatchesTheStoredContent": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tcommand.precondition.type !== \"content_sha256\" ||\n\t\t\t[\n\t\t\t\tbefore.memory.status === \"present\",\n\t\t\t\t[\n\t\t\t\t\tbefore.memory.content_sha256 === command.precondition.content_sha256,\n\t\t\t\t\tbefore.memory.content_sha256 === command.content_sha256,\n\t\t\t\t].some((ok) => ok),\n\t\t\t].every((ok) => ok)"
+			},
+			"DeleteMemory.AnExpectedHashIsTheStoredHash": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tcommand.expected_content_sha256 === null,\n\t\t\t\tbefore.memory.content_sha256 === command.expected_content_sha256,\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

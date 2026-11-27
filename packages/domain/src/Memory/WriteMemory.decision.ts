@@ -91,6 +91,19 @@ export class WriteMemoryDecision extends Domain.Decision(WriteMemory, {
 			: [written, store.record(new MemoryAdded({ memory_count: store.state.memory_count + 1 }))]
 	},
 	transitions: {
+		APresentPreconditionFindsTheMemory: ({ before, command }) =>
+			[command.precondition.type !== "present", before.memory.status === "present"].some(
+				(ok) => ok,
+			),
+		AHashPreconditionMatchesTheStoredContent: ({ before, command }) =>
+			command.precondition.type !== "content_sha256" ||
+			[
+				before.memory.status === "present",
+				[
+					before.memory.content_sha256 === command.precondition.content_sha256,
+					before.memory.content_sha256 === command.content_sha256,
+				].some((ok) => ok),
+			].every((ok) => ok),
 		OnlyAnActiveStoreIsWritten: ({ before }) => before.store.status === "active",
 		AWriteLeavesTheMemoryPresentWithItsContent: ({ after, command }) =>
 			[

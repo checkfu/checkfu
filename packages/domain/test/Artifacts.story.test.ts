@@ -525,6 +525,12 @@ describe("Artifacts", () => {
 			}),
 			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact, new ArtifactDeleted()),
+			Story.state(artifact, {
+				status: "deleted",
+				publication_token: "",
+				pinned_version: 0,
+				published_at: 0,
+			}),
 			Story.when(publish("third", 0)),
 			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
 			Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),

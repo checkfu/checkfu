@@ -217,6 +217,70 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 					SUSTAINED_FAILURE_DISABLE_WINDOW_MS,
 			].some((ok) => ok)
 		},
+		OnlyAFullFailureWindowDisablesForFailure: ({ before, after }) =>
+			[
+				after.status !== "disabled_sustained_failure",
+				before.status === "disabled_sustained_failure",
+				after.last_failure_at - after.failure_window_started_at >=
+					SUSTAINED_FAILURE_DISABLE_WINDOW_MS,
+			].some((ok) => ok),
+		ADeliveryAfterTheLastFailureClearsHealth: ({ before, after, command }) => {
+			if (command._tag !== "RecordWebhookOutcome") {
+				return true
+			}
+			return [
+				before.status !== "active",
+				command.definition_revision !== before.definition_revision,
+				command.outcome !== "delivered",
+				before.failure_window_started_at === 0,
+				command.observed_at < before.last_failure_at,
+				[
+					after.failure_window_started_at === 0,
+					after.last_failure_at === 0,
+					after.consecutive_failures === 0,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
+		ARotationKeepsTheOldSecretForTheGracePeriod: ({ before, after, command }) => {
+			if (command._tag !== "RotateWebhookSecret") {
+				return true
+			}
+			return [
+				after.secret_revision === before.secret_revision,
+				[
+					after.secret_salt === command.next_secret_salt,
+					after.previous_secret_revision === before.secret_revision,
+					after.previous_secret_salt === before.secret_salt,
+					after.previous_secret_expires_at ===
+						command.rotated_at + WEBHOOK_SECRET_ROTATION_GRACE_MS,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
+		AResumeStartsANewDefinitionRevision: ({ before, after, command }) => {
+			if (command._tag !== "ResumeWebhookEndpoint") {
+				return true
+			}
+			return [
+				before.status === "",
+				before.status === "deleted",
+				before.status === "active",
+				[
+					after.status === "active",
+					after.definition_revision === before.definition_revision + 1,
+					after.failure_window_started_at === 0,
+					after.last_failure_at === 0,
+					after.consecutive_failures === 0,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
+		OnlyResumeOrReactivationActivates: ({ before, after, command }) =>
+			[
+				after.status !== "active",
+				before.status === "active",
+				command._tag === "CreateWebhookEndpoint",
+				command._tag === "ResumeWebhookEndpoint",
+				command._tag === "UpdateWebhookEndpoint" && command.reactivate,
+			].some((ok) => ok),
 		StaleSecretExpiryLeavesPreviousSecretUntouched: ({ before, after, command }) => {
 			if (command._tag !== "ExpirePreviousWebhookSecret") {
 				return true

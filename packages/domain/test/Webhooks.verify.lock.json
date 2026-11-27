@@ -113,6 +113,26 @@
 			"WebhookEndpoint.ActiveGracePeriodNotOverwritten": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RotateWebhookSecret\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.previous_secret_revision === 0,\n\t\t\t\tcommand.rotated_at >= before.previous_secret_expires_at,\n\t\t\t\t[\n\t\t\t\t\tafter.secret_revision === before.secret_revision,\n\t\t\t\t\tafter.previous_secret_revision === before.previous_secret_revision,\n\t\t\t\t\tafter.previous_secret_salt === before.previous_secret_salt,\n\t\t\t\t\tafter.previous_secret_expires_at === before.previous_secret_expires_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.OnlyAFullFailureWindowDisablesForFailure": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.status !== \"disabled_sustained_failure\",\n\t\t\t\tbefore.status === \"disabled_sustained_failure\",\n\t\t\t\tafter.last_failure_at - after.failure_window_started_at >=\n\t\t\t\t\tSUSTAINED_FAILURE_DISABLE_WINDOW_MS,\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.ADeliveryAfterTheLastFailureClearsHealth": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookOutcome\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tcommand.definition_revision !== before.definition_revision,\n\t\t\t\tcommand.outcome !== \"delivered\",\n\t\t\t\tbefore.failure_window_started_at === 0,\n\t\t\t\tcommand.observed_at < before.last_failure_at,\n\t\t\t\t[\n\t\t\t\t\tafter.failure_window_started_at === 0,\n\t\t\t\t\tafter.last_failure_at === 0,\n\t\t\t\t\tafter.consecutive_failures === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.ARotationKeepsTheOldSecretForTheGracePeriod": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RotateWebhookSecret\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.secret_revision === before.secret_revision,\n\t\t\t\t[\n\t\t\t\t\tafter.secret_salt === command.next_secret_salt,\n\t\t\t\t\tafter.previous_secret_revision === before.secret_revision,\n\t\t\t\t\tafter.previous_secret_salt === before.secret_salt,\n\t\t\t\t\tafter.previous_secret_expires_at ===\n\t\t\t\t\t\tcommand.rotated_at + WEBHOOK_SECRET_ROTATION_GRACE_MS,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.AResumeStartsANewDefinitionRevision": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"ResumeWebhookEndpoint\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tbefore.status === \"deleted\",\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\tafter.definition_revision === before.definition_revision + 1,\n\t\t\t\t\tafter.failure_window_started_at === 0,\n\t\t\t\t\tafter.last_failure_at === 0,\n\t\t\t\t\tafter.consecutive_failures === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"WebhookEndpoint.OnlyResumeOrReactivationActivates": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.status !== \"active\",\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\tcommand._tag === \"CreateWebhookEndpoint\",\n\t\t\t\tcommand._tag === \"ResumeWebhookEndpoint\",\n\t\t\t\tcommand._tag === \"UpdateWebhookEndpoint\" && command.reactivate,\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

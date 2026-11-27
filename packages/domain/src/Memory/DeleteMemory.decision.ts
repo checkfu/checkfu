@@ -47,6 +47,11 @@ export class DeleteMemoryDecision extends Domain.Decision(DeleteMemory, {
 		]
 	},
 	transitions: {
+		AnExpectedHashIsTheStoredHash: ({ before, command }) =>
+			[
+				command.expected_content_sha256 === null,
+				before.memory.content_sha256 === command.expected_content_sha256,
+			].some((ok) => ok),
 		ADeleteRemovesOnePresentMemory: ({ before, after }) =>
 			[
 				before.store.status === "active",

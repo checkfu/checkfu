@@ -101,6 +101,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					].some((ok) => ok),
 				].every((ok) => ok),
 			].some((ok) => ok),
+		ADeletedArtifactIsNotPublished: (s) =>
+			[s.status !== "deleted", s.publication_token === ""].some((ok) => ok),
 		PublishedOnlyOnceCreated: (s) => [s.publication_token === "", s.status !== ""].some((ok) => ok),
 		UnpublishedHoldsNoSettings: (s) =>
 			[
@@ -395,6 +397,9 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				? {
 						...state,
 						status: "deleted",
+						publication_token: "",
+						pinned_version: 0,
+						published_at: 0,
 					}
 				: state,
 		"artifact.published": (state, e, envelope) =>
