@@ -29,5 +29,6 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
-      - run: bun run --cwd tools/release test
+      - run: bun run release:build --qualify "$RUNNER_TEMP/checkfu-npm"
+      - run: bun run release:build --verify "$RUNNER_TEMP/checkfu-npm"
       - run: git diff --exit-code

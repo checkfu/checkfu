@@ -3,15 +3,23 @@ import { once } from "node:events"
 import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { makeTestServer, TEST_API_KEY } from "../../apps/mcp/test/helpers/McpHarness.ts"
-import { buildCliPackage, buildSdkPackage, repoRoot } from "./Build.ts"
-import { version as cliVersion } from "../../apps/cli/package.json"
+import {
+	BUILD_CREDENTIAL_SENTINEL,
+	buildCliPackage,
+	buildSdkPackage,
+	candidateRecordInput,
+	packBuiltPackages,
+	integrityOf,
+	qualifiedPackages,
+	repoRoot,
+} from "./Build.ts"
 
 const decodeResourceId = Schema.decodeSync(
 	Schema.fromJsonString(Schema.Struct({ id: Schema.String })),
@@ -19,12 +27,15 @@ const decodeResourceId = Schema.decodeSync(
 const decodeCoverage = Schema.decodeSync(
 	Schema.fromJsonString(Schema.Struct({ commands: Schema.Array(Schema.String) })),
 )
-const buildCredentialSentinel = "ck_packaging_must_never_embed_credentials"
 const execute = promisify(execFile)
 const consumerNode = process.env["CHECKFU_TEST_NODE"] ?? process.execPath
 let scratch: string
 let consumer: string
 let cli: string
+let cliVersion: string
+let sdkVersion: string
+let recordPath: string
+let recordIntegrity: string
 const env = (extra: Readonly<Record<string, string>> = {}) => ({
 	...Object.fromEntries(
 		Object.entries(process.env).filter(
@@ -44,43 +55,40 @@ beforeAll(async () => {
 		join(consumer, "package.json"),
 		'{"name":"checkfu-package-user","private":true,"type":"module"}',
 	)
-	const previous = process.env["CHECKFU_API_KEY"]
-	let built: Array<string>
-	try {
-		process.env["CHECKFU_API_KEY"] = buildCredentialSentinel
-		built = [
-			await buildCliPackage(join(scratch, "packages")),
-			await buildSdkPackage(join(scratch, "packages")),
-		]
-	} finally {
-		if (previous === undefined) {
-			delete process.env["CHECKFU_API_KEY"]
-		} else {
-			process.env["CHECKFU_API_KEY"] = previous
+	const candidate = candidateRecordInput()
+	if (candidate === undefined) {
+		const previous = process.env["CHECKFU_API_KEY"]
+		try {
+			process.env["CHECKFU_API_KEY"] = BUILD_CREDENTIAL_SENTINEL
+			const buildDirectory = join(scratch, "packages")
+			const cli = await buildCliPackage(buildDirectory)
+			const sdk = await buildSdkPackage(buildDirectory)
+			const packed = await packBuiltPackages([cli, sdk], scratch)
+			recordPath = packed.recordPath
+			recordIntegrity = packed.integrity
+		} finally {
+			if (previous === undefined) {
+				delete process.env["CHECKFU_API_KEY"]
+			} else {
+				process.env["CHECKFU_API_KEY"] = previous
+			}
 		}
+	} else {
+		recordPath = resolve(candidate.recordPath)
+		recordIntegrity = candidate.integrity
 	}
-
-	const artifacts = []
-	for (const directory of built) {
-		const packed = Schema.decodeSync(
-			Schema.fromJsonString(Schema.Tuple([Schema.Struct({ filename: Schema.String })])),
-		)(
-			execFileSync(
-				"npm",
-				[
-					"pack",
-					directory,
-					"--ignore-scripts",
-					"--workspaces=false",
-					"--pack-destination",
-					scratch,
-					"--json",
-				],
-				{ encoding: "utf8", timeout: 30_000 },
-			),
-		)
-		artifacts.push(join(scratch, packed[0].filename))
-	}
+	const accepted = join(scratch, "accepted")
+	await mkdir(accepted)
+	const packages = await qualifiedPackages(recordPath, recordIntegrity)
+	cliVersion = packages[0].metadata.version
+	sdkVersion = packages[1].metadata.version
+	const artifacts = await Promise.all(
+		packages.map(async ({ bytes, metadata }) => {
+			const destination = join(accepted, metadata.filename)
+			await writeFile(destination, bytes, { flag: "wx" })
+			return destination
+		}),
+	)
 	execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", ...artifacts], {
 		cwd: consumer,
 		stdio: "pipe",
@@ -124,15 +132,19 @@ afterAll(async () => {
 })
 
 it("installs independently of the checkout and exposes working JavaScript and TypeScript entry points", async () => {
-	expect(await readFile(cli, "utf8")).not.toContain(buildCredentialSentinel)
+	expect(await readFile(cli, "utf8")).not.toContain(BUILD_CREDENTIAL_SENTINEL)
 	expect((await lstat(join(consumer, "node_modules", "@checkfu", "sdk"))).isSymbolicLink()).toBe(
 		false,
 	)
 	const sdk = Schema.decodeSync(
 		Schema.fromJsonString(
-			Schema.Struct({ dependencies: Schema.Record(Schema.String, Schema.String) }),
+			Schema.Struct({
+				version: Schema.String,
+				dependencies: Schema.Record(Schema.String, Schema.String),
+			}),
 		),
 	)(await readFile(join(consumer, "node_modules", "@checkfu", "sdk", "package.json"), "utf8"))
+	expect(sdk.version).toBe(sdkVersion)
 	expect(
 		Object.values(sdk.dependencies).some((value) => /^(workspace|catalog|file):/.test(value)),
 	).toBe(false)
@@ -148,6 +160,47 @@ it("installs independently of the checkout and exposes working JavaScript and Ty
 	})
 	expect(stdout.trim()).toBe(`checkfu v${cliVersion}`)
 }, 45_000)
+
+it("refuses candidates whose bytes, names, or versions disagree with the record", async () => {
+	const { commit } = Schema.decodeSync(
+		Schema.fromJsonString(Schema.Struct({ commit: Schema.String })),
+	)(await readFile(recordPath, "utf8"))
+	const [cli, sdk] = await qualifiedPackages(recordPath, recordIntegrity)
+	const altered = join(scratch, "altered")
+	await mkdir(altered)
+	const alteredRecord = join(altered, "candidates.json")
+	const writeRecord = (packages = [cli.metadata, sdk.metadata]) =>
+		writeFile(alteredRecord, JSON.stringify({ commit, packages }))
+	await writeRecord()
+	const pinned = integrityOf(await readFile(alteredRecord))
+	await expect(qualifiedPackages(alteredRecord, pinned)).rejects.toMatchObject({ code: "ENOENT" })
+	await writeFile(join(altered, cli.metadata.filename), cli.bytes)
+	await writeFile(join(altered, sdk.metadata.filename), sdk.bytes)
+	await expect(qualifiedPackages(alteredRecord, pinned)).resolves.toHaveLength(2)
+	const replacement = Uint8Array.from(cli.bytes)
+	replacement[4] = (replacement[4] ?? 0) ^ 1
+	await writeFile(join(altered, cli.metadata.filename), replacement)
+	await writeRecord([{ ...cli.metadata, integrity: integrityOf(replacement) }, sdk.metadata])
+	await expect(qualifiedPackages(alteredRecord)).resolves.toHaveLength(2)
+	await expect(qualifiedPackages(alteredRecord, pinned)).rejects.toThrow(
+		"The candidate record changed during qualification.",
+	)
+	await writeRecord()
+	await writeFile(join(altered, cli.metadata.filename), sdk.bytes)
+	await expect(qualifiedPackages(alteredRecord)).rejects.toThrow("Integrity mismatch")
+	const modified = Uint8Array.from(cli.bytes)
+	modified[0] = 0
+	await writeFile(join(altered, cli.metadata.filename), modified)
+	await expect(qualifiedPackages(alteredRecord)).rejects.toThrow("Integrity mismatch")
+	const changed = { ...cli.metadata, filename: "checkfu-0.0.999.tgz", version: "0.0.999" }
+	await writeFile(join(altered, changed.filename), cli.bytes)
+	await writeRecord([changed, sdk.metadata])
+	await expect(qualifiedPackages(alteredRecord)).rejects.toThrow("Package identity mismatch")
+	await writeRecord([sdk.metadata, cli.metadata])
+	await expect(qualifiedPackages(alteredRecord)).rejects.toThrow("unambiguous checkfu tarball")
+	const originals = await qualifiedPackages(recordPath, recordIntegrity)
+	expect(originals.map(({ metadata }) => metadata)).toEqual([cli.metadata, sdk.metadata])
+}, 30_000)
 
 it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry, history, errors and event streams against the domain backend", async () => {
 	await Effect.runPromise(
