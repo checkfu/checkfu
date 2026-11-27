@@ -42,15 +42,16 @@ export const callerKey = (artifactId: string, caller: string) =>
 
 export const artifactKey = (artifactId: string, kind: DataCallKind) => `${artifactId}:${kind}`
 
-export const makeDataThrottleMemory = () => {
-	const counter = (limit: number) => {
-		const counts = new Map<string, number>()
-		return (key: string) => {
-			const used = (counts.get(key) ?? 0) + 1
-			counts.set(key, used)
-			return used <= limit
-		}
+const counter = (limit: number) => {
+	const counts = new Map<string, number>()
+	return (key: string) => {
+		const used = (counts.get(key) ?? 0) + 1
+		counts.set(key, used)
+		return used <= limit
 	}
+}
+
+export const makeDataThrottleMemory = () => {
 	const withinCaller = counter(DATA_CALLS_PER_MINUTE_PER_CALLER)
 	const withinArtifact = counter(DATA_CALLS_PER_MINUTE_PER_ARTIFACT)
 	return {
