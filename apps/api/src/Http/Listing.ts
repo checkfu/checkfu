@@ -127,6 +127,41 @@ const ownedByAgent: OwnedBy = (resource, parent) =>
 const ownedByVault: OwnedBy = (resource, parent) =>
 	Predicate.hasProperty(resource, "vault_id") && resource.vault_id === parent
 
+export const hydratePage = <Entry, A extends object, E, R>(
+	entries: ReadonlyArray<Entry>,
+	retrieve: (entry: Entry) => Effect.Effect<A | null, E, R>,
+) =>
+	Effect.gen(function* () {
+		const data: Array<A> = []
+		let bytes = 0
+		let lastHandled: Entry | undefined
+		let firstOmitted: Entry | undefined
+		yield* Stream.fromIterable(entries).pipe(
+			Stream.mapEffect(
+				(entry) => Effect.map(Effect.exit(retrieve(entry)), (outcome) => ({ entry, outcome })),
+				{ concurrency: HYDRATE_CONCURRENCY },
+			),
+			Stream.runForEachWhile(({ entry, outcome }) =>
+				Effect.gen(function* () {
+					const resource = yield* outcome
+					if (resource !== null) {
+						const size = utf8.encode(JSON.stringify(resource)).length
+						const next = pageBytesWith(bytes, data.length, size)
+						if (data.length > 0 && next > LIST_PAGE_BYTES) {
+							firstOmitted = entry
+							return false
+						}
+						bytes = next
+						data.push(resource)
+					}
+					lastHandled = entry
+					return true
+				}),
+			),
+		)
+		return { data, lastHandled, firstOmitted }
+	})
+
 export const hydrateListingPage = <A extends object, E, R>(
 	page: Query.Page<ListingEntry>,
 	input: Pick<ListQuery, "include_archived" | "agent_id">,
@@ -134,42 +169,26 @@ export const hydrateListingPage = <A extends object, E, R>(
 	ownedBy: OwnedBy = ownedByAgent,
 ) =>
 	Effect.gen(function* () {
-		const include_archived = input.include_archived ?? false
-		const data: Array<A> = []
-		let bytes = 0
-		let handled: ListingEntry | undefined
-		let cut = false
-		yield* Stream.fromIterable(page.entries).pipe(
-			Stream.mapEffect(
-				(entry) =>
-					Effect.exit(
-						retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
-					).pipe(Effect.map((outcome) => ({ entry, outcome }))),
-				{ concurrency: HYDRATE_CONCURRENCY },
-			),
-			Stream.runForEachWhile(({ entry, outcome }) =>
-				Effect.gen(function* () {
-					const resource = yield* outcome
-					const archived =
-						resource !== null && "archived_at" in resource && resource.archived_at !== null
-					const owned =
-						resource !== null && (input.agent_id === undefined || ownedBy(resource, input.agent_id))
-					if (resource !== null && owned && (include_archived || !archived)) {
-						const size = utf8.encode(JSON.stringify(resource)).length
-						const next = pageBytesWith(bytes, data.length, size)
-						if (data.length > 0 && next > LIST_PAGE_BYTES) {
-							cut = true
-							return false
-						}
-						bytes = next
-						data.push(resource)
+		const includeArchived = input.include_archived ?? false
+		const { data, lastHandled, firstOmitted } = yield* hydratePage(page.entries, (entry) =>
+			retrieve(entry.id).pipe(
+				Effect.catchIf(isNotFound, () => Effect.succeed(null)),
+				Effect.map((resource) => {
+					if (
+						resource === null ||
+						(!includeArchived && "archived_at" in resource && resource.archived_at !== null) ||
+						(input.agent_id !== undefined && !ownedBy(resource, input.agent_id))
+					) {
+						return null
 					}
-					handled = entry
-					return true
+					return resource
 				}),
 			),
 		)
-		const cursor = cut && handled !== undefined ? listingCursor(handled) : page.cursor
+		const cursor =
+			firstOmitted !== undefined && lastHandled !== undefined
+				? listingCursor(lastHandled)
+				: page.cursor
 		return listPage(data, cursor)
 	})
 

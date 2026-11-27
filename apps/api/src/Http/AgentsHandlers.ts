@@ -38,9 +38,10 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import * as Struct from "effect/Struct"
 import { configuredApiCustomProviders, resolveCatalogModel } from "../Pi/PiCatalog.ts"
 import { CheckfuApi } from "./Api.ts"
-import { makeLister } from "./Listing.ts"
+import { hydratePage, listPage, makeLister } from "./Listing.ts"
 import { CustomToolFaults } from "./ToolSchemas.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
@@ -181,7 +182,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					return yield* reject(503, `Agent ${id} version ${version} projection is not ready.`)
 				}
 				return {
-					...head,
+					...Struct.omit(head, ["current_version_id"]),
 					version,
 					name: snapshot.name,
 					model: snapshot.model,
@@ -389,13 +390,12 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						return yield* reject(400, "Invalid agent version page.")
 					}
 					const size = Math.min(start, query.limit ?? 50)
-					const data = yield* Effect.forEach(
+					const { data, firstOmitted } = yield* hydratePage(
 						Array.from({ length: size }, (_, index) => start - index),
 						(version) => readVersion(head, version),
-						{ concurrency: 8 },
 					)
-					const next = start - size
-					return { data, next_page: next > 0 ? versionPage(id, next) : null }
+					const next = firstOmitted ?? start - size
+					return listPage(data, next > 0 ? versionPage(id, next) : null)
 				}).pipe(handled),
 			)
 			.handle("update", ({ params, payload }) =>

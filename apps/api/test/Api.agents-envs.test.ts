@@ -90,13 +90,14 @@ import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { makeWebhooksTestSupport } from "../src/Webhooks/WebhookTestLayer.ts"
-import { CheckfuApi } from "../src/Http/Api.ts"
+import { AgentResource, CheckfuApi, ListAgentVersionsResponse } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
 	IsSupportedAgentModel,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
 import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHelpers.ts"
+import { LIST_PAGE_BYTES, hydratePage } from "../src/Http/Listing.ts"
 import {
 	AgentVersionLookupTimeout,
 	HarnessCallFailed,
@@ -478,6 +479,150 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 		expect(seenContexts).toEqual([[{ role: "user", text: "New question" }]])
 	})
+
+	it("bounds agent version pages by bytes and resumes at the first omitted revision", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const views = yield* AgentVersionByNumberView
+					const reads: Array<string> = []
+					const observed: typeof views = {
+						...views,
+						get: (key, options) =>
+							Effect.sync(() => reads.push(String(key))).pipe(
+								Effect.andThen(views.get(key, options)),
+							),
+					}
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(AgentVersionByNumberView, observed),
+						Effect.provideService(IsSupportedAgentModel, (id) => id === "fixture-model"),
+					)
+					const decodeAgent = Schema.decodeUnknownEffect(Schema.toCodecJson(AgentResource))
+					const decodeHistory = Schema.decodeUnknownEffect(
+						Schema.toCodecJson(ListAgentVersionsResponse),
+					)
+					const utf8 = new TextEncoder()
+					const bytesOf = (value: unknown) => utf8.encode(JSON.stringify(value)).byteLength
+					const create = (name: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/agents",
+							headers: AUTH_HEADERS,
+							body: { name, model: "fixture-model", system: "Version 1" },
+						})
+					const created = yield* create("Historian")
+					expect(created.status).toBe(201)
+					const agent = yield* Effect.promise(() => created.json()).pipe(
+						Effect.flatMap(decodeAgent),
+					)
+					const endpoint = `/v1/agents/${agent.id}`
+					const update = (system: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: endpoint,
+							headers: AUTH_HEADERS,
+							body: { system },
+						})
+					const history = (limit: number, cursor?: string) => {
+						const query = new URLSearchParams({ limit: String(limit) })
+						if (cursor !== undefined) {
+							query.set("page", cursor)
+						}
+						return sendRequest(apiFetch, {
+							method: "GET",
+							path: `${endpoint}/versions?${query}`,
+							headers: AUTH_HEADERS,
+						})
+					}
+					const readPage = (limit: number, cursor?: string) =>
+						Effect.gen(function* () {
+							const response = yield* history(limit, cursor)
+							expect(response.status).toBe(200)
+							return yield* Effect.promise(() => response.json()).pipe(
+								Effect.flatMap(decodeHistory),
+							)
+						})
+					const head = 40
+					const boundaryVersion = 27
+					const largeSystem = "界".repeat(MAX_AGENT_SYSTEM_LENGTH - 2)
+					const systemFor = (version: number) => `${largeSystem}${version}`
+					const larger = Array.from({ length: head - boundaryVersion }, (_, index) => {
+						const version = head - index
+						return { ...agent, version, system: systemFor(version) }
+					})
+					const boundaryLength =
+						LIST_PAGE_BYTES -
+						bytesOf([...larger, { ...agent, version: boundaryVersion, system: "" }])
+					expect(boundaryLength).toBeGreaterThan(0)
+					expect(boundaryLength).toBeLessThanOrEqual(MAX_AGENT_SYSTEM_LENGTH)
+					for (let version = 2; version <= head; version++) {
+						const system =
+							version > boundaryVersion
+								? systemFor(version)
+								: version === boundaryVersion
+									? "x".repeat(boundaryLength)
+									: `Version ${version}`
+						const response = yield* update(system)
+						expect(response.status, `version ${version}`).toBe(200)
+						yield* Effect.promise(() => response.arrayBuffer())
+					}
+					const control = yield* readPage(2)
+					expect(control.data.map(({ version }) => version)).toEqual([40, 39])
+					reads.length = 0
+					const first = yield* readPage(50)
+					const firstVersions = Array.from(
+						{ length: head - boundaryVersion + 1 },
+						(_, index) => head - index,
+					)
+					expect(bytesOf(first.data)).toBe(LIST_PAGE_BYTES)
+					expect(first.data.map(({ version }) => version)).toEqual(firstVersions)
+					expect(first.next_page).toBe(
+						`page_${encodeURIComponent(agent.id)}:${boundaryVersion - 1}`,
+					)
+					expect(reads).toContain(agentVersionLookupKey(agent.id, boundaryVersion - 1))
+					expect(reads.length).toBeLessThanOrEqual(firstVersions.length + 11)
+					const advanced = yield* update("A new head after the first page")
+					expect(advanced.status).toBe(200)
+					expect(yield* Effect.promise(() => advanced.json())).toMatchObject({ version: head + 1 })
+					const seen = [...firstVersions]
+					let cursor = first.next_page
+					while (cursor !== null && seen.length <= head) {
+						const page = yield* readPage(7, cursor)
+						expect(bytesOf(page.data)).toBeLessThanOrEqual(LIST_PAGE_BYTES)
+						expect(page.data.length).toBeGreaterThan(0)
+						seen.push(...page.data.map(({ version }) => version))
+						cursor = page.next_page
+					}
+					expect(seen).toEqual(Array.from({ length: head }, (_, index) => head - index))
+					expect(cursor).toBeNull()
+					const other = yield* create("Another agent")
+					const foreign = yield* Effect.promise(() => other.json()).pipe(
+						Effect.flatMap(decodeAgent),
+					)
+					reads.length = 0
+					expect((yield* history(50, "not-a-cursor")).status).toBe(400)
+					expect((yield* history(50, `page_${encodeURIComponent(foreign.id)}:1`)).status).toBe(400)
+					expect(reads).toEqual([])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	}, 30_000)
+
+	it.effect("keeps a history page moving past an individually oversized item", () =>
+		Effect.gen(function* () {
+			const oversized = "x".repeat(LIST_PAGE_BYTES)
+			const page = yield* hydratePage([2, 1], (version) =>
+				Effect.succeed({ version, system: version === 2 ? oversized : "Earlier version" }),
+			)
+			expect(page.data.map(({ version }) => version)).toEqual([2])
+			expect(page.firstOmitted).toBe(1)
+		}),
+	)
 
 	it("returns 202 with the committed id when the view lags behind a create", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
