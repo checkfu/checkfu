@@ -505,7 +505,7 @@ describe("CLI help, errors, and resource commands", () => {
 							"CLI Session",
 						],
 						{
-							env: { CHECKFU_API_KEY: TEST_API_KEY, CHECKFU_URL: "http://localhost:1337" },
+							env: { CHECKFU_API_KEY: TEST_API_KEY, CHECKFU_BASE_URL: "http://localhost:1337" },
 						},
 					)
 					expect(created.exitCode).toBe(0)

@@ -438,7 +438,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						? options.env
 						: {
 								CHECKFU_API_KEY: TEST_API_KEY,
-								CHECKFU_API_URL: "http://localhost:1337",
+								CHECKFU_BASE_URL: "http://localhost:1337",
 							}
 
 				const cliLayer = Layer.mergeAll(

@@ -86,7 +86,6 @@ const RESERVED_MEMBER_NAMES = new Set([
 const RESERVED_ROOT_MEMBERS = new Set([
 	...RESERVED_MEMBER_NAMES,
 	"baseUrl",
-	"baseURL",
 	"raw",
 	"generateIdempotencyKey",
 	"withOptions",

@@ -110,7 +110,6 @@ export type EventPagePromise = PagePromise<CursorPage<JsonSessionEvent>, JsonSes
 export interface CheckfuOptions {
 	readonly apiKey?: string | undefined
 	readonly baseUrl?: string | undefined
-	readonly baseURL?: string | undefined
 	readonly allowInsecureHttp?: boolean | undefined
 	readonly maxRetries?: number | undefined
 	readonly timeout?: Duration.Input | null | undefined
@@ -130,8 +129,6 @@ const CheckfuProcessEnvSchema = Schema.Struct({
 				Schema.Struct({
 					CHECKFU_API_KEY: Schema.optional(Schema.String),
 					CHECKFU_BASE_URL: Schema.optional(Schema.String),
-					CHECKFU_API_URL: Schema.optional(Schema.String),
-					CHECKFU_URL: Schema.optional(Schema.String),
 				}),
 			),
 		}),
@@ -139,9 +136,7 @@ const CheckfuProcessEnvSchema = Schema.Struct({
 })
 const decodeCheckfuProcessEnv = Schema.decodeUnknownOption(CheckfuProcessEnvSchema)
 
-const readEnvVar = (
-	name: "CHECKFU_API_KEY" | "CHECKFU_BASE_URL" | "CHECKFU_API_URL" | "CHECKFU_URL",
-): string | undefined => {
+const readEnvVar = (name: "CHECKFU_API_KEY" | "CHECKFU_BASE_URL"): string | undefined => {
 	const decoded = decodeCheckfuProcessEnv(globalThis)
 	if (Option.isNone(decoded)) {
 		return undefined
@@ -171,23 +166,8 @@ const resolveConstructorOptions = (
 	options: CheckfuOptions | undefined,
 	stripApiVersionSuffix: boolean,
 ): ResolvedCheckfuOptions => {
-	if (
-		options?.baseUrl !== undefined &&
-		options.baseURL !== undefined &&
-		options.baseUrl !== options.baseURL
-	) {
-		throw new CheckfuConfigError({
-			message: "Provide either baseUrl or baseURL, not both with different values.",
-		})
-	}
 	const allowInsecureHttp = options?.allowInsecureHttp ?? false
-	const rawBaseUrl =
-		options?.baseUrl ??
-		options?.baseURL ??
-		readEnvVar("CHECKFU_BASE_URL") ??
-		readEnvVar("CHECKFU_API_URL") ??
-		readEnvVar("CHECKFU_URL") ??
-		DEFAULT_API_URL
+	const rawBaseUrl = options?.baseUrl ?? readEnvVar("CHECKFU_BASE_URL") ?? DEFAULT_API_URL
 	const parsedUrl = parseNormalizedApiUrl(rawBaseUrl, {
 		allowInsecureHttp,
 		stripApiVersionSuffix,
@@ -268,7 +248,6 @@ export class Checkfu extends PromiseResources {
 	static readonly isPendingResource = isPendingResource
 
 	readonly baseUrl: string
-	readonly baseURL: string
 	readonly #config: ResolvedCheckfuOptions
 	readonly #runtime: ManagedRuntime.ManagedRuntime<CheckfuClient, CheckfuConfigError>
 
@@ -296,21 +275,14 @@ export class Checkfu extends PromiseResources {
 		super(promiseRuntime)
 		this.#config = resolved
 		this.baseUrl = resolved.baseUrl
-		this.baseURL = resolved.baseUrl
 		this.#runtime = managed
 	}
 
 	withOptions(overrides: CheckfuOptions): Checkfu {
 		const mergedHeaders = mergeHeaderMaps(this.#config.defaultHeaders, overrides.defaultHeaders)
-		const hasBaseOverride = overrides.baseUrl !== undefined || overrides.baseURL !== undefined
 		const nextOptions: CheckfuOptions = {
 			apiKey: overrides.apiKey ?? this.#config.apiKey,
-			...(hasBaseOverride
-				? {
-						...(overrides.baseUrl === undefined ? {} : { baseUrl: overrides.baseUrl }),
-						...(overrides.baseURL === undefined ? {} : { baseURL: overrides.baseURL }),
-					}
-				: { baseUrl: this.#config.baseUrl }),
+			baseUrl: overrides.baseUrl ?? this.#config.baseUrl,
 			allowInsecureHttp: overrides.allowInsecureHttp ?? this.#config.allowInsecureHttp,
 			maxRetries: overrides.maxRetries ?? this.#config.maxRetries,
 			timeout: overrides.timeout === undefined ? this.#config.timeout : overrides.timeout,
@@ -318,7 +290,7 @@ export class Checkfu extends PromiseResources {
 			fetch: overrides.fetch ?? this.#config.fetch,
 			autoIdempotencyKey: overrides.autoIdempotencyKey ?? this.#config.autoIdempotencyKey,
 		}
-		if (!hasBaseOverride) {
+		if (overrides.baseUrl === undefined) {
 			preNormalizedOptions.add(nextOptions)
 		}
 		return new Checkfu(nextOptions)

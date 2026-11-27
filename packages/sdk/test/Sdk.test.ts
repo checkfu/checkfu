@@ -27,7 +27,7 @@ import {
 	makePromiseSdkRuntime,
 } from "../src/PromiseRuntime.ts"
 import { attachPendingReadiness } from "../src/Runtime.ts"
-import { makeAuthorizedHttpClient } from "../src/Transport.ts"
+import { DEFAULT_API_URL, makeAuthorizedHttpClient } from "../src/Transport.ts"
 import {
 	APIConnectionError,
 	APIConnectionTimeoutError,
@@ -402,38 +402,10 @@ describe("@checkfu/sdk", () => {
 			}),
 		)
 
-		it.effect(
-			"resolves layerFromEnv using CHECKFU_API_KEY and CHECKFU_BASE_URL > CHECKFU_API_URL > CHECKFU_URL",
-			() =>
-				Effect.gen(function* () {
-					const primary = yield* CheckfuClient
-					expect(primary.baseUrl).toBe("https://base.checkfu.dev")
-				}).pipe(
-					Effect.provide(
-						CheckfuClient.layerFromEnv().pipe(
-							Layer.provide(
-								Layer.mergeAll(
-									FetchHttpClient.layer,
-									SecureRandom.layerWebCrypto,
-									ConfigProvider.layer(
-										ConfigProvider.fromUnknown({
-											CHECKFU_API_KEY: "ck_env_key",
-											CHECKFU_BASE_URL: "https://base.checkfu.dev/v1",
-											CHECKFU_API_URL: "https://primary.checkfu.dev/v1",
-											CHECKFU_URL: "https://fallback.checkfu.dev",
-										}),
-									),
-								),
-							),
-						),
-					),
-				),
-		)
-
-		it.effect("falls back to CHECKFU_API_URL > CHECKFU_URL when CHECKFU_BASE_URL is unset", () =>
+		it.effect("resolves layerFromEnv using CHECKFU_API_KEY and CHECKFU_BASE_URL", () =>
 			Effect.gen(function* () {
-				const client = yield* CheckfuClient
-				expect(client.baseUrl).toBe("https://primary.checkfu.dev")
+				const primary = yield* CheckfuClient
+				expect(primary.baseUrl).toBe("https://base.checkfu.dev")
 			}).pipe(
 				Effect.provide(
 					CheckfuClient.layerFromEnv().pipe(
@@ -444,8 +416,7 @@ describe("@checkfu/sdk", () => {
 								ConfigProvider.layer(
 									ConfigProvider.fromUnknown({
 										CHECKFU_API_KEY: "ck_env_key",
-										CHECKFU_API_URL: "https://primary.checkfu.dev/v1",
-										CHECKFU_URL: "https://fallback.checkfu.dev",
+										CHECKFU_BASE_URL: "https://base.checkfu.dev/v1",
 									}),
 								),
 							),
@@ -455,22 +426,40 @@ describe("@checkfu/sdk", () => {
 			),
 		)
 
-		it("validates Checkfu constructor config eagerly and supports baseURL alias", () => {
+		it.effect("uses the default base URL when CHECKFU_BASE_URL is unset", () =>
+			Effect.gen(function* () {
+				const client = yield* CheckfuClient
+				expect(client.baseUrl).toBe(DEFAULT_API_URL)
+			}).pipe(
+				Effect.provide(
+					CheckfuClient.layerFromEnv().pipe(
+						Layer.provide(
+							Layer.mergeAll(
+								FetchHttpClient.layer,
+								SecureRandom.layerWebCrypto,
+								ConfigProvider.layer(
+									ConfigProvider.fromUnknown({
+										CHECKFU_API_KEY: "ck_env_key",
+									}),
+								),
+							),
+						),
+					),
+				),
+			),
+		)
+
+		it("validates Checkfu constructor config eagerly and normalizes baseUrl", () => {
 			expect(() => new Checkfu({ apiKey: "   " })).toThrow(CheckfuConfigError)
-			expect(
-				() =>
-					new Checkfu({
-						apiKey: "ck_test",
-						baseUrl: "https://a.checkfu.dev",
-						baseURL: "https://b.checkfu.dev",
-					}),
-			).toThrow(CheckfuConfigError)
+			expect(() => new Checkfu({ apiKey: "ck_test", baseUrl: "invalid" })).toThrow(
+				CheckfuConfigError,
+			)
 			expect(() => new Checkfu({ apiKey: "ck_test", maxRetries: -1 })).toThrow(CheckfuConfigError)
 			expect(() => new Checkfu({ apiKey: "ck_test", timeout: 0 })).toThrow(CheckfuConfigError)
 
 			const client = new Checkfu({
 				apiKey: "ck_test",
-				baseURL: "https://api.checkfu.dev/v1/",
+				baseUrl: "https://api.checkfu.dev/v1/",
 			})
 			expect(client.baseUrl).toBe("https://api.checkfu.dev")
 			void client.close()

@@ -17,7 +17,7 @@ export const SharedFlags = {
 	baseUrl: Flag.String("base-url").pipe(
 		Flag.withMetavar("URL"),
 		Flag.withDescription(
-			"Checkfu API base URL (defaults to CHECKFU_API_URL, CHECKFU_URL, the saved deployment, or http://localhost:1337)",
+			"Checkfu API base URL (defaults to CHECKFU_BASE_URL, the saved deployment, or http://localhost:1337)",
 		),
 		Flag.optional,
 	),

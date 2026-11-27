@@ -40,7 +40,7 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			mkdirSync(hostile)
 			writeFileSync(
 				join(hostile, ".env"),
-				"CHECKFU_API_KEY=planted\nCHECKFU_URL=https://planted.example\n",
+				"CHECKFU_API_KEY=planted\nCHECKFU_BASE_URL=https://planted.example\n",
 			)
 			writeFileSync(join(hostile, "bunfig.toml"), 'preload = ["./preload.js"]\n')
 			writeFileSync(
@@ -48,15 +48,20 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 				'require("node:fs").writeFileSync(__dirname + "/PRELOAD_RAN", "1")\n',
 			)
 
-			const call = spawnSync(binary, ["sessions", "retrieve", "--session-id", "sess_x"], {
-				cwd: hostile,
-				env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
-				encoding: "utf8",
-				timeout: 30_000,
-			})
+			const run = (args: ReadonlyArray<string>) =>
+				spawnSync(binary, args, {
+					cwd: hostile,
+					env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
+					encoding: "utf8",
+					timeout: 30_000,
+				})
+			const call = run(["sessions", "retrieve", "--session-id", "sess_x"])
 			expect(call.status).toBe(1)
 			expect(call.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(call.stderr).not.toContain("planted")
+			const login = run(["login"])
+			expect(login.status).toBe(1)
+			expect(login.stderr).toContain("Pass the deployment URL")
 			expect(existsSync(join(hostile, "PRELOAD_RAN"))).toBe(false)
 
 			for (const [cwd, name] of [
@@ -238,9 +243,13 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 		return { server, url: `http://127.0.0.1:${port}` }
 	}
 
-	const run = (cwd: string, env: Record<string, string>) =>
+	const run = (
+		cwd: string,
+		env: Record<string, string>,
+		args: ReadonlyArray<string> = ["sessions", "retrieve", "--session-id", "s"],
+	) =>
 		new Promise<{ readonly status: number | null; readonly stderr: string }>((resolve, reject) => {
-			const child = spawn("bun", ["checkfu", "sessions", "retrieve", "--session-id", "s"], {
+			const child = spawn("bun", ["checkfu", ...args], {
 				cwd,
 				env,
 				stdio: ["ignore", "ignore", "pipe"],
@@ -261,7 +270,7 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 		const exportedServer = await listen((authorization) => exported.push(authorization))
 		const checkout = copyCheckout()
 		try {
-			const dotenv = `CHECKFU_API_KEY=planted\nCHECKFU_API_URL=${plantedServer.url}\nCHECKFU_URL=${plantedServer.url}\n`
+			const dotenv = `CHECKFU_API_KEY=planted\nCHECKFU_BASE_URL=${plantedServer.url}\n`
 			for (const file of [".env", ".env.local", ".env.development", ".env.production"]) {
 				writeFileSync(join(checkout, file), dotenv)
 			}
@@ -274,18 +283,21 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 				const nothingExported = await run(checkout, base)
 				expect(nothingExported.status).toBe(1)
 				expect(nothingExported.stderr).toContain("Missing CHECKFU_API_KEY")
+				const login = await run(checkout, base, ["login"])
+				expect(login.status).toBe(1)
+				expect(login.stderr).toContain("Pass the deployment URL")
 
 				const sameAsTheFile = await run(checkout, {
 					...base,
 					CHECKFU_API_KEY: "planted",
-					CHECKFU_API_URL: exportedServer.url,
+					CHECKFU_BASE_URL: exportedServer.url,
 				})
 				expect(sameAsTheFile.stderr).toContain("not_found_error")
 
 				const ownKey = await run(checkout, {
 					...base,
 					CHECKFU_API_KEY: "exported",
-					CHECKFU_API_URL: exportedServer.url,
+					CHECKFU_BASE_URL: exportedServer.url,
 				})
 				expect(ownKey.stderr).toContain("not_found_error")
 			}

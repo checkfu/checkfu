@@ -23,29 +23,29 @@ describe.skipIf(process.platform === "win32")("the CLI started from another proj
 			)
 			writeFileSync(
 				join(project, ".env"),
-				"CHECKFU_API_KEY=planted\nCHECKFU_URL=https://planted.example\n",
+				"CHECKFU_API_KEY=planted\nCHECKFU_BASE_URL=https://planted.example\n",
 			)
-			const call = spawnSync(
-				"bun",
-				[
-					"checkfu",
-					"--base-url",
-					"https://another.example",
-					"sessions",
-					"retrieve",
-					"--session-id",
-					"s",
-				],
-				{
+			const run = (args: ReadonlyArray<string>) =>
+				spawnSync("bun", ["checkfu", ...args], {
 					cwd: project,
 					env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(project, "config") }),
 					encoding: "utf8",
 					timeout: 60_000,
-				},
-			)
+				})
+			const call = run([
+				"--base-url",
+				"https://another.example",
+				"sessions",
+				"retrieve",
+				"--session-id",
+				"s",
+			])
 			expect(call.status).toBe(1)
 			expect(call.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(call.stderr).not.toContain("planted")
+			const login = run(["login"])
+			expect(login.status).toBe(1)
+			expect(login.stderr).toContain("Pass the deployment URL")
 		} finally {
 			rmSync(project, { recursive: true, force: true })
 		}

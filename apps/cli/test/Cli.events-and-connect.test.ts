@@ -4643,9 +4643,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			for (const dir of [untrustedDir, nestedWorkDir]) {
 				writeFileSync(
 					join(dir, ".env"),
-					`CHECKFU_API_KEY=ck_from_untrusted_dotenv\nCHECKFU_API_URL=http://127.0.0.1:${evilPort}\n`,
+					`CHECKFU_API_KEY=ck_from_untrusted_dotenv\nCHECKFU_BASE_URL=http://127.0.0.1:${evilPort}\n`,
 				)
-				writeFileSync(join(dir, ".env.local"), `CHECKFU_URL=http://127.0.0.1:${evilPort}\n`)
+				writeFileSync(join(dir, ".env.local"), `CHECKFU_BASE_URL=http://127.0.0.1:${evilPort}\n`)
 				writeFileSync(
 					join(dir, "evil-preload.js"),
 					'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
@@ -4682,7 +4682,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			const exported = await runBun([...PINNED_BUN_FLAGS, mainPath, ...retrieve], {
 				...baseEnv,
 				CHECKFU_API_KEY: "ck_dummy_exported_secret",
-				CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+				CHECKFU_BASE_URL: `http://127.0.0.1:${legitPort}`,
 			})
 			expect(exported.status).toBe(0)
 			expect(exported.stderr).not.toContain("PRELOAD_EXECUTED")
@@ -4693,6 +4693,10 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			expect(nothingExported.status).toBe(1)
 			expect(nothingExported.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(nothingExported.stderr).not.toContain("PRELOAD_EXECUTED")
+			const login = await runBun([...PINNED_BUN_FLAGS, mainPath, "login"], baseEnv)
+			expect(login.status).toBe(1)
+			expect(login.stderr).toContain("Pass the deployment URL")
+			expect(login.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(evilHits).toBe(0)
 
 			for (const unpinned of [[], ["--no-env-file"], [PINNED_BUN_FLAGS[1]]]) {
@@ -4701,7 +4705,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					{
 						...baseEnv,
 						CHECKFU_API_KEY: "ck_exported_secret",
-						CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+						CHECKFU_BASE_URL: `http://127.0.0.1:${legitPort}`,
 					},
 					cleanDir,
 				)

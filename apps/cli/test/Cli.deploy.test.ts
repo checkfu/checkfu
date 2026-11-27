@@ -573,7 +573,7 @@ describe("checkfu deploy", () => {
 				const dotenv = `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`
 				const files = virtualFiles({ ...checkout, [ENV_FILE]: dotenv })
 				const result = yield* cli.run(["deploy", "--yes"], {
-					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_URL: "https://another.example" },
+					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_BASE_URL: "https://another.example" },
 					files,
 					spawn: fakeAlchemy([]),
 					onChmod: (filePath, mode) => chmods.push([filePath, mode]),

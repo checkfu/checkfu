@@ -931,7 +931,7 @@ describe("normalizeApiUrl", () => {
 		)
 	})
 
-	it("resolves default URL without network access and rejects explicitly blank --base-url", async () => {
+	it("uses the flag before the environment and defaults to the local URL", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const emptyEnvLayer = ConfigProvider.layer(ConfigProvider.fromUnknown({}))
@@ -939,24 +939,17 @@ describe("normalizeApiUrl", () => {
 					DEFAULT_API_URL,
 				)
 
-				const fallbackUrlLayer = ConfigProvider.layer(
-					ConfigProvider.fromUnknown({
-						CHECKFU_URL: "https://staging.checkfu.com/v1/",
-					}),
-				)
-				expect(yield* resolveBaseUrl(Option.none()).pipe(Effect.provide(fallbackUrlLayer))).toBe(
-					"https://staging.checkfu.com",
-				)
-
 				const envLayer = ConfigProvider.layer(
-					ConfigProvider.fromUnknown({
-						CHECKFU_API_URL: "https://api.checkfu.com",
-						CHECKFU_URL: "https://staging.checkfu.com",
-					}),
+					ConfigProvider.fromUnknown({ CHECKFU_BASE_URL: "https://staging.checkfu.com/v1/" }),
 				)
 				expect(yield* resolveBaseUrl(Option.none()).pipe(Effect.provide(envLayer))).toBe(
-					"https://api.checkfu.com",
+					"https://staging.checkfu.com",
 				)
+				expect(
+					yield* resolveBaseUrl(Option.some("https://api.checkfu.com/v1")).pipe(
+						Effect.provide(envLayer),
+					),
+				).toBe("https://api.checkfu.com")
 				for (const blank of ["", "   "]) {
 					const err = yield* Effect.flip(
 						resolveBaseUrl(Option.some(blank)).pipe(Effect.provide(envLayer)),

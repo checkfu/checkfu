@@ -78,13 +78,9 @@ const optionalConfigString = (name: string): Effect.Effect<Option.Option<string>
 export const explicitBaseUrl = (
 	baseUrlFlag: Option.Option<string>,
 ): Effect.Effect<Option.Option<string>, CliFailure> =>
-	Effect.gen(function* () {
-		if (Option.isSome(baseUrlFlag)) {
-			return baseUrlFlag
-		}
-		const apiUrl = yield* optionalConfigString("CHECKFU_API_URL")
-		return Option.isSome(apiUrl) ? apiUrl : yield* optionalConfigString("CHECKFU_URL")
-	})
+	Option.isSome(baseUrlFlag)
+		? Effect.succeed(baseUrlFlag)
+		: optionalConfigString("CHECKFU_BASE_URL")
 
 type LoadSaved<R> = Effect.Effect<Option.Option<SavedConnection>, CliFailure, R>
 

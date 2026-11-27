@@ -188,18 +188,7 @@ export const resolveBaseUrl = (
 			return yield* normalizeApiUrl(override, options)
 		}
 		const baseUrl = yield* optionalConfigString("CHECKFU_BASE_URL")
-		if (Option.isSome(baseUrl)) {
-			return yield* normalizeApiUrl(baseUrl.value, options)
-		}
-		const apiUrl = yield* optionalConfigString("CHECKFU_API_URL")
-		if (Option.isSome(apiUrl)) {
-			return yield* normalizeApiUrl(apiUrl.value, options)
-		}
-		const url = yield* optionalConfigString("CHECKFU_URL")
-		if (Option.isSome(url)) {
-			return yield* normalizeApiUrl(url.value, options)
-		}
-		return DEFAULT_API_URL
+		return Option.isSome(baseUrl) ? yield* normalizeApiUrl(baseUrl.value, options) : DEFAULT_API_URL
 	})
 
 export const normalizeApiKey = (
