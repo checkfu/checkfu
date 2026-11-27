@@ -108,13 +108,20 @@ const withSessions = async (
 	}
 }
 
+interface ToolReply {
+	readonly id: string
+	readonly data?: unknown
+	readonly data_omitted?: string
+	readonly next_page?: string | null
+}
+
 interface DataArguments {
 	readonly collection: string
 	readonly operation: string
 	readonly id?: string
 	readonly data?: unknown
 	readonly limit?: number
-	readonly page?: string | null | undefined
+	readonly page?: string | null
 }
 
 describe("An artifact the agent saves", () => {
@@ -436,12 +443,8 @@ describe("An artifact the agent saves", () => {
 					)
 				const done = (args: DataArguments) =>
 					Effect.map(call({ name: "Dashboard", ...args }), ({ error, text }) => {
-						expect([error, text]).toEqual([false, text])
-						return JSON.parse(text) as {
-							id: string
-							data: unknown
-							next_page?: string | null
-						}
+						expect(error ? text : "served").toBe("served")
+						return JSON.parse(text) as ToolReply
 					})
 
 				const revenue = yield* done({
@@ -468,7 +471,7 @@ describe("An artifact the agent saves", () => {
 				const rest = yield* done({
 					collection: "numbers",
 					operation: "list",
-					page: first.next_page,
+					page: first.next_page ?? null,
 				})
 				expect(
 					(rest.data as ReadonlyArray<{ data: unknown }>).map((document) => document.data),
@@ -511,7 +514,7 @@ describe("An artifact the agent saves", () => {
 					(yield* refusal({ name: "Dashboard", collection: "Numbers", operation: "list" }))[1],
 				).toContain("collection must be")
 				expect((yield* refusal({ ...numbers, operation: "everything" }))[1]).toContain(
-					"artifact_data needs",
+					"artifact_data needs name",
 				)
 				expect(
 					(yield* refusal({
@@ -528,12 +531,80 @@ describe("An artifact the agent saves", () => {
 					'No artifact named "Someone else\'s" has been saved in this session. Save it with save_artifact first.',
 				])
 
+				for (const value of [false, 0, ""]) {
+					expect(
+						(yield* done({ collection: "flags", operation: "put", id: "falsy", data: value })).data,
+					).toBe(value)
+				}
+				expect(
+					(yield* refusal({
+						...numbers,
+						operation: "add",
+						data: JSON.parse(`${"[".repeat(33)}1${"]".repeat(33)}`),
+					}))[1],
+				).toContain("nested at most 32 deep")
+				for (const limit of [0, 101, 1.5]) {
+					expect((yield* refusal({ ...numbers, operation: "list", limit }))[1]).toContain(
+						"limit an integer from 1 to 100",
+					)
+				}
+				for (const page of ["abc", "1e3", "-1", "007"]) {
+					expect(yield* refusal({ ...numbers, operation: "list", page })).toEqual([
+						true,
+						"page must be the next_page of an earlier list.",
+					])
+				}
+
+				for (const [name, bytes] of [
+					["first", 15_000],
+					["second", 15_000],
+					["third", 15_000],
+					["huge", 50_000],
+					["last", 10],
+				] as const) {
+					yield* done({
+						collection: "large",
+						operation: "put",
+						id: name,
+						data: "x".repeat(bytes),
+					})
+				}
+				const pages: Array<ReadonlyArray<string>> = []
+				let page: string | null = null
+				do {
+					const listed: ToolReply = yield* done({ collection: "large", operation: "list", page })
+					const documents = listed.data as ReadonlyArray<{
+						id: string
+						data?: string
+						data_omitted?: string
+					}>
+					pages.push(
+						documents.map((document) =>
+							document.data_omitted === undefined ? document.id : `${document.id} (omitted)`,
+						),
+					)
+					expect(JSON.stringify(listed).length).toBeLessThan(50 * 1024)
+					page = listed.next_page ?? null
+				} while (typeof page === "string")
+				expect(pages).toEqual([["first", "second"], ["third"], ["huge (omitted)"], ["last"]])
+				const huge = yield* done({ collection: "large", operation: "get", id: "huge" })
+				expect(huge).toMatchObject({
+					id: "huge",
+					data_omitted: "50002 bytes of JSON, more than this tool can return",
+				})
+				expect("data" in huge).toBe(false)
+
 				const other = yield* createSession
 				expect(
 					(yield* Effect.promise(() =>
 						sessionArtifactData(other.id, 1, { ...numbers, operation: "list" }),
-					)).isError,
-				).toBe(true)
+					)).content,
+				).toEqual([
+					{
+						type: "text",
+						text: 'No artifact named "Dashboard" has been saved in this session. Save it with save_artifact first.',
+					},
+				])
 				expect((yield* request(apiFetch, "DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
 				expect((yield* refusal({ ...numbers, operation: "list" }))[1]).toContain(
 					"No artifact named",

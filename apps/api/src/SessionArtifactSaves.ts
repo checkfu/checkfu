@@ -32,7 +32,9 @@ import { outputFileId } from "./Files/OutputsSaverLive.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
 import { RESERVATION_LOST, artifactWrites } from "./Http/ArtifactsHandlers.ts"
 import {
+	ARTIFACT_DATA_RESULT_BYTES,
 	DEFAULT_ARTIFACT_DATA_LIMIT,
+	MAX_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
@@ -74,12 +76,16 @@ const isDataCall = Schema.is(SessionArtifactToolCalls.sessionArtifactData.args)
 const decodeData = Schema.decodeUnknownOption(Schema.fromJsonString(ArtifactDocumentData))
 const encodeDocument = Schema.encodeSync(ArtifactDocumentResource)
 const encodeDeleted = Schema.encodeSync(ArtifactDocumentDeleted)
-const encodeList = Schema.encodeSync(
-	Schema.Struct({
-		data: Schema.Array(ArtifactDocumentResource),
-		next_page: Schema.NullOr(Schema.String),
-	}),
-)
+
+const ID_HELP = "id must be up to 64 letters, digits, - and _, starting with a letter or digit."
+
+const shown = (document: typeof ArtifactDocumentResource.Type) => {
+	const { data, ...rest } = encodeDocument(document)
+	const bytes = utf8Encoder.encode(JSON.stringify(data)).byteLength
+	return bytes <= ARTIFACT_DATA_RESULT_BYTES
+		? { ...rest, data }
+		: { ...rest, data_omitted: `${bytes} bytes of JSON, more than this tool can return` }
+}
 
 export const sessionArtifactId = (
 	digest: Digest.Digest["Service"],
@@ -129,7 +135,11 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 
 	const documents = yield* DocumentCalls
 
-	const dataOf = (id: ArtifactId, request: SessionDataRequest) =>
+	const dataOf = (
+		id: ArtifactId,
+		request: SessionDataRequest,
+		stillRunning: Effect.Effect<SessionDataResult | undefined>,
+	) =>
 		Effect.gen(function* () {
 			const { operation, collection } = request
 			if (!isCollection(collection)) {
@@ -139,43 +149,43 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 			}
 			if (operation === "list") {
 				const after = request.page === "" ? 0 : Number(request.page)
-				if (!Number.isSafeInteger(after) || after < 0) {
+				if (String(after) !== (request.page === "" ? "0" : request.page) || after < 0) {
 					return refused("page must be the next_page of an earlier list.")
 				}
-				return told(
-					encodeList(
-						yield* documents.list(
-							id,
-							collection,
-							after,
-							request.limit === 0 ? DEFAULT_ARTIFACT_DATA_LIMIT : request.limit,
-						),
-					),
+				if (request.limit < 0 || request.limit > MAX_ARTIFACT_DATA_LIMIT) {
+					return refused(`limit must be 1 to ${MAX_ARTIFACT_DATA_LIMIT}.`)
+				}
+				const listed = yield* documents.list(
+					id,
+					collection,
+					after,
+					request.limit === 0 ? DEFAULT_ARTIFACT_DATA_LIMIT : request.limit,
+					ARTIFACT_DATA_RESULT_BYTES,
 				)
-			}
-			if (operation === "add") {
-				const data = decodeData(request.data)
-				return Option.isNone(data)
-					? refused(DATA_HELP)
-					: told(
-							encodeDocument(yield* documents.add(id, collection, data.value, undefined, "owner")),
-						)
-			}
-			if (!isDocumentId(request.id)) {
-				return refused(
-					"id must be up to 64 letters, digits, - and _, starting with a letter or digit.",
-				)
+				return told({ next_page: listed.next_page, data: listed.data.map(shown) })
 			}
 			if (operation === "get") {
-				return told(encodeDocument(yield* documents.get(id, collection, request.id)))
+				return isDocumentId(request.id)
+					? told(shown(yield* documents.get(id, collection, request.id)))
+					: refused(ID_HELP)
 			}
-			if (operation === "delete") {
-				return told(encodeDeleted(yield* documents.remove(id, collection, request.id)))
+			if (operation !== "add" && !isDocumentId(request.id)) {
+				return refused(ID_HELP)
 			}
-			const data = decodeData(request.data)
-			return Option.isNone(data)
-				? refused(DATA_HELP)
-				: told(encodeDocument(yield* documents.put(id, collection, request.id, data.value)))
+			const data = operation === "delete" ? Option.some(null) : decodeData(request.data)
+			if (Option.isNone(data)) {
+				return refused(DATA_HELP)
+			}
+			const ended = yield* stillRunning
+			if (ended !== undefined) {
+				return ended
+			}
+			if (operation === "add") {
+				return told(shown(yield* documents.add(id, collection, data.value, undefined, "owner")))
+			}
+			return operation === "delete"
+				? told(encodeDeleted(yield* documents.remove(id, collection, request.id)))
+				: told(shown(yield* documents.put(id, collection, request.id, data.value)))
 		}).pipe(Effect.catchIf(isDocumentRefused, ({ message }) => Effect.succeed(refused(message))))
 
 	return {
@@ -203,7 +213,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 							`No artifact named ${JSON.stringify(name)} has been saved in this session. Save it with save_artifact first.`,
 						)
 					}
-					return yield* dataOf(id, request)
+					return yield* dataOf(id, request, stopped(sessionId, turn))
 				}),
 			),
 

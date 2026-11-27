@@ -31,6 +31,7 @@ export type SavedSessionArtifact = typeof SavedSessionArtifact.Type
 
 export const DEFAULT_ARTIFACT_DATA_LIMIT = 50
 export const MAX_ARTIFACT_DATA_LIMIT = 100
+export const ARTIFACT_DATA_RESULT_BYTES = 40 * 1024
 
 export const ARTIFACT_DATA_OPERATIONS = ["list", "get", "add", "put", "delete"] as const
 

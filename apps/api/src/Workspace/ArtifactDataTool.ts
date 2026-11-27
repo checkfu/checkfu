@@ -9,13 +9,15 @@ const decodeArguments = Schema.decodeUnknownOption(
 		name: ArtifactName,
 		collection: Schema.String.check(Schema.isMinLength(1)),
 		operation: Schema.Literals(ARTIFACT_DATA_OPERATIONS),
-		id: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
+		id: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
 		data: Schema.optionalKey(Schema.Json),
-		page: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
+		page: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
 		limit: Schema.optionalKey(
-			Schema.Int.check(
-				Schema.isGreaterThanOrEqualTo(1),
-				Schema.isLessThanOrEqualTo(MAX_ARTIFACT_DATA_LIMIT),
+			Schema.NullOr(
+				Schema.Int.check(
+					Schema.isGreaterThanOrEqualTo(1),
+					Schema.isLessThanOrEqualTo(MAX_ARTIFACT_DATA_LIMIT),
+				),
 			),
 		),
 	}),
@@ -33,13 +35,13 @@ export const artifactData = async (
 	const decoded = decodeArguments(args)
 	if (decoded._tag === "None") {
 		return told(
-			`artifact_data needs a name, a collection and an operation (${ARTIFACT_DATA_OPERATIONS.join(", ")}).`,
+			`artifact_data needs name (1 to 256 characters), collection and operation (${ARTIFACT_DATA_OPERATIONS.join(", ")}). id is text, data any JSON value, limit an integer from 1 to ${MAX_ARTIFACT_DATA_LIMIT}, and page the next_page text of an earlier list.`,
 			true,
 		)
 	}
 	const { name, collection, operation, id, data, page, limit } = decoded.value
 	const needsId = operation === "get" || operation === "put" || operation === "delete"
-	if (needsId && id === undefined) {
+	if (needsId && (id === undefined || id === null)) {
 		return told(`${operation} needs the document's id.`, true)
 	}
 	const needsData = operation === "add" || operation === "put"
@@ -55,7 +57,12 @@ export const artifactData = async (
 		limit: operation === "list" ? (limit ?? 0) : 0,
 	}).catch(() => null)
 	if (result === null) {
-		return told("The artifact's data could not be reached; try again.", true)
+		return told(
+			operation === "list" || operation === "get"
+				? "The artifact's data could not be reached; try again."
+				: `The artifact's data could not be reached, and the ${operation} may or may not have been applied. Check with list or get before repeating it.`,
+			true,
+		)
 	}
 	return result.ok ? told(result.text, false) : told(result.message, true)
 }
