@@ -20,82 +20,104 @@ npm install -g checkfu
 checkfu deploy
 ```
 
-Signs in to Cloudflare, prompts for a provider key, deploys the server from `origin/main`, and saves credentials in `~/.config/checkfu` (re-run `checkfu deploy` to update in place; see the [CLI guide](apps/cli/README.md)).
+`deploy` signs in to Cloudflare, prompts for a provider key, deploys the server from `origin/main`, prints your API, MCP, and Dashboard URLs, and saves credentials in `~/.config/checkfu` (re-run `checkfu deploy` to update in place).
 
-```sh
-checkfu agents create --name Assistant --model your-model-id
-checkfu environments create --name default
-checkfu sessions create --agent <agent-id> --environment-id <environment-id>
-checkfu sessions connect <session-id>
-```
+## Interfaces
 
-### Configuration as code
+Every interface talks to the same API.
 
-Define agents, environments, and automations as Markdown or YAML (or export them from the dashboard) and reconcile them with `checkfu-lock.json`:
+- **CLI ([`apps/cli`](apps/cli/README.md)):** Interactive sessions, resource commands, `--format`, and GJSON `--transform`.
 
-```md
----
-# agents/support.md
-name: Support
-model: your-model-id
----
+  ```sh
+  checkfu agents create --name Assistant --model your-model-id
+  checkfu environments create --name default
+  checkfu sessions create --agent <agent-id> --environment-id <environment-id>
+  checkfu sessions connect <session-id>
+  ```
 
-Answer support questions and cite the source you used.
-```
+- The [SDK](packages/sdk/README.md) provides Promise and Effect clients. Run `npm install @checkfu/sdk` and set `CHECKFU_API_KEY` in your environment.
 
-```yaml
-# environments/cloud.yaml
-name: Cloud
-```
+  ```ts
+  import Checkfu from "@checkfu/sdk"
 
-```yaml
-# yaml-language-server: $schema=https://your-api.workers.dev/schemas/apply/automation.json
-# automations/report.yaml
-name: Weekday report
-agent: ../agents/support.md
-environment_id: ../environments/cloud.yaml
-initial_events:
-  - type: user.message
-    content: [{ type: text, text: Write the daily support report. }]
-schedule: { type: cron, expression: "0 9 * * 1-5", timezone: America/New_York }
-```
+  const client = new Checkfu({
+    baseUrl: "https://your-api.workers.dev",
+    apiKey: process.env.CHECKFU_API_KEY,
+  })
+  const session = await client.waitForPending(
+    await client.sessions.create({ agent: "<agent-id>", environment_id: "<environment-id>" }),
+  )
+  await client.sessions.events.send(session.id, {
+    events: [{ type: "user.message", content: [{ type: "text", text: "Write a short status report." }] }],
+  })
+  for await (const event of await client.sessions.events.stream(session.id)) {
+    if (event.type === "agent.message") console.log(event.content.map((b) => b.text).join(""))
+    if (event.type === "session.status_idle") break
+  }
+  ```
 
-```sh
-checkfu apply . --dry-run
-checkfu apply . --yes
-```
+- **HTTP API (`/v1/*`):** REST + SSE with `Authorization: Bearer $CHECKFU_API_KEY`, plus `GET /openapi.json` for client generation.
 
-### TypeScript ([`@checkfu/sdk`](packages/sdk/README.md))
+  ```sh
+  curl -N "https://your-api.workers.dev/v1/sessions/<session-id>/events/stream" \
+    -H "Authorization: Bearer $CHECKFU_API_KEY"
+  ```
 
-```ts
-import Checkfu from "@checkfu/sdk"
+- **MCP** exposes Checkfu operations as tools. Connect an HTTP MCP client to `https://your-mcp.workers.dev/mcp` with `Authorization: Bearer $CHECKFU_API_KEY`. With `@modelcontextprotocol/client`, set `{ versionNegotiation: { mode: "auto" } }`.
 
-const client = new Checkfu({
-  baseUrl: "https://your-api.workers.dev",
-  apiKey: process.env.CHECKFU_API_KEY,
-})
+- Open the **Dashboard** URL printed by `deploy` and sign in with `CHECKFU_API_KEY` to edit resources, manage artifact publications and grants, and watch live session transcripts.
 
-const agent = await client.waitForPending(
-  await client.agents.create({ name: "Assistant", model: "your-model-id" }),
-)
-const env = await client.waitForPending(await client.environments.create({ name: "default" }))
-const session = await client.waitForPending(
-  await client.sessions.create({
-    agent: agent.id,
-    environment_id: env.id,
-    resources: [{ type: "github_repository", url: "https://github.com/acme/repo" }],
-  }),
-)
+- Use **YAML and Markdown** with `checkfu apply` to reconcile agent, environment, and automation files through `checkfu-lock.json`. The dashboard can edit these resources and export agents as code.
 
-await client.sessions.events.send(session.id, {
-  events: [{ type: "user.message", content: [{ type: "text", text: "Summarize recent commits." }] }],
-})
+  ```md
+  ---
+  # agents/support.md
+  name: Support
+  model: your-model-id
+  ---
 
-for await (const event of await client.sessions.events.stream(session.id)) {
-  if (event.type === "agent.message") console.log(event.content.map((b) => b.text).join(""))
-  if (event.type === "session.status_idle") break
-}
-```
+  Answer support questions and cite the source you used.
+  ```
+
+  ```yaml
+  # environments/cloud.yaml
+  name: Cloud
+  ```
+
+  ```yaml
+  # yaml-language-server: $schema=https://your-api.workers.dev/schemas/apply/automation.json
+  # automations/report.yaml
+  name: Weekday report
+  agent: ../agents/support.md
+  environment_id: ../environments/cloud.yaml
+  initial_events:
+    - type: user.message
+      content: [{ type: text, text: Write the daily support report. }]
+  schedule: { type: cron, expression: "0 9 * * 1-5", timezone: America/New_York }
+  ```
+
+  ```sh
+  checkfu apply . --dry-run
+  checkfu apply . --yes
+  ```
+
+## Resources
+
+| Resource | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| **Agent** | `/v1/agents` | Model, system prompt, MCP servers, custom tools, and approval rules; versioned on edit. |
+| **Environment** | `/v1/environments` | Sandbox networking policy (`unrestricted`, or `limited` host/MCP/package allowlists). |
+| **Session** | `/v1/sessions` | Conversation, `/workspace` filesystem, and shell bound to an agent, environment, and mounts. |
+| **Memory store** | `/v1/memory_stores` | Cross-session UTF-8 files with SHA-256 preconditions, mounted at `/mnt/memory/<name>`. |
+| **File** | `/v1/files` | Immutable uploaded or generated bytes. Attach them to a session or use them to build an Artifact version. |
+| **Artifact** | `/v1/artifacts` | Versioned file sets with their own document collections. Mount a version in a session, share it by signed link, or publish it as a sandboxed site. |
+| **Vault** | `/v1/vaults` | Credential store isolating each MCP bearer secret in its own `Connection` Durable Object. |
+| **Automation** | `/v1/automations` | Cron (with IANA timezone) or manual session triggers with pinned agent versions and run history. |
+| **Webhook** | `/v1/webhooks` | HMAC-signed event subscriptions with Durable Object fan-out, retries, and delivery history. |
+
+Retrieve saved session outputs from `GET /v1/sessions/{session_id}/outputs` and use each returned File ID to download its bytes from `GET /v1/files/{file_id}/content`.
+
+Inspect webhook deliveries with `checkfu webhooks:deliveries list --webhook-id "$WEBHOOK_ID"`.
 
 ## Architecture
 
@@ -146,32 +168,11 @@ for await (const event of await client.sessions.events.stream(session.id)) {
    └── Tool Execution
         ├── File, git & bash tools   ──► SessionWorkspace DO + on-demand Linux machine
         ├── save_artifact           ──► Save a workspace directory as an Artifact version
-        ├── artifact_data           ──► Read and write document collections on an Artifact
+        ├── artifact_data           ──► Read and write collections on an Artifact saved in this session
         ├── codemode (JS scripts)    ──► CodemodeSandboxWorker (QuickJS, no network/timers, journaled)
         ├── MCP tools                ──► Connection DO (attaches vault bearer token; enforces approvals)
         └── Custom tools             ──► Pauses session (requires_action, $0 compute) until app posts result
 ```
-
-## API & Clients
-
-| Resource | Endpoint | Purpose |
-| :--- | :--- | :--- |
-| **Agent** | `/v1/agents` | Model, system prompt, MCP servers, custom tools, and approval rules; versioned on edit. |
-| **Environment** | `/v1/environments` | Sandbox networking policy (`unrestricted`, or `limited` host/MCP/package allowlists). |
-| **Session** | `/v1/sessions` | Conversation, `/workspace` filesystem, and shell bound to an agent, environment, and mounts. |
-| **Memory store** | `/v1/memory_stores` | Cross-session UTF-8 files with SHA-256 preconditions, mounted at `/mnt/memory/<name>`. |
-| **File** | `/v1/files` | Immutable uploaded or generated bytes. Attach them to a session or use them to build an Artifact version. |
-| **Artifact** | `/v1/artifacts` | Versioned file sets with their own document collections. Mount a version in a session, share it by signed link, or publish it as a sandboxed site. |
-| **Vault** | `/v1/vaults` | Credential store isolating each MCP bearer secret in its own `Connection` Durable Object. |
-| **Automation** | `/v1/automations` | Cron (with IANA timezone) or manual session triggers with pinned agent versions and run history. |
-| **Webhook** | `/v1/webhooks` | HMAC-signed event subscriptions with Durable Object fan-out, retries, and delivery history. |
-
-Retrieve saved session outputs from `GET /v1/sessions/{session_id}/outputs` and use each returned File ID to download its bytes from `GET /v1/files/{file_id}/content`.
-
-- **SDK ([`packages/sdk`](packages/sdk/README.md)):** `npm install @checkfu/sdk` for Effect (`CheckfuClient`) and Promise (`new Checkfu()`) clients (`GET /openapi.json` for other languages).
-- **CLI ([`apps/cli`](apps/cli/README.md)):** `npm install -g checkfu` for `deploy`, `apply`, `sessions connect`, `--format`, and GJSON `--transform`.
-- **Dashboard:** Sign in with `CHECKFU_API_KEY` to edit resources (Form or YAML), manage artifact publications and grants, and stream transcripts. Use `checkfu webhooks:deliveries list` to inspect webhook deliveries.
-- **MCP (`2026-07-28`):** Connect an HTTP MCP client to `https://<mcp-worker>.workers.dev/mcp` with `Authorization: Bearer $CHECKFU_API_KEY` (`{ versionNegotiation: { mode: "auto" } }` in `@modelcontextprotocol/client`).
 
 ## Development
 

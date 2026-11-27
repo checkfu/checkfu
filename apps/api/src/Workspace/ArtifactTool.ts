@@ -19,6 +19,7 @@ const decodeArguments = Schema.decodeUnknownOption(
 	Schema.Struct({
 		name: ArtifactName,
 		directory: Schema.String.check(Schema.isMinLength(1)),
+		made_from: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	}),
 )
 
@@ -31,6 +32,7 @@ export interface ArtifactToolPorts {
 	readonly saveArtifact: (
 		name: string,
 		entries: ReadonlyArray<{ readonly path: string; readonly file_id: string }>,
+		madeFrom: string,
 	) => Promise<SavedSessionArtifact>
 }
 
@@ -54,6 +56,19 @@ export const saveArtifact = async (
 		return refused("save_artifact needs a name and a directory.")
 	}
 	const { name, directory: requested } = decoded.value
+	const source = decoded.value.made_from ?? ""
+	if (source !== "" && !source.startsWith("/")) {
+		return refused(
+			"made_from must be the mount path of an attached artifact, for example /mnt/artifacts/document.",
+		)
+	}
+	const madeFrom =
+		source === ""
+			? ""
+			: `/${source
+					.split("/")
+					.filter((part) => part !== "" && part !== ".")
+					.join("/")}`
 	if (!requested.startsWith("/")) {
 		return refused("directory must be an absolute path, for example /workspace/site.")
 	}
@@ -156,7 +171,7 @@ export const saveArtifact = async (
 		entries.push({ path, file_id: saved.file_id })
 	}
 	signal?.throwIfAborted()
-	const artifact = await ports.saveArtifact(name, entries).catch(() => null)
+	const artifact = await ports.saveArtifact(name, entries, madeFrom).catch(() => null)
 	if (artifact === null) {
 		signal?.throwIfAborted()
 		return refused("Saving the artifact failed; try again.")

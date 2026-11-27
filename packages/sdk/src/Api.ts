@@ -2885,6 +2885,25 @@ const Files = HttpApiGroup.make("files")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Upload a file")
+			.annotate(OpenApi.Transform, (operation) => {
+				const parameters: ReadonlyArray<unknown> = Array.isArray(operation.parameters)
+					? operation.parameters
+					: []
+				return {
+					...operation,
+					parameters: [
+						...parameters,
+						{
+							name: "Content-Length",
+							in: "header",
+							required: true,
+							description:
+								"Exact byte length of the raw request body. Clients using a fixed-size body can let their HTTP transport set this header.",
+							schema: { type: "integer", minimum: 0, maximum: MAX_FILE_BYTES },
+						},
+					],
+				}
+			})
 			.annotate(
 				OpenApi.Description,
 				`Upload one file as the raw request body, with a Content-Length header. A file never changes after it is uploaded; to change its content, upload another. At most ${MAX_FILE_BYTES / 1024 / 1024} MiB.`,

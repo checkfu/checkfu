@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process"
 import { mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { MAX_FILE_BYTES } from "@checkfu/sdk/Limits"
 import { parse } from "@cloudflare/forge"
 import type { Json } from "@cloudflare/forge"
 import { describe, expect, it } from "@effect/vitest"
@@ -479,6 +480,23 @@ describe("Cloudflare Forge pipeline", () => {
 		const spec = JSON.parse(openApiJson) as {
 			paths: Record<string, Record<string, Record<string, Json>>>
 		}
+		const upload = spec.paths["/v1/files"]?.["post"]
+		const uploadParams = upload?.["parameters"] as ReadonlyArray<{ name: string }>
+		expect(uploadParams.map((parameter) => parameter.name.toLowerCase()).sort()).toEqual([
+			"content-length",
+			"content_type",
+			"filename",
+			"idempotency-key",
+		])
+		expect(
+			uploadParams.find((parameter) => parameter.name.toLowerCase() === "content-length"),
+		).toMatchObject({
+			in: "header",
+			required: true,
+			schema: { type: "integer", minimum: 0, maximum: MAX_FILE_BYTES },
+		})
+		expect(upload?.["x-forge-skip"]).toBe(true)
+		expect(upload?.["requestBody"]).toMatchObject({ content: { "application/octet-stream": {} } })
 		const agentsPost = spec.paths["/v1/agents"]?.["post"]
 		expect(agentsPost?.["description"]).toBe(
 			"Create a reusable agent configuration with a model and an optional system prompt.",

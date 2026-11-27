@@ -221,6 +221,17 @@ describe("Files API", () => {
 				expect(yield* status("filename=..")).toBe(400)
 				expect(yield* status("filename=a.txt&content_type=nonsense")).toBe(400)
 				expect(yield* status("filename=a.txt", { "content-length": "eight" })).toBe(400)
+				const missingLength = yield* upload(
+					"filename=a.txt",
+					new ReadableStream({
+						start(controller) {
+							controller.close()
+						},
+					}),
+				)
+				expect(missingLength.status).toBe(400)
+				expect((yield* json<ErrorBody>(missingLength)).error.message).toContain("Content-Length")
+				expect(store.writes()).toBe(0)
 
 				const tooLarge = yield* upload("filename=a.txt", bytesOf(8), {
 					"content-length": String(MAX_FILE_BYTES + 1),

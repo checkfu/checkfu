@@ -459,8 +459,10 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 									capture: (directory) => on.capture(directory, signal),
 									saveFile: (path, bytes) =>
 										askApi(api.sessionFileSave(sessionId, turn, path, bytes), { signal }),
-									saveArtifact: (name, entries) =>
-										askApi(api.sessionArtifactSave(sessionId, turn, name, entries), { signal }),
+									saveArtifact: (name, entries, madeFrom) =>
+										askApi(api.sessionArtifactSave(sessionId, turn, name, entries, madeFrom), {
+											signal,
+										}),
 								},
 								signal,
 							),

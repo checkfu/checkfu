@@ -33544,6 +33544,17 @@
 							"description": "Media type; inferred from the filename extension when omitted"
 						},
 						"required": false
+					},
+					{
+						"name": "Content-Length",
+						"in": "header",
+						"required": true,
+						"description": "Exact byte length of the raw request body. Clients using a fixed-size body can let their HTTP transport set this header.",
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 104857600
+						}
 					}
 				],
 				"security": [

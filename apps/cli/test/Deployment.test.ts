@@ -60,6 +60,7 @@ const fixture = async () => {
 		"bun.lock": "frozen dependencies",
 		"apps/api/test/persisted/Persisted.lock.json": "shipped baseline",
 	})
+	const forced: Array<boolean> = []
 	const calls: Array<string> = []
 	let revision = first
 	const distribution: Distribution = {
@@ -78,6 +79,7 @@ const fixture = async () => {
 	}
 	return {
 		calls,
+		forced,
 		source,
 		runtimeSpec,
 		distribution,
@@ -89,9 +91,18 @@ const fixture = async () => {
 			target: "darwin-arm64",
 			env: {},
 			announce: () => {},
-			install: async (_runtime: string, root: string) => {
+			install: async (
+				_runtime: string,
+				root: string,
+				_env: NodeJS.ProcessEnv,
+				_signal: AbortSignal,
+				force = false,
+			) => {
 				calls.push("install")
-				await mkdir(join(root, "node_modules"))
+				forced.push(force)
+				const bin = join(root, "node_modules", "alchemy", "bin")
+				await mkdir(bin, { recursive: true })
+				await writeFile(join(bin, "cli.js"), "")
 			},
 		},
 	}
@@ -261,6 +272,38 @@ describe("managed deployment lifecycle", () => {
 		await expect(
 			prepareManaged(directory, { operation: "deploy", stage: "../live" }, f.options, signal()),
 		).rejects.toThrow("Invalid deployment stage")
+	})
+
+	it("repairs missing dependencies without fetching recorded source or disturbing stage data", async () => {
+		const directory = await temporary()
+		const f = await fixture()
+		const deploy = { operation: "deploy" as const, stage: "staging" }
+		const ready = await prepareManaged(directory, deploy, f.options, signal())
+		await ready.record()
+		const marker = join(ready.root, ".checkfu", "installed")
+		const modules = join(ready.root, "node_modules")
+		const entry = join(modules, "alchemy", "bin", "cli.js")
+		await rm(entry)
+		await expect(
+			prepareManaged(directory, deploy, { ...f.options, install: async () => {} }, signal()),
+		).rejects.toThrow("Alchemy CLI")
+		await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
+		await prepareManaged(directory, deploy, f.options, signal())
+		await rm(modules, { recursive: true })
+		f.next()
+		const repaired = await prepareManaged(
+			directory,
+			{ operation: "destroy", stage: "staging" },
+			f.options,
+			signal(),
+		)
+		expect(repaired.revision).toBe(first)
+		expect(repaired.dataRoot).toBe(ready.dataRoot)
+		expect((await stat(entry)).isFile()).toBe(true)
+		expect(await readFile(marker, "utf8")).toBe("1\n")
+		expect(f.calls.filter((call) => call.startsWith("source:"))).toEqual([`source:${first}`])
+		expect(f.calls.filter((call) => call === "install")).toHaveLength(3)
+		expect(f.forced).toEqual([false, true, false])
 	})
 
 	it("recovers an interrupted install and never marks failed dependencies installed", async () => {

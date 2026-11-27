@@ -1,11 +1,13 @@
 import { AddArtifactVersion } from "@checkfu/domain/Artifact/AddArtifactVersion.command"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
+import { encodeMadeFrom } from "@checkfu/domain/Artifact/ArtifactMadeFrom"
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
 import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import { ARTIFACT_MOUNT_ROOT, artifactsOf } from "@checkfu/domain/Session/SessionResource"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { isClientEventId } from "@checkfu/sdk/IdempotencyKey"
 import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
@@ -31,8 +33,9 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { DocumentCalls, DocumentRefused, isDocumentRefused } from "./ArtifactData/DocumentCalls.ts"
 import { outputFileId } from "./Files/OutputsSaverLive.ts"
+import { SessionResources } from "./SessionResources.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
-import { RESERVATION_LOST, artifactWrites } from "./Http/ArtifactsHandlers.ts"
+import { RESERVATION_LOST, artifactWrites, startedFrom } from "./Http/ArtifactsHandlers.ts"
 import {
 	DEFAULT_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
@@ -122,7 +125,8 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 	const files = yield* File
 	const digest = yield* Digest.Digest
 	const storeFile = yield* makeStoreFile
-	const { build, fromFiles, copyIn, stage, capabilitiesOf } = yield* artifactWrites
+	const { build, fromFiles, copyIn, stage, capabilitiesOf, loadManifest } = yield* artifactWrites
+	const resourcesOf = yield* SessionResources
 
 	const stopped = (sessionId: string, turn: number) =>
 		Effect.map(sessions.get(SessionId.make(sessionId)), (state) => {
@@ -334,7 +338,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 				"Saving the artifact",
 				args[0],
 				Effect.gen(function* () {
-					const [sessionId, turn, name, entries] = args
+					const [sessionId, turn, name, entries, madeFrom] = args
 					if (!isArtifactSave(args) || !isSessionId(sessionId)) {
 						return refused("Invalid session artifact save.")
 					}
@@ -369,7 +373,27 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						return refused(`${foreign.path} is not a file this session saved.`)
 					}
 					const id = yield* sessionArtifactId(digest, sessionId, name)
-					const resolved = yield* fromFiles(wanted)
+					const own = yield* fromFiles(wanted)
+					const source =
+						madeFrom === ""
+							? undefined
+							: artifactsOf(yield* resourcesOf(sessionId)).find(
+									(mount) => mount.mount_path === madeFrom,
+								)
+					if (madeFrom !== "" && source === undefined) {
+						return refused(
+							`${madeFrom} is not an artifact attached to this session. made_from takes the mount path of one, such as ${ARTIFACT_MOUNT_ROOT}/document.`,
+						)
+					}
+					const from = source === undefined ? undefined : ArtifactId.make(source.artifact_id)
+					const resolved =
+						source === undefined || from === undefined
+							? own
+							: yield* startedFrom(from, yield* loadManifest(from, source.manifest), own)
+					const made_from =
+						source === undefined || from === undefined
+							? ""
+							: encodeMadeFrom({ artifact_id: from, version: source.version })
 					const built = yield* build(resolved.files)
 					if (
 						built.total_bytes > MAX_TOOL_ARTIFACT_TOTAL_BYTES ||
@@ -413,7 +437,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 									file_count: built.file_count,
 									total_bytes: built.total_bytes,
 									capabilities,
-									made_from: "",
+									made_from,
 									request: "",
 								}),
 							)
@@ -439,7 +463,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 								file_count: built.file_count,
 								total_bytes: built.total_bytes,
 								capabilities,
-								made_from: "",
+								made_from,
 								request: "",
 								reservation,
 							}),

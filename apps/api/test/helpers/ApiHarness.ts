@@ -625,11 +625,12 @@ export const makePiDurableTestLayer = (
 		turn: number,
 		name: string,
 		directory: string,
+		madeFrom?: string,
 	) => {
 		const files = workspaceFiles(sessionId)
 		const encoder = new TextEncoder()
 		return saveArtifact(
-			{ name, directory },
+			madeFrom === undefined ? { name, directory } : { name, directory, made_from: madeFrom },
 			{
 				capture: (root) => ({
 					list: async () => {
@@ -648,8 +649,10 @@ export const makePiDurableTestLayer = (
 				}),
 				saveFile: (path, bytes) =>
 					built().run(built().saves.sessionFileSave(sessionId, turn, path, bytes)),
-				saveArtifact: (artifactName, entries) =>
-					built().run(built().saves.sessionArtifactSave(sessionId, turn, artifactName, entries)),
+				saveArtifact: (artifactName, entries, source) =>
+					built().run(
+						built().saves.sessionArtifactSave(sessionId, turn, artifactName, entries, source),
+					),
 			},
 		)
 	}

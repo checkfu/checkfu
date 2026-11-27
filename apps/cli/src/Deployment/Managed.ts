@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
-import { mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { delimiter, dirname, join } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -95,11 +95,18 @@ export const installDependencies = (
 	root: string,
 	env: NodeJS.ProcessEnv,
 	signal: AbortSignal,
+	force = false,
 ): Promise<void> =>
 	new Promise((resolve, reject) => {
 		const child = spawn(
 			runtime,
-			["--no-env-file", "install", "--frozen-lockfile", "--ignore-scripts"],
+			[
+				"--no-env-file",
+				"install",
+				"--frozen-lockfile",
+				"--ignore-scripts",
+				...(force ? ["--force"] : []),
+			],
 			{
 				cwd: root,
 				env,
@@ -119,7 +126,7 @@ export const installDependencies = (
 					? resolve()
 					: reject(
 							new Error(
-								`Deployment dependency installation did not finish (exit ${code}). Run checkfu deploy again to retry.`,
+								`Deployment dependency installation did not finish (exit ${code}). Retry this command.`,
 							),
 						),
 		)
@@ -165,6 +172,14 @@ const sourceIsValid = async (root: string): Promise<boolean> => {
 		throw error
 	}
 }
+
+const statIfPresent = (path: string) =>
+	stat(path).catch((error: unknown) => {
+		if (missing(error)) {
+			return null
+		}
+		throw error
+	})
 
 export interface ManagedOptions {
 	readonly distribution: Distribution
@@ -251,15 +266,30 @@ export const prepareManaged = async (
 		options.distribution,
 		signal,
 	)
-	try {
-		await readFile(join(root, ".checkfu", "installed"))
-	} catch (error) {
-		if (!missing(error)) {
-			throw error
+	const marker = join(root, ".checkfu", "installed")
+	const modules = join(root, "node_modules")
+	const entry = join(modules, "alchemy", "bin", "cli.js")
+	const hasEntry = async () => (await statIfPresent(entry))?.isFile() === true
+	const marked = await readFile(marker, "utf8").catch((error: unknown) => {
+		if (missing(error)) {
+			return ""
 		}
+		throw error
+	})
+	if (marked !== "1\n" || !(await hasEntry())) {
+		await rm(marker, { force: true })
 		options.announce("Installing deployment dependencies (no global tools required)…")
-		await options.install(runtime, root, options.env, signal)
-		await writeFile(join(root, ".checkfu", "installed"), "1\n", { mode: 0o600 })
+		await options.install(
+			runtime,
+			root,
+			options.env,
+			signal,
+			(await statIfPresent(modules)) !== null,
+		)
+		if (!(await hasEntry())) {
+			throw new Error("Installation did not produce the Alchemy CLI. Retry this command.")
+		}
+		await writeFile(marker, "1\n", { mode: 0o600 })
 	}
 	options.announce(
 		`${request.operation === "destroy" ? "Using recorded" : "Deploying"} source ${revision} (stage ${stage}).`,
