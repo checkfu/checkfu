@@ -9,7 +9,11 @@ export const ArtifactBytesLive = ArtifactBytes.toLayer(
 		const database = yield* ArtifactDatabase
 		return {
 			purge: ({ artifact_id }) =>
-				Effect.orDie(Effect.andThen(database.erase(artifact_id), store.purge(artifact_id))),
+				Effect.gen(function* () {
+					const erased = yield* Effect.exit(database.erase(artifact_id))
+					yield* Effect.orDie(store.purge(artifact_id))
+					yield* Effect.orDie(erased)
+				}),
 			release: ({ artifact_id, reservation }) =>
 				Effect.orDie(store.release(artifact_id, reservation)),
 		}

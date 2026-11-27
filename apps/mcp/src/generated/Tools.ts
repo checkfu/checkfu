@@ -649,9 +649,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				body: {
 					type: "object",
 					properties: {
-						data: {
-							description: "The document: any JSON value of at most 65536 bytes once encoded",
-						},
+						data: {},
 					},
 					required: ["data"],
 					additionalProperties: false,
@@ -1465,9 +1463,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				body: {
 					type: "object",
 					properties: {
-						data: {
-							description: "The document: any JSON value of at most 65536 bytes once encoded",
-						},
+						data: {},
 					},
 					required: ["data"],
 					additionalProperties: false,

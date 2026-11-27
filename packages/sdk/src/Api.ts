@@ -1297,6 +1297,29 @@ export const ArtifactDeleted = Schema.Struct({
 })
 export type ArtifactDeleted = typeof ArtifactDeleted.Type
 
+export const MAX_ARTIFACT_DOCUMENT_DEPTH = 32
+
+const nestedWithin = (value: Schema.Json, limit: number): boolean => {
+	let level: Array<Schema.Json> = [value]
+	for (let depth = 0; level.length > 0; depth += 1) {
+		if (depth > limit) {
+			return false
+		}
+		level = level.flatMap((entry): ReadonlyArray<Schema.Json> =>
+			entry === null || typeof entry !== "object" ? [] : Object.values(entry),
+		)
+	}
+	return true
+}
+
+export const ArtifactDocumentData = Schema.Json.check(
+	Schema.makeFilter(
+		(data) =>
+			nestedWithin(data, MAX_ARTIFACT_DOCUMENT_DEPTH) ||
+			`arrays and objects nested at most ${MAX_ARTIFACT_DOCUMENT_DEPTH} deep`,
+	),
+)
+
 export const ArtifactDocumentResource = Schema.Struct({
 	id: ArtifactDocumentId,
 	type: Schema.Literal("artifact_document"),
@@ -1309,8 +1332,8 @@ export const ArtifactDocumentResource = Schema.Struct({
 export type ArtifactDocument = typeof ArtifactDocumentResource.Type
 
 export const ArtifactDocumentBody = Schema.Struct({
-	data: Schema.Json.annotate({
-		description: `The document: any JSON value of at most ${MAX_ARTIFACT_DOCUMENT_BYTES} bytes once encoded`,
+	data: ArtifactDocumentData.annotate({
+		description: `The document: any JSON value of at most ${MAX_ARTIFACT_DOCUMENT_BYTES} bytes once encoded, with arrays and objects nested at most ${MAX_ARTIFACT_DOCUMENT_DEPTH} deep`,
 	}),
 })
 export type ArtifactDocumentBody = typeof ArtifactDocumentBody.Type

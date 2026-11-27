@@ -1,4 +1,5 @@
 import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
+import { MAX_ARTIFACT_DOCUMENT_DEPTH } from "@checkfu/sdk/Api"
 import { describe, expect, it } from "vitest"
 import * as Effect from "effect/Effect"
 import { ArtifactDatabase } from "../src/ArtifactData/ArtifactDatabase.ts"
@@ -65,13 +66,16 @@ const withData = <A>(
 				path: string,
 				body?: unknown,
 				headers?: Record<string, string>,
-			) =>
-				sendRequest(apiFetch, {
+			) => {
+				const { "x-raw-body": rawBody, ...sent } = headers ?? {}
+				return sendRequest(apiFetch, {
 					method,
 					path,
 					...(body === undefined ? {} : { body }),
-					headers: { ...AUTH_HEADERS, ...headers },
+					...(rawBody === undefined ? {} : { rawBody }),
+					headers: { ...AUTH_HEADERS, ...sent },
 				})
+			}
 			return yield* run({
 				call,
 				database: yield* ArtifactDatabase,
@@ -234,6 +238,22 @@ describe("An artifact's data API", () => {
 				expect((yield* json<DocumentBody>(yield* call("GET", `${data}/votes/large`))).data).toBe(
 					fits,
 				)
+
+				const nested = (levels: number) => `${"[".repeat(levels)}1${"]".repeat(levels)}`
+				const sendRaw = (levels: number) =>
+					Effect.map(
+						call("PUT", `${data}/votes/nested`, undefined, {
+							"content-type": "application/json",
+							"x-raw-body": `{"data":${nested(levels)}}`,
+						}),
+						(res) => res.status,
+					)
+				expect(yield* sendRaw(MAX_ARTIFACT_DOCUMENT_DEPTH)).toBe(200)
+				expect(yield* sendRaw(MAX_ARTIFACT_DOCUMENT_DEPTH + 1)).toBe(400)
+				expect(yield* sendRaw(70_000)).toBe(400)
+				expect(
+					(yield* json<DocumentBody>(yield* call("GET", `${data}/votes/nested`))).data,
+				).toEqual(JSON.parse(nested(MAX_ARTIFACT_DOCUMENT_DEPTH)))
 
 				const missing = "/v1/artifacts/art_000000000000000000000000/data"
 				expect(yield* status("GET", missing)).toBe(404)

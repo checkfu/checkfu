@@ -818,9 +818,7 @@ const artifactsDataAddCommand = CommandMake(
 		),
 		data: FlagString("data").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription(
-				"The document: any JSON value of at most 65536 bytes once encoded (JSON, YAML, or @file)",
-			),
+			FlagWithDescription("Body field data (JSON, YAML, or @file)"),
 			FlagOptional,
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
@@ -1049,9 +1047,7 @@ const artifactsDataPutCommand = CommandMake(
 		),
 		data: FlagString("data").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription(
-				"The document: any JSON value of at most 65536 bytes once encoded (JSON, YAML, or @file)",
-			),
+			FlagWithDescription("Body field data (JSON, YAML, or @file)"),
 			FlagOptional,
 		),
 	},

@@ -208,6 +208,15 @@ describe("An artifact's documents", () => {
 		expect(documents.write("votes", "a", "1", "replace", 2)).toEqual({ refused: "erased" })
 	})
 
+	it("stops, instead of guessing, when its own totals cannot be read", () => {
+		const { documents, sql } = database()
+		documents.write("notes", "a", body("kept"), "create", 1)
+		sql.exec("DELETE FROM totals")
+		expect(() => documents.write("notes", "b", body("unsafe"), "create", 2)).toThrow()
+		expect(() => documents.get("notes", "a")).toThrow()
+		expect(() => documents.usage()).toThrow()
+	})
+
 	it("opened again over the same storage, finds what it held", () => {
 		const sqlite = makeDocumentsSqlite()
 		makeArtifactDocuments(sqlite.sql).write("notes", "a", body("kept"), "create", 1)

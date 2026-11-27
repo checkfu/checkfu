@@ -101,16 +101,9 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 		return undefined
 	}
 	const count = (query: string, ...bindings: ReadonlyArray<string | number>): number =>
-		Option.match(decodeCounted(first(query, ...bindings)), {
-			onNone: () => 0,
-			onSome: (row) => row.n,
-		})
+		Option.getOrThrow(decodeCounted(first(query, ...bindings))).n
 	const totals = () =>
-		Option.getOrElse(decodeTotals(first("SELECT next_seq, bytes, erased FROM totals")), () => ({
-			next_seq: 1,
-			bytes: 0,
-			erased: 0,
-		}))
+		Option.getOrThrow(decodeTotals(first("SELECT next_seq, bytes, erased FROM totals")))
 	const held = (collection: string, id: string) =>
 		Option.getOrNull(
 			decodeDocument(
@@ -126,18 +119,15 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 			if (totals().erased === 1) {
 				return { documents: [], next: null }
 			}
-			const rows: Array<StoredDocument> = []
-			for (const row of sql.exec(
-				`SELECT ${COLUMNS} FROM documents WHERE collection = ? AND seq > ? ORDER BY seq LIMIT ?`,
-				collection,
-				after,
-				limit + 1,
-			)) {
-				const document = decodeDocument(row)
-				if (Option.isSome(document)) {
-					rows.push(document.value)
-				}
-			}
+			const rows = Array.from(
+				sql.exec(
+					`SELECT ${COLUMNS} FROM documents WHERE collection = ? AND seq > ? ORDER BY seq LIMIT ?`,
+					collection,
+					after,
+					limit + 1,
+				),
+				(row) => Option.getOrThrow(decodeDocument(row)),
+			)
 			const documents = rows.slice(0, limit)
 			return {
 				documents,
@@ -231,15 +221,12 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 		},
 
 		usage: (): DatabaseUsage => {
-			const collections: Array<typeof CollectionUsage.Type> = []
-			for (const row of sql.exec(
-				"SELECT collection, COUNT(*) AS documents, SUM(size) AS bytes FROM documents GROUP BY collection ORDER BY collection",
-			)) {
-				const usage = decodeUsage(row)
-				if (Option.isSome(usage)) {
-					collections.push(usage.value)
-				}
-			}
+			const collections = Array.from(
+				sql.exec(
+					"SELECT collection, COUNT(*) AS documents, SUM(size) AS bytes FROM documents GROUP BY collection ORDER BY collection",
+				),
+				(row) => Option.getOrThrow(decodeUsage(row)),
+			)
 			return { collections, bytes: totals().bytes }
 		},
 	}

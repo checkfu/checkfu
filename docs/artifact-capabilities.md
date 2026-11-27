@@ -116,7 +116,7 @@ GET | PUT | DELETE  /v1/artifacts/{artifact_id}/data/{collection}/{id}
 | `PUT data/{collection}/{id}` | Store `{"data": …}` under an id the client chooses, replacing what is there |
 | `DELETE data/{collection}/{id}` | Remove one document |
 
-A document is any JSON value. The owner may use any collection name, declared by a version or not, so a dashboard can be filled before its page exists and a dropped collection can still be read and emptied. A document over the size limit answers 400; a full collection or database answers 409.
+A document is any JSON value, with arrays and objects nested at most 32 deep. Numbers are JSON numbers, so an integer beyond 2^53 loses precision. An `Idempotency-Key` protects a retry only while the document it added still exists. The owner may use any collection name, declared by a version or not, so a dashboard can be filled before its page exists and a dropped collection can still be read and emptied. A document over the size limit answers 400; a full collection or database answers 409.
 
 This lets a client fill a dashboard or read a form’s responses. A separate agent tool uses a private Worker binding scoped to the running turn and artifacts created by that session. Access to other artifacts would require an explicit write grant.
 
