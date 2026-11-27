@@ -77,6 +77,8 @@ export class AdmitAutomationDecision extends Domain.Decision(AdmitAutomation, {
 		]
 	},
 	transitions: {
+		AnAdmittedAutomationHasAUsableSchedule: ({ command }) =>
+			isUsableSchedule(command.schedule.expression, command.schedule.timezone),
 		OnlyActiveAgentAndEnvironmentAdmitAutomation: ({ before, after }) =>
 			[
 				before.agent.status === "active",

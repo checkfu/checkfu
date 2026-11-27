@@ -385,6 +385,22 @@ export class Session extends Domain.Aggregate("Session", {
 			after._tag !== "Running" ||
 			after.turn !== before.turn ||
 			after.interrupted,
+		AWorkerCommandRecordsOnlyForTheRunningTurn: ({ before, command, events }) =>
+			(command._tag !== "RecordModelRequestStart" &&
+				command._tag !== "RecordToolCall" &&
+				command._tag !== "RecordToolResult" &&
+				command._tag !== "PauseTurn" &&
+				command._tag !== "CommitModelReply" &&
+				command._tag !== "FailModelRequest" &&
+				command._tag !== "InterruptModelRequest" &&
+				command._tag !== "AbandonTurn") ||
+			events.length === 0 ||
+			(before._tag === "Running" && before.turn === command.turn),
+		AUserMessageWaitsForTheInitialMessages: ({ before, command, events }) =>
+			command._tag !== "SendUserMessage" ||
+			events.length === 0 ||
+			before._tag !== "Idle" ||
+			!before.initial_messages_remaining,
 		ADeadlineAbandonsOnlyItsOwnSegment: ({ before, command, events }) =>
 			command._tag !== "AbandonTurn" ||
 			before._tag !== "Running" ||

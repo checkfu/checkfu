@@ -66,6 +66,10 @@ export class Environment extends Domain.Aggregate("Environment", {
 			].some((ok) => ok),
 	},
 	transitions: {
+		AnUpdateAppliesOnlyAtTheExpectedVersion: ({ before, after, command }) =>
+			command._tag !== "UpdateEnvironment" ||
+			after.version === before.version ||
+			command.expected_version === before.version,
 		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) => {
 			if (command._tag !== "UpdateEnvironment") {
 				return true

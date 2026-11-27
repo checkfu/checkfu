@@ -506,6 +506,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ASessionIsAdmitted: (m) => m.Session.some((s) => s.state._tag === "Idle"),
 		AnAdmittedSessionCompletesATurn: (m) =>
 			m.Session.some((s) => s.state._tag === "Idle" && s.state.turn >= 1),
+		ASessionGetsAReply: (m) => m.TurnInput.some((view) => view.state.last_reply_turn >= 1),
 	},
 	eventually: {
 		EveryTurnSettles: (m) => m.Session.every((s) => s.state._tag !== "Running" || s.state.paused),

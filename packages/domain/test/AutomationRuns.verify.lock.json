@@ -377,6 +377,22 @@
 			"AutomationRuns.AnArchivedAutomationFreesItsSlot": {
 				"kind": "sometimes",
 				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Automation.some((a) => a.state.status === \"archived\"),\n\t\t\t\tm.AutomationCapacity.some((c) => c.state.reserved === 0),\n\t\t\t].every((ok) => ok)"
+			},
+			"Environment.AnUpdateAppliesOnlyAtTheExpectedVersion": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateEnvironment\" ||\n\t\t\tafter.version === before.version ||\n\t\t\tcommand.expected_version === before.version"
+			},
+			"Session.AWorkerCommandRecordsOnlyForTheRunningTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\t(command._tag !== \"RecordModelRequestStart\" &&\n\t\t\t\tcommand._tag !== \"RecordToolCall\" &&\n\t\t\t\tcommand._tag !== \"RecordToolResult\" &&\n\t\t\t\tcommand._tag !== \"PauseTurn\" &&\n\t\t\t\tcommand._tag !== \"CommitModelReply\" &&\n\t\t\t\tcommand._tag !== \"FailModelRequest\" &&\n\t\t\t\tcommand._tag !== \"InterruptModelRequest\" &&\n\t\t\t\tcommand._tag !== \"AbandonTurn\") ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Running\" && before.turn === command.turn)"
+			},
+			"Session.AUserMessageWaitsForTheInitialMessages": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"SendUserMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\tbefore._tag !== \"Idle\" ||\n\t\t\t!before.initial_messages_remaining"
+			},
+			"AdmitAutomation.AnAdmittedAutomationHasAUsableSchedule": {
+				"kind": "transition",
+				"source": "({ command }) =>\n\t\t\tisUsableSchedule(command.schedule.expression, command.schedule.timezone)"
 			}
 		}
 	}

@@ -41,6 +41,8 @@ export const STANDING = {
 	"Session.AnInterruptedTurnNeitherWaitsNorGoesOn": "proved",
 	"Session.AnInterruptedTurnStaysInterrupted": "proved",
 	"Session.ADeadlineAbandonsOnlyItsOwnSegment": "proved",
+	"Session.AWorkerCommandRecordsOnlyForTheRunningTurn": "proved",
+	"Session.AUserMessageWaitsForTheInitialMessages": "proved",
 	"Session.AnEndedTurnStartsTheQueuedOne": "proved",
 	"Session.AStopNamesTheUnansweredCalls": "proved",
 	"ToolConfirmation.OnlyADenialCarriesAMessage": "proved",
@@ -59,6 +61,7 @@ export const STANDING = {
 	"Sessions.SessionViewMatchesSession": "checked",
 	"Sessions.TurnInputMatchesSession": "checked",
 	"Sessions.ASessionCompletesATurn": "reached",
+	"Sessions.ASessionGetsAReply": "reached",
 	"Sessions.ASessionTerminates": "reached",
 	"Sessions.ASessionIsArchived": "reached",
 	"Sessions.EveryTurnSettles": "checked",
@@ -70,6 +73,7 @@ export const PROVED = Object.entries(STANDING)
 
 export const REQUIRED_REPLAY_RULES = [
 	"Sessions.ASessionCompletesATurn",
+	"Sessions.ASessionGetsAReply",
 	"Sessions.ASessionTerminates",
 	"Sessions.ASessionIsArchived",
 ] as const

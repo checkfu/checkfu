@@ -721,6 +721,38 @@
 			"DeleteMemory.AnExpectedHashIsTheStoredHash": {
 				"kind": "transition",
 				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tcommand.expected_content_sha256 === null,\n\t\t\t\tbefore.memory.content_sha256 === command.expected_content_sha256,\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.AnUpdateAppliesOnlyAtTheExpectedVersion": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateEnvironment\" ||\n\t\t\tafter.version === before.version ||\n\t\t\tcommand.expected_version === before.version"
+			},
+			"Session.AWorkerCommandRecordsOnlyForTheRunningTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\t(command._tag !== \"RecordModelRequestStart\" &&\n\t\t\t\tcommand._tag !== \"RecordToolCall\" &&\n\t\t\t\tcommand._tag !== \"RecordToolResult\" &&\n\t\t\t\tcommand._tag !== \"PauseTurn\" &&\n\t\t\t\tcommand._tag !== \"CommitModelReply\" &&\n\t\t\t\tcommand._tag !== \"FailModelRequest\" &&\n\t\t\t\tcommand._tag !== \"InterruptModelRequest\" &&\n\t\t\t\tcommand._tag !== \"AbandonTurn\") ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Running\" && before.turn === command.turn)"
+			},
+			"Session.AUserMessageWaitsForTheInitialMessages": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"SendUserMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\tbefore._tag !== \"Idle\" ||\n\t\t\t!before.initial_messages_remaining"
+			},
+			"AdmitAutomation.AnAdmittedAutomationHasAUsableSchedule": {
+				"kind": "transition",
+				"source": "({ command }) =>\n\t\t\tisUsableSchedule(command.schedule.expression, command.schedule.timezone)"
+			},
+			"UpdateAutomation.AChangedAgentIsActiveAndHasThePinnedVersion": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.automation.revision === before.automation.revision,\n\t\t\t\t[\n\t\t\t\t\t!command.agent_id_changed,\n\t\t\t\t\t(command.agent_version ?? before.agent.version) === command.previous_agent_version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\t\t(command.agent_version ?? before.agent.version) <= before.agent.version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"UpdateAutomation.AChangedEnvironmentIsActive": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.automation.revision === before.automation.revision,\n\t\t\t\t!command.environment_changed,\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t].some((ok) => ok)"
+			},
+			"UpdateAutomation.AnUpdateStoresOnlyAUsableSchedule": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tafter.automation.revision === before.automation.revision ||\n\t\t\tisUsableSchedule(command.schedule.expression, command.schedule.timezone)"
+			},
+			"Checkfu.ASessionGetsAReply": {
+				"kind": "sometimes",
+				"source": "(m) => m.TurnInput.some((view) => view.state.last_reply_turn >= 1)"
 			}
 		}
 	}

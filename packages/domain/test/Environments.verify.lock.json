@@ -53,6 +53,10 @@
 			"Environments.EnvironmentViewConfigMatchesEnvironment": {
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Environment.every((e) => {\n\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\tif (e.state.config === null) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\tconst projected = view.state.config.networking\n\t\t\t\tconst committed = e.state.config.networking\n\t\t\t\treturn [\n\t\t\t\t\tview.state.description === e.state.description,\n\t\t\t\t\tprojected.type === committed.type,\n\t\t\t\t\tprojected.type !== \"limited\" ||\n\t\t\t\t\t\tcommitted.type !== \"limited\" ||\n\t\t\t\t\t\t(projected.allow_mcp_servers === committed.allow_mcp_servers &&\n\t\t\t\t\t\t\tprojected.allow_package_managers === committed.allow_package_managers &&\n\t\t\t\t\t\t\tprojected.allowed_hosts.length === committed.allowed_hosts.length &&\n\t\t\t\t\t\t\tprojected.allowed_hosts.every(\n\t\t\t\t\t\t\t\t(host, index) => host === committed.allowed_hosts[index],\n\t\t\t\t\t\t\t)),\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
+			},
+			"Environment.AnUpdateAppliesOnlyAtTheExpectedVersion": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateEnvironment\" ||\n\t\t\tafter.version === before.version ||\n\t\t\tcommand.expected_version === before.version"
 			}
 		}
 	}

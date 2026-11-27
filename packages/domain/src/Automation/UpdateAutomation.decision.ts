@@ -70,6 +70,27 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 		]
 	},
 	transitions: {
+		AChangedAgentIsActiveAndHasThePinnedVersion: ({ before, after, command }) =>
+			[
+				after.automation.revision === before.automation.revision,
+				[
+					!command.agent_id_changed,
+					(command.agent_version ?? before.agent.version) === command.previous_agent_version,
+				].every((ok) => ok),
+				[
+					before.agent.status === "active",
+					(command.agent_version ?? before.agent.version) <= before.agent.version,
+				].every((ok) => ok),
+			].some((ok) => ok),
+		AChangedEnvironmentIsActive: ({ before, after, command }) =>
+			[
+				after.automation.revision === before.automation.revision,
+				!command.environment_changed,
+				before.environment.status === "active",
+			].some((ok) => ok),
+		AnUpdateStoresOnlyAUsableSchedule: ({ before, after, command }) =>
+			after.automation.revision === before.automation.revision ||
+			isUsableSchedule(command.schedule.expression, command.schedule.timezone),
 		AnUpdateNeedsTheCurrentRevisionOfALiveAutomation: ({ before, after, command }) =>
 			after.automation.revision === before.automation.revision ||
 			[

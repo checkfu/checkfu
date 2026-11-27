@@ -13,6 +13,7 @@ const STANDING = {
 	"Environment.CreatedExactlyWhenVersioned": "proved",
 	"Environment.ConfiguredExactlyWhenCreated": "proved",
 	"Environment.UpdateKeepsWhatItDoesNotName": "proved",
+	"Environment.AnUpdateAppliesOnlyAtTheExpectedVersion": "proved",
 	"Environments.EnvironmentViewConfigMatchesEnvironment": "checked",
 	"Environment.CreatedEnvironmentNeverReturnsToUninitialized": "proved",
 	"Environment.ArchivedNeverReactivates": "proved",

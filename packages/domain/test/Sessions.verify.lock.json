@@ -245,6 +245,18 @@
 			"ReturnCustomToolResult.AResultMatchesItsSessionAndCall": {
 				"kind": "transition",
 				"source": "({ before, command }) =>\n\t\t\tbefore.call.session_id === command.session_id &&\n\t\t\tbefore.call.tool_use_id === command.custom_tool_use_id"
+			},
+			"Session.AWorkerCommandRecordsOnlyForTheRunningTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\t(command._tag !== \"RecordModelRequestStart\" &&\n\t\t\t\tcommand._tag !== \"RecordToolCall\" &&\n\t\t\t\tcommand._tag !== \"RecordToolResult\" &&\n\t\t\t\tcommand._tag !== \"PauseTurn\" &&\n\t\t\t\tcommand._tag !== \"CommitModelReply\" &&\n\t\t\t\tcommand._tag !== \"FailModelRequest\" &&\n\t\t\t\tcommand._tag !== \"InterruptModelRequest\" &&\n\t\t\t\tcommand._tag !== \"AbandonTurn\") ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Running\" && before.turn === command.turn)"
+			},
+			"Session.AUserMessageWaitsForTheInitialMessages": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"SendUserMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\tbefore._tag !== \"Idle\" ||\n\t\t\t!before.initial_messages_remaining"
+			},
+			"Sessions.ASessionGetsAReply": {
+				"kind": "sometimes",
+				"source": "(m) => m.TurnInput.some((view) => view.state.last_reply_turn >= 1)"
 			}
 		}
 	}
