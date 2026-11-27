@@ -1266,6 +1266,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			"delete",
 			"bash",
 			"save_artifact",
+			"artifact_data",
 			"codemode",
 		])
 		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
@@ -1931,6 +1932,31 @@ describe("PiSession real Durable Object under workerd", () => {
 						arguments: { name: "Empty", directory: "/workspace/nowhere" },
 					},
 				],
+				"Fill in the numbers.": [
+					{
+						kind: "tool_call",
+						name: "artifact_data",
+						arguments: {
+							name: "Q3 report",
+							collection: "numbers",
+							operation: "put",
+							id: "revenue",
+							data: { q3: 1200 },
+						},
+					},
+					{
+						kind: "tool_call",
+						name: "artifact_data",
+						arguments: { name: "Q3 report", collection: "numbers", operation: "list" },
+					},
+				],
+				"Read another report's numbers.": [
+					{
+						kind: "tool_call",
+						name: "artifact_data",
+						arguments: { name: "Not saved here", collection: "numbers", operation: "list" },
+					},
+				],
 			}),
 		)
 		fakeOpenAI.setHandler(
@@ -1970,6 +1996,17 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(await corrected.text()).toBe("<h1>Q3, corrected</h1>")
 		expect(await replyAfterTurn(session.id, "Save nothing.", 4)).toMatch(
 			/\/workspace\/nowhere (?:is not a directory|holds no files)\./u,
+		)
+
+		const filled = await replyAfterTurn(session.id, "Fill in the numbers.", 5)
+		expect(filled).toContain('"id":"revenue"')
+		expect(filled).toContain('"next_page":null')
+		const numbers = await apiJson<{ readonly data: ReadonlyArray<{ readonly data: unknown }> }>(
+			`/v1/artifacts/${artifactId}/data/numbers`,
+		)
+		expect(numbers.body.data.map((document) => document.data)).toEqual([{ q3: 1200 }])
+		expect(await replyAfterTurn(session.id, "Read another report's numbers.", 6)).toContain(
+			'No artifact named "Not saved here" has been saved in this session.',
 		)
 	}, 180_000)
 

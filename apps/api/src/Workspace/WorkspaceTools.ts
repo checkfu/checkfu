@@ -10,6 +10,9 @@ import {
 } from "./SessionOutputs.ts"
 import * as Schema from "effect/Schema"
 import {
+	ARTIFACT_DATA_OPERATIONS,
+	DEFAULT_ARTIFACT_DATA_LIMIT,
+	MAX_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
@@ -55,6 +58,25 @@ export const ARTIFACT_TOOL: WorkspaceTool = {
 			directory: { type: "string" },
 		},
 		required: ["name", "directory"],
+		additionalProperties: false,
+	},
+}
+
+export const ARTIFACT_DATA_TOOL: WorkspaceTool = {
+	name: "artifact_data",
+	description: `Read or write the data of an artifact you saved in this session with save_artifact: the documents its page reaches through artifactData. Use it to fill a dashboard's numbers or to read what a form collected. \`name\` is the artifact's name and \`collection\` one of its collections. \`operation\` is list, get, add, put or delete: list returns documents oldest first, up to \`limit\` (${DEFAULT_ARTIFACT_DATA_LIMIT} when left out, at most ${MAX_ARTIFACT_DATA_LIMIT}), with a next_page to pass as \`page\`; get, put and delete take the document's \`id\`; add and put take \`data\`, any JSON value, and put stores it under an id you choose. You may use any collection, whatever the page's visitors may do.`,
+	parameters: {
+		type: "object",
+		properties: {
+			name: { type: "string" },
+			collection: { type: "string" },
+			operation: { type: "string", enum: [...ARTIFACT_DATA_OPERATIONS] },
+			id: { type: "string" },
+			data: {},
+			page: { type: "string" },
+			limit: { type: "integer", minimum: 1, maximum: MAX_ARTIFACT_DATA_LIMIT },
+		},
+		required: ["name", "collection", "operation"],
 		additionalProperties: false,
 	},
 }
@@ -188,6 +210,7 @@ export const workspaceToolDeclarations = async (): Promise<ReadonlyArray<Workspa
 		),
 		BASH_TOOL,
 		ARTIFACT_TOOL,
+		ARTIFACT_DATA_TOOL,
 	]
 }
 

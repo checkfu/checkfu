@@ -140,7 +140,7 @@ GET | PUT | DELETE  /v1/artifacts/{artifact_id}/data/{collection}/{id}
 
 A document is any JSON value, with arrays and objects nested at most 32 deep. Numbers are JSON numbers, so an integer beyond 2^53 loses precision. An `Idempotency-Key` protects a retry only while the document it added still exists. The owner may use any collection name, declared by a version or not, so a dashboard can be filled before its page exists and a dropped collection can still be read and emptied. A document over the size limit answers 400; a full collection or database answers 409.
 
-This lets a client fill a dashboard or read a form’s responses. A separate agent tool uses a private Worker binding scoped to the running turn and artifacts created by that session. Access to other artifacts would require an explicit write grant.
+This lets a client fill a dashboard or read a form’s responses. The agent has a tool of its own, `artifact_data`, for the artifacts it saved in its session: it names the artifact as it named it in `save_artifact`, a collection and an operation (list, get, add, put or delete). The call goes over a private Worker binding and is tied to the running turn. It reaches only artifacts that session created; an artifact named by another session, or by the owner through the API, is not found. Like the owner, the agent may use any collection, whatever the page's visitors may do.
 
 The database allows up to 16 collections, 10,000 documents per collection, 64 KiB of encoded JSON per document, and 64 MiB of document data. Each mutation checks quotas and updates the counters in the same SQLite transaction. A page's calls are rate limited: 120 a minute for one caller on one artifact, and 1,200 a minute for an artifact from all callers. A caller is a network address, since there are no visitor accounts: an IPv4 address, or the /64 network of an IPv6 address. The platform counts at each of its locations, so the limits are a ceiling on abuse and not an exact quota. Only calls the address allows are counted, so a refused call or a made-up address cannot use up an artifact's budget. A call over a limit answers 429 with `Retry-After`. The owner's API is not limited this way. [SQLite-backed Durable Object storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
 
@@ -189,7 +189,7 @@ These are to be proved or checked when each part is built, in the same way as th
 | C1 (built) | Levels on viewing links and publications, and the grant a publication saves | A |
 | C2 (built) | The page's `_/data` calls through the content Worker | B, C1 |
 | C3 (built) | Rate limits per caller and per artifact | C2 |
-| D | A tool for the agent to write an artifact's data | B |
+| D (built) | A tool for the agent to read and write an artifact's data | B |
 | E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C2 |
 | F | The document, slides and dashboard types | E |
 

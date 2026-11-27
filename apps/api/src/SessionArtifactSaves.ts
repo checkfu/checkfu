@@ -8,23 +8,42 @@ import { FileId } from "@checkfu/domain/File/File.id"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { isApiErrorEnvelope } from "@checkfu/sdk/Errors"
-import { ArtifactName, ArtifactPath, FileName } from "@checkfu/sdk/Schemas"
+import {
+	ArtifactDocumentData,
+	ArtifactDocumentDeleted,
+	ArtifactDocumentResource,
+	MAX_ARTIFACT_DOCUMENT_DEPTH,
+} from "@checkfu/sdk/Api"
+import {
+	ArtifactCollectionName,
+	ArtifactDocumentId,
+	ArtifactName,
+	ArtifactPath,
+	FileName,
+} from "@checkfu/sdk/Schemas"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Mime from "effect/http/Mime"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { DocumentCalls, isDocumentRefused } from "./ArtifactData/DocumentCalls.ts"
 import { outputFileId } from "./Files/OutputsSaverLive.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
 import { RESERVATION_LOST, artifactWrites } from "./Http/ArtifactsHandlers.ts"
 import {
+	DEFAULT_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
 	SessionArtifactToolCalls,
 } from "./Workspace/SessionArtifactTool.ts"
-import type { SavedSessionArtifact, SavedSessionFile } from "./Workspace/SessionArtifactTool.ts"
+import type {
+	SavedSessionArtifact,
+	SavedSessionFile,
+	SessionDataRequest,
+	SessionDataResult,
+} from "./Workspace/SessionArtifactTool.ts"
 
 const DEFAULT_CONTENT_TYPE = "application/octet-stream"
 const RETRY = "retry" as const
@@ -44,6 +63,23 @@ const isFileSave = Schema.is(SessionArtifactToolCalls.sessionFileSave.args)
 const isArtifactSave = Schema.is(SessionArtifactToolCalls.sessionArtifactSave.args)
 
 const refused = (message: string) => ({ ok: false as const, message })
+
+const told = (value: unknown) => ({ ok: true as const, text: JSON.stringify(value) })
+
+const DATA_HELP = `data must be a JSON value with arrays and objects nested at most ${MAX_ARTIFACT_DOCUMENT_DEPTH} deep.`
+
+const isCollection = Schema.is(ArtifactCollectionName)
+const isDocumentId = Schema.is(ArtifactDocumentId)
+const isDataCall = Schema.is(SessionArtifactToolCalls.sessionArtifactData.args)
+const decodeData = Schema.decodeUnknownOption(Schema.fromJsonString(ArtifactDocumentData))
+const encodeDocument = Schema.encodeSync(ArtifactDocumentResource)
+const encodeDeleted = Schema.encodeSync(ArtifactDocumentDeleted)
+const encodeList = Schema.encodeSync(
+	Schema.Struct({
+		data: Schema.Array(ArtifactDocumentResource),
+		next_page: Schema.NullOr(Schema.String),
+	}),
+)
 
 export const sessionArtifactId = (
 	digest: Digest.Digest["Service"],
@@ -91,7 +127,86 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 			}
 		})
 
+	const documents = yield* DocumentCalls
+
+	const dataOf = (id: ArtifactId, request: SessionDataRequest) =>
+		Effect.gen(function* () {
+			const { operation, collection } = request
+			if (!isCollection(collection)) {
+				return refused(
+					"collection must be a lowercase name of up to 32 letters, digits, - and _, starting with a letter.",
+				)
+			}
+			if (operation === "list") {
+				const after = request.page === "" ? 0 : Number(request.page)
+				if (!Number.isSafeInteger(after) || after < 0) {
+					return refused("page must be the next_page of an earlier list.")
+				}
+				return told(
+					encodeList(
+						yield* documents.list(
+							id,
+							collection,
+							after,
+							request.limit === 0 ? DEFAULT_ARTIFACT_DATA_LIMIT : request.limit,
+						),
+					),
+				)
+			}
+			if (operation === "add") {
+				const data = decodeData(request.data)
+				return Option.isNone(data)
+					? refused(DATA_HELP)
+					: told(
+							encodeDocument(yield* documents.add(id, collection, data.value, undefined, "owner")),
+						)
+			}
+			if (!isDocumentId(request.id)) {
+				return refused(
+					"id must be up to 64 letters, digits, - and _, starting with a letter or digit.",
+				)
+			}
+			if (operation === "get") {
+				return told(encodeDocument(yield* documents.get(id, collection, request.id)))
+			}
+			if (operation === "delete") {
+				return told(encodeDeleted(yield* documents.remove(id, collection, request.id)))
+			}
+			const data = decodeData(request.data)
+			return Option.isNone(data)
+				? refused(DATA_HELP)
+				: told(encodeDocument(yield* documents.put(id, collection, request.id, data.value)))
+		}).pipe(Effect.catchIf(isDocumentRefused, ({ message }) => Effect.succeed(refused(message))))
+
 	return {
+		sessionArtifactData: (
+			...args: typeof SessionArtifactToolCalls.sessionArtifactData.args.Type
+		): Effect.Effect<SessionDataResult> =>
+			explained(
+				"Reaching the artifact's data",
+				args[0],
+				Effect.gen(function* () {
+					const [sessionId, turn, name, request] = args
+					if (!isDataCall(args) || !isSessionId(sessionId)) {
+						return refused("Invalid session artifact data call.")
+					}
+					if (!isArtifactName(name)) {
+						return refused("The artifact needs a name of 1 to 256 characters.")
+					}
+					const ended = yield* stopped(sessionId, turn)
+					if (ended !== undefined) {
+						return ended
+					}
+					const id = yield* sessionArtifactId(digest, sessionId, name)
+					if ((yield* artifacts.get(id)).status !== "active") {
+						return refused(
+							`No artifact named ${JSON.stringify(name)} has been saved in this session. Save it with save_artifact first.`,
+						)
+					}
+					return yield* dataOf(id, request)
+				}),
+			),
+
 		sessionFileSave: (
 			...args: typeof SessionArtifactToolCalls.sessionFileSave.args.Type
 		): Effect.Effect<SavedSessionFile> =>

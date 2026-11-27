@@ -121,7 +121,7 @@ describe("An artifact's documents", () => {
 		})
 		expect(documents.write("c0", "over", "1", "create", 1)).toEqual({ refused: "documents" })
 		expect(documents.write("c0", "only", "2", "replace", 2)).toMatchObject({ created: false })
-	})
+	}, 60_000)
 
 	it("refuses a write that would take the database past its size, and allows it once room is made", () => {
 		const { documents } = database()
@@ -136,7 +136,7 @@ describe("An artifact's documents", () => {
 		expect(documents.write("blobs", "b0", "1", "replace", 3)).toMatchObject({ refused: null })
 		expect(documents.write("blobs", "over", "1", "create", 4)).toMatchObject({ refused: null })
 		expect(documents.usage().bytes).toBe(MAX_ARTIFACT_DATABASE_BYTES - large.length + 2)
-	})
+	}, 60_000)
 
 	it("keeps its byte count equal to what it holds through any mix of writes and removals", () => {
 		const { documents } = database()

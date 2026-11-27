@@ -42,6 +42,7 @@ import { makeWorkspaceMachine } from "./WorkspaceMachine.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./WorkspaceShapes.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
 import {
+	ARTIFACT_DATA_TOOL,
 	ARTIFACT_TOOL,
 	BASH_SECONDS,
 	BASH_TOOL,
@@ -415,6 +416,12 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 				): Promise<WorkspaceToolResult> => {
 					if (call.name === BASH_TOOL.name) {
 						return runBash(call.arguments, signal)
+					}
+					if (call.name === ARTIFACT_DATA_TOOL.name) {
+						const { artifactData } = await import("./ArtifactDataTool.ts")
+						return artifactData(call.arguments, (name, request) =>
+							askApi(api.sessionArtifactData(sessionId, turn, name, request), { signal }),
+						)
 					}
 					if (call.name === ARTIFACT_TOOL.name) {
 						const { saveArtifact } = await import("./ArtifactTool.ts")

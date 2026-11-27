@@ -575,6 +575,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 						"memoryRemove",
 						"memoryStat",
 						"memoryWrite",
+						"sessionArtifactData",
 						"sessionArtifactSave",
 						"sessionFileSave",
 					].flatMap((method) => [`api-call:Api.${method}/args`, `api-call:Api.${method}/result`]),
