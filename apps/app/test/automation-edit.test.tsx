@@ -6,7 +6,7 @@ import { waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { AutomationView } from "../src/pages/automations.tsx"
 import { automationQuery } from "../src/queries.ts"
-import { button, click, mount, newQueryClient, stubApi, submit, type } from "./dom.tsx"
+import { button, click, mount, newQueryClient, settle, stubApi, submit, type } from "./dom.tsx"
 
 const automation: JsonAutomation = {
 	id: "auto_1",
@@ -55,11 +55,17 @@ const field = (container: HTMLElement, label: string): HTMLInputElement => {
 const editor = async ({
 	pending = false,
 	lagOnConflict = false,
+	openEditor = true,
+	latestAgentVersion = automation.agent.version,
+	agentArchived = false,
 	omitRevision,
 	beforeWrite,
 }: {
 	readonly pending?: boolean
 	readonly lagOnConflict?: boolean
+	readonly openEditor?: boolean
+	readonly latestAgentVersion?: number
+	readonly agentArchived?: boolean
 	readonly omitRevision?: "opening" | "refresh"
 	readonly beforeWrite?: (
 		advance: (fields: Partial<JsonAutomation>) => void,
@@ -78,6 +84,12 @@ const editor = async ({
 		current = { ...current, ...fields, revision: current.revision + 1 }
 	}
 	const sent = stubApi((request) => {
+		if (request.path === `${endpoint}/run` && request.method === "POST") {
+			return {
+				status: 409,
+				body: { error: { type: "conflict_error", message: "Run could not start." } },
+			}
+		}
 		if (request.path === endpoint && request.method === "POST") {
 			const response = beforeWrite?.(advance)
 			if (response !== undefined) {
@@ -93,6 +105,10 @@ const editor = async ({
 			}
 			const before = current
 			advance({
+				agent:
+					typeof body.agent === "object" && body.agent.id === current.agent.id
+						? { id: body.agent.id, version: body.agent.version ?? latestAgentVersion }
+						: current.agent,
 				name: body.name ?? current.name,
 				schedule: { ...current.schedule, ...body.schedule },
 			})
@@ -115,6 +131,15 @@ const editor = async ({
 			}
 			return { body }
 		}
+		if (request.path === "/v1/agents/agent_1") {
+			return {
+				body: {
+					id: "agent_1",
+					version: latestAgentVersion,
+					archived_at: agentArchived ? automation.created_at : null,
+				},
+			}
+		}
 		if (request.path.startsWith("/v1/agents?")) {
 			return {
 				body: { ...emptyPage, data: [{ id: "agent_1", name: "Reporter", model: { id: "model" } }] },
@@ -127,8 +152,10 @@ const editor = async ({
 	})
 	const page = await mount(<AutomationUnderTest />, queryClient)
 	await waitFor(() => expect(button(page.container, "Edit")).toBeTruthy())
-	await click(button(page.container, "Edit"))
-	await waitFor(() => expect(page.container.querySelector("form")).not.toBeNull())
+	if (openEditor) {
+		await click(button(page.container, "Edit"))
+		await waitFor(() => expect(page.container.querySelector("form")).not.toBeNull())
+	}
 	return {
 		...page,
 		advance,
@@ -144,6 +171,54 @@ const editor = async ({
 afterEach(() => {
 	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
+})
+
+it("moves the automation to the displayed agent version after a pending update settles", async () => {
+	const page = await editor({ openEditor: false, latestAgentVersion: 3, pending: true })
+	try {
+		await waitFor(() => expect(button(page.container, "Use v3")).toBeTruthy())
+		await click(button(page.container, "Use v3"))
+		await waitFor(() => expect(page.container.textContent).toContain("pinned to v3"))
+		expect(page.writes()).toEqual([
+			{ revision: 1, agent: { type: "agent", id: "agent_1", version: 3 } },
+		])
+		expect(page.acceptedReads()).toBe(3)
+		expect(page.container.textContent).not.toContain("Use v3")
+	} finally {
+		page.unmount()
+	}
+})
+
+it.each([{ latestAgentVersion: 2 }, { latestAgentVersion: 3, agentArchived: true }])(
+	"offers no repin action for an already current pin or an archived agent (%j)",
+	async (agent) => {
+		const page = await editor({ ...agent, openEditor: false })
+		try {
+			await settle()
+			expect(page.container.textContent).toContain("pinned to v2")
+			expect(page.container.textContent).not.toContain("Use v")
+		} finally {
+			page.unmount()
+		}
+	},
+)
+
+it("shows a revision conflict without resubmitting the repin", async () => {
+	const page = await editor({ openEditor: false, latestAgentVersion: 3 })
+	try {
+		await waitFor(() => expect(button(page.container, "Use v3")).toBeTruthy())
+		await click(button(page.container, "Run now"))
+		await waitFor(() => expect(page.container.textContent).toContain("Run could not start."))
+		page.advance({ description: "External edit" })
+		await click(button(page.container, "Use v3"))
+		await waitFor(() => expect(page.container.textContent).toContain("The automation changed."))
+		expect(page.writes()).toEqual([
+			{ revision: 1, agent: { type: "agent", id: "agent_1", version: 3 } },
+		])
+		expect(page.container.textContent).toContain("pinned to v2")
+	} finally {
+		page.unmount()
+	}
 })
 
 it("waits for the newer revision, retries a disjoint edit, and settles the accepted write", async () => {

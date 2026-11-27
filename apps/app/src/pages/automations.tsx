@@ -6,7 +6,7 @@ import { Input, Textarea } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonAutomation } from "@checkfu/sdk/client"
-import { useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
@@ -28,6 +28,7 @@ import type { Choices } from "../option-picker.tsx"
 import { Pager } from "../pager.tsx"
 import {
 	agentChoices,
+	agentQuery,
 	automationQuery,
 	automationRunsQuery,
 	automationsPage,
@@ -412,7 +413,27 @@ export function AutomationView({
 	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
 	const archive = useAction(() => checkfu.automations.archive(automation.id), { invalidates })
 	const archived = automation.status === "archived"
-	const busy = runNow.pending || pause.pending || unpause.pending || archive.pending
+	const agent = useQuery({
+		...agentQuery(automation.agent.id),
+		enabled: !archived && editBase === null,
+	})
+	const newerVersion =
+		!archived &&
+		agent.isSuccess &&
+		agent.data.archived_at === null &&
+		agent.data.version > automation.agent.version
+			? agent.data.version
+			: undefined
+	const repin = useAction(
+		(version: number) =>
+			checkfu.automations.update(automation.id, {
+				agent: { type: "agent", id: automation.agent.id, version },
+				revision: automation.revision,
+			}),
+		{ invalidates },
+	)
+	const busy =
+		runNow.pending || pause.pending || unpause.pending || archive.pending || repin.pending
 	const error = runNow.error ?? pause.error ?? unpause.error ?? archive.error
 	return (
 		<>
@@ -437,7 +458,12 @@ export function AutomationView({
 									Pause
 								</Button>
 							)}
-							<Button variant="outline" size="sm" onClick={() => setEditBase(automation)}>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={repin.pending}
+								onClick={() => setEditBase(automation)}
+							>
 								Edit
 							</Button>
 							<Button variant="destructive" size="sm" disabled={busy} onClick={() => archive.run()}>
@@ -448,6 +474,7 @@ export function AutomationView({
 				}
 			/>
 			{error === undefined ? null : <Callout tone="error">{error}</Callout>}
+			{repin.error === undefined ? null : <Callout tone="error">{repin.error}</Callout>}
 			{queuedRun === null ? null : (
 				<Callout>
 					Run #{queuedRun} is queued and not listed yet. It will appear under Runs once it starts;
@@ -456,7 +483,21 @@ export function AutomationView({
 			)}
 			{editBase === null ? (
 				<>
-					<AutomationDetails automation={automation} />
+					<AutomationDetails
+						automation={automation}
+						repin={
+							newerVersion === undefined ? undefined : (
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={busy}
+									onClick={() => repin.run(newerVersion)}
+								>
+									Use v{newerVersion}
+								</Button>
+							)
+						}
+					/>
 					<AutomationRuns automation={automation} />
 				</>
 			) : (
@@ -468,8 +509,10 @@ export function AutomationView({
 
 function AutomationDetails({
 	automation,
+	repin,
 }: {
 	readonly automation: JsonAutomation
+	readonly repin?: React.ReactNode
 }): React.JSX.Element {
 	const zone = automation.schedule.timezone
 	return (
@@ -490,7 +533,8 @@ function AutomationDetails({
 					>
 						{shortId(automation.agent.id)}
 					</Link>{" "}
-					<span className="text-muted-foreground">pinned to v{automation.agent.version}</span>
+					<span className="text-muted-foreground">pinned to v{automation.agent.version}</span>{" "}
+					{repin}
 				</Description>
 				<Description label="Environment">
 					<Link

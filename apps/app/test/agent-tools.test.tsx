@@ -246,7 +246,11 @@ describe("agent revision navigation", () => {
 		expect(view.getByText("Original instructions")).toBeDefined()
 		expect(view.queryByRole("button", { name: "Edit" })).toBeNull()
 		expect(view.queryByRole("button", { name: "Archive" })).toBeNull()
-		expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`])
+		expect(view.agentRequests()).toEqual(
+			path.startsWith("/automations/")
+				? [agentApiPath, `${agentApiPath}?version=1`]
+				: [`${agentApiPath}?version=1`],
+		)
 	})
 
 	it("keeps a directly loaded revision and the current editor separate through history", async () => {
