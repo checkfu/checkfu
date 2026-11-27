@@ -83,19 +83,29 @@
 					? "#"
 					: url.trim()
 			}
-			const inline = (value) =>
-				escape(value)
-					.replace(/`([^`]+)`/g, "<code>$1</code>")
-					.replace(
-						/!\[([^\]]*)\]\(([^)\s]+)\)/g,
-						(_, alt, src) => '<img alt="' + alt + '" src="' + safe(src) + '">',
-					)
-					.replace(
-						/\[([^\]]+)\]\(([^)\s]+)\)/g,
-						(_, label, href) => '<a href="' + safe(href) + '">' + label + "</a>",
-					)
-					.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-					.replace(/\*([^*]+)\*/g, "<em>$1</em>")
+			const inlinePattern =
+				/`([^`]+)`|!\[([^\]]*)\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*/g
+			const inline = (value) => {
+				let result = ""
+				let offset = 0
+				for (const match of value.matchAll(inlinePattern)) {
+					result += escape(value.slice(offset, match.index))
+					const [token, code, alt, source, label, href, strong, emphasis] = match
+					if (code !== undefined) {
+						result += "<code>" + escape(code) + "</code>"
+					} else if (source !== undefined) {
+						result += '<img alt="' + escape(alt) + '" src="' + escape(safe(source)) + '">'
+					} else if (href !== undefined) {
+						result += '<a href="' + escape(safe(href)) + '">' + inline(label) + "</a>"
+					} else if (strong !== undefined) {
+						result += "<strong>" + inline(strong) + "</strong>"
+					} else {
+						result += "<em>" + inline(emphasis) + "</em>"
+					}
+					offset = match.index + token.length
+				}
+				return result + escape(value.slice(offset))
+			}
 			const out = []
 			let paragraph = []
 			let list = null
@@ -194,8 +204,8 @@
 				const slides = splitSlides(text)
 				const content = document.getElementById("content")
 				const position = document.getElementById("position")
-				let current =
-					Math.min(Math.max(Number(location.hash.slice(1)) || 1, 1), Math.max(slides.length, 1)) - 1
+				const requested = Number(location.hash.slice(1))
+				let current = Number.isSafeInteger(requested) ? Math.max(requested - 1, 0) : 0
 				const show = (index) => {
 					current = Math.min(Math.max(index, 0), slides.length - 1)
 					content.innerHTML = renderMarkdown(slides[current] ?? "")
@@ -205,9 +215,14 @@
 				document.getElementById("previous").addEventListener("click", () => show(current - 1))
 				document.getElementById("next").addEventListener("click", () => show(current + 1))
 				document.addEventListener("keydown", (event) => {
+					if (event.key === " " && event.target?.closest?.("button, a")) {
+						return
+					}
 					if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") {
+						event.preventDefault()
 						show(current + 1)
 					} else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+						event.preventDefault()
 						show(current - 1)
 					}
 				})
