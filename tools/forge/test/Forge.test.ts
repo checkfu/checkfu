@@ -1,5 +1,16 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readdirSync, rmSync } from "node:fs"
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MAX_FILE_BYTES } from "@checkfu/sdk/Limits"
@@ -12,7 +23,7 @@ import * as HttpApiGroup from "effect/http-api/HttpApiGroup"
 import * as OpenApi from "effect/http-api/OpenApi"
 import * as Schema from "effect/Schema"
 import { generateCliFiles } from "../src/CliTransformer.ts"
-import { REPO_ROOT } from "../src/Generate.ts"
+import { REPO_ROOT, runGenerate } from "../src/Generate.ts"
 import { exportDeterministicOpenApiJson } from "../src/OpenApiExport.ts"
 import { generateSdkFiles } from "../src/SdkTransformer.ts"
 import { buildSurfaceCatalog } from "../src/SurfaceCatalog.ts"
@@ -839,6 +850,132 @@ describe("Cloudflare Forge pipeline", () => {
 		}
 		const collisionForge = parse(JSON.stringify(collisionSpec))
 		expect(() => buildSurfaceCatalog(collisionForge)).toThrow(/Collision between subgroup/)
+	})
+
+	it("checks and removes stale files only within generated directories", () => {
+		const repoRoot = mkdtempSync(join(tmpdir(), "checkfu-forge-outputs-"))
+		try {
+			copyFileSync(join(REPO_ROOT, ".oxfmtrc.json"), join(repoRoot, ".oxfmtrc.json"))
+			symlinkSync(join(REPO_ROOT, "node_modules"), join(repoRoot, "node_modules"), "junction")
+			expect(runGenerate({ repoRoot })).toEqual({ ok: true, drifted: [] })
+			const nested = join(repoRoot, "apps/cli/src/generated/old")
+			mkdirSync(nested)
+			writeFileSync(join(nested, "Stale.ts"), "unused\n")
+			const handwritten = join(repoRoot, "apps/cli/src/Handwritten.ts")
+			writeFileSync(handwritten, "handwritten\n")
+			symlinkSync(handwritten, join(nested, "Linked.ts"))
+			symlinkSync(join(repoRoot, "apps/cli/src"), join(nested, "LinkedDirectory"), "junction")
+			expect(runGenerate({ repoRoot, check: true })).toEqual({
+				ok: false,
+				drifted: [
+					join("apps/cli/src/generated/old", "Linked.ts"),
+					join("apps/cli/src/generated/old", "LinkedDirectory"),
+					join("apps/cli/src/generated/old", "Stale.ts"),
+				],
+			})
+			expect(existsSync(join(nested, "Stale.ts"))).toBe(true)
+			expect(runGenerate({ repoRoot })).toEqual({ ok: true, drifted: [] })
+			expect(readdirSync(nested)).toEqual([])
+			expect(readFileSync(handwritten, "utf8")).toBe("handwritten\n")
+			expect(runGenerate({ repoRoot, check: true })).toEqual({ ok: true, drifted: [] })
+
+			const source = join(repoRoot, "apps/cli/src")
+			const outside = join(repoRoot, "other")
+			renameSync(source, outside)
+			symlinkSync(outside, source, "junction")
+			expect(() => runGenerate({ repoRoot })).toThrow("Expected a directory within the checkout")
+			expect(readFileSync(join(outside, "Handwritten.ts"), "utf8")).toBe("handwritten\n")
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true })
+		}
+	})
+
+	it("refuses linked output parents and standalone output files before writing", () => {
+		const repoRoot = mkdtempSync(join(tmpdir(), "checkfu-forge-output-links-"))
+		try {
+			const root = join(repoRoot, "checkout")
+			const other = join(repoRoot, "other")
+			mkdirSync(join(root, "apps/cli"), { recursive: true })
+			mkdirSync(other)
+			symlinkSync(other, join(root, "apps/cli/src"), "junction")
+			expect(() => runGenerate({ repoRoot: root })).toThrow(
+				"Expected a directory within the checkout",
+			)
+			expect(readdirSync(other)).toEqual([])
+			rmSync(join(root, "apps/cli/src"))
+			const outside = join(other, "save.json")
+			writeFileSync(outside, "keep")
+			symlinkSync(outside, join(root, "openapi.json"))
+			expect(() => runGenerate({ repoRoot: root })).toThrow(
+				"Expected a regular generated file at openapi.json",
+			)
+			expect(readFileSync(outside, "utf8")).toBe("keep")
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects two fields mapped to the same CLI flag", () => {
+		const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
+			paths: Record<string, { get: Record<string, Json> }>
+		}
+		spec.paths["/v1/sessions/{session_id}/events"]!.get["x-checkfu-cli"] = {
+			repeatArrayField: { field: "types", flag: "limit" },
+		}
+		const forge = parse(JSON.stringify(spec))
+		expect(() => generateCliFiles(forge)).toThrow(
+			"Duplicate CLI flag --limit for GET /v1/sessions/{session_id}/events",
+		)
+	})
+
+	it.each(["format", "help", "r", "no-raw-output"])(
+		"rejects repeat flags that shadow the global %s flag",
+		(flag) => {
+			const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
+				paths: Record<string, { get: Record<string, Json> }>
+			}
+			spec.paths["/v1/sessions/{session_id}/events"]!.get["x-checkfu-cli"] = {
+				repeatArrayField: { field: "types", flag },
+			}
+			expect(() => generateCliFiles(parse(JSON.stringify(spec)))).toThrow(
+				`Reserved CLI flag --${flag} for GET /v1/sessions/{session_id}/events`,
+			)
+		},
+	)
+
+	it("rejects a repeat flag that shadows a Boolean flag's implicit negation", () => {
+		const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
+			paths: Record<string, { get: Record<string, Json> }>
+		}
+		const method = spec.paths["/v1/sessions/{session_id}/events"]!.get
+		const parameters = method["parameters"]
+		if (!Array.isArray(parameters)) {
+			throw new Error("Expected session event parameters")
+		}
+		method["parameters"] = [
+			...parameters,
+			{ name: "include_archived", in: "query", schema: { type: "boolean" } },
+		]
+		method["x-checkfu-cli"] = { repeatArrayField: { field: "types", flag: "no-include-archived" } }
+		expect(() => generateCliFiles(parse(JSON.stringify(spec)))).toThrow(
+			"Duplicate CLI flag --no-include-archived for GET /v1/sessions/{session_id}/events",
+		)
+	})
+
+	it("checks flags from distinct request locations even when the wire names match", () => {
+		const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
+			paths: Record<string, { post: Record<string, Json> }>
+		}
+		spec.paths["/v1/agents/{agent_id}"]!.post["requestBody"] = {
+			content: {
+				"application/json": {
+					schema: { type: "object", properties: { agent_id: { type: "string" } } },
+				},
+			},
+		}
+		expect(() => generateCliFiles(parse(JSON.stringify(spec)))).toThrow(
+			"Duplicate CLI flag --agent-id for POST /v1/agents/{agent_id}",
+		)
 	})
 
 	it("passes Cloudflare Forge CLI inspect and native TypeScript SDK generation", () => {

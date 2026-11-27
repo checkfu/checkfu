@@ -169,14 +169,21 @@ const carriesSecret = (type: Type, seen: ReadonlySet<string> = new Set()): boole
 
 const RESERVED_GLOBAL_FLAG_NAMES = new Set([
 	"help",
+	"no-help",
+	"h",
 	"version",
+	"no-version",
+	"v",
 	"wizard",
+	"no-wizard",
 	"completions",
 	"log-level",
 	"base-url",
 	"format",
 	"transform",
 	"raw-output",
+	"no-raw-output",
+	"r",
 ])
 
 const resolveCliFlagName = (field: Field): string => {
@@ -241,12 +248,17 @@ const formatCliCommandDescription = (base: string, hasBody: boolean): string => 
 const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray<FlagSpec> => {
 	const flags: Array<FlagSpec> = []
 	const seenFlagNames = new Set<string>()
+	const seenFieldNames = new Set<string>()
 	const fileFields = new Set(cliExt.fileFields ?? [])
 	const textOrObjectFields = new Set(cliExt.textOrObjectFields ?? [])
 	const intQueryParams = cliExt.intQueryParams ?? {}
 
 	const allRequestFields = new Map<string, Field>()
-	collectFieldsFromType(method.request, allRequestFields)
+	collectFieldsFromType(
+		method.request,
+		allRequestFields,
+		(field) => `${method.location(field)?.in ?? "body"}:${field.wireName}`,
+	)
 
 	const pathFields: Array<Field> = []
 	const queryFields: Array<Field> = []
@@ -267,17 +279,29 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		const extraBodyFields = new Map<string, Field>()
 		collectFieldsFromType(method.body.json.type, extraBodyFields)
 		for (const [wireName, field] of extraBodyFields) {
-			if (!allRequestFields.has(wireName)) {
+			if (!allRequestFields.has(`body:${wireName}`)) {
 				bodyFields.push(field)
 			}
 		}
 	}
 
 	const pushFlag = (spec: FlagSpec) => {
-		if (seenFlagNames.has(spec.flagName)) {
-			return
+		const names = spec.kind === "boolean" ? [spec.flagName, `no-${spec.flagName}`] : [spec.flagName]
+		for (const name of names) {
+			if (RESERVED_GLOBAL_FLAG_NAMES.has(name)) {
+				throw new Error(`Reserved CLI flag --${name} for ${method.httpMethod} ${method.path}`)
+			}
+			if (seenFlagNames.has(name)) {
+				throw new Error(`Duplicate CLI flag --${name} for ${method.httpMethod} ${method.path}`)
+			}
+			seenFlagNames.add(name)
 		}
-		seenFlagNames.add(spec.flagName)
+		if (seenFieldNames.has(spec.propName)) {
+			throw new Error(
+				`Duplicate CLI field ${spec.propName} for ${method.httpMethod} ${method.path}`,
+			)
+		}
+		seenFieldNames.add(spec.propName)
 		flags.push(spec)
 	}
 

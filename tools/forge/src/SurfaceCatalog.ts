@@ -128,15 +128,20 @@ export const unwrapNullableType = (ty: Type): Type => {
 	return ty
 }
 
-export const collectFieldsFromType = (ty: Type | undefined, out: Map<string, Field>): void => {
+export const collectFieldsFromType = (
+	ty: Type | undefined,
+	out: Map<string, Field>,
+	keyOf: (field: Field) => string = (field) => field.wireName,
+): void => {
 	if (ty === undefined) {
 		return
 	}
 	switch (ty.kind) {
 		case "object": {
 			for (const field of ty.fields) {
-				if (!out.has(field.wireName)) {
-					out.set(field.wireName, field)
+				const key = keyOf(field)
+				if (!out.has(key)) {
+					out.set(key, field)
 				}
 			}
 			return
@@ -144,12 +149,12 @@ export const collectFieldsFromType = (ty: Type | undefined, out: Map<string, Fie
 		case "intersection":
 		case "union": {
 			for (const member of ty.members) {
-				collectFieldsFromType(member, out)
+				collectFieldsFromType(member, out, keyOf)
 			}
 			return
 		}
 		case "model": {
-			collectFieldsFromType(ty.model.type, out)
+			collectFieldsFromType(ty.model.type, out, keyOf)
 			return
 		}
 		default:

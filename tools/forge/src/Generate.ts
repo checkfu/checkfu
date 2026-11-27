@@ -1,6 +1,14 @@
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import {
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
+import { dirname, join, posix, relative, resolve } from "node:path"
 import { parse } from "@cloudflare/forge"
 import { generateApplySchemas } from "./ApplySchemas.ts"
 import { generateCliFiles } from "./CliTransformer.ts"
@@ -10,6 +18,12 @@ import { generateSdkFiles } from "./SdkTransformer.ts"
 
 const THIS_DIR = import.meta.dirname
 export const REPO_ROOT = resolve(THIS_DIR, "../../..")
+
+const generatedDirectories = {
+	cli: "apps/cli/src/generated",
+	sdk: "packages/sdk/src/generated",
+	mcp: "apps/mcp/src/generated",
+}
 
 export interface EmittedArtifact {
 	readonly relativePath: string
@@ -34,15 +48,15 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 		},
 		...generateApplySchemas(),
 		...cliFiles.map((file) => ({
-			relativePath: `apps/cli/src/generated/${file.path}`,
+			relativePath: `${generatedDirectories.cli}/${file.path}`,
 			content: file.content,
 		})),
 		...sdkFiles.map((file) => ({
-			relativePath: `packages/sdk/src/generated/${file.path}`,
+			relativePath: `${generatedDirectories.sdk}/${file.path}`,
 			content: file.content,
 		})),
 		...mcpFiles.map((file) => ({
-			relativePath: `apps/mcp/src/generated/${file.path}`,
+			relativePath: `${generatedDirectories.mcp}/${file.path}`,
 			content: file.content,
 		})),
 	]
@@ -78,6 +92,54 @@ const formatArtifacts = (
 	}
 }
 
+const checkOutputPaths = (repoRoot: string, artifacts: ReadonlyArray<EmittedArtifact>): void => {
+	const directories = new Set([
+		...Object.values(generatedDirectories),
+		...artifacts.map(({ relativePath }) => posix.dirname(relativePath)),
+	])
+	for (const directory of directories) {
+		let parent = repoRoot
+		for (const part of directory.split("/")) {
+			parent = join(parent, part)
+			const info = lstatSync(parent, { throwIfNoEntry: false })
+			if (info === undefined) {
+				break
+			}
+			if (!info.isDirectory()) {
+				throw new Error(`Expected a directory within the checkout at ${relative(repoRoot, parent)}`)
+			}
+		}
+	}
+	for (const { relativePath } of artifacts) {
+		const info = lstatSync(join(repoRoot, relativePath), { throwIfNoEntry: false })
+		if (info !== undefined && (!info.isFile() || info.nlink > 1)) {
+			throw new Error(`Expected a regular generated file at ${relativePath}`)
+		}
+	}
+}
+
+const staleArtifacts = (repoRoot: string, artifacts: ReadonlyArray<EmittedArtifact>) => {
+	const emitted = new Set(artifacts.map((artifact) => join(repoRoot, artifact.relativePath)))
+	const stale: Array<string> = []
+	const visit = (directory: string): void => {
+		for (const entry of readdirSync(directory, { withFileTypes: true })) {
+			const path = join(directory, entry.name)
+			if (entry.isDirectory()) {
+				visit(path)
+			} else if (!emitted.has(path)) {
+				stale.push(relative(repoRoot, path))
+			}
+		}
+	}
+	for (const directory of Object.values(generatedDirectories)) {
+		const root = join(repoRoot, directory)
+		if (lstatSync(root, { throwIfNoEntry: false }) !== undefined) {
+			visit(root)
+		}
+	}
+	return stale.sort()
+}
+
 export interface GenerateResult {
 	readonly ok: boolean
 	readonly drifted: ReadonlyArray<string>
@@ -89,9 +151,16 @@ export const runGenerate = (options?: {
 }): GenerateResult => {
 	const repoRoot = options?.repoRoot ?? REPO_ROOT
 	const check = options?.check ?? false
-	const formatted = formatArtifacts(generateAllArtifacts(), repoRoot)
+	const artifacts = generateAllArtifacts()
+	checkOutputPaths(repoRoot, artifacts)
+	const formatted = formatArtifacts(artifacts, repoRoot)
+	const stale = staleArtifacts(repoRoot, formatted)
 
 	if (!check) {
+		for (const path of stale) {
+			rmSync(join(repoRoot, path))
+			process.stdout.write(`forge: removed ${path}\n`)
+		}
 		for (const artifact of formatted) {
 			const target = join(repoRoot, artifact.relativePath)
 			mkdirSync(dirname(target), { recursive: true })
@@ -101,7 +170,10 @@ export const runGenerate = (options?: {
 		return { ok: true, drifted: [] }
 	}
 
-	const drifted: Array<string> = []
+	const drifted = stale.slice()
+	for (const path of stale) {
+		process.stderr.write(`forge drift: ${path} is no longer generated\n`)
+	}
 	for (const artifact of formatted) {
 		const target = join(repoRoot, artifact.relativePath)
 		let existing: string | undefined
