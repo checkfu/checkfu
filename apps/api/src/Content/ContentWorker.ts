@@ -14,6 +14,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { ApiWorker, ArtifactVersionNotReady, bindApiAs } from "../Api.ts"
 import type { DataAddress, DataCall } from "../Api.ts"
+import { cacheArtifactManifests } from "../Artifacts/ArtifactManifestCache.ts"
 import { ArtifactReader, ArtifactReaderR2, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import { publishDomain } from "../CustomDomain.ts"
 import { storageScope } from "../Placement.ts"
@@ -68,7 +69,7 @@ export default ContentWorker.make(
 	Effect.gen(function* () {
 		const mac = yield* Mac.Mac
 		const digest = yield* Digest.Digest
-		const store = yield* ArtifactReader
+		const store = yield* cacheArtifactManifests(yield* ArtifactReader)
 		const scope = yield* storageScope
 		const domain = yield* publishDomain
 		const api = yield* bindApiAs("content", ApiWorker)

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { THEME_SCRIPT } from "@checkfu/ui/theme-script"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import worker from "../worker.ts"
 
@@ -187,10 +189,23 @@ describe("app worker", () => {
 		expect(seen).toHaveLength(0)
 	})
 
-	it("serves the app for every other path", async () => {
+	it("serves app pages with a policy for its exact inline theme script and same-origin assets", async () => {
 		const { env } = makeEnv()
 		const response = await worker.fetch(new Request(`${ORIGIN}/sessions/abc`), env)
 		expect(await response.text()).toBe("index")
+		expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+		expect(response.headers.get("x-frame-options")).toBe("DENY")
+		expect(response.headers.get("referrer-policy")).toBe("same-origin")
+		const policy = response.headers.get("content-security-policy")?.split("; ")
+		const hash = createHash("sha256").update(THEME_SCRIPT).digest("base64")
+		expect(policy).toEqual(
+			expect.arrayContaining([
+				"default-src 'self'",
+				`script-src 'self' 'sha256-${hash}'`,
+				"img-src 'self' data: blob:",
+				"frame-ancestors 'none'",
+			]),
+		)
 	})
 
 	it("gives each local instance its own hostname, by port, and never signs in elsewhere", async () => {

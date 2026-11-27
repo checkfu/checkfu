@@ -15,6 +15,7 @@ import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
+import { cacheArtifactManifests } from "../src/Artifacts/ArtifactManifestCache.ts"
 import { ArtifactStore } from "../src/Artifacts/ArtifactStore.ts"
 import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
@@ -87,6 +88,8 @@ const withContent = <A>(
 			headers?: Record<string, string>,
 		) => Effect.Effect<Response>
 		readonly transfers: ReadonlyArray<{ readonly range: ByteRange | undefined; size: number }>
+		readonly manifestReads: () => number
+		readonly setManifestAvailable: (available: boolean) => void
 		readonly openIn: (scope: string, url: string) => Effect.Effect<Response>
 		readonly openLagging: (lag: ViewLag, url: string) => Effect.Effect<Response>
 		readonly openUrl: (url: string) => Effect.Effect<Response>
@@ -117,8 +120,15 @@ const withContent = <A>(
 			let now: number | undefined
 			const store = yield* ArtifactStore
 			const transfers: Array<{ readonly range: ByteRange | undefined; size: number }> = []
-			const streamed = {
+			let manifestReads = 0
+			let manifestAvailable = true
+			const streamed = yield* cacheArtifactManifests({
 				...store,
+				getManifest: (artifactId, hash) =>
+					Effect.suspend(() => {
+						manifestReads += 1
+						return manifestAvailable ? store.getManifest(artifactId, hash) : Effect.succeed(null)
+					}),
 				blobStream: (artifactId: string, sha256: string, range?: ByteRange) =>
 					Effect.gen(function* () {
 						const transfer = { range, size: 0 }
@@ -134,7 +144,7 @@ const withContent = <A>(
 							) ?? null
 						)
 					}),
-			}
+			})
 			const resolveArtifactVersion = yield* ArtifactVersionResolver
 			const resolvePublication = yield* PublicationResolver
 			const artifactData = yield* VisitorData
@@ -181,6 +191,10 @@ const withContent = <A>(
 						...(body === undefined ? {} : { body }),
 					}),
 				transfers,
+				manifestReads: () => manifestReads,
+				setManifestAvailable: (available) => {
+					manifestAvailable = available
+				},
 				open: (url, method = "GET", ifNoneMatch, headers) =>
 					Effect.map(
 						serve(webRequest(url, method, ifNoneMatch, headers)),
@@ -610,6 +624,57 @@ describe("Artifact viewing links", () => {
 				expect(folder.status).toBe(308)
 				expect(folder.headers.get("location")).toBe(`${root}docs/?tab=2`)
 				expect((yield* open(`${link.url}docs`)).headers.get("location")).toBe(`${root}docs/`)
+			}),
+		))
+
+	it("reuses an immutable manifest across assets and rechecks publication access", () =>
+		withContent(({ api, open, manifestReads, setManifestAvailable }) =>
+			Effect.gen(function* () {
+				const { id } = yield* createArtifact(api, [
+					{ path: "index.html", content: "hello" },
+					{ path: "article.txt", content: "article" },
+				])
+				const publication = yield* json<{ publication: { url: string } }>(
+					yield* api("POST", `/v1/artifacts/${id}/publication`, { version: 1 }),
+				)
+				const url = publication.publication.url
+				setManifestAvailable(false)
+				expect((yield* open(url)).status).toBe(404)
+				expect(manifestReads()).toBe(1)
+				setManifestAvailable(true)
+				const root = yield* open(url)
+				expect(root.status).toBe(200)
+				expect(yield* text(root)).toBe("hello")
+				const asset = yield* open(`${url}article.txt`)
+				expect(yield* text(asset)).toBe("article")
+				expect((yield* open(url, "GET", root.headers.get("etag") ?? "")).status).toBe(304)
+				expect(manifestReads()).toBe(2)
+				yield* api("DELETE", `/v1/artifacts/${id}/publication`)
+				expect((yield* open(url, "GET", root.headers.get("etag") ?? "")).status).toBe(404)
+				expect(manifestReads()).toBe(2)
+			}),
+		))
+
+	it("evicts older manifests from the per-isolate cache", () =>
+		withContent(({ api, open, manifestReads }) =>
+			Effect.gen(function* () {
+				const urls: Array<string> = []
+				for (let index = 0; index < 9; index += 1) {
+					const { id } = yield* createArtifact(api, [
+						{ path: "index.html", content: String(index) },
+					])
+					const publication = yield* json<{ publication: { url: string } }>(
+						yield* api("POST", `/v1/artifacts/${id}/publication`, { version: 1 }),
+					)
+					const url = publication.publication.url
+					urls.push(url)
+					expect(yield* text(yield* open(url))).toBe(String(index))
+				}
+				expect(manifestReads()).toBe(9)
+				expect(yield* text(yield* open(urls.at(-1) ?? ""))).toBe("8")
+				expect(manifestReads()).toBe(9)
+				expect(yield* text(yield* open(urls[0] ?? ""))).toBe("0")
+				expect(manifestReads()).toBe(10)
 			}),
 		))
 

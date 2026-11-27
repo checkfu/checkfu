@@ -1,3 +1,5 @@
+import { THEME_SCRIPT } from "@checkfu/ui/theme-script"
+
 interface Env {
 	readonly API: { readonly fetch: typeof globalThis.fetch }
 	readonly ASSETS: { readonly fetch: typeof globalThis.fetch }
@@ -16,6 +18,36 @@ const localHost = (url: URL): string | undefined =>
 		: undefined
 const NO_STORE = { "cache-control": "no-store" }
 const utf8 = new TextEncoder()
+
+const assetPolicy = async (): Promise<string> => {
+	const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(THEME_SCRIPT)))
+	const script = btoa(String.fromCodePoint(...hash))
+	return [
+		"default-src 'self'",
+		`script-src 'self' 'sha256-${script}'`,
+		"img-src 'self' data: blob:",
+		"style-src 'self' 'unsafe-inline'",
+		"frame-src 'none'",
+		"frame-ancestors 'none'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'self'",
+	].join("; ")
+}
+let assetsPolicy: Promise<string> | undefined
+
+const dashboardAsset = async (response: Response): Promise<Response> => {
+	const headers = new Headers(response.headers)
+	headers.set("x-content-type-options", "nosniff")
+	headers.set("x-frame-options", "DENY")
+	headers.set("referrer-policy", "same-origin")
+	headers.set("content-security-policy", await (assetsPolicy ??= assetPolicy()))
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	})
+}
 
 const cookie = (value: string, maxAge: number): string =>
 	`${COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`
@@ -202,6 +234,6 @@ export default {
 		if (url.pathname.startsWith("/auth/")) {
 			return new Response(null, { status: 404 })
 		}
-		return env.ASSETS.fetch(request)
+		return dashboardAsset(await env.ASSETS.fetch(request))
 	},
 }

@@ -1,10 +1,8 @@
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
-import * as Cache from "effect/Cache"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
+import { cacheArtifactManifests } from "./ArtifactManifestCache.ts"
 import { ArtifactStore } from "./ArtifactStore.ts"
 import type { ByteRange } from "../Content/ByteRange.ts"
 
@@ -19,28 +17,16 @@ const missing = (artifactId: string, what: string) =>
 		Effect.fail(new ArtifactBytesMissing({ artifact_id: artifactId, missing: what })),
 	)
 
-const MANIFESTS_KEPT = 64
-
 export const PinnedArtifact = Effect.gen(function* () {
 	const artifacts = yield* Artifact
-	const store = yield* ArtifactStore
-
-	const manifests = yield* Cache.makeWith(
-		(key: string) =>
-			store.getManifest(key.slice(0, key.indexOf("/")), key.slice(key.indexOf("/") + 1)),
-		{
-			capacity: MANIFESTS_KEPT,
-			timeToLive: (exit) =>
-				Exit.isSuccess(exit) && exit.value !== null ? Duration.infinity : Duration.zero,
-		},
-	)
+	const store = yield* cacheArtifactManifests(yield* ArtifactStore)
 
 	const active = (artifactId: string) =>
 		Effect.map(artifacts.get(ArtifactId.make(artifactId)), ({ status }) => status === "active")
 
 	return {
 		manifest: Effect.fn(function* (artifactId: string, manifest: string) {
-			const found = yield* Cache.get(manifests, `${artifactId}/${manifest}`)
+			const found = yield* store.getManifest(artifactId, manifest)
 			if (!(yield* active(artifactId))) {
 				return null
 			}
