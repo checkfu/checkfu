@@ -237,6 +237,14 @@
 			"Session.OnlyTheLastInitialMessageStartsTheTurn": {
 				"kind": "transition",
 				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\t!events.some((e) => e._tag === \"session.status_running\") ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === 1)"
+			},
+			"ConfirmTool.AnAnswerMatchesItsSessionAndCall": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tbefore.call.session_id === command.session_id &&\n\t\t\tbefore.call.tool_use_id === command.tool_use_id"
+			},
+			"ReturnCustomToolResult.AResultMatchesItsSessionAndCall": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tbefore.call.session_id === command.session_id &&\n\t\t\tbefore.call.tool_use_id === command.custom_tool_use_id"
 			}
 		}
 	}

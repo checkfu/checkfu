@@ -31,6 +31,8 @@ Aggregate and cross-aggregate transition rules state the invariants independentl
 
 `ToolActions.verify.test.ts` requires proved decision rules for confirmations and custom results. As in the unified model proof, the JSON set encoding helpers are opaque; the session/call identity comparisons remain symbolic. The full model's standing and source locks must also pass.
 
+Shared decisions appear in both the `Checkfu` and `Sessions` verifiers. When their rules change, run both model verifiers, regenerate both source locks, and align both standing declarations with the required evidence. Updating only the unified model leaves the Sessions proof and replay gates incomplete.
+
 Z3 transition proofs, bounded exploration, replay and runtime tests provide different evidence. Keep their distinctions explicit. A successful bounded check must not be relabelled an unbounded proof. Do not relax requirements, exploration budgets, standing locks or assertions to make a refactor pass.
 
 ## Running the gate
