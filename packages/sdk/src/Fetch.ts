@@ -1,4 +1,5 @@
 import { parseJsonAs } from "./Boundary.ts"
+import type { IsoDateTimes } from "./Boundary.ts"
 import { ERROR_CODES } from "./ErrorCodes.ts"
 import type { ErrorCode } from "./ErrorCodes.ts"
 import { CLIENT_EVENT_ID_MESSAGE, isClientEventId } from "./IdempotencyKey.ts"
@@ -23,11 +24,13 @@ type PathField<Op extends OperationId> = BindingOf<Op>["pathParams"] extends rea
 	? { readonly path?: never }
 	: { readonly path: PathOf<Shape<Op>> }
 
+type WireQueries = { readonly [Op in OperationId]: IsoDateTimes<QueryOf<Shape<Op>>> }
+
 type QueryField<Op extends OperationId> = BindingOf<Op>["queryParams"] extends readonly []
 	? { readonly query?: never }
-	: Record<never, never> extends QueryOf<Shape<Op>>
-		? { readonly query?: QueryOf<Shape<Op>> }
-		: { readonly query: QueryOf<Shape<Op>> }
+	: Record<never, never> extends WireQueries[Op]
+		? { readonly query?: WireQueries[Op] }
+		: { readonly query: WireQueries[Op] }
 
 type BodyField<Op extends OperationId> = BindingOf<Op>["hasBody"] extends false
 	? { readonly body?: never }
