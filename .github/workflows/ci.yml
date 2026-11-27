@@ -18,7 +18,7 @@ env:
   TURBO_CACHE_DIR: .turbo/cache
   TURBO_TELEMETRY_DISABLED: 1
 
-# The jobs together run exactly what `bun run check`, `test`, `test:bun` and `test:workerd` run:
+# The jobs run `check`, `test`, `test:bun`, `test:workerd` and the release baseline guard:
 # the two test jobs split the workspace with `--filter=@checkfu/domain` and its negation.
 jobs:
   static:
@@ -35,6 +35,8 @@ jobs:
         run: bun run format:check
       - if: ${{ !cancelled() }}
         run: bun run lint
+      - if: ${{ !cancelled() }}
+        run: bun run persisted:check
       - if: ${{ !cancelled() }}
         name: Fail if a check changed any tracked file
         run: git diff --exit-code
