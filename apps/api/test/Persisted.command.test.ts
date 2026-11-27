@@ -6,9 +6,9 @@ import * as FileSystem from "effect/FileSystem"
 import * as Runtime from "effect/Runtime"
 import * as Schema from "effect/Schema"
 import * as TestConsole from "effect/testing/TestConsole"
-import { PersistedLockJson, PersistedServicesLive } from "./persisted/Lock.ts"
+import { PersistedLockJson, PersistedServicesLive, makePersistedLock } from "./persisted/Lock.ts"
 import type { PersistedLock } from "./persisted/Lock.ts"
-import { runPersisted } from "./persisted/main.ts"
+import { makePersistedCli, runPersisted } from "./persisted/main.ts"
 
 const EMPTY: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [] }
 
@@ -174,5 +174,48 @@ describe("persisted command", () => {
 				expect(Exit.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true)
 				expect(Exit.isFailure(defect) && Cause.pretty(defect.cause)).toContain("disk on fire")
 			}),
+	)
+
+	it.effect("runs an isolated lock and CLI instance over custom shapes", () =>
+		Effect.gen(function* () {
+			const customLock = makePersistedLock({
+				lockFileUrl: new URL("./custom.lock.json", import.meta.url),
+				shapes: [
+					{
+						id: "event:Custom/created",
+						kind: "event",
+						schema: Schema.Struct({ id: Schema.String }),
+					},
+				],
+				rules: { event: "Custom event rule." },
+				samplesPerShape: 2,
+			})
+			const runCustom = makePersistedCli({
+				...customLock,
+				registryProblems: () => [],
+			})
+
+			let content = yield* Schema.encodeEffect(PersistedLockJson)(EMPTY)
+			const run = (...args: ReadonlyArray<string>) =>
+				runCustom(args).pipe(
+					Effect.provide([
+						PersistedServicesLive,
+						FileSystem.layerNoop({
+							readFileString: () => Effect.succeed(content),
+							writeFileString: (_path, data) =>
+								Effect.sync(() => {
+									content = data
+								}),
+						}),
+					]),
+					Effect.exit,
+				)
+
+			expect(Exit.isSuccess(yield* run("cut", "v1"))).toBe(true)
+			const saved = yield* Schema.decodeEffect(PersistedLockJson)(content)
+			expect(Object.keys(saved.baselines[0]?.shapes ?? {})).toEqual(["event:Custom/created"])
+			expect(saved.baselines[0]?.shapes["event:Custom/created"]).toHaveLength(2)
+			expect(Exit.isSuccess(yield* run("cut", "--check"))).toBe(true)
+		}),
 	)
 })

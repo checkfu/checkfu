@@ -136,7 +136,7 @@ interface SagaClass {
 		readonly successSchema: PersistedSchema
 	}
 }
-interface ModelClass {
+export interface PersistedModelClass {
 	readonly modelName: string
 	readonly aggregates: ReadonlyArray<AggregateClass>
 	readonly decisions?: ReadonlyArray<{ readonly command: CommandClass }>
@@ -151,14 +151,20 @@ const commandReply = (model: string, command: CommandClass): PersistedShape => (
 	schema: command.reply ?? Schema.Null,
 })
 
-const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
+export const shapesOfModel = (model: PersistedModelClass): ReadonlyArray<PersistedShape> => {
 	const shapes: Array<PersistedShape> = []
+	const seenEventIds = new Set<string>()
 	for (const aggregate of model.aggregates) {
 		const owner = `${model.modelName}.${aggregate.aggregateName}`
 		shapes.push({ id: `state:${owner}`, kind: "state", schema: aggregate.definition.state })
 		for (const event of aggregate.definition.events) {
+			const eventId = `event:${owner}/${event.tag}`
+			if (seenEventIds.has(eventId)) {
+				continue
+			}
+			seenEventIds.add(eventId)
 			shapes.push({
-				id: `event:${owner}/${event.tag}`,
+				id: eventId,
 				kind: "event",
 				schema: event,
 			})
@@ -538,9 +544,9 @@ const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMa
 )
 
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
-	...shapesOfModel(Checkfu as unknown as ModelClass),
-	...shapesOfModel(Webhooks as unknown as ModelClass),
-	...shapesOfModel(Vaults as unknown as ModelClass),
+	...shapesOfModel(Checkfu as unknown as PersistedModelClass),
+	...shapesOfModel(Webhooks as unknown as PersistedModelClass),
+	...shapesOfModel(Vaults as unknown as PersistedModelClass),
 	...SAGA_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,
