@@ -136,18 +136,42 @@ jobs:
         run: git diff --exit-code
 
   # Builds the image of the sessions' machines and runs them under the runner's Docker.
-  workerd:
+  # The tests that share one Alchemy stack run on one runner, and every other workerd test on another.
+  # The two name patterns are each other's complement, so each test runs once.
+  workerd-tests:
+    name: workerd (${{ matrix.leg.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        leg:
+          - name: stack
+            pattern: ^PiSession real Durable Object under workerd
+          - name: rest
+            pattern: ^(?!PiSession real Durable Object under workerd)
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run test:workerd
+      - run: bun run test:workerd -t "$PATTERN"
+        env:
+          PATTERN: ${{ matrix.leg.pattern }}
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
+
+  # The required check: it passes only when both workerd legs passed.
+  workerd:
+    needs: workerd-tests
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.workerd-tests.result }}
 
   # A deployable main includes its sandbox image. This is independent of npm CLI versions.
   cli-platforms:
