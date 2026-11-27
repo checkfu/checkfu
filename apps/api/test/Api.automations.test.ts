@@ -409,6 +409,39 @@ describe("Automations API", () => {
 			}),
 		))
 
+	it("gives a run's session no resources even when a memory store exists", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const store = yield* call(apiFetch, "POST", "/v1/memory_stores", { name: "Report history" })
+				expect(store.status).toBe(201)
+				const { body: automation } = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					{
+						name: "Daily report",
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message("Write the next report."),
+						schedule: weekdayMornings,
+					},
+				)
+				const queued = yield* call(apiFetch, "POST", `/v1/automations/${automation.id}/run`)
+				expect(queued.status).toBe(201)
+				const started = yield* settledRuns(apiFetch, automation.id, 1)
+				const sessionId = started.body.data[0]?.session_id
+				expect(sessionId).toEqual(expect.any(String))
+				const session = yield* call<{
+					readonly resources: ReadonlyArray<unknown>
+					readonly mcp_server_credentials: ReadonlyArray<unknown>
+				}>(apiFetch, "GET", `/v1/sessions/${sessionId}`)
+				expect(session.status).toBe(200)
+				expect(session.body.resources).toEqual([])
+				expect(session.body.mcp_server_credentials).toEqual([])
+			}),
+		))
+
 	it("runs on request in a new session that receives the automation's message", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
