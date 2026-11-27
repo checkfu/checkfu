@@ -21,9 +21,10 @@ env:
 # The jobs run `check`, `test`, `test:bun`, `test:workerd` and the release baseline guard:
 # the two test jobs split the workspace with `--filter=@checkfu/domain` and its negation.
 jobs:
+  # Generated files, format, lint and every package's typecheck, on one runner.
   static:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v5
         with:
@@ -36,6 +37,8 @@ jobs:
             exit 1
           fi
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache: typecheck
       # Each check runs even when one before it fails, so a run lists every failure.
       - run: bun run generate:check
       - if: ${{ !cancelled() }}
@@ -45,22 +48,9 @@ jobs:
       - if: ${{ !cancelled() }}
         run: bun run persisted:check
       - if: ${{ !cancelled() }}
-        name: Fail if a check changed any tracked file
-        run: git diff --exit-code
-
-  typecheck:
-    runs-on: ubuntu-latest
-    timeout-minutes: 4
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          turbo-cache: typecheck
-      - run: bun run typecheck
+        run: bun run typecheck
       - if: ${{ !cancelled() }}
-        name: Fail if the typecheck changed any tracked file
+        name: Fail if a check changed any tracked file
         run: git diff --exit-code
 
   # Each package's tests already use Vitest workers, so packages that share a runner run one at a
@@ -165,8 +155,8 @@ jobs:
         run: git diff --exit-code
 
   # Builds the image of the sessions' machines and runs them under the runner's Docker.
-  # PiSession.workerd.ts, whose tests share one Alchemy stack, runs on a runner of its own,
-  # and every other workerd file on another.
+  # Each PiSession file starts one Alchemy stack for its tests and runs on a runner of its own.
+  # Every other workerd file shares one more.
   workerd-tests:
     name: workerd (${{ matrix.leg.name }})
     runs-on: ubuntu-latest
@@ -177,8 +167,10 @@ jobs:
         leg:
           - name: pi-session
             args: test/workerd/PiSession.workerd.ts
+          - name: pi-session-machines
+            args: test/workerd/PiSessionMachines.workerd.ts
           - name: rest
-            args: --exclude test/workerd/PiSession.workerd.ts
+            args: --exclude test/workerd/PiSession.workerd.ts --exclude test/workerd/PiSessionMachines.workerd.ts
     steps:
       - uses: actions/checkout@v5
         with:
@@ -189,7 +181,7 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
-  # The required check: it passes only when both workerd legs passed.
+  # The required check: it passes only when every workerd leg passed.
   workerd:
     needs: workerd-tests
     if: ${{ always() }}
@@ -206,7 +198,7 @@ jobs:
 
   sandbox-image:
     if: github.event_name == 'push'
-    needs: [static, typecheck, test, domain, domain-checkfu, workerd, cli-platforms]
+    needs: [static, test, domain, domain-checkfu, workerd, cli-platforms]
     runs-on: ubuntu-latest
     timeout-minutes: 6
     permissions:
