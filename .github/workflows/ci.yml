@@ -84,7 +84,8 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain
-      - run: bun x turbo run test --filter=@checkfu/domain -- --exclude test/Checkfu.verify.test.ts
+      # Concurrent solver-heavy files can starve Sessions' unchanged proof deadline.
+      - run: bun x turbo run test --filter=@checkfu/domain -- --exclude test/Checkfu.verify.test.ts --no-file-parallelism
         env:
           CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}
