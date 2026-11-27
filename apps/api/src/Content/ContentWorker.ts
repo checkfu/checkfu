@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { ApiWorker, ArtifactVersionNotReady } from "../Api.ts"
+import { ApiWorker, ArtifactVersionNotReady, bindApiAs } from "../Api.ts"
 import type { DataAddress, DataCall } from "../Api.ts"
 import { ArtifactReader, ArtifactReaderR2, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import { publishDomain } from "../CustomDomain.ts"
@@ -71,7 +71,7 @@ export default ContentWorker.make(
 		const store = yield* ArtifactReader
 		const scope = yield* storageScope
 		const domain = yield* publishDomain
-		const api = yield* Cloudflare.Workers.bindWorker(ApiWorker)
+		const api = yield* bindApiAs("content", ApiWorker)
 		const resolveArtifactVersion = (artifactId: string, version: number) =>
 			apiCall(() => api.resolveArtifactVersion(artifactId, version))
 		const resolvePublication = (address: string) => apiCall(() => api.resolvePublication(address))

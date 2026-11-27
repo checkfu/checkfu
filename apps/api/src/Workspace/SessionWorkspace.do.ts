@@ -17,7 +17,7 @@ import {
 	repositoryTokenGate,
 	withRepositoryCredentials,
 } from "./Repositories.ts"
-import { ApiWorker } from "../Api.ts"
+import { ApiWorker, bindApiAs } from "../Api.ts"
 import {
 	ARTIFACT_MOUNT_ROOT,
 	FILE_MOUNT_ROOT,
@@ -149,7 +149,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 			sandboxes: Sandboxes,
 			idleAfter: Effect.orDie(machineIdle),
 			baseUrl: githubBaseUrl,
-			api: Cloudflare.Workers.bindWorker(Cloudflare.Worker.ref(ApiWorker)),
+			api: bindApiAs("harness", Cloudflare.Worker.ref(ApiWorker)),
 			services: Effect.context<never>(),
 		}),
 		({ state, sandboxes, idleAfter, baseUrl, api, services }) =>

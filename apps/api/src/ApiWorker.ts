@@ -21,7 +21,8 @@ import {
 	CredentialSecretsLive,
 	credentialAccessInVault,
 } from "./Connection/CredentialCustody.ts"
-import { ApiWorker } from "./Api.ts"
+import { ApiWorker, calledBy } from "./Api.ts"
+import type { ApiCaller } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { OutputsSaverLive } from "./Files/OutputsSaverLive.ts"
 import {
@@ -347,33 +348,47 @@ export default ApiWorker.make(
 				Effect.provide(services),
 			),
 		)
+		const resolveArtifactVersion = yield* ArtifactVersionResolver.pipe(Effect.provide(services))
+		const resolvePublication = yield* PublicationResolver.pipe(Effect.provide(services))
+		const runtime = yield* Cloudflare.Worker
+		const from =
+			(caller: ApiCaller) =>
+			<A, E>(call: Effect.Effect<A, E>) =>
+				calledBy(caller)(call).pipe(Effect.provideService(RuntimeContext, runtime))
+		const fromHarness = from("harness")
+		const fromContent = from("content")
 		return ApiWorker.of({
 			...handler,
 			credentialAccess: (vaultId, credentialId) =>
-				credentialAccessInVault(vaultId, credentialId).pipe(Effect.provide(services)),
-			artifactData: (address, call) => Effect.flatMap(visitorData, (serve) => serve(address, call)),
-			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
-			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),
-			memoryMounts: (sessionId) => Effect.orDie(memory.memoryMounts(sessionId)),
+				fromHarness(credentialAccessInVault(vaultId, credentialId).pipe(Effect.provide(services))),
+			artifactData: (address, call) =>
+				fromContent(Effect.flatMap(visitorData, (serve) => serve(address, call))),
+			resolveArtifactVersion: (...args) => fromContent(resolveArtifactVersion(...args)),
+			resolvePublication: (...args) => fromContent(resolvePublication(...args)),
+			memoryMounts: (sessionId) => fromHarness(Effect.orDie(memory.memoryMounts(sessionId))),
 			memoryList: (sessionId, name, after) =>
-				Effect.orDie(memory.memoryList(sessionId, name, after)),
-			memoryStat: (sessionId, name, path) => Effect.orDie(memory.memoryStat(sessionId, name, path)),
-			memoryRead: (sessionId, name, path) => Effect.orDie(memory.memoryRead(sessionId, name, path)),
+				fromHarness(Effect.orDie(memory.memoryList(sessionId, name, after))),
+			memoryStat: (sessionId, name, path) =>
+				fromHarness(Effect.orDie(memory.memoryStat(sessionId, name, path))),
+			memoryRead: (sessionId, name, path) =>
+				fromHarness(Effect.orDie(memory.memoryRead(sessionId, name, path))),
 			memoryWrite: (sessionId, name, path, content, exclusive) =>
-				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, exclusive)),
+				fromHarness(Effect.orDie(memory.memoryWrite(sessionId, name, path, content, exclusive))),
 			memoryRemove: (sessionId, name, path, expected) =>
-				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected)),
-			artifactMounts: (sessionId) => Effect.orDie(artifacts.artifactMounts(sessionId)),
+				fromHarness(Effect.orDie(memory.memoryRemove(sessionId, name, path, expected))),
+			artifactMounts: (sessionId) => fromHarness(Effect.orDie(artifacts.artifactMounts(sessionId))),
 			artifactFiles: (sessionId, mountPath) =>
-				Effect.orDie(artifacts.artifactFiles(sessionId, mountPath)),
+				fromHarness(Effect.orDie(artifacts.artifactFiles(sessionId, mountPath))),
 			artifactRead: (sessionId, mountPath, path, offset, length) =>
-				Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
+				fromHarness(
+					Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
+				),
 			sessionFileSave: (...args) =>
-				Effect.flatMap(saves, (service) => service.sessionFileSave(...args)),
+				fromHarness(Effect.flatMap(saves, (service) => service.sessionFileSave(...args))),
 			sessionArtifactSave: (...args) =>
-				Effect.flatMap(saves, (service) => service.sessionArtifactSave(...args)),
+				fromHarness(Effect.flatMap(saves, (service) => service.sessionArtifactSave(...args))),
 			sessionArtifactData: (...args) =>
-				Effect.flatMap(saves, (service) => service.sessionArtifactData(...args)),
+				fromHarness(Effect.flatMap(saves, (service) => service.sessionArtifactData(...args))),
 		})
 	}),
 )
