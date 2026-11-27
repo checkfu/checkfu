@@ -146,26 +146,32 @@ describe("normalizeApiUrl", () => {
 
 				const makeVirtualClock = (initialNanos = 1_000_000_000n) => {
 					let nowNanos = initialNanos
+					let connectionAgeNanos = 0n
 					const sleepsMs: Array<number> = []
+					const liveClock = Clock.Clock.defaultValue()
 					const clock: Clock.Clock = {
 						currentTimeMillisUnsafe: () => Number(nowNanos / 1_000_000n),
 						currentTimeMillis: Effect.sync(() => Number(nowNanos / 1_000_000n)),
 						currentTimeNanosUnsafe: () => nowNanos,
 						currentTimeNanos: Effect.sync(() => nowNanos),
-						monotonicTimeNanosUnsafe: () => nowNanos,
-						monotonicTimeNanos: Effect.sync(() => nowNanos),
-						sleep: (duration) =>
-							Effect.sync(() => {
-								const ms = Duration.toMillis(duration)
+						monotonicTimeNanosUnsafe: () => nowNanos + connectionAgeNanos,
+						monotonicTimeNanos: Effect.sync(() => nowNanos + connectionAgeNanos),
+						sleep: (duration) => {
+							const ms = Duration.toMillis(duration)
+							if (ms > 5000) {
+								return liveClock.sleep(duration)
+							}
+							return Effect.sync(() => {
 								sleepsMs.push(ms)
 								nowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-							}),
+							})
+						},
 					}
 					return {
 						clock,
 						sleepsMs,
 						advanceMs: (ms: number) => {
-							nowNanos += BigInt(ms) * 1_000_000n
+							connectionAgeNanos += BigInt(ms) * 1_000_000n
 						},
 					}
 				}

@@ -248,6 +248,72 @@ describe("waitForPending", () => {
 		expect([typeof archived, typeof created]).toEqual(["function", "function"])
 	})
 
+	it.each([
+		{ name: "waits for the next automation revision", revision: 3, reads: 2 },
+		{
+			name: "requires an explicit predicate when the revision was omitted",
+			revision: undefined,
+			reads: 0,
+		},
+	])("$name", async ({ revision, reads }) => {
+		let polls = 0
+		const at = "2026-01-01T00:00:00.000Z"
+		const fetch: typeof globalThis.fetch = async (input, init) => {
+			const request = new Request(input, init)
+			expect(new URL(request.url).pathname).toBe("/v1/automations/auto_1")
+			if (request.method === "POST") {
+				expect(await request.json()).toEqual({
+					name: "Updated report",
+					...(revision === undefined ? {} : { revision }),
+				})
+				return Response.json({ id: "auto_1", type: "automation", pending: true }, { status: 202 })
+			}
+			polls += 1
+			return Response.json({
+				id: "auto_1",
+				type: "automation",
+				name: polls === 1 ? "Morning report" : "Updated report",
+				description: null,
+				agent: { id: "agent_1", version: 1 },
+				environment_id: "env_1",
+				initial_events: [{ type: "user.message", content: [{ type: "text", text: "Report." }] }],
+				schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+				status: "active",
+				pause_reason: null,
+				revision: polls === 1 ? 3 : 4,
+				run_count: 0,
+				last_run_at: null,
+				upcoming_runs_at: [],
+				created_at: at,
+				updated_at: at,
+				archived_at: null,
+			})
+		}
+		const client = new Checkfu({ apiKey: "ck_test_key", baseUrl: "http://localhost:1337", fetch })
+		try {
+			const receipt = await client.automations.update("auto_1", {
+				name: "Updated report",
+				...(revision === undefined ? {} : { revision }),
+			})
+			expect(receipt).toMatchObject({ id: "auto_1", pending: true })
+			const settled = client.waitForPending(receipt, {
+				initialDelay: "1 millis",
+				timeout: "2 seconds",
+			})
+			if (revision === undefined) {
+				await expect(settled).rejects.toMatchObject({
+					_tag: "CheckfuConfigError",
+					message: expect.stringContaining('requires an explicit "until" predicate'),
+				})
+			} else {
+				await expect(settled).resolves.toMatchObject({ name: "Updated report", revision: 4 })
+			}
+			expect(polls).toBe(reads)
+		} finally {
+			await client.close()
+		}
+	})
+
 	it("polls pending webhook registration by ID and refuses to pair signing_secret with a rotated revision", async () => {
 		const seenUrls: Array<string> = []
 		let attempt = 0

@@ -27,6 +27,7 @@ import {
 	makePromiseSdkRuntime,
 } from "../src/PromiseRuntime.ts"
 import { attachPendingReadiness } from "../src/Runtime.ts"
+import type { StreamSseOptions } from "../src/Sse.ts"
 import { DEFAULT_API_URL, makeAuthorizedHttpClient } from "../src/Transport.ts"
 import {
 	APIConnectionError,
@@ -3309,6 +3310,119 @@ describe("@checkfu/sdk", () => {
 					expect(err._tag).toBe("APIConnectionError")
 					expect(attempts).toBe(3)
 				}),
+		)
+
+		const eventStreamResponse = (body: string | ReadableStream<Uint8Array>) =>
+			new Response(body, { headers: { "content-type": "text/event-stream" } })
+
+		const collectEvents = (fetch: typeof globalThis.fetch, options: StreamSseOptions) =>
+			Effect.flatMap(CheckfuClient, (client) =>
+				Stream.runCollect(client.sessions.events.stream("sess_wait", {}, options)),
+			).pipe(Effect.provide(makeEffectLayer(fetch)))
+
+		it.live("reconnects from the last event when a stream stops sending bytes", () =>
+			Effect.gen(function* () {
+				const signals: Array<AbortSignal> = []
+				const cursorHeaders: Array<string | null> = []
+				const encoder = new TextEncoder()
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					const request = toWebRequest(input, init)
+					signals.push(request.signal)
+					cursorHeaders.push(request.headers.get("last-event-id"))
+					return signals.length === 1
+						? eventStreamResponse(
+								new ReadableStream<Uint8Array>({
+									start: (controller) =>
+										controller.enqueue(encoder.encode(sseFrame(sampleUserMessageEvent(1)))),
+								}),
+							)
+						: eventStreamResponse(
+								sseFrame(sampleUserMessageEvent(2)) + sseFrame(sampleArchivedEvent(3)),
+							)
+				}
+				const events = yield* collectEvents(fetch, { idleTimeoutMs: 30, baseReconnectDelayMs: 1 })
+				expect(events.map(({ seq }) => seq)).toEqual([1, 2, 3])
+				expect(cursorHeaders).toEqual([null, "1"])
+				expect(signals[0]?.aborted).toBe(true)
+			}),
+		)
+
+		it.live("fails with a timeout when a stream stays silent through every reconnect", () =>
+			Effect.gen(function* () {
+				const signals: Array<AbortSignal> = []
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					signals.push(toWebRequest(input, init).signal)
+					return eventStreamResponse(new ReadableStream<Uint8Array>())
+				}
+				const error = yield* Effect.flip(
+					collectEvents(fetch, {
+						idleTimeoutMs: 20,
+						maxReconnectAttempts: 2,
+						baseReconnectDelayMs: 1,
+					}),
+				)
+				expect(error).toMatchObject({
+					_tag: "APIConnectionTimeoutError",
+					message: "The event stream received no data for 20 ms.",
+				})
+				expect(signals).toHaveLength(3)
+				expect(signals.every((signal) => signal.aborted)).toBe(true)
+			}),
+		)
+
+		it.live("aborts and retries an event stream open that never answers", () =>
+			Effect.gen(function* () {
+				const signals: Array<AbortSignal> = []
+				const fetch: typeof globalThis.fetch = async (input, init) => {
+					const { signal } = toWebRequest(input, init)
+					signals.push(signal)
+					return signals.length === 1
+						? new Promise<Response>((_resolve, reject) => {
+								if (signal.aborted) {
+									reject(signal.reason)
+								} else {
+									signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+								}
+							})
+						: eventStreamResponse(sseFrame(sampleArchivedEvent(1)))
+				}
+				const events = yield* collectEvents(fetch, { openTimeoutMs: 20, baseReconnectDelayMs: 1 })
+				expect(events.map(({ seq }) => seq)).toEqual([1])
+				expect(signals).toHaveLength(2)
+				expect(signals[0]?.aborted).toBe(true)
+			}),
+		)
+
+		it.live("counts keepalive bytes as event stream activity", () =>
+			Effect.gen(function* () {
+				let opens = 0
+				const encoder = new TextEncoder()
+				const fetch: typeof globalThis.fetch = async () => {
+					opens += 1
+					let timer: ReturnType<typeof setInterval> | undefined
+					let keepalives = 0
+					return eventStreamResponse(
+						new ReadableStream<Uint8Array>({
+							start(controller) {
+								timer = setInterval(() => {
+									if (keepalives < 8) {
+										keepalives += 1
+										controller.enqueue(encoder.encode(": keepalive\n\n"))
+									} else {
+										clearInterval(timer)
+										controller.enqueue(encoder.encode(sseFrame(sampleArchivedEvent(1))))
+										controller.close()
+									}
+								}, 10)
+							},
+							cancel: () => clearInterval(timer),
+						}),
+					)
+				}
+				const events = yield* collectEvents(fetch, { idleTimeoutMs: 40, maxReconnectAttempts: 0 })
+				expect(events.map(({ seq }) => seq)).toEqual([1])
+				expect(opens).toBe(1)
+			}),
 		)
 
 		it.live(

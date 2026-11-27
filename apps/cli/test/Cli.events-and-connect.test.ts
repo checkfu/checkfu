@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import type * as Clock from "effect/Clock"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -663,20 +663,26 @@ describe("CLI sessions:events and sessions connect", () => {
 
 					let rotationRequests = 0
 					let virtualRotationNanos = 1_000_000_000n
+					let connectionAgeNanos = 0n
 					const rotationSleepsMs: Array<number> = []
+					const liveClock = Clock.Clock.defaultValue()
 					const rotationClock: Clock.Clock = {
 						currentTimeMillisUnsafe: () => Number(virtualRotationNanos / 1_000_000n),
 						currentTimeMillis: Effect.sync(() => Number(virtualRotationNanos / 1_000_000n)),
 						currentTimeNanosUnsafe: () => virtualRotationNanos,
 						currentTimeNanos: Effect.sync(() => virtualRotationNanos),
-						monotonicTimeNanosUnsafe: () => virtualRotationNanos,
-						monotonicTimeNanos: Effect.sync(() => virtualRotationNanos),
-						sleep: (duration) =>
-							Effect.sync(() => {
-								const ms = Duration.toMillis(duration)
+						monotonicTimeNanosUnsafe: () => virtualRotationNanos + connectionAgeNanos,
+						monotonicTimeNanos: Effect.sync(() => virtualRotationNanos + connectionAgeNanos),
+						sleep: (duration) => {
+							const ms = Duration.toMillis(duration)
+							if (ms > 5000) {
+								return liveClock.sleep(duration)
+							}
+							return Effect.sync(() => {
 								rotationSleepsMs.push(ms)
 								virtualRotationNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-							}),
+							})
+						},
 					}
 					const rotationEncoder = new TextEncoder()
 					const rotated = yield* cli.run(
@@ -696,7 +702,7 @@ describe("CLI sessions:events and sessions connect", () => {
 												step = 1
 												controller.enqueue(rotationEncoder.encode(": keepalive\n\n"))
 											} else {
-												virtualRotationNanos += 10_000_000_000n
+												connectionAgeNanos += 10_000_000_000n
 												controller.close()
 											}
 										},

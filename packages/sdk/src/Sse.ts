@@ -13,6 +13,7 @@ import { CursorFromString, SessionStreamEvent, statusOfErrorType } from "./Api.t
 import type { ApiError, CheckfuHttpApiClient, SessionEvent, SessionPreviewType } from "./Api.ts"
 import {
 	APIConnectionError,
+	APIConnectionTimeoutError,
 	BadRequestError,
 	decodeApiErrorEnvelope,
 	fromApiErrorEnvelope,
@@ -25,6 +26,7 @@ import type { CheckfuSdkError } from "./Errors.ts"
 import { SessionId } from "./Schemas.ts"
 import {
 	CurrentRequestTransportMeta,
+	DEFAULT_TIMEOUT_MS,
 	cancelResponseBody,
 	lookupHeader,
 	mergeHeaderMaps,
@@ -37,6 +39,8 @@ const DEFAULT_MAX_SSE_RECONNECTS = 5
 const DEFAULT_SSE_RECONNECT_DELAY_MS = 250
 const DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS = 2000
 const DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS = 5000
+const DEFAULT_SSE_OPEN_TIMEOUT_MS = DEFAULT_TIMEOUT_MS
+const DEFAULT_SSE_IDLE_TIMEOUT_MS = 60_000
 const MAX_SSE_ERROR_BODY_BYTES = 16 * 1024
 const MAX_SSE_NO_PROGRESS_DELAY_MS = 5000
 const MAX_SSE_ID_LINE_LENGTH = 10 * 1024 * 1024
@@ -54,6 +58,8 @@ export interface StreamSseOptions {
 	readonly baseReconnectDelayMs?: number | undefined
 	readonly errorBodyTimeoutMs?: number | undefined
 	readonly healthyIdleDurationMs?: number | undefined
+	readonly openTimeoutMs?: number | undefined
+	readonly idleTimeoutMs?: number | undefined
 	readonly headers?: HeaderMap | undefined
 	readonly onOpen?: ((status: 200 | 204) => Effect.Effect<void>) | undefined
 }
@@ -81,6 +87,13 @@ class IncompleteSseFrameError extends Data.TaggedError("IncompleteSseFrameError"
 	Record<never, never>
 > {}
 
+class SseTimeoutError extends Data.TaggedError("SseTimeoutError")<{
+	readonly phase: "open" | "idle"
+	readonly timeoutMs: number
+}> {}
+
+type SseConnectionError = ApiSseError | IncompleteSseFrameError | SseTimeoutError
+
 const decodeUnknownJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 const decodeCursorOption = Schema.decodeUnknownOption(CursorFromString)
 const decodeSessionEventFromJsonString = Schema.decodeUnknownEffect(
@@ -88,9 +101,17 @@ const decodeSessionEventFromJsonString = Schema.decodeUnknownEffect(
 )
 
 const mapSseError = (
-	error: ApiSseError | IncompleteSseFrameError,
+	error: SseConnectionError,
 	headers?: Readonly<Record<string, string>>,
 ): CheckfuSdkError => {
+	if (Predicate.isTagged(error, "SseTimeoutError")) {
+		return new APIConnectionTimeoutError({
+			message:
+				error.phase === "open"
+					? `The event stream did not open within ${error.timeoutMs} ms.`
+					: `The event stream received no data for ${error.timeoutMs} ms.`,
+		})
+	}
 	if (Predicate.isTagged(error, "IncompleteSseFrameError")) {
 		return new APIConnectionError({
 			message: "SSE stream closed with an incomplete SSE frame.",
@@ -106,8 +127,11 @@ const mapSseError = (
 	return mapRawClientError(error, headers)
 }
 
-const isRetryableRawError = (error: ApiSseError | IncompleteSseFrameError): boolean => {
-	if (Predicate.isTagged(error, "IncompleteSseFrameError")) {
+const isRetryableRawError = (error: SseConnectionError): boolean => {
+	if (
+		Predicate.isTagged(error, "IncompleteSseFrameError") ||
+		Predicate.isTagged(error, "SseTimeoutError")
+	) {
 		return true
 	}
 	if (Schema.isSchemaError(error) || Predicate.isTagged(error, "SseError")) {
@@ -282,10 +306,14 @@ const decodeBoundedHttpError = (
 		)
 	})
 
+const timeoutMs = (value: number): number => (Number.isFinite(value) ? Math.max(0, value) : 0)
+
 export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 	config: ApiSseStreamConfig<Event, E>,
 ): Stream.Stream<Event, CheckfuSdkError> => {
 	const options = config.options
+	const openTimeoutMs = timeoutMs(options?.openTimeoutMs ?? DEFAULT_SSE_OPEN_TIMEOUT_MS)
+	const idleTimeoutMs = timeoutMs(options?.idleTimeoutMs ?? DEFAULT_SSE_IDLE_TIMEOUT_MS)
 	const maxReconnects = Math.max(0, options?.maxReconnectAttempts ?? DEFAULT_MAX_SSE_RECONNECTS)
 	const baseDelayMs = Math.max(0, options?.baseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS)
 	const errorBodyTimeoutMs = Math.max(
@@ -333,15 +361,24 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 							? mergeHeaderMaps(options?.headers, { "last-event-id": null })
 							: options?.headers
 				let lastResponse: HttpClientResponse.HttpClientResponse | undefined
+				const open = config.open({ reconnect, cursor: loopState.cursor }).pipe(
+					Effect.provideService(CurrentRequestTransportMeta, {
+						...(extraHeaders === undefined ? {} : { headers: extraHeaders }),
+						onResponse: (response) => {
+							lastResponse = response
+						},
+					}),
+				)
 				const outcome = yield* Effect.result(
-					config.open({ reconnect, cursor: loopState.cursor }).pipe(
-						Effect.provideService(CurrentRequestTransportMeta, {
-							...(extraHeaders === undefined ? {} : { headers: extraHeaders }),
-							onResponse: (response) => {
-								lastResponse = response
-							},
-						}),
-					),
+					openTimeoutMs === 0
+						? open
+						: open.pipe(
+								Effect.timeoutOrElse({
+									duration: Duration.millis(openTimeoutMs),
+									orElse: () =>
+										Effect.fail(new SseTimeoutError({ phase: "open", timeoutMs: openTimeoutMs })),
+								}),
+							),
 				)
 
 				if (outcome._tag === "Failure") {
@@ -407,7 +444,7 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 				const cursorAtStart = loopState.cursor
 				let sawDataEvent = false
 				let sawTerminal = false
-				let streamError: ApiSseError | IncompleteSseFrameError | undefined
+				let streamError: SseConnectionError | undefined
 				let hasStreamError = false
 				const healthTracker = makeSseFrameHealthTracker()
 				let chunkEvents: Array<{ readonly data: string; readonly id: string | undefined }> = []
@@ -434,10 +471,20 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 					}
 				}
 
+				const body =
+					idleTimeoutMs === 0
+						? response.stream
+						: response.stream.pipe(
+								Stream.timeoutOrElse({
+									duration: Duration.millis(idleTimeoutMs),
+									orElse: () =>
+										Stream.fail(new SseTimeoutError({ phase: "idle", timeoutMs: idleTimeoutMs })),
+								}),
+							)
 				const parsedItems: Stream.Stream<
 					ParsedSseItem,
-					HttpClientError.HttpClientError | Sse.SseError
-				> = response.stream.pipe(
+					HttpClientError.HttpClientError | Sse.SseError | SseTimeoutError
+				> = body.pipe(
 					Stream.decodeText(),
 					Stream.flatMap((chunk) =>
 						Stream.unwrap(

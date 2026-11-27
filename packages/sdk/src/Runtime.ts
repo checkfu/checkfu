@@ -4,6 +4,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { CheckfuApi, ClientEventId } from "./Api.ts"
@@ -440,10 +441,12 @@ export const executeWithRetries = <A, E>(
 		}
 	}).pipe(Effect.withSpan(spanName))
 
+type VersionField = "version" | "revision"
+
 export type PendingReadiness =
 	| { readonly kind: "create" }
 	| { readonly kind: "archive" }
-	| { readonly kind: "min-version"; readonly minVersion: number }
+	| { readonly kind: "min-version"; readonly field: VersionField; readonly minVersion: number }
 	| { readonly kind: "requires-until"; readonly operation: string }
 
 const pendingReadinessByReceipt = new WeakMap<object, PendingReadiness>()
@@ -458,19 +461,19 @@ export const attachPendingReadiness = <A>(value: A, readiness: PendingReadiness)
 export const getPendingReadiness = (value: unknown): PendingReadiness | undefined =>
 	typeof value === "object" && value !== null ? pendingReadinessByReceipt.get(value) : undefined
 
-export const pendingUpdateReadiness = (body: unknown, operation: string): PendingReadiness => {
-	if (
-		typeof body === "object" &&
-		body !== null &&
-		"version" in body &&
-		typeof body.version === "number" &&
-		Number.isInteger(body.version) &&
-		body.version >= 1
-	) {
-		return { kind: "min-version", minVersion: body.version + 1 }
-	}
-	return { kind: "requires-until", operation }
+const minimumVersion = (body: unknown, field: VersionField): PendingReadiness | undefined => {
+	const current =
+		typeof body === "object" && body !== null && Predicate.hasProperty(body, field)
+			? body[field]
+			: undefined
+	return typeof current === "number" && Number.isInteger(current) && current >= 1
+		? { kind: "min-version", field, minVersion: current + 1 }
+		: undefined
 }
+
+export const pendingUpdateReadiness = (body: unknown, operation: string): PendingReadiness =>
+	minimumVersion(body, "version") ??
+	minimumVersion(body, "revision") ?? { kind: "requires-until", operation }
 
 export const withPendingReadiness = <A>(
 	effect: Effect.Effect<WithResponse<A>, CheckfuSdkError>,
@@ -639,11 +642,10 @@ const isResourceReadyForMutation = <T>(
 			(!("custody" in resource) || custodySettled(resource.custody))
 		)
 	}
-	return (
-		"version" in resource &&
-		typeof resource.version === "number" &&
-		resource.version >= readiness.minVersion
-	)
+	const current = Predicate.hasProperty(resource, readiness.field)
+		? resource[readiness.field]
+		: undefined
+	return typeof current === "number" && current >= readiness.minVersion
 }
 
 export const pollPending = <T>(
