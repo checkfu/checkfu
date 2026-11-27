@@ -27,6 +27,7 @@ import {
 	ArtifactDataObjectsLive,
 	ArtifactDatabaseDurable,
 } from "./ArtifactData/ArtifactDatabase.do.ts"
+import { DataThrottleLive } from "./ArtifactData/DataThrottleLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { FileBytesLive } from "./Files/FileBytesLive.ts"
@@ -273,6 +274,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
 	ArtifactStoreLive,
 	ArtifactDatabaseLive,
+	DataThrottleLive,
 	FileStoreLive,
 	CustomToolFaultsLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),

@@ -55,6 +55,7 @@ const PREFLIGHT_HEADERS = {
 const RESERVED_PREFIX = "_/"
 const DATA_SEGMENT = "data"
 const MAX_DATA_BODY_BYTES = 128 * 1024
+const RETRY_AFTER_SECONDS = "60"
 const COLLECTION_METHODS = "GET, POST, OPTIONS"
 const DOCUMENT_METHODS = "GET, PUT, DELETE, OPTIONS"
 
@@ -316,11 +317,19 @@ export const serveContent = (options: {
 				page: url.searchParams.get("page") ?? "",
 				limit: url.searchParams.get("limit") ?? "",
 				idempotency_key: request.headers["idempotency-key"] ?? "",
+				caller: request.headers["cf-connecting-ip"] ?? "",
 			})
 			return HttpServerResponse.text(reply.body, {
 				status: reply.status,
 				contentType: "application/json",
-				headers: CONTENT_HEADERS,
+				headers:
+					reply.status === 429
+						? {
+								...CONTENT_HEADERS,
+								"retry-after": RETRY_AFTER_SECONDS,
+								"access-control-expose-headers": "retry-after",
+							}
+						: CONTENT_HEADERS,
 			})
 		})
 

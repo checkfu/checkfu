@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { makeArtifactDatabaseMemory } from "../../src/ArtifactData/ArtifactDatabaseMemory.ts"
+import { makeDataThrottleMemory } from "../../src/ArtifactData/DataThrottle.ts"
 import { ArtifactBytesLive } from "../../src/Artifacts/ArtifactBytesLive.ts"
 import * as Domain from "@alchemy.run/domain"
 import {
@@ -804,6 +805,7 @@ export const makePiDurableTestLayer = (
 	const artifactStore = makeArtifactStoreMemory()
 	const fileStore = makeFileStoreMemory()
 	const artifactDatabase = makeArtifactDatabaseMemory()
+	const dataThrottle = makeDataThrottleMemory()
 	const listingMemory = makeListingStoreMemory()
 	const listingStore = listingMemory.layer
 	const WebhooksLive = Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(listingStore)))
@@ -908,6 +910,7 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(artifactStore.layer),
 		Layer.provideMerge(fileStore.layer),
 		Layer.provideMerge(artifactDatabase.layer),
+		Layer.provideMerge(dataThrottle.layer),
 		Layer.provideMerge(
 			Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
 		),
@@ -954,6 +957,7 @@ export const makePiDurableTestLayer = (
 		artifactStore,
 		fileStore,
 		artifactDatabase,
+		dataThrottle,
 		webhookDeliveries,
 		discardedWorkspaces,
 		workspaceFiles,

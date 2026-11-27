@@ -3561,6 +3561,49 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect((await sendData(address, "tally/current")).status).toBe(404)
 	}, 60_000)
 
+	it("answers 429 once a page sends more data calls in a minute than one caller may", async () => {
+		const created = await apiJson<{ readonly id: string }>("/v1/artifacts", {
+			method: "POST",
+			body: {
+				name: "Busy",
+				files: [
+					{ path: "index.html", content: "<h1>Busy</h1>" },
+					{
+						path: "artifact.json",
+						content: JSON.stringify({
+							capabilities: { database: { collections: { board: { visitors: "read" } } } },
+						}),
+					},
+				],
+			},
+		})
+		const id = created.body.id
+		const link = await apiJson<{ readonly url: string }>(`/v1/artifacts/${id}/versions/1/links`, {
+			method: "POST",
+			body: { access: "read" },
+		})
+		const statuses: Array<number> = []
+		let slowed: Response | undefined
+		for (let batch = 0; batch < 10; batch += 1) {
+			const responses = await Promise.all(
+				Array.from({ length: 25 }, () => sendData(link.body.url, "board")),
+			)
+			for (const response of responses) {
+				statuses.push(response.status)
+				if (response.status === 429) {
+					slowed = response
+				}
+			}
+		}
+		expect(statuses.filter((status) => status !== 200 && status !== 429)).toEqual([])
+		expect(statuses.filter((status) => status === 200).length).toBe(120)
+		expect(statuses).toContain(429)
+		expect(slowed?.headers.get("retry-after")).toBe("60")
+		expect((await fetch(link.body.url)).status).toBe(200)
+		expect((await apiFetch(`/v1/artifacts/${id}/data/board`)).status).toBe(200)
+		expect((await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })).status).toBe(200)
+	}, 60_000)
+
 	it("manages webhooks, rotates signing secrets, records deliveries in Durable Object SQLite, and fans out lifecycle events", async () => {
 		interface WebhookBody {
 			readonly id: string

@@ -24,6 +24,7 @@ import type { ArtifactVersionNotReady, DataAddress, DataCall, DataReply } from "
 import { ArtifactVersionAt } from "../Artifacts/ResolveArtifactVersion.ts"
 import { PublishedAt } from "../Artifacts/ResolvePublication.ts"
 import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
+import { DataThrottle } from "./DataThrottle.ts"
 import { DEFAULT_DOCUMENT_PAGE_SIZE, DocumentCalls, isDocumentRefused } from "./DocumentCalls.ts"
 
 const MAX_PAGE_SIZE = 100
@@ -70,6 +71,7 @@ export const VisitorData = Effect.gen(function* () {
 	const publishedAt = yield* PublishedAt
 	const documents = yield* DocumentCalls
 	const links = yield* ArtifactLinks
+	const throttle = yield* DataThrottle
 
 	const resolve = (
 		address: DataAddress,
@@ -124,6 +126,9 @@ export const VisitorData = Effect.gen(function* () {
 			const { collection, operation } = call
 			if (!isCollection(collection) || !permits(target.allowed(collection), operation)) {
 				return refused(403, `This address does not allow ${operation} on ${collection}.`)
+			}
+			if (!(yield* throttle.admit(target.id, call.caller))) {
+				return refused(429, "Too many requests. Try again in a minute.")
 			}
 			if (operation === "list") {
 				const after = call.page === "" ? 0 : wholeNumber(call.page, Number.MAX_SAFE_INTEGER)

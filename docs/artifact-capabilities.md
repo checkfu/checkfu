@@ -130,7 +130,7 @@ A document is any JSON value, with arrays and objects nested at most 32 deep. Nu
 
 This lets a client fill a dashboard or read a form’s responses. A separate agent tool uses a private Worker binding scoped to the running turn and artifacts created by that session. Access to other artifacts would require an explicit write grant.
 
-The database allows up to 16 collections, 10,000 documents per collection, 64 KiB of encoded JSON per document, and 64 MiB of document data. Each mutation checks quotas and updates the counters in the same SQLite transaction. Calls are rate limited per address and per artifact. [SQLite-backed Durable Object storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
+The database allows up to 16 collections, 10,000 documents per collection, 64 KiB of encoded JSON per document, and 64 MiB of document data. Each mutation checks quotas and updates the counters in the same SQLite transaction. A page's calls are rate limited: 120 a minute for one caller on one artifact, and 1,200 a minute for an artifact from all callers. A caller is a network address, since there are no visitor accounts: an IPv4 address, or the /64 network of an IPv6 address. The platform counts at each of its locations, so the limits are a ceiling on abuse and not an exact quota. Only calls the address allows are counted, so a refused call or a made-up address cannot use up an artifact's budget. A call over a limit answers 429 with `Retry-After`. The owner's API is not limited this way. [SQLite-backed Durable Object storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
 
 ### Data is kept apart from versions
 
@@ -176,7 +176,7 @@ These are to be proved or checked when each part is built, in the same way as th
 | B (built) | The artifact's database object and the owner's data API | A |
 | C1 (built) | Levels on viewing links and publications, and the grant a publication saves | A |
 | C2 (built) | The page's `_/data` calls through the content Worker | B, C1 |
-| C3 | Rate limits per address and per artifact | C2 |
+| C3 (built) | Rate limits per caller and per artifact | C2 |
 | D | A tool for the agent to write an artifact's data | B |
 | E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C2 |
 | F | The document, slides and dashboard types | E |
@@ -187,4 +187,4 @@ These are to be proved or checked when each part is built, in the same way as th
 - **Live updates.** A dashboard page would poll `_/data` to see new numbers. Pushing changes to open pages is possible later and is not needed first.
 - **Files people add.** A capability for a page to accept uploads would reuse files and the same grant model. It is not designed here.
 - **Asking an agent from a page.** A page that sends a message to a session needs a decision about whose session it is and what it may cost. It is the capability most in need of its own note.
-- **Abuse of public write access.** Rate limits and size limits bound the damage. Whether a public `write` level needs a further check before it is allowed is undecided.
+- **Abuse of public write access.** Rate limits and size limits bound the damage: about 1,200 calls a minute at each location, and 64 MiB for one artifact. Readers and writers share an artifact's budget, so ten callers reading at full rate can crowd out a form's writers. Separate budgets for reads and writes would fix that and are not built. Whether a public `write` level needs a further check before it is allowed is undecided.
