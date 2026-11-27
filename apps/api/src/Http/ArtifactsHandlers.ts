@@ -148,7 +148,9 @@ const versionResource = (id: ArtifactId, found: LocatedVersion, manifest: Artifa
 	created_at: found.created_at,
 })
 
-const interrupted = reject(503, "The create took too long; retry the request.")
+export const RESERVATION_LOST = "The create took too long; retry the request."
+
+const interrupted = reject(503, RESERVATION_LOST)
 
 export const artifactReads = Effect.gen(function* () {
 	const artifacts = yield* Artifact

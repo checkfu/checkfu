@@ -57,7 +57,8 @@ const told = (text: string, isError: boolean): WorkspaceToolResult => ({
 
 const refused = (text: string) => told(text, true)
 
-const INTERRUPTED = "The turn was interrupted before the artifact was saved."
+const INTERRUPTED =
+	"The turn was interrupted while the artifact was being saved. Call save_artifact again to see whether it was."
 
 const canonical = (directory: string): string | null => {
 	if (!directory.startsWith("/")) {
@@ -156,7 +157,7 @@ export const saveArtifact = async (
 		}
 		const saved = await ports.saveFile(path, bytes).catch(() => null)
 		if (saved === null) {
-			return refused(`Saving ${path} failed; try again.`)
+			return refused(ports.stopped() ? INTERRUPTED : `Saving ${path} failed; try again.`)
 		}
 		if (!saved.ok) {
 			return refused(saved.message)
@@ -168,7 +169,7 @@ export const saveArtifact = async (
 	}
 	const artifact = await ports.saveArtifact(name, entries).catch(() => null)
 	if (artifact === null) {
-		return refused("Saving the artifact failed; try again.")
+		return refused(ports.stopped() ? INTERRUPTED : "Saving the artifact failed; try again.")
 	}
 	if (!artifact.ok) {
 		return refused(artifact.message)

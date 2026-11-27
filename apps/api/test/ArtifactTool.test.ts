@@ -64,6 +64,9 @@ const workspace = (
 	return { ports, saved, artifacts, reads }
 }
 
+const INTERRUPTED =
+	"The turn was interrupted while the artifact was being saved. Call save_artifact again to see whether it was."
+
 const textOf = (result: Awaited<ReturnType<typeof saveArtifact>>) =>
 	result.content.map((part) => (part.type === "text" ? part.text : "")).join("")
 
@@ -208,10 +211,22 @@ describe("the save_artifact tool", () => {
 		const result = await saveArtifact({ name: "Data", directory: "/w" }, ports)
 		expect([result.isError, textOf(result), world.saved, world.artifacts]).toEqual([
 			true,
-			"The turn was interrupted before the artifact was saved.",
+			INTERRUPTED,
 			["a.txt"],
 			[],
 		])
+
+		let cut = false
+		const midCall = workspace(new Map([["/w/a.txt", 1]]), {
+			stopped: () => cut,
+			saveArtifact: () => {
+				cut = true
+				return Promise.reject(new Error("aborted"))
+			},
+		})
+		expect(textOf(await saveArtifact({ name: "Data", directory: "/w" }, midCall.ports))).toBe(
+			INTERRUPTED,
+		)
 	})
 
 	it("answers plainly when a save cannot reach the API", async () => {

@@ -419,9 +419,9 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 									stopped: () => signal.aborted,
 									read: async (path, limit) => readUpTo(await on.fs.readFile(path), limit),
 									saveFile: (path, bytes) =>
-										askApi(api.sessionFileSave(sessionId, turn, path, bytes)),
+										askApi(api.sessionFileSave(sessionId, turn, path, bytes), { signal }),
 									saveArtifact: (name, entries) =>
-										askApi(api.sessionArtifactSave(sessionId, name, entries)),
+										askApi(api.sessionArtifactSave(sessionId, name, entries), { signal }),
 								}),
 							),
 						)

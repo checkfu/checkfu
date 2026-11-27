@@ -7,7 +7,7 @@ import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { HANDLER_ERROR_TYPES } from "@checkfu/sdk/Api"
+
 import { isApiErrorEnvelope } from "@checkfu/sdk/Errors"
 import { ArtifactName, ArtifactPath, FileName, MAX_ARTIFACT_FILES } from "@checkfu/sdk/Schemas"
 import * as Digest from "effect/crypto/Digest"
@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { outputFileId } from "./Files/OutputsSaverLive.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
-import { artifactWrites } from "./Http/ArtifactsHandlers.ts"
+import { RESERVATION_LOST, artifactWrites } from "./Http/ArtifactsHandlers.ts"
 import { idempotentCommandId } from "./Http/HttpHelpers.ts"
 import type {
 	SavedSessionArtifact,
@@ -36,6 +36,8 @@ const isFileName = Schema.is(FileName)
 const refused = (message: string) => ({ ok: false as const, message })
 
 const AGAIN = "again" as const
+const FILE_COPIES = [0, 1, 2, 3] as const
+const RETRY_PAUSE = "20 millis"
 const SAVE_ATTEMPTS = 4
 
 export const sessionArtifactId = (
@@ -106,18 +108,22 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 							body: Stream.make(bytes),
 							size: bytes.byteLength,
 						})
-					const id = yield* outputFileId(digest, sessionId, path, sha256)
-					const first = yield* save(id)
-					if (first._tag === "Stored") {
-						return { ok: true as const, file_id: id }
-					}
-					if (first._tag === "Taken") {
-						const again = yield* outputFileId(digest, sessionId, path, `${sha256}:turn:${turn}`)
-						if ((yield* save(again))._tag === "Stored") {
-							return { ok: true as const, file_id: again }
+					for (const copy of FILE_COPIES) {
+						const id = yield* outputFileId(
+							digest,
+							sessionId,
+							path,
+							copy === 0 ? sha256 : `${sha256}:turn:${turn}:${copy}`,
+						)
+						const outcome = yield* save(id)
+						if (outcome._tag === "Stored") {
+							return { ok: true as const, file_id: id }
+						}
+						if (outcome._tag !== "Taken") {
+							return refused(`Saving ${path} took too long; try again.`)
 						}
 					}
-					return refused(`Saving ${path} took too long; try again.`)
+					return refused(`${path} keeps being deleted after it is saved.`)
 				}),
 			),
 
@@ -234,7 +240,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						return created ? saved(1, true) : AGAIN
 					}).pipe(
 						Effect.catchIf(
-							(error) => isApiErrorEnvelope(error) && error.error.type === HANDLER_ERROR_TYPES[503],
+							(error) => isApiErrorEnvelope(error) && error.error.message === RESERVATION_LOST,
 							() => Effect.succeed(AGAIN),
 						),
 					)
@@ -244,6 +250,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						if (outcome !== AGAIN) {
 							return outcome
 						}
+						yield* Effect.sleep(RETRY_PAUSE)
 					}
 					return busy
 				}),
