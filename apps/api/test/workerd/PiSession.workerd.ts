@@ -1174,6 +1174,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			"edit",
 			"delete",
 			"bash",
+			"save_artifact",
 			"codemode",
 		])
 		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
@@ -1792,6 +1793,94 @@ describe("PiSession real Durable Object under workerd", () => {
 			"/before.md": "Written before.",
 		})
 	}, 240_000)
+
+	it("lets the model save a directory as an artifact, and add a version when the files change", async () => {
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Build the report.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/site/index.html", content: "<h1>Q3</h1>" },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/site/assets/app.js", content: "start()" },
+					},
+					{
+						kind: "tool_call",
+						name: "save_artifact",
+						arguments: { name: "Q3 report", directory: "/workspace/site" },
+					},
+				],
+				"Save it again.": [
+					{
+						kind: "tool_call",
+						name: "save_artifact",
+						arguments: { name: "Q3 report", directory: "/workspace/site" },
+					},
+				],
+				"Correct the title.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/site/index.html", content: "<h1>Q3, corrected</h1>" },
+					},
+					{
+						kind: "tool_call",
+						name: "save_artifact",
+						arguments: { name: "Q3 report", directory: "/workspace/site" },
+					},
+				],
+				"Save nothing.": [
+					{
+						kind: "tool_call",
+						name: "save_artifact",
+						arguments: { name: "Empty", directory: "/workspace/nowhere" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.at(-1) ?? ""}`,
+				},
+		)
+		const session = await createSession()
+		const saved = await replyAfterTurn(session.id, "Build the report.", 1)
+		const artifactId = /art_[0-9a-f]{32}/u.exec(saved)?.[0] ?? ""
+		expect(saved).toContain(`Saved "Q3 report" as artifact ${artifactId}, version 1, with 2 files.`)
+		const artifact = await apiJson<{
+			readonly name: string
+			readonly version: number
+			readonly files: ReadonlyArray<{ readonly path: string }>
+		}>(`/v1/artifacts/${artifactId}`)
+		expect(artifact.status).toBe(200)
+		expect(artifact.body).toMatchObject({
+			name: "Q3 report",
+			version: 1,
+			files: [{ path: "assets/app.js" }, { path: "index.html" }],
+		})
+		const page = await apiFetch(`/v1/artifacts/${artifactId}/versions/1/content?file=index.html`)
+		expect(await page.text()).toBe("<h1>Q3</h1>")
+
+		expect(await replyAfterTurn(session.id, "Save it again.", 2)).toContain(
+			`"Q3 report" is unchanged: artifact ${artifactId} is still at version 1`,
+		)
+		expect(await replyAfterTurn(session.id, "Correct the title.", 3)).toContain(
+			`as artifact ${artifactId}, version 2, with 2 files.`,
+		)
+		const corrected = await apiFetch(
+			`/v1/artifacts/${artifactId}/versions/2/content?file=index.html`,
+		)
+		expect(await corrected.text()).toBe("<h1>Q3, corrected</h1>")
+		expect(await replyAfterTurn(session.id, "Save nothing.", 4)).toMatch(
+			/\/workspace\/nowhere (?:is not a directory|holds no files)\./u,
+		)
+	}, 180_000)
 
 	const uploadText = async (filename: string, text: string) => {
 		const response = await uploadFile(`filename=${filename}`, new TextEncoder().encode(text))

@@ -24,6 +24,7 @@ import {
 	SKILL_MOUNT_ROOT,
 } from "@checkfu/domain/Session/SessionResource"
 import { makeArtifactMount, makeFilesMount } from "./ArtifactMount.ts"
+import { ARTIFACT_TOOL, readUpTo, saveArtifact } from "./ArtifactTool.ts"
 import { makeSandboxMount, makeSandboxOutputFiles } from "./SandboxMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
@@ -399,12 +400,29 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					return inMachine ? work(files.shared()) : onStored(() => work(files.local))
 				}
 
+				const askApi = call
+
 				const answer = async (
 					call: WorkspaceToolCall,
 					signal: AbortSignal,
+					turn: number,
 				): Promise<WorkspaceToolResult> => {
 					if (call.name === BASH_TOOL.name) {
 						return runBash(call.arguments, signal)
+					}
+					if (call.name === ARTIFACT_TOOL.name) {
+						return withCallSignal(signal, () =>
+							onActive((on) =>
+								saveArtifact(call.arguments, {
+									find: (directory, limit) => on.fs.find(directory, undefined, { limit }),
+									read: async (path, limit) => readUpTo(await on.fs.readFile(path), limit),
+									saveFile: (path, bytes) =>
+										askApi(api.sessionFileSave(sessionId, turn, path, bytes)),
+									saveArtifact: (name, entries) =>
+										askApi(api.sessionArtifactSave(sessionId, name, entries)),
+								}),
+							),
+						)
 					}
 					return withCallSignal(signal, () =>
 						onActive((on) => on.tools.execute(asLiteral(call), { abortSignal: signal })),
@@ -477,7 +495,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								.run(token, async (turn): Promise<WorkspaceToolResult> => {
 									const signal = AbortSignal.any([stopping.signal, turn])
 									await initialize((await workspace()).fs)
-									const { content, isError } = await answer(call, signal)
+									const { content, isError } = await answer(call, signal, token.turn)
 									return boundWorkspaceResult(call.name, { content, isError })
 								})
 								.finally(() => {

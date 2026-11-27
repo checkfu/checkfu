@@ -131,7 +131,9 @@ An artifact keeps one job: a deliverable with versions that can be viewed and pu
 - **Viewing links, publication, pinning a version or following the latest:** unchanged.
 - **Session mount:** `{type: "artifact", artifact_id, version?}` stays, as the way to hand a session an existing deliverable to work on.
 
-Turning a session's outputs into something shareable is one explicit call: create an artifact, or a new version, naming the output files. A tool that lets the agent do this itself can follow.
+Turning a session's outputs into something shareable is one explicit call: create an artifact, or a new version, naming the output files.
+
+**The agent can do it itself.** The `save_artifact` tool takes a name and a directory of the workspace. Each file under the directory is saved as a file of the session, and the artifact is created from those files, or given a new version if the session already saved one under that name. The artifact's id is derived from the session and the name, and a file's id from its content, so calling the tool again with nothing changed does nothing, and a repeated call after a crash cannot create a second artifact. An artifact made this way can only be built from files that session saved. The tool takes up to 256 files, 8 MiB each and 64 MiB in total; larger deliverables go through `POST /v1/files` and `POST /v1/artifacts`.
 
 ### One noun for a document, a deck and an app
 
@@ -167,7 +169,7 @@ A skill becomes its own resource: `POST /v1/skills` with files, versions as full
 | 4 (built) | Artifact versions from file ids; remove empty artifacts and blob upload | 1 |
 | 5 | Skill resource, attached to agents | 4 |
 | 6 | File blocks in messages; add and remove resources on a running session | 2 |
-| 7 | A tool for the agent to create or update an artifact | 4 |
+| 7 (built) | A tool for the agent to create or update an artifact | 4 |
 | 8 | Artifact capabilities, starting with a per-artifact database, with data kept apart from versions | 4 |
 | 9 | Artifact types, with document, slides and dashboard as the first three | 8 |
 

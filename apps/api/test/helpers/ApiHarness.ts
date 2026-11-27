@@ -80,6 +80,8 @@ import { WebhookListingQueryLive } from "../../src/Http/Listing.ts"
 import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
 import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
+import { SessionArtifactSaves } from "../../src/SessionArtifactSaves.ts"
+import { saveArtifact } from "../../src/Workspace/ArtifactTool.ts"
 import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
 import { makeArtifactMount, makeFilesMount } from "../../src/Workspace/ArtifactMount.ts"
 import type { SessionArtifacts } from "../../src/Workspace/SessionArtifacts.ts"
@@ -566,6 +568,7 @@ export const makePiDurableTestLayer = (
 		| {
 				readonly access: Effect.Success<typeof SessionMemoryAccess>
 				readonly artifacts: Effect.Success<typeof SessionArtifactAccess>
+				readonly saves: Effect.Success<typeof SessionArtifactSaves>
 				readonly run: <A>(effect: Effect.Effect<A>) => Promise<A>
 		  }
 		| undefined
@@ -573,10 +576,12 @@ export const makePiDurableTestLayer = (
 		Effect.gen(function* () {
 			const access = yield* SessionMemoryAccess
 			const artifacts = yield* SessionArtifactAccess
+			const saves = yield* SessionArtifactSaves
 			const services = yield* Effect.context<never>()
 			memoryCalls = {
 				access,
 				artifacts,
+				saves,
 				run: (effect) => Effect.runPromiseWith(services)(effect),
 			}
 		}),
@@ -601,6 +606,32 @@ export const makePiDurableTestLayer = (
 	})
 	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") =>
 		filesIn(makeArtifactMount(root, sessionArtifacts(sessionId), 100_000), root)
+	const saveSessionArtifact = (
+		sessionId: string,
+		turn: number,
+		name: string,
+		directory: string,
+	) => {
+		const files = workspaceFiles(sessionId)
+		const encoder = new TextEncoder()
+		return saveArtifact(
+			{ name, directory },
+			{
+				find: async (root) => {
+					const inside = [...files.keys()].filter((path) => path.startsWith(`${root}/`))
+					if (inside.length === 0) {
+						throw new Error("ENOENT")
+					}
+					return inside.map((path) => ({ path, type: "file" }))
+				},
+				read: async (path) => encoder.encode(files.get(path) ?? ""),
+				saveFile: (path, bytes) =>
+					built().run(built().saves.sessionFileSave(sessionId, turn, path, bytes)),
+				saveArtifact: (artifactName, entries) =>
+					built().run(built().saves.sessionArtifactSave(sessionId, artifactName, entries)),
+			},
+		)
+	}
 	const uploadedFiles = (sessionId: string) =>
 		filesIn(makeFilesMount(FILE_MOUNT_ROOT, sessionArtifacts(sessionId), 100_000), FILE_MOUNT_ROOT)
 	const heldReceipts = new Map<string, PendingReceipts>()
@@ -930,6 +961,9 @@ export const makePiDurableTestLayer = (
 		sessionMemoryCalls,
 		artifactFiles,
 		uploadedFiles,
+		saveSessionArtifact,
+		sessionArtifactSaves: () => built().saves,
+		runInWorld: <A>(effect: Effect.Effect<A>) => built().run(effect),
 	}
 }
 

@@ -9,6 +9,7 @@ import {
 	SESSION_OUTPUTS_PATH,
 } from "./SessionOutputs.ts"
 import * as Schema from "effect/Schema"
+import { ARTIFACT_TOOL } from "./ArtifactTool.ts"
 
 export type WorkspaceTool = PiTool
 export type WorkspaceToolCall = Required<PiToolCall>
@@ -168,6 +169,7 @@ export const workspaceToolDeclarations = async (): Promise<ReadonlyArray<Workspa
 			asDeclared,
 		),
 		BASH_TOOL,
+		ARTIFACT_TOOL,
 	]
 }
 

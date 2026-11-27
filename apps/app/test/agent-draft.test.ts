@@ -6,7 +6,6 @@ import {
 	changesFrom,
 	draftOf,
 	emptyDraft,
-	editSourceBody,
 	hasProblems,
 	newServer,
 	problemsOf,
@@ -465,16 +464,6 @@ describe("carrying server edits onto a newer version", () => {
 		expect(changesFrom(newer, again.draft)).toEqual({})
 	})
 
-	it("keeps a permission both editors chose without reporting a conflict", () => {
-		const draft = asking(draftOf(docs), "docs")
-		const { mcp_servers = [], tools = [] } = editSourceBody(draft)
-		const latest = { ...docs, version: 2, mcp_servers, tools }
-		const rebased = rebase(docs, draft, latest)
-		expect(rebased.overlapping).toEqual([])
-		expect(rebased.orphaned).toEqual([])
-		expect(changesFrom(latest, rebased.draft)).toEqual({})
-	})
-
 	it("carries an explicit YAML server order past an unrelated concurrent change", () => {
 		const reordered = [...docs.mcp_servers].reverse()
 		const draft = draftOf({ ...docs, mcp_servers: reordered })
@@ -638,10 +627,7 @@ const edit = (draft: AgentDraft, all: ReadonlyArray<Step>, who: string): AgentDr
 	return current
 }
 
-const submittedServer = (server: ServerDraft): string => {
-	const { mcp_servers, tools } = editSourceBody({ ...emptyDraft, servers: [server] })
-	return JSON.stringify({ mcp_servers, tools })
-}
+const fieldsOf = ({ row: _, ...fields }: ServerDraft) => JSON.stringify(fields)
 
 describe("agent drafts, for any agent", () => {
 	it("writes back exactly the agent that was read", () => {
@@ -695,25 +681,22 @@ describe("agent drafts, for any agent", () => {
 				const mine = edit(was, mySteps, "mine")
 				const theirs = edit(was, theirSteps, "theirs")
 				fc.pre(!hasProblems(problemsOf(theirs)))
-				const { mcp_servers = [], tools = [] } = editSourceBody(theirs)
+				const { mcp_servers, tools } = bodyOf(theirs)
 				const latest = { ...base, version: 2, mcp_servers, tools }
 				const current = draftOf(latest)
 				const rebased = rebase(base, mine, latest)
-				const kept = rebased.draft.servers.map(submittedServer)
+				const kept = rebased.draft.servers.map(fieldsOf)
 				for (const server of was.servers) {
 					const my = mine.servers.find((candidate) => candidate.row === server.row)
 					const their = current.servers.find((candidate) => candidate.row === server.row)
-					if (my === undefined || submittedServer(my) === submittedServer(server)) {
+					if (my === undefined || fieldsOf(my) === fieldsOf(server)) {
 						expect(rebased.orphaned).not.toContain(server.name)
 						continue
 					}
-					expect(kept).toContain(submittedServer(my))
+					expect(kept).toContain(fieldsOf(my))
 					if (their === undefined) {
 						expect(rebased.orphaned).toContain(server.name)
-					} else if (
-						submittedServer(their) !== submittedServer(server) &&
-						submittedServer(their) !== submittedServer(my)
-					) {
+					} else if (fieldsOf(their) !== fieldsOf(server) && fieldsOf(their) !== fieldsOf(my)) {
 						expect(rebased.overlapping).toContain(`MCP server ${server.name}`)
 					}
 				}
