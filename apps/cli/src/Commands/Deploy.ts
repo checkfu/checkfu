@@ -33,6 +33,7 @@ import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
 import { CliFailure, configError, networkFailure, usageError } from "../Errors.ts"
@@ -106,9 +107,14 @@ export const providerForKey = (key: string): ModelProvider => {
 
 export interface Checkout {
 	readonly root: string
+	readonly dataRoot?: string
 	readonly runtime: string
 	readonly runtimeEnv: Readonly<Record<string, string>>
 	readonly readyWithin: Duration.Input
+	readonly managed?: boolean
+	readonly stage?: string
+	readonly environment?: Readonly<Record<string, string | undefined>>
+	readonly recordStage?: (stage: string) => Effect.Effect<void, CliFailure>
 }
 
 export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
@@ -119,6 +125,22 @@ export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
 		readyWithin: "90 seconds",
 	}),
 })
+
+export interface CheckoutRequest {
+	readonly operation: "deploy" | "destroy"
+	readonly stage?: string
+}
+
+export type ResolveCheckout = (
+	request: CheckoutRequest,
+) => Effect.Effect<Checkout, CliFailure, Scope.Scope | Path.Path>
+
+export const CheckoutResolver = Context.Reference<ResolveCheckout>(
+	"@checkfu/cli/CheckoutResolver",
+	{
+		defaultValue: () => () => Checkout,
+	},
+)
 
 export const readDotEnvValue = (contents: string, name: string): Effect.Effect<string> =>
 	Config.String(name)
@@ -184,7 +206,7 @@ const stageFlag = Flag.String("stage").pipe(
 	Flag.withSchema(Schema.String.check(Schema.isPattern(STAGE_NAME))),
 	Flag.withMetavar("NAME"),
 	Flag.withDescription(
-		`Deployment stage. deploy defaults to the one this checkout last deployed, or "${DEFAULT_STAGE}" the first time; destroy requires it`,
+		`Deployment stage. deploy remembers the last selected stage, or uses "${DEFAULT_STAGE}" the first time; destroy requires an explicit stage`,
 	),
 	Flag.optional,
 )
@@ -201,13 +223,16 @@ const DeploymentRecord = Schema.fromJsonString(
 		profile: Schema.String,
 		account_id: Schema.String,
 		url: Schema.optional(Schema.String),
+		image: Schema.optional(Schema.String),
 	}),
 	{ space: "\t" },
 )
 type DeploymentRecord = typeof DeploymentRecord.Type
 
 const deploymentRecordPath = (checkout: Checkout) =>
-	Effect.map(Path.Path, (path) => path.join(checkout.root, ".checkfu", "deployment.json"))
+	Effect.map(Path.Path, (path) =>
+		path.join(checkout.dataRoot ?? checkout.root, ".checkfu", "deployment.json"),
+	)
 
 const readDeploymentRecord = (checkout: Checkout) =>
 	Effect.gen(function* () {
@@ -225,36 +250,45 @@ const readDeploymentRecord = (checkout: Checkout) =>
 		)
 	})
 
-const requireCheckout = Effect.gen(function* () {
-	const fs = yield* FileSystem.FileSystem
-	const path = yield* Path.Path
-	const checkout = yield* Checkout
-	const hasStack = yield* fs
-		.exists(path.join(checkout.root, "alchemy.run.ts"))
-		.pipe(
-			Effect.mapError((error) =>
-				configError(`Could not look for the checkout at ${checkout.root}: ${error.message}`),
-			),
-		)
-	if (!hasStack) {
-		return yield* usageError(
-			"This command deploys from a Checkfu source checkout. Clone https://github.com/checkfu/checkfu, run `bun install`, then `bun checkfu deploy`.",
-		)
-	}
-	return checkout
-})
+const requireCheckout = (request: CheckoutRequest) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem
+		const path = yield* Path.Path
+		const checkout = yield* (yield* CheckoutResolver)(request)
+		const hasStack = yield* fs
+			.exists(path.join(checkout.root, "alchemy.run.ts"))
+			.pipe(
+				Effect.mapError((error) =>
+					configError(`Could not look for the checkout at ${checkout.root}: ${error.message}`),
+				),
+			)
+		if (!hasStack) {
+			return yield* usageError(
+				"This command deploys from a Checkfu source checkout. Clone https://github.com/checkfu/checkfu, run `bun install`, then `bun checkfu deploy`.",
+			)
+		}
+		return checkout
+	})
 
 interface Target {
 	readonly checkout: Checkout
 	readonly profile: string
 	readonly envFile: Option.Option<string>
+	readonly image?: string
 }
 
 const inCheckout = (target: Target) => ({
 	cwd: target.checkout.root,
-	env: target.checkout.runtimeEnv,
-	extendEnv: true,
+	env: {
+		...target.checkout.environment,
+		...target.checkout.runtimeEnv,
+		...(target.image === undefined ? {} : { CHECKFU_SANDBOX_IMAGE: target.image }),
+	},
+	extendEnv: target.checkout.environment === undefined,
 })
+
+const runtimeFlags = (checkout: Checkout) =>
+	checkout.managed ? ["--no-env-file", `--config=${checkout.root}/apps/cli/bunfig.toml`] : []
 
 const run = (target: Target, args: ReadonlyArray<string>) =>
 	Effect.gen(function* () {
@@ -265,7 +299,10 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 				ChildProcess.make(
 					target.checkout.runtime,
 					[
-						path.join(target.checkout.root, "node_modules", "alchemy", "bin", "cli.js"),
+						...runtimeFlags(target.checkout),
+						target.checkout.managed && (args[0] === "deploy" || args[0] === "destroy")
+							? path.join(target.checkout.root, "apps", "cli", "scripts", "Deployment.ts")
+							: path.join(target.checkout.root, "node_modules", "alchemy", "bin", "cli.js"),
 						...args,
 						...Option.match(target.envFile, {
 							onNone: () => [],
@@ -300,6 +337,7 @@ const ask = <A>(
 				ChildProcess.make(
 					target.checkout.runtime,
 					[
+						...runtimeFlags(target.checkout),
 						path.join(target.checkout.root, "apps", "cli", "scripts", "alchemy-query.ts"),
 						name,
 						target.profile,
@@ -314,8 +352,10 @@ const ask = <A>(
 		return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(answers))(
 			line?.slice(ANSWER_PREFIX.length),
 		).pipe(
-			Effect.mapError(
-				() => "Alchemy gave no usable answer; run `bun install` if this checkout is new",
+			Effect.mapError(() =>
+				target.checkout.managed
+					? "The deployment helper gave no usable answer; run checkfu deploy again to retry"
+					: "Alchemy gave no usable answer; run `bun install` if this checkout is new",
 			),
 		)
 	}).pipe(Effect.catch((error) => Effect.succeed({ status: "error" as const, message: error })))
@@ -342,6 +382,9 @@ const resolveTarget = (
 			checkout,
 			profile: fromFile || fromShell || Option.getOrUndefined(record)?.profile || "default",
 			envFile: dotenv.length > 0 ? Option.some(envFile) : Option.none(),
+			...(Option.isSome(record) && record.value.image !== undefined
+				? { image: record.value.image }
+				: {}),
 		} satisfies Target
 	})
 
@@ -375,12 +418,20 @@ const promptForProviderKey = (retry: string) =>
 const syncEnvEntry = (
 	contents: string,
 	name: string,
-	options?: { readonly secret?: boolean },
+	options?: { readonly secret?: boolean; readonly preferEnvironment?: boolean },
 ): Effect.Effect<{ readonly contents: string; readonly value: string }, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		let value = options?.secret
 			? yield* readDotEnvSecret(contents, name)
 			: (yield* readDotEnvValue(contents, name)).trim()
+		if (options?.preferEnvironment) {
+			const exported = yield* envValue(name)
+			if (exported.length > 0 && exported !== value) {
+				const next = yield* setDotEnvValue(contents, name, exported)
+				yield* writeStderrLine(`Using ${name} from your environment.`)
+				return { contents: next, value: exported }
+			}
+		}
 		if (value.length === 0) {
 			value = yield* envValue(name)
 			if (value.length > 0) {
@@ -392,7 +443,7 @@ const syncEnvEntry = (
 		return { contents, value }
 	})
 
-const prepareEnvFile = (envFile: string, retry: string) =>
+const prepareEnvFile = (envFile: string, retry: string, managed = false) =>
 	Effect.gen(function* () {
 		const original = Option.getOrElse(yield* readIfPresent(envFile), () => "")
 		let contents = original
@@ -408,7 +459,7 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 			apiKey = exportedKey
 			if (apiKey.length > 0) {
 				yield* writeStderrLine(`Using ${API_KEY_ENV} from your environment.`)
-			} else if (yield* (yield* Stdio.Stdio).stdinIsTerminal) {
+			} else if (managed || (yield* (yield* Stdio.Stdio).stdinIsTerminal)) {
 				apiKey = yield* generateApiKey
 				yield* writeStderrLine("Generated an API key for your deployment.")
 			} else {
@@ -421,7 +472,10 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 
 		let provider: ModelProvider | undefined
 		for (const candidate of MODEL_PROVIDERS) {
-			const synced = yield* syncEnvEntry(contents, candidate.env, { secret: true })
+			const synced = yield* syncEnvEntry(contents, candidate.env, {
+				secret: true,
+				preferEnvironment: managed,
+			})
 			contents = synced.contents
 			if (synced.value.length > 0) {
 				provider ??= candidate
@@ -432,15 +486,20 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 		// is set without CLOUDFLARE_AI_API_KEY, or HTTPS with CLOUDFLARE_AI_API_KEY +
 		// CLOUDFLARE_ACCOUNT_ID) and Cloudflare Workers AI (CLOUDFLARE_AI_API_KEY +
 		// CLOUDFLARE_ACCOUNT_ID). Deliberately never reads Alchemy's deployment CLOUDFLARE_API_KEY.
-		const gatewaySynced = yield* syncEnvEntry(contents, CLOUDFLARE_GATEWAY_ID_ENV)
+		const gatewaySynced = yield* syncEnvEntry(contents, CLOUDFLARE_GATEWAY_ID_ENV, {
+			preferEnvironment: managed,
+		})
 		contents = gatewaySynced.contents
 		const cloudflareAiKeySynced = yield* syncEnvEntry(contents, CLOUDFLARE_AI_API_KEY_ENV, {
 			secret: true,
+			preferEnvironment: managed,
 		})
 		contents = cloudflareAiKeySynced.contents
 		let accountIdValue = ""
 		if (cloudflareAiKeySynced.value.length > 0) {
-			const accountSynced = yield* syncEnvEntry(contents, CLOUDFLARE_ACCOUNT_ID_ENV)
+			const accountSynced = yield* syncEnvEntry(contents, CLOUDFLARE_ACCOUNT_ID_ENV, {
+				preferEnvironment: managed,
+			})
 			contents = accountSynced.contents
 			accountIdValue = accountSynced.value
 		}
@@ -479,7 +538,7 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 		const customManifestFromFile = yield* readDotEnvValue(original, CUSTOM_PROVIDERS_ENV)
 		let customManifestRaw = customManifestFromFile.trim()
 		let customManifestFromShell = false
-		if (customManifestRaw.length === 0) {
+		if (customManifestRaw.length === 0 || managed) {
 			const exportedManifest = (yield* envValue(CUSTOM_PROVIDERS_ENV)).trim()
 			if (exportedManifest.length > 0) {
 				customManifestRaw = exportedManifest
@@ -547,7 +606,7 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 			for (const secretEnv of providerRequiredSecretEnvs(customProviders)) {
 				let value = yield* readDotEnvSecret(original, secretEnv)
 				let fromShell = false
-				if (value.length === 0) {
+				if (value.length === 0 || managed) {
 					const exported = yield* rawEnvValue(secretEnv)
 					if (exported.length > 0) {
 						value = exported
@@ -649,6 +708,18 @@ const OutputAnswer = Schema.Union([
 	AnswerError,
 ])
 
+const ImageAnswer = Schema.Union([
+	Schema.Struct({
+		status: Schema.Literal("found"),
+		image: Schema.String.check(
+			Schema.isPattern(
+				/^registry\.cloudflare\.com\/[a-f0-9]{32}\/checkfu-sandbox@sha256:[a-f0-9]{64}$/,
+			),
+		),
+	}),
+	AnswerError,
+])
+
 const requireAccount = (target: Target, signIn: Option.Option<{ readonly retry: string }>) =>
 	Effect.gen(function* () {
 		let answer = yield* ask(target, AccountAnswer, ["account"])
@@ -696,7 +767,7 @@ const requireRecordedAccount = (
 ) =>
 	Option.isSome(record) && record.value.stage === stage && record.value.account_id !== accountId
 		? usageError(
-				`This checkout deployed "${stage}" to Cloudflare account ${record.value.account_id}, but the credentials in use act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials.`,
+				`This CLI recorded "${stage}" in Cloudflare account ${record.value.account_id}, but the credentials in use act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials.`,
 			)
 		: Effect.void
 
@@ -704,6 +775,9 @@ const writeDeploymentRecord = (checkout: Checkout, record: DeploymentRecord) =>
 	Effect.gen(function* () {
 		const contents = yield* Schema.encodeEffect(DeploymentRecord)(record).pipe(Effect.orDie)
 		yield* writePrivate(yield* deploymentRecordPath(checkout), `${contents}\n`)
+		if (checkout.recordStage !== undefined) {
+			yield* checkout.recordStage(record.stage)
+		}
 	})
 
 const readDeployedUrl = (target: Target, stage: string, retry: string) =>
@@ -755,11 +829,17 @@ const formatShellArg = (value: string): string =>
 export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yesFlag }, (input) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path
-		const checkout = yield* requireCheckout
-		const envFile = path.join(checkout.root, ".env")
+		const checkout = yield* requireCheckout({
+			operation: "deploy",
+			...Option.match(input.stage, { onNone: () => ({}), onSome: (stage) => ({ stage }) }),
+		})
+		const envFile = path.join(checkout.dataRoot ?? checkout.root, ".env")
 		const record = yield* readDeploymentRecord(checkout)
 		const stage = Option.getOrElse(input.stage, () =>
-			Option.match(record, { onNone: () => DEFAULT_STAGE, onSome: (known) => known.stage }),
+			Option.match(record, {
+				onNone: () => checkout.stage ?? DEFAULT_STAGE,
+				onSome: (known) => known.stage,
+			}),
 		)
 
 		const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
@@ -767,8 +847,28 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		const checked = yield* resolveTarget(checkout, envFile, record)
 		const accountId = yield* requireAccount(checked, Option.some({ retry }))
 		yield* requireRecordedAccount(record, stage, accountId)
-		const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
-		const target = { ...checked, envFile: Option.some(envFile) } satisfies Target
+		const { apiKey, provider } = yield* prepareEnvFile(envFile, retry, checkout.managed)
+		let target: Target = { ...checked, envFile: Option.some(envFile) }
+		// Record ownership before the first mutation: failed/partial deploys must be destroyable.
+		const attempt = {
+			stage,
+			profile: target.profile,
+			account_id: accountId,
+			...(Option.isSome(record) && record.value.stage === stage && record.value.url !== undefined
+				? { url: record.value.url }
+				: {}),
+			...(target.image === undefined ? {} : { image: target.image }),
+		}
+		yield* writeDeploymentRecord(checkout, attempt)
+		if (checkout.managed) {
+			yield* writeStderrLine("Preparing the agent sandbox in your Cloudflare account…")
+			const image = yield* ask(target, ImageAnswer, ["image"])
+			if (image.status === "error") {
+				return yield* configError(`Could not prepare the sandbox: ${image.message}`)
+			}
+			target = { ...target, image: image.image }
+			yield* writeDeploymentRecord(checkout, { ...attempt, image: image.image })
+		}
 
 		const exitCode = yield* run(target, [
 			"deploy",
@@ -787,7 +887,12 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			record,
 			(previous) => previous.stage === stage && previous.account_id === accountId,
 		)
-		const deployed = { stage, profile: target.profile, account_id: accountId }
+		const deployed = {
+			stage,
+			profile: target.profile,
+			account_id: accountId,
+			...(target.image === undefined ? {} : { image: target.image }),
+		}
 		yield* writeDeploymentRecord(checkout, {
 			...deployed,
 			...Option.match(known, {
@@ -830,7 +935,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 					: []),
 			].join("\n"),
 		)
-	}),
+	}).pipe(Effect.scoped),
 ).pipe(
 	Command.withDescription("Deploy Checkfu to your Cloudflare account and connect this CLI to it"),
 )
@@ -838,23 +943,26 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: yesFlag }, (input) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path
-		const checkout = yield* requireCheckout
+		const checkout = yield* requireCheckout({
+			operation: "destroy",
+			...Option.match(input.stage, { onNone: () => ({}), onSome: (stage) => ({ stage }) }),
+		})
 		const record = Option.getOrUndefined(yield* readDeploymentRecord(checkout))
 
 		if (Option.isNone(input.stage)) {
 			return yield* usageError(
-				`Name the stage to delete: \`${COMMAND} destroy --stage <name>\`.${record === undefined ? "" : ` This checkout last deployed "${record.stage}".`}`,
+				`Name the stage to delete: \`${COMMAND} destroy --stage <name>\`.${record === undefined ? "" : ` This CLI last deployed "${record.stage}".`}`,
 			)
 		}
 		const stage = input.stage.value
 		if (record?.stage !== stage) {
 			return yield* usageError(
-				`This checkout has no record of deploying "${stage}"${record === undefined ? "" : ` (it last deployed "${record.stage}")`}. Nothing was deleted. To delete a deployment made elsewhere, use Alchemy directly: \`bun run destroy --stage ${stage}\`.`,
+				`This CLI has no record of deploying "${stage}"${record === undefined ? "" : ` (it last deployed "${record.stage}")`}. Nothing was deleted. Use the configuration directory that originally deployed this stage.`,
 			)
 		}
 		const target = yield* resolveTarget(
 			checkout,
-			path.join(checkout.root, ".env"),
+			path.join(checkout.dataRoot ?? checkout.root, ".env"),
 			Option.some(record),
 		)
 		const accountId = yield* requireAccount(target, Option.none())
@@ -875,9 +983,9 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 		if (Option.isSome(saved) && saved.value.url === record.url) {
 			yield* removeSavedConnection
 		}
-	}),
+	}).pipe(Effect.scoped),
 ).pipe(
 	Command.withDescription(
-		"Delete a deployment this checkout made, and all of its data, from your Cloudflare account",
+		"Delete a recorded deployment and all of its data from your Cloudflare account",
 	),
 )

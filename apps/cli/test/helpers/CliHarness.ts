@@ -122,6 +122,7 @@ export interface CliRunOptions {
 	readonly onChmod?: (filePath: string, mode: number) => void
 	readonly onRead?: (filePath: string) => void
 	readonly readyWithin?: Duration.Input
+	readonly checkout?: Partial<Checkout>
 	readonly spawn?: (args: ReadonlyArray<string>) => {
 		readonly exitCode: number
 		readonly stdout?: string
@@ -381,7 +382,9 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						if (options?.spawn === undefined) {
 							return Effect.die("unused")
 						}
-						const [program = "", ...rest] = command.args.map(String)
+						const [program = "", ...rest] = command.args
+							.map(String)
+							.filter((arg) => arg !== "--no-env-file" && !arg.startsWith("--config="))
 						const result = options.spawn(
 							program.endsWith("alchemy-query.ts")
 								? [program, "query", ...rest]
@@ -460,6 +463,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						runtime: "bun",
 						runtimeEnv: {},
 						readyWithin: options?.readyWithin ?? "300 millis",
+						...options?.checkout,
 					}),
 					FetchHttpClient.layer.pipe(
 						Layer.provide(Layer.succeed(FetchHttpClient.Fetch, customFetch)),

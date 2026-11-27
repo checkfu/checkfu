@@ -21,6 +21,7 @@
 		"@effect/platform-bun": "catalog:",
 		"alchemy": "catalog:",
 		"effect": "catalog:",
+		"modern-tar": "catalog:",
 		"yaml": "catalog:"
 	},
 	"devDependencies": {

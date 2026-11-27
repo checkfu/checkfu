@@ -1,20 +1,7 @@
 name: npm packages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "apps/cli/**"
-      - "apps/api/**"
-      - "apps/mcp/**"
-      - "packages/**"
-      - "tools/release/**"
-      - "package.json"
-      - "bun.lock"
-      - "tsconfig.base.json"
-      - "LICENSE"
-      - ".github/workflows/npm-packages.yml"
-  pull_request:
+  workflow_call:
 
 permissions:
   contents: read

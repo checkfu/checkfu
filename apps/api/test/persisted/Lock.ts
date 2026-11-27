@@ -1,6 +1,8 @@
 import { isDeepStrictEqual } from "node:util"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Arbitrary from "effect/Arbitrary"
+import * as Config from "effect/Config"
+import * as Option from "effect/Option"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -310,15 +312,49 @@ export const shipBlockers = (
 			: [`Persisted shapes changed since "${latest.label}".`]
 	})
 
+const ManagedSource = Schema.Struct({
+	revision: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+	baseline_sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+})
+
+export const matchesManagedBaseline = (
+	source: unknown,
+	bytes: Uint8Array,
+): Effect.Effect<boolean, never, Digest.Digest> =>
+	Effect.gen(function* () {
+		const metadata = Schema.decodeUnknownOption(ManagedSource)(source)
+		if (Option.isNone(metadata)) {
+			return false
+		}
+		const digest = yield* Digest.Digest
+		return (yield* digest.digestHex(Digest.sha256, bytes)) === metadata.value.baseline_sha256
+	})
+
 const lockIsCommitted: Effect.Effect<
 	boolean,
 	never,
-	ChildProcessSpawner.ChildProcessSpawner | Path.Path
+	ChildProcessSpawner.ChildProcessSpawner | Path.Path | FileSystem.FileSystem | Digest.Digest
 > = Effect.gen(function* () {
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 	const file = yield* lockFilePath.pipe(Effect.orElseSucceed(() => null))
 	if (file === null) {
 		return false
+	}
+	if (
+		(yield* Config.String("CHECKFU_MANAGED_DEPLOYMENT").pipe(
+			Config.withDefault("0"),
+			Effect.orElseSucceed(() => "0"),
+		)) === "1"
+	) {
+		const fs = yield* FileSystem.FileSystem
+		const path = yield* Path.Path
+		return yield* Effect.gen(function* () {
+			const source = yield* fs.readFileString(
+				path.resolve(path.dirname(file), "../../../../.checkfu/source.json"),
+			)
+			const metadata = yield* Schema.decodeEffect(Schema.fromJsonString(ManagedSource))(source)
+			return yield* matchesManagedBaseline(metadata, yield* fs.readFile(file))
+		}).pipe(Effect.orElseSucceed(() => false))
 	}
 	const git = (...args: ReadonlyArray<string>) =>
 		spawner

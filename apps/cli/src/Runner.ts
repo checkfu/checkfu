@@ -19,6 +19,7 @@ const releaseStdin = () => {
 
 export const startCli = (
 	platform: Layer.Layer<Command.Environment | HttpClient.HttpClient | SecureRandom.SecureRandom>,
+	program: ReturnType<typeof runCli> = runCli(),
 ) => {
 	const sigintController = makeSigintController()
 	const layer = Layer.merge(platform, Layer.succeed(SigintCoordinator, sigintController))
@@ -65,7 +66,7 @@ export const startCli = (
 		process.on("SIGTERM", onSigterm)
 	})
 
-	runMain(runCli().pipe(Effect.provide(layer)), {
+	runMain(program.pipe(Effect.provide(layer)), {
 		disableErrorReporting: true,
 	})
 }

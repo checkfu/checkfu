@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
+import * as Config from "effect/Config"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -14,10 +15,19 @@ import { SandboxError, Sandboxes, TIMED_OUT, machineIdle } from "./Sandboxes.ts"
 import { WRITE_FILE } from "./WriteFile.ts"
 import type { ExecOptions, Sandbox } from "./Sandboxes.ts"
 
-export class SandboxMachine extends Cloudflare.Container<SandboxMachine>()("SandboxMachine", {
-	schedulingPolicy: "durable_object",
-	context: `${import.meta.dirname}/image`,
-}) {}
+export class SandboxMachine extends Cloudflare.Container<SandboxMachine>()(
+	"SandboxMachine",
+	Effect.gen(function* () {
+		const managed = yield* Config.String("CHECKFU_MANAGED_DEPLOYMENT").pipe(Config.withDefault("0"))
+		if (managed === "1") {
+			const image = yield* Config.option(Config.String("CHECKFU_SANDBOX_IMAGE"))
+			if (Option.isSome(image)) {
+				return { schedulingPolicy: "durable_object" as const, image: image.value }
+			}
+		}
+		return { schedulingPolicy: "durable_object" as const, context: `${import.meta.dirname}/image` }
+	}),
+) {}
 
 const MACHINE = "machine"
 const STARTS = "starts"

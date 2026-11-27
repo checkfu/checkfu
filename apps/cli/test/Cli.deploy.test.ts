@@ -81,6 +81,12 @@ const fakeAlchemy = (
 					: { status: "connected", account_id: account },
 			)
 		}
+		if (command[0] === "query" && command[1] === "image") {
+			return answer({
+				status: "found",
+				image: `registry.cloudflare.com/${ACCOUNT}/checkfu-sandbox@sha256:${"a".repeat(64)}`,
+			})
+		}
 		if (command[0] === "query") {
 			switch (options.output) {
 				case "missing":
@@ -161,6 +167,28 @@ describe("what the CLI calls itself in messages", () => {
 
 describe("checkfu deploy", () => {
 	const checkout = { "/checkout/alchemy.run.ts": "" }
+
+	it.live(
+		"updates an exported provider key in managed deployment settings while retaining the API key",
+		() =>
+			Effect.gen(function* () {
+				const cli = yield* makeTestServer()
+				const files = virtualFiles({
+					...checkout,
+					[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=revoked-key\n`,
+				})
+				const result = yield* cli.run(["deploy", "--yes"], {
+					checkout: { managed: true },
+					env: deployEnv,
+					files,
+					spawn: fakeAlchemy([]),
+				})
+				expect(result.exitCode).toBe(0)
+				expect(files[ENV_FILE]).toBe(`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`)
+				expect(result.stderr).not.toContain("revoked-key")
+				expect(result.stderr).not.toContain("sk-proj-x")
+			}),
+	)
 
 	it.live("prepares secrets, deploys, records the deployment, and saves the connection", () =>
 		Effect.gen(function* () {
@@ -427,7 +455,7 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
-	it.live("records the deployment only once Alchemy has deployed it", () =>
+	it.live("records an attempted deployment so partial failures can be retried or destroyed", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			const files = virtualFiles(checkout)
@@ -435,18 +463,26 @@ describe("checkfu deploy", () => {
 
 			const first = yield* cli.run(["deploy", "--stage", "staging"], declined)
 			expect(first.exitCode).toBe(3)
-			expect(files[RECORD_FILE]).toBeUndefined()
+			expect(files[RECORD_FILE]).toBe(record("staging", "default", ACCOUNT, null))
 			expect(files[CONFIG_FILE]).toBeUndefined()
 
 			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy([]) })
-			expect(files[RECORD_FILE]).toBe(record("live"))
+			expect(files[RECORD_FILE]).toBe(record("staging"))
 
 			yield* cli.run(["deploy", "--stage", "staging"], declined)
-			expect(files[RECORD_FILE]).toBe(record("live"))
+			expect(files[RECORD_FILE]).toBe(record("staging"))
 
 			const next: Array<ReadonlyArray<string>> = []
 			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy(next) })
-			expect(next[1]).toEqual(["deploy", "--stage", "live", "--yes", ...SHARED])
+			expect(next[1]).toEqual(["deploy", "--stage", "staging", "--yes", ...SHARED])
+
+			const cleanup = yield* cli.run(["destroy", "--stage", "staging", "--yes"], {
+				env: deployEnv,
+				files,
+				spawn: fakeAlchemy([]),
+			})
+			expect(cleanup.exitCode).toBe(0)
+			expect(files[RECORD_FILE]).toBeUndefined()
 		}),
 	)
 
@@ -1443,13 +1479,13 @@ describe("checkfu destroy", () => {
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			for (const [args, files, message] of [
-				[["destroy", "--yes"], liveCheckout, 'This checkout last deployed "live"'],
+				[["destroy", "--yes"], liveCheckout, 'This CLI last deployed "live"'],
 				[["destroy", "--yes"], { "/checkout/alchemy.run.ts": "" }, "Name the stage to delete"],
 				[["destroy", "--yes", "--stage", "staging"], liveCheckout, 'it last deployed "live"'],
 				[
 					["destroy", "--yes", "--stage", "live"],
 					{ "/checkout/alchemy.run.ts": "" },
-					"bun run destroy --stage live",
+					"Use the configuration directory that originally deployed this stage",
 				],
 			] as const) {
 				const calls: Array<ReadonlyArray<string>> = []

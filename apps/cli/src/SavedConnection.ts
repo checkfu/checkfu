@@ -22,30 +22,32 @@ const envDirectory = (name: string): Effect.Effect<Option.Option<string>> =>
 		Effect.orElseSucceed(() => Option.none()),
 	)
 
-const configDirectory: Effect.Effect<Option.Option<string>, CliFailure, Path.Path> = Effect.gen(
-	function* () {
-		const path = yield* Path.Path
-		const explicit = yield* envDirectory("CHECKFU_CONFIG_DIR")
-		if (Option.isSome(explicit)) {
-			if (!path.isAbsolute(explicit.value)) {
-				return yield* configError("CHECKFU_CONFIG_DIR must be an absolute path.")
-			}
-			return explicit
+export const configDirectory: Effect.Effect<
+	Option.Option<string>,
+	CliFailure,
+	Path.Path
+> = Effect.gen(function* () {
+	const path = yield* Path.Path
+	const explicit = yield* envDirectory("CHECKFU_CONFIG_DIR")
+	if (Option.isSome(explicit)) {
+		if (!path.isAbsolute(explicit.value)) {
+			return yield* configError("CHECKFU_CONFIG_DIR must be an absolute path.")
 		}
-		for (const [name, ...segments] of [
-			["XDG_CONFIG_HOME", "checkfu"],
-			["APPDATA", "checkfu"],
-			["HOME", ".config", "checkfu"],
-			["USERPROFILE", ".config", "checkfu"],
-		] as const) {
-			const base = yield* envDirectory(name)
-			if (Option.isSome(base) && path.isAbsolute(base.value)) {
-				return Option.some(path.join(base.value, ...segments))
-			}
+		return explicit
+	}
+	for (const [name, ...segments] of [
+		["XDG_CONFIG_HOME", "checkfu"],
+		["APPDATA", "checkfu"],
+		["HOME", ".config", "checkfu"],
+		["USERPROFILE", ".config", "checkfu"],
+	] as const) {
+		const base = yield* envDirectory(name)
+		if (Option.isSome(base) && path.isAbsolute(base.value)) {
+			return Option.some(path.join(base.value, ...segments))
 		}
-		return Option.none()
-	},
-)
+	}
+	return Option.none()
+})
 
 const store = <A>(fileName: string, schema: Schema.Codec<A, unknown>) => {
 	const json = Schema.fromJsonString(schema, { space: "\t" })

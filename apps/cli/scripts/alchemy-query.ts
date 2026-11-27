@@ -10,6 +10,11 @@ import * as State from "alchemy/State"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Containers from "@distilled.cloud/cloudflare/containers"
+import { sandboxImageTag } from "./Image.ts"
+import { copySandboxImage } from "./Registry.ts"
+import { fileURLToPath } from "node:url"
+import { configError } from "../src/Errors.ts"
 
 export const ANSWER_PREFIX = "@checkfu "
 
@@ -39,10 +44,40 @@ const output = Effect.gen(function* () {
 	return value === null ? { status: "missing" as const } : { status: "found" as const, value }
 })
 
+const image = Effect.gen(function* () {
+	const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment
+	const credentials = yield* Containers.createContainerRegistryCredentials({
+		accountId,
+		domain: "registry.cloudflare.com",
+		permissions: ["pull", "push"],
+		expirationMinutes: 60,
+	})
+	const value = yield* Effect.tryPromise({
+		try: async (signal) =>
+			copySandboxImage(
+				await sandboxImageTag(
+					fileURLToPath(new URL("../../api/src/Sandbox/image", import.meta.url)),
+				),
+				{
+					origin: "https://registry.cloudflare.com",
+					repository: `${accountId}/checkfu-sandbox`,
+					authorization: `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString("base64")}`,
+				},
+				fetch,
+				signal,
+			),
+		catch: (error) => configError(error instanceof Error ? error.message : String(error)),
+	})
+	return { status: "found" as const, image: value }
+}).pipe(Effect.provide(Cloudflare.CloudflareApiLive().pipe(Layer.provideMerge(AuthProvidersLive))))
+
 const answer = Effect.gen(function* () {
 	const config = yield* configServices(target)
 	if (question === "account") {
 		return yield* Effect.provide(account, config)
+	}
+	if (question === "image") {
+		return yield* Effect.provide(image, config)
 	}
 	return yield* Effect.provide(output, config)
 }).pipe(
