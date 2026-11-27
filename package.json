@@ -58,7 +58,8 @@
 		"check": "bun run generate:check && bun run format:check && bun run lint --type-check",
 		"persisted:check": "bun apps/api/test/persisted/main.ts check",
 		"persisted:cut": "bun apps/api/test/persisted/main.ts cut",
-		"release:build": "bun tools/release/Build.ts"
+		"release:build": "bun tools/release/Build.ts",
+		"verify": "bun tools/release/Verify.ts"
 	},
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",

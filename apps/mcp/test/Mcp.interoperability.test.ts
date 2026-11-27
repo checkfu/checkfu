@@ -99,5 +99,6 @@ describe("independent MCP SDK interoperability", () => {
 				const server = yield* makeTestServer
 				yield* Effect.promise(() => exerciseRetry(server.fetchWeb))
 			}).pipe(Effect.scoped),
+		{ tags: ["acceptance", "mcp-uncertain-create"] },
 	)
 })

@@ -192,13 +192,65 @@ jobs:
         env:
           RESULT: ${{ needs.workerd-tests.result }}
 
+  # Fresh executions retain provenance; Turbo's log cache is not evidence for a new SHA.
+  acceptance-evidence:
+    name: journeys (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [clients, ui, mcp, project, machines, domain]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run verify ${{ matrix.group }}
+        env:
+          CHECKFU_VERIFICATION_DIR: .checkfu/verification
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ matrix.group }}
+          path: .checkfu/verification/
+          include-hidden-files: true
+
+  verification:
+    needs: acceptance-evidence
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verification-*
+          path: .checkfu/results
+      - name: Derive the feature matrix from executed cases
+        shell: bash
+        run: |
+          mapfile -t reports < <(find .checkfu/results -type f -regextype posix-extended -regex '.*/(clients|ui|mcp|project|machines|domain)\.json' | sort)
+          bun run verify report "${reports[@]}"
+        env:
+          CHECKFU_VERIFICATION_DIR: .checkfu/verification
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-matrix
+          path: .checkfu/verification/
+          include-hidden-files: true
+
   # A deployable main includes its sandbox image. This is independent of npm CLI versions.
   cli-platforms:
     uses: ./.github/workflows/npm-packages.yml
 
   sandbox-image:
     if: github.event_name == 'push'
-    needs: [static, test, domain, domain-checkfu, workerd, cli-platforms]
+    needs: [static, test, domain, domain-checkfu, workerd, cli-platforms, verification]
     runs-on: ubuntu-latest
     timeout-minutes: 6
     permissions:
