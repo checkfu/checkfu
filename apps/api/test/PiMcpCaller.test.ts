@@ -28,8 +28,8 @@ describe("The MCP clients a host keeps", () => {
 	afterEach(async () => {
 		await Promise.all(closing.splice(0).map((server) => server.close()))
 	})
-	const server = async () => {
-		const started = await startScriptedMcpServer()
+	const server = async (options: Parameters<typeof startScriptedMcpServer>[0] = {}) => {
+		const started = await startScriptedMcpServer(options)
 		closing.push(started)
 		return started
 	}
@@ -93,6 +93,35 @@ describe("The MCP clients a host keeps", () => {
 		expect(await slow).toMatchObject({ ok: false, interrupted: true })
 		expect(await caller.list("c", peerOf(c), scope())).toMatchObject({ ok: true })
 	})
+
+	it.each([
+		["2025-11-25", true],
+		["2026-07-28", false],
+	] as const)(
+		"uses the cancellation mechanism for protocol %s",
+		async (protocolVersion, sendsNotice) => {
+			const upstream = await server({ protocolVersion, stream: "silent" })
+			const caller = makeMcpCaller({ capacity: 1 })
+			const giver = new AbortController()
+			const peer: McpPeer = {
+				url: upstream.url,
+				exit: (_target, call) =>
+					call.signal?.aborted === true
+						? { refused: "The turn was interrupted." }
+						: { token: null },
+			}
+			const running = caller.call("docs", peer, scope(giver.signal), echo, {
+				text: "slow",
+			})
+			await expect.poll(() => upstream.streamedRequests).toHaveLength(1)
+			giver.abort()
+			expect(await running).toMatchObject({ ok: false, interrupted: true })
+			expect(upstream.methods.includes("initialize")).toBe(sendsNotice)
+			await expect.poll(() => upstream.closedStreams).toEqual(upstream.streamedRequests)
+			expect(upstream.methods.includes("notifications/cancelled")).toBe(sendsNotice)
+			expect(upstream.cancellations).toEqual(sendsNotice ? upstream.streamedRequests : [])
+		},
+	)
 
 	it("closes a dropped client only once the call using it ends, and connects again for the next", async () => {
 		const a = await server()

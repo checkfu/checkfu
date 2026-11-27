@@ -28,6 +28,17 @@ const passesOut = (name: string): boolean => {
 
 const BEARER = "Bearer "
 
+const decodeCancellation = Schema.decodeUnknownOption(
+	Schema.fromJsonString(
+		Schema.Struct({
+			...McpSchema.JsonRpcNotification.fields,
+			id: Schema.optionalKey(Schema.Never),
+			method: Schema.Literal(McpSchema.CancelledNotification._tag),
+			params: McpSchema.CancelledNotification.payloadSchema,
+		}),
+	),
+)
+
 const metered = (response: Response, budget: McpCallScope["budget"]): Response => {
 	if (response.body === null) {
 		return response
@@ -53,7 +64,7 @@ const metered = (response: Response, budget: McpCallScope["budget"]): Response =
 const leaving = (target: string, exit: McpExit, fetchFn: typeof fetch): HttpClient.HttpClient =>
 	HttpClient.make((request, url, interrupted) =>
 		Effect.gen(function* () {
-			const call = yield* McpCall
+			const scope = yield* McpCall
 			const refuse = (description: string) =>
 				new HttpClientError.HttpClientError({
 					reason: new HttpClientError.TransportError({ request, description }),
@@ -61,6 +72,14 @@ const leaving = (target: string, exit: McpExit, fetchFn: typeof fetch): HttpClie
 			if (url.href !== target) {
 				return yield* refuse("This connection is for a different MCP server.")
 			}
+			const body =
+				request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : undefined
+			const cancelling =
+				scope.signal?.aborted === true &&
+				request.method === "POST" &&
+				body !== undefined &&
+				Option.isSome(decodeCancellation(body))
+			const call = cancelling ? { ...scope, signal: undefined } : scope
 			const pass = exit(target, call)
 			if ("refused" in pass) {
 				return yield* refuse(pass.refused)
@@ -79,9 +98,7 @@ const leaving = (target: string, exit: McpExit, fetchFn: typeof fetch): HttpClie
 					fetchFn(target, {
 						method: request.method,
 						headers,
-						...(request.body._tag === "Uint8Array"
-							? { body: new TextDecoder().decode(request.body.body) }
-							: {}),
+						...(body === undefined ? {} : { body }),
 						redirect: "manual",
 						signal:
 							call.signal === undefined ? interrupted : AbortSignal.any([interrupted, call.signal]),

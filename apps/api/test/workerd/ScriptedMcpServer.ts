@@ -6,6 +6,9 @@ export interface ScriptedMcpServer {
 	readonly url: string
 	readonly methods: ReadonlyArray<string>
 	readonly tokens: ReadonlyArray<string | undefined>
+	readonly streamedRequests: ReadonlyArray<string | number>
+	readonly closedStreams: ReadonlyArray<string | number>
+	readonly cancellations: ReadonlyArray<string | number>
 	readonly holdHandshakes: () => () => void
 	readonly expireSessions: () => void
 	readonly close: () => Promise<void>
@@ -17,6 +20,7 @@ interface Message {
 	readonly params?: {
 		readonly cursor?: string
 		readonly name?: string
+		readonly requestId?: string | number
 		readonly arguments?: { readonly text?: string; readonly delay_ms?: number }
 	}
 }
@@ -40,12 +44,15 @@ export const startScriptedMcpServer = async (
 		readonly pages?: number
 		readonly pageBytes?: number
 		readonly protocolVersion?: string
-		readonly stream?: "held" | "ping"
+		readonly stream?: "held" | "ping" | "silent"
 		readonly callContent?: ReadonlyArray<unknown>
 	} = {},
 ): Promise<ScriptedMcpServer> => {
 	const methods: Array<string> = []
 	const tokens: Array<string | undefined> = []
+	const streamedRequests: Array<string | number> = []
+	const closedStreams: Array<string | number> = []
+	const cancellations: Array<string | number> = []
 	const answers = new Map<string, () => void>()
 	let pings = 0
 	const sockets = new Set<Socket>()
@@ -64,6 +71,18 @@ export const startScriptedMcpServer = async (
 		readonly session?: string
 	}> => {
 		switch (message.method) {
+			case "server/discover":
+				return options.protocolVersion === "2026-07-28"
+					? {
+							result: {
+								supportedVersions: [options.protocolVersion],
+								capabilities: { tools: {} },
+								resultType: "complete",
+								ttlMs: 0,
+								cacheScope: "private",
+							},
+						}
+					: { error: { code: -32_601, message: "Method not found" } }
 			case "initialize": {
 				await held
 				const id = `scripted-${(opened += 1)}`
@@ -171,7 +190,21 @@ export const startScriptedMcpServer = async (
 				return
 			}
 			if (message.id === undefined) {
+				if (
+					message.method === "notifications/cancelled" &&
+					message.params?.requestId !== undefined
+				) {
+					cancellations.push(message.params.requestId)
+				}
 				response.writeHead(202).end()
+				return
+			}
+			if (options.stream === "silent" && message.method === "tools/call") {
+				const id = message.id
+				streamedRequests.push(id)
+				response.once("close", () => closedStreams.push(id))
+				response.writeHead(200, { "content-type": "text/event-stream" })
+				response.write(": waiting\n\n")
 				return
 			}
 			const answered = await answer(message, session, token)
@@ -230,6 +263,9 @@ export const startScriptedMcpServer = async (
 		url: `http://127.0.0.1:${address.port}/mcp`,
 		methods,
 		tokens,
+		streamedRequests,
+		closedStreams,
+		cancellations,
 		holdHandshakes: () => {
 			const { promise, resolve } = Promise.withResolvers<void>()
 			held = promise
