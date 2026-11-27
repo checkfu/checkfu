@@ -199,6 +199,19 @@ describe("Bounding what a tool result keeps", () => {
 		expect(boundResultImages(result.output, RESULT_BUDGET_BYTES)).toBe(result.output)
 	})
 
+	it("keeps call details when the image cannot fit", () => {
+		const details = { calls: [{ name: "a" }, { name: "b" }] }
+		const bounded = boundResult<Bounded>({
+			output: [{ type: "text", text: "one picture" }, image(2 * MIB)],
+			details,
+		})
+		expect(bounded.output?.[1]).toMatchObject({
+			type: "text",
+			text: expect.stringContaining("left out"),
+		})
+		expect(bounded.details).toEqual(details)
+	})
+
 	it("replaces other details that do not fit with a marker", () => {
 		expect(boundResultDetails({ blob: "x".repeat(10_000) }, 1000)).toEqual({ truncated: true })
 	})

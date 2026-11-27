@@ -254,6 +254,29 @@ describe("A vault speaking MCP", () => {
 		expect(answer.ok && "structuredContent" in answer).toBe(false)
 	})
 
+	it("keeps supported images with their canonical media type and explains the ones left out", async () => {
+		const png =
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k8noAAAAASUVORK5CYII="
+		const server = await scripted({
+			callContent: [
+				{ type: "image", mimeType: "image/png", data: png },
+				{ type: "image", mimeType: "IMAGE/PNG; name=chart", data: png },
+				{ type: "image", mimeType: "image/svg+xml", data: btoa("<svg/>") },
+			],
+		})
+		const vault = makeVaultMcp(custodyOf({ cred_1: { target: server.url, token: TOKEN } }))
+		expect(
+			asCall(await within(vault.call("cred_1", "s", server.url, echo, {}, callId()))),
+		).toMatchObject({
+			ok: true,
+			content: [
+				{ type: "image", mimeType: "image/png", data: png },
+				{ type: "image", mimeType: "image/png", data: png },
+				{ type: "text", text: expect.stringContaining("image/svg+xml image left out") },
+			],
+		})
+	})
+
 	it("answers from an event stream the server never closes, with its data in pieces between other lines", async () => {
 		const server = await scripted({ stream: "held" })
 		const vault = makeVaultMcp(custodyOf({ cred_1: { target: server.url, token: TOKEN } }))

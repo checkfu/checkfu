@@ -141,12 +141,21 @@ export const listMcpTools = (
 		),
 	)
 
+const INLINE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+
 const content = (block: McpSchema.ContentBlock): McpContent => {
 	switch (block.type) {
 		case "text":
 			return { type: "text", text: block.text }
-		case "image":
-			return { type: "image", data: Base64.encode(block.data), mimeType: block.mimeType }
+		case "image": {
+			const mimeType = block.mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? ""
+			return INLINE_IMAGE_TYPES.has(mimeType)
+				? { type: "image", data: Base64.encode(block.data), mimeType }
+				: {
+						type: "text",
+						text: `[${block.mimeType} image left out: only PNG, JPEG, GIF and WebP images can be shown to the model.]`,
+					}
+		}
 		case "resource":
 			return "text" in block.resource
 				? { type: "text", text: block.resource.text }

@@ -41,6 +41,7 @@ export const startScriptedMcpServer = async (
 		readonly pageBytes?: number
 		readonly protocolVersion?: string
 		readonly stream?: "held" | "ping"
+		readonly callContent?: ReadonlyArray<unknown>
 	} = {},
 ): Promise<ScriptedMcpServer> => {
 	const methods: Array<string> = []
@@ -95,6 +96,9 @@ export const startScriptedMcpServer = async (
 				}
 			}
 			case "tools/call": {
+				if (options.callContent !== undefined) {
+					return { result: { content: options.callContent } }
+				}
 				if (message.params?.name === "boom") {
 					return { error: { code: -32_000, message: "boom failed" } }
 				}

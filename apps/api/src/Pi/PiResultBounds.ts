@@ -513,7 +513,7 @@ export const boundResult = <R extends Stored>(
 			call,
 		) + IMAGES_CUT_RESERVE_BYTES
 	const room = Math.max(0, Math.min(RESULT_BUDGET_BYTES, STORAGE_ROW_BYTES - base))
-	const images = imageBytes(original ?? [])
+	const images = original === undefined ? 0 : imageBytes(boundResultImages(original, room))
 	const details = boundResultDetails(result.details, Math.max(0, room - images))
 	const output =
 		original === undefined
