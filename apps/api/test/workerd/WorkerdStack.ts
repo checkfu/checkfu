@@ -215,6 +215,7 @@ export const boundNames = (
 export const webhookFanoutFixture = {
 	config: "apps/api/test/workerd/WebhookFanoutFixture.stack.ts",
 	stack: "WebhookFanoutFixture",
+	worker: "FanoutTestWorker",
 }
 
 interface WorkerdDevOptions {
@@ -342,13 +343,10 @@ export const startAlchemyDev = async (
 			return
 		}
 		const clean = stripAnsi(line)
-		const readyMessage =
-			fixture === undefined
-				? /\[ApiWorker\] ready at (http:\/\/[^\s]+)/
-				: /\[FanoutTestWorker\] ready at (http:\/\/[^\s]+)/
-		const match = clean.match(readyMessage)
-		if (match?.[1] !== undefined) {
-			apiUrl = match[1].replace(/\/+$/, "")
+		const readyMessage = `[${fixture?.worker ?? "ApiWorker"}] ready at `
+		const url = clean.split(readyMessage)[1]?.match(/^http:\/\/[^\s]+/)?.[0]
+		if (url !== undefined) {
+			apiUrl = url.replace(/\/+$/, "")
 		}
 		harnessReady ||= clean.includes("[PiHarnessWorker] ready at ")
 		if (apiUrl !== null && harnessReady && readyUrl === null) {
