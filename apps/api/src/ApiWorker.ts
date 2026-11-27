@@ -202,6 +202,7 @@ const CheckfuLive = Checkfu.layer(
 		Layer.provide(ListingLive),
 		Layer.provide(WebhookEventsRuntimeLive),
 	),
+	{ legacyData: false },
 ).pipe(
 	Layer.provide(PiHarnessExecutorLive),
 	Layer.provide(PlacedDurableObjects),

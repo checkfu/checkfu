@@ -69,6 +69,7 @@ describe("Alchemy stack and worker entry", () => {
 				expect(PI_HARNESS_WORKER_PROPS.workersDev).toBe(false)
 				expect(PI_HARNESS_WORKER_PROPS.observability).toEqual({
 					enabled: true,
+					logs: { enabled: true, invocationLogs: false },
 					issues: { enabled: true },
 				})
 				expect(CONTENT_WORKER_PROPS.compatibility.date).toBe(API_WORKER_PROPS.compatibility.date)
@@ -378,7 +379,7 @@ describe("Alchemy stack and worker entry", () => {
 	)
 
 	it.live(
-		"keeps planned Worker entrypoints and local classes within the export budget",
+		"keeps planned Worker exports within budget and declares no Durable Object renames",
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* Effect.acquireRelease(
@@ -407,6 +408,9 @@ describe("Alchemy stack and worker entry", () => {
 								const bindings: ReadonlyArray<Cloudflare.Workers.WorkerBinding> =
 									data.bindings ?? []
 								for (const binding of bindings) {
+									if (binding.type === "durable_object_namespace") {
+										expect(binding.renamedFrom, `${id} class ${binding.className}`).toBeUndefined()
+									}
 									if (
 										(binding.type === "durable_object_namespace" || binding.type === "workflow") &&
 										"className" in binding &&

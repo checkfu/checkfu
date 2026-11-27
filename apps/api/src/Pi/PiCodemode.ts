@@ -15,6 +15,7 @@ import type * as CodemodeSource from "@earendil-works/pi-codemode/source"
 import type * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { COMPATIBILITY_DATE } from "../Compatibility.ts"
 import { hostOf } from "../WorkerHost.ts"
 import { SCRIPT_OUTPUT_DIRECTORY } from "../Workspace/SessionWorkspace.do.ts"
 
@@ -40,7 +41,7 @@ const IMAGE_LABEL_BYTES = 512
 
 export const CodemodeSandboxWorker = Cloudflare.Worker("CodemodeSandboxWorker", {
 	main: new URL("./PiCodemodeSandboxWorker.ts", import.meta.url).href,
-	compatibility: { date: "2026-11-17" },
+	compatibility: { date: COMPATIBILITY_DATE },
 	workersDev: false,
 	codeUpdateStrategy: { mode: "deferred", maxDelay: "6 minutes" },
 	env: { [SANDBOX_CLASS]: Cloudflare.DurableObject(SANDBOX_CLASS) },

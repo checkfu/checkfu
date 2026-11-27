@@ -19,6 +19,7 @@ export const PI_HARNESS_WORKER_PROPS = {
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	observability: {
 		enabled: true,
+		logs: { enabled: true, invocationLogs: false },
 		issues: { enabled: true },
 	},
 	dev: { port: 1339 },
