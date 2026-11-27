@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
 	actionsExtension,
 	customToolsExtension,
@@ -16,6 +16,13 @@ import {
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import { makeAssistantReply, makeScriptedPiModels } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import type { InMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import {
+	measurePause,
+	observePauseWait,
+	reportPauseMeasurement,
+	waitForPauseProbe,
+} from "./helpers/PiPauseProbe.ts"
 import { toolUseOf } from "@checkfu/domain/Session/ToolEventBounds"
 
 const asks = (name: string) =>
@@ -91,23 +98,27 @@ describe("an operation that waits on a custom tool", () => {
 		description: "Looks an order up",
 		input_schema: { type: "object", properties: { order: { type: "integer" } } },
 	}
-	const models = makeScriptedPiModels(async (model, context) => {
-		const last = context.messages.at(-1)
-		if (last?.role === "toolResult") {
-			const text = last.content.map((part) => (part.type === "text" ? part.text : "")).join("")
-			return makeAssistantReply(model, null, `saw ${text}`, 1, 1)
-		}
-		return {
-			...makeAssistantReply(model, null, "", 2, 1),
-			content: [{ type: "toolCall", id: "c1", name: "lookup_order", arguments: { order: "7" } }],
-			stopReason: "toolUse",
-		}
-	})
-	const open = async () => {
+	const models = (ready?: Promise<void>) =>
+		makeScriptedPiModels(async (model, context) => {
+			const last = context.messages.at(-1)
+			if (last?.role === "toolResult") {
+				const text = last.content.map((part) => (part.type === "text" ? part.text : "")).join("")
+				return makeAssistantReply(model, null, `saw ${text}`, 1, 1)
+			}
+			if (ready !== undefined) {
+				await ready
+			}
+			return {
+				...makeAssistantReply(model, null, "", 2, 1),
+				content: [{ type: "toolCall", id: "c1", name: "lookup_order", arguments: { order: "7" } }],
+				stopReason: "toolUse",
+			}
+		})
+	const open = (ready?: Promise<void>) => {
 		const registry = createCheckfuRegistry()
 		registry.install(customToolsExtension([lookup]))
 		registry.install(actionsExtension(() => undefined))
-		return createInMemoryPiDurableBackend(models, undefined, registry)
+		return createInMemoryPiDurableBackend(models(ready), undefined, registry)
 	}
 	const request = {
 		operationId: "turn:1",
@@ -117,6 +128,202 @@ describe("an operation that waits on a custom tool", () => {
 		system: null,
 		text: "look it up",
 	}
+	const recordPark = async (backend: InMemoryPiDurableBackend, now: () => number) => {
+		const parked = Promise.withResolvers<number>()
+		const watcher = (await backend.pi()).observeCommits({
+			advance: ({ changes }) => {
+				if (
+					changes.some(
+						(change) =>
+							change.type === "task" &&
+							change.value.kind === "pi.tool" &&
+							change.value.state.status === "sleeping",
+					)
+				) {
+					parked.resolve(now())
+				}
+			},
+			end: () => undefined,
+		})
+		return { parked: parked.promise, detach: () => watcher.detach() }
+	}
+
+	it.each(["fresh", "recovery"] as const)(
+		"counts a pending ordinary tool on a %s wait",
+		async (path) => {
+			const entered = Promise.withResolvers<void>()
+			const release = Promise.withResolvers<void>()
+			const registry = createCheckfuRegistry()
+			registry.install({
+				name: "hold-tool",
+				tools: [
+					{
+						name: "hold_tool",
+						description: "Hold a fixture call until released.",
+						parameters: { type: "object", properties: {} },
+						replay: "safe",
+						execute: async () => {
+							entered.resolve()
+							await release.promise
+							return { output: [{ type: "text", text: "finished" }] }
+						},
+					},
+				],
+			})
+			const backend = await createInMemoryPiDurableBackend(
+				makeScriptedPiModels(async (model, context) =>
+					context.messages.at(-1)?.role === "toolResult"
+						? makeAssistantReply(model, null, "done", 1, 1)
+						: {
+								...makeAssistantReply(model, null, "", 1, 1),
+								content: [{ type: "toolCall", id: "call_probe", name: "hold_tool", arguments: {} }],
+								stopReason: "toolUse",
+							},
+				),
+				undefined,
+				registry,
+			)
+			const observer = await observePauseWait(backend, path, request)
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			try {
+				const wait = await observer.start()
+				try {
+					await waitForPauseProbe(entered.promise, "starting the ordinary tool")
+					const before = wait.counts()
+					let previous = 0
+					for (const elapsed of [1000, 10_000, 30_000]) {
+						await vi.advanceTimersByTimeAsync(elapsed - previous)
+						previous = elapsed
+						const counts = wait.counts()
+						reportPauseMeasurement({
+							path,
+							workload: "ordinary tool",
+							elapsed,
+							atWait: wait.atWait,
+							before,
+							...counts,
+						})
+						expect(counts.submissionReads - before.submissionReads).toBe(elapsed / 100)
+						expect(counts.inspections - before.inspections).toBe(elapsed / 100)
+					}
+					release.resolve()
+					expect(await wait.result()).toMatchObject({ ok: true })
+				} finally {
+					release.resolve()
+					await wait.stop()
+				}
+			} finally {
+				release.resolve()
+				vi.useRealTimers()
+				observer.restore()
+				await backend.close()
+			}
+		},
+		15_000,
+	)
+
+	it.each(["fresh", "recovery"] as const)(
+		"detects a parked action on a %s wait",
+		async (path) => {
+			for (const offset of [0, 101]) {
+				const release = Promise.withResolvers<void>()
+				const backend = await open(release.promise)
+				const observer = await observePauseWait(backend, path, request)
+				const watch = await recordPark(backend, () => Date.now())
+				vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+				try {
+					const wait = await observer.start()
+					try {
+						const started = Date.now()
+						await vi.advanceTimersByTimeAsync(offset)
+						release.resolve()
+						const parked = await waitForPauseProbe(watch.parked, "observing the sleeping tool")
+						await vi.advanceTimersByTimeAsync(100 - (offset % 100))
+						expect(await wait.result()).toMatchObject({
+							ok: "paused",
+							calls: [{ name: lookup.name }],
+						})
+						const counts = wait.counts()
+						reportPauseMeasurement({
+							path,
+							workload: "custom action",
+							parkedAtMs: parked - started,
+							detectedAtMs: Date.now() - started,
+							...counts,
+						})
+						expect(parked - started).toBe(offset)
+						expect(counts).toMatchObject({
+							inspections: Math.floor(offset / 100) + 1,
+							waitAborts: 1,
+							turnAborts: 0,
+						})
+					} finally {
+						release.resolve()
+						await wait.stop()
+					}
+				} finally {
+					release.resolve()
+					vi.useRealTimers()
+					watch.detach()
+					observer.restore()
+					await backend.close()
+				}
+			}
+		},
+		15_000,
+	)
+
+	it.runIf(measurePause)(
+		"measures real pause wakeup latency",
+		async () => {
+			for (const path of ["fresh", "recovery"] as const) {
+				for (const offsetMs of [10, 90, 110]) {
+					for (let repetition = 1; repetition <= 5; repetition++) {
+						const release = Promise.withResolvers<void>()
+						const backend = await open(release.promise)
+						const observer = await observePauseWait(backend, path, request)
+						const watch = await recordPark(backend, () => performance.now())
+						try {
+							const wait = await observer.start()
+							try {
+								const began = performance.now()
+								const cpuStart = process.cpuUsage()
+								await new Promise<void>((resolve) => {
+									setTimeout(resolve, offsetMs)
+								})
+								release.resolve()
+								const parked = await waitForPauseProbe(watch.parked, "observing the sleeping tool")
+								const outcome = await wait.result()
+								const detected = performance.now()
+								const cpu = process.cpuUsage(cpuStart)
+								expect(outcome).toMatchObject({ ok: "paused" })
+								reportPauseMeasurement({
+									path,
+									workload: "custom action realtime",
+									offsetMs,
+									repetition,
+									parkedAtMs: Number((parked - began).toFixed(3)),
+									wakeMs: Number((detected - parked).toFixed(3)),
+									cpuUserUs: cpu.user,
+									cpuSystemUs: cpu.system,
+									...wait.counts(),
+								})
+							} finally {
+								release.resolve()
+								await wait.stop()
+							}
+						} finally {
+							release.resolve()
+							watch.detach()
+							observer.restore()
+							await backend.close()
+						}
+					}
+				}
+			}
+		},
+		30_000,
+	)
 
 	it("reports the parked call with its checked arguments, and settles once it is answered", async () => {
 		const backend = await open()

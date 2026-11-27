@@ -84,6 +84,12 @@ import {
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend, InMemoryStorage } from "./helpers/InMemoryPiBackend.ts"
+import {
+	measurePause,
+	observePauseWait,
+	reportPauseMeasurement,
+	waitForPauseProbe,
+} from "./helpers/PiPauseProbe.ts"
 
 describe("PiDurableEngine storage, compaction, and provider error classification", () => {
 	it("supports OpenAI + Anthropic only and surfaces missing_api_key_error / unknown_model_error", async () => {
@@ -834,6 +840,160 @@ describe("turn engine", () => {
 		)
 		return { backend, release, started, calls: () => calls }
 	}
+
+	it.each(["fresh", "recovery"] as const)(
+		"counts pause polling during a %s wait",
+		async (path) => {
+			const { backend, release, started } = await blockingBackend()
+			const observer = await observePauseWait(
+				backend,
+				path,
+				turnRequest(1, "measure a waiting turn"),
+			)
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			try {
+				const wait = await observer.start()
+				try {
+					await waitForPauseProbe(started, "starting the model")
+					let previous = 0
+					for (const elapsed of [1000, 10_000, 30_000]) {
+						await vi.advanceTimersByTimeAsync(elapsed - previous)
+						previous = elapsed
+						const counts = wait.counts()
+						reportPauseMeasurement({
+							path,
+							workload: "pending model",
+							elapsed,
+							atWait: wait.atWait,
+							...counts,
+						})
+						expect(counts).toMatchObject({
+							waitCalls: 1,
+							submissionReads: elapsed / 100,
+							inspections: elapsed / 100,
+							waitAborts: 0,
+							turnAborts: 0,
+						})
+					}
+					release()
+					expect(await wait.result()).toMatchObject({ ok: true })
+				} finally {
+					release()
+					await wait.stop()
+				}
+			} finally {
+				release()
+				vi.useRealTimers()
+				observer.restore()
+				await backend.close()
+			}
+		},
+		15_000,
+	)
+
+	it.each(["fresh", "recovery"] as const)(
+		"settles or cancels a %s wait before the first tick",
+		async (path) => {
+			for (const action of ["finish", "cancel"] as const) {
+				const { backend, release, started } = await blockingBackend()
+				const observer = await observePauseWait(
+					backend,
+					path,
+					turnRequest(1, "measure pause cancellation"),
+				)
+				vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+				try {
+					const wait = await observer.start()
+					try {
+						await waitForPauseProbe(started, "starting the model")
+						await vi.advanceTimersByTimeAsync(99)
+						if (action === "cancel") {
+							await wait.abort()
+						} else {
+							release()
+						}
+						const outcome = await wait.result()
+						expect(outcome).toMatchObject(
+							action === "cancel"
+								? { ok: false, error: { _tag: "TurnInterrupted" } }
+								: { ok: true },
+						)
+						const counts = wait.counts()
+						reportPauseMeasurement({
+							path,
+							workload: action,
+							elapsed: 99,
+							atWait: wait.atWait,
+							...counts,
+						})
+						expect(counts).toMatchObject({
+							inspections: 0,
+							turnAborts: action === "cancel" ? 1 : 0,
+						})
+					} finally {
+						release()
+						await wait.stop()
+					}
+				} finally {
+					release()
+					vi.useRealTimers()
+					observer.restore()
+					await backend.close()
+				}
+			}
+		},
+		15_000,
+	)
+
+	it.runIf(measurePause).each(["fresh", "recovery"] as const)(
+		"measures real pending polling cost on a %s wait",
+		async (path) => {
+			for (let repetition = 1; repetition <= 5; repetition++) {
+				const { backend, release, started } = await blockingBackend()
+				const observer = await observePauseWait(
+					backend,
+					path,
+					turnRequest(1, "measure a pending turn"),
+				)
+				try {
+					const wait = await observer.start()
+					try {
+						await waitForPauseProbe(started, "starting the model")
+						const began = performance.now()
+						const startCpu = process.cpuUsage()
+						for (const targetMs of [1000, 10_000, 30_000]) {
+							const remaining = Math.max(0, Math.ceil(targetMs - (performance.now() - began)))
+							await new Promise<void>((resolve) => {
+								setTimeout(resolve, remaining)
+							})
+							const elapsedMs = Number((performance.now() - began).toFixed(3))
+							const cpu = process.cpuUsage(startCpu)
+							reportPauseMeasurement({
+								path,
+								workload: "pending model realtime",
+								targetMs,
+								elapsedMs,
+								repetition,
+								cpuUserUs: cpu.user,
+								cpuSystemUs: cpu.system,
+								...wait.counts(),
+							})
+						}
+						release()
+						expect(await wait.result()).toMatchObject({ ok: true })
+					} finally {
+						release()
+						await wait.stop()
+					}
+				} finally {
+					release()
+					observer.restore()
+					await backend.close()
+				}
+			}
+		},
+		180_000,
+	)
 
 	it("accounts for blocking compaction and failed attempts exactly once across replay", async () => {
 		let summaries = 0
