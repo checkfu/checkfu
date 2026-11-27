@@ -22,6 +22,8 @@ import type { StoredDocument, WriteRefusal } from "./ArtifactDocuments.ts"
 
 export const DEFAULT_DOCUMENT_PAGE_SIZE = 50
 
+const DOCUMENT_OVERHEAD_BYTES = 256
+
 export type DocumentAuthor = "owner" | "visitor"
 
 export class DocumentRefused extends Data.TaggedError("DocumentRefused")<{
@@ -136,14 +138,35 @@ export const DocumentCalls = Effect.gen(function* () {
 				})),
 			})),
 
-		list: (artifactId: ArtifactId, collection: string, after: number, limit: number) =>
+		list: (
+			artifactId: ArtifactId,
+			collection: string,
+			after: number,
+			limit: number,
+			budget = Number.POSITIVE_INFINITY,
+		) =>
 			Effect.gen(function* () {
 				const page = yield* held(database.list(artifactId, collection, after, limit))
+				const fitting: Array<StoredDocument> = []
+				let used = 0
+				for (const document of page.documents) {
+					used += document.size + DOCUMENT_OVERHEAD_BYTES
+					if (fitting.length > 0 && used > budget) {
+						break
+					}
+					fitting.push(document)
+				}
+				const last = fitting.at(-1)
 				return {
-					data: yield* Effect.forEach(page.documents, (document) =>
+					next_page:
+						fitting.length < page.documents.length && last !== undefined
+							? String(last.seq)
+							: page.next === null
+								? null
+								: String(page.next),
+					data: yield* Effect.forEach(fitting, (document) =>
 						resource(artifactId, collection, document),
 					),
-					next_page: page.next === null ? null : String(page.next),
 				}
 			}),
 

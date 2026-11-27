@@ -83,6 +83,7 @@ import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.t
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
 import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
 import { SessionArtifactSaves } from "../../src/SessionArtifactSaves.ts"
+import { artifactData } from "../../src/Workspace/ArtifactDataTool.ts"
 import { saveArtifact } from "../../src/Workspace/ArtifactTool.ts"
 import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
 import { makeArtifactMount, makeFilesMount } from "../../src/Workspace/ArtifactMount.ts"
@@ -608,6 +609,10 @@ export const makePiDurableTestLayer = (
 	})
 	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") =>
 		filesIn(makeArtifactMount(root, sessionArtifacts(sessionId), 100_000), root)
+	const sessionArtifactData = (sessionId: string, turn: number, args: unknown) =>
+		artifactData(args, (name, request) =>
+			built().run(built().saves.sessionArtifactData(sessionId, turn, name, request)),
+		)
 	const saveSessionArtifact = (
 		sessionId: string,
 		turn: number,
@@ -982,6 +987,7 @@ export const makePiDurableTestLayer = (
 		artifactFiles,
 		uploadedFiles,
 		saveSessionArtifact,
+		sessionArtifactData,
 		sessionArtifactSaves: () => built().saves,
 		runInWorld: <A>(effect: Effect.Effect<A>) => built().run(effect),
 	}

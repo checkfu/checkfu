@@ -369,6 +369,8 @@ export default ApiWorker.make(
 				Effect.flatMap(saves, (service) => service.sessionFileSave(...args)),
 			sessionArtifactSave: (...args) =>
 				Effect.flatMap(saves, (service) => service.sessionArtifactSave(...args)),
+			sessionArtifactData: (...args) =>
+				Effect.flatMap(saves, (service) => service.sessionArtifactData(...args)),
 		})
 	}),
 )

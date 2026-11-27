@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T18:02:35.031Z",
+			"cut_at": "2026-11-27T18:27:53.025Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -346,7 +346,9 @@
 				"api-call:Api.sessionFileSave/args": "6a66c561a71d417886ff0bbd0317525d61df1bae2c1f5fdaae13af96429ea87a",
 				"api-call:Api.sessionFileSave/result": "5202d677d6d59fe97ce65457968dd7b6729c47c2db5e846dc9956cdf74968ea5",
 				"api-call:Api.sessionArtifactSave/args": "409457eef36d9784817a886ee43bf6346d4f5070b69612d8ee5e1996615c7bd3",
-				"api-call:Api.sessionArtifactSave/result": "2ca6647ffdcd0a316b8320cac832fcd24bb9da67620dd674adda4718917724e3"
+				"api-call:Api.sessionArtifactSave/result": "2ca6647ffdcd0a316b8320cac832fcd24bb9da67620dd674adda4718917724e3",
+				"api-call:Api.sessionArtifactData/args": "05024f41bb405284f3fe966df14fd1a8345a4d097c14d0a518577f4ab5d649e4",
+				"api-call:Api.sessionArtifactData/result": "6e7a78c90d94be8cd1e68578f5bec16522f276f6cdeac92919f9b06bd9d0ef11"
 			},
 			"shapes": {
 				"state:Checkfu.Agent": [
@@ -19890,6 +19892,146 @@
 					{
 						"ok": false,
 						"message": ".*ZgzA~PBf"
+					}
+				],
+				"api-call:Api.sessionArtifactData/args": [
+					[
+						"",
+						78,
+						"2d^]CNi.)t",
+						{
+							"operation": "add",
+							"collection": "toString",
+							"id": "",
+							"data": "0",
+							"page": " ",
+							"limit": 6
+						}
+					],
+					[
+						"#H",
+						37,
+						"prototype",
+						{
+							"operation": "get",
+							"collection": "0",
+							"id": "\ud800",
+							"data": " ",
+							"page": "rt+,\\:rOg&",
+							"limit": -27
+						}
+					],
+					[
+						"4294967295",
+						6,
+						"!{RRBzBh+k",
+						{
+							"operation": "get",
+							"collection": "",
+							"id": "",
+							"data": "\udc00",
+							"page": "}a6HY+d[OP",
+							"limit": 99
+						}
+					],
+					[
+						"😀",
+						93,
+						"4294967295",
+						{
+							"operation": "delete",
+							"collection": "",
+							"id": "😀",
+							"data": "",
+							"page": "😀",
+							"limit": 96
+						}
+					],
+					[
+						"",
+						100,
+						"prototype",
+						{
+							"operation": "put",
+							"collection": "jz,}Kmo_oZ",
+							"id": "'V>F",
+							"data": "",
+							"page": "@IYGu//Hk ",
+							"limit": -99
+						}
+					],
+					[
+						"\u0000",
+						101,
+						"ofAAu\"d\\sr",
+						{
+							"operation": "add",
+							"collection": "\n",
+							"id": "toString",
+							"data": "eKQAo'pB",
+							"page": "\n",
+							"limit": 89
+						}
+					],
+					[
+						"9N)]smwG5S",
+						75,
+						"prototype",
+						{
+							"operation": "get",
+							"collection": " ",
+							"id": "\udc00",
+							"data": "p5H",
+							"page": "ggF\\X",
+							"limit": -53
+						}
+					],
+					[
+						"gG5[MEN>[h",
+						5,
+						"prototype",
+						{
+							"operation": "add",
+							"collection": "|q7@O)fmXD",
+							"id": "4294967295",
+							"data": "",
+							"page": "\udc00",
+							"limit": 96
+						}
+					]
+				],
+				"api-call:Api.sessionArtifactData/result": [
+					{
+						"ok": false,
+						"message": "Jlj"
+					},
+					{
+						"ok": true,
+						"text": "}"
+					},
+					{
+						"ok": true,
+						"text": "\udc00"
+					},
+					{
+						"ok": false,
+						"message": "8\"o[^ "
+					},
+					{
+						"ok": false,
+						"message": "toString"
+					},
+					{
+						"ok": true,
+						"text": ""
+					},
+					{
+						"ok": false,
+						"message": "\n"
+					},
+					{
+						"ok": false,
+						"message": "u&kA[E%L,:"
 					}
 				]
 			}

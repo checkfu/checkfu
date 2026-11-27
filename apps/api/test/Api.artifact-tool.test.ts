@@ -39,6 +39,7 @@ const withSessions = async (
 			World,
 			| "workspaceFiles"
 			| "saveSessionArtifact"
+			| "sessionArtifactData"
 			| "sessionArtifactSaves"
 			| "runInWorld"
 			| "artifactStore"
@@ -105,6 +106,22 @@ const withSessions = async (
 		pending.resolve()
 		await closeAll()
 	}
+}
+
+interface ToolReply {
+	readonly id: string
+	readonly data?: unknown
+	readonly data_omitted?: string
+	readonly next_page?: string | null
+}
+
+interface DataArguments {
+	readonly collection: string
+	readonly operation: string
+	readonly id?: string
+	readonly data?: unknown
+	readonly limit?: number
+	readonly page?: string | null
 }
 
 describe("An artifact the agent saves", () => {
@@ -399,6 +416,198 @@ describe("An artifact the agent saves", () => {
 				files.set("/workspace/form/artifact.json", "{ not json")
 				expect(yield* save(session.id, "Form", "/workspace/form")).toBe(
 					"artifact.json cannot be used: it is not JSON.",
+				)
+			}),
+		))
+
+	it("lets the agent read and write the data of an artifact it saved, in any collection", () =>
+		withSessions((apiFetch, { workspaceFiles, createSession, save, sessionArtifactData }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const files = workspaceFiles(session.id)
+				files.set("/workspace/board/index.html", "<h1>Numbers</h1>")
+				files.set(
+					"/workspace/board/artifact.json",
+					JSON.stringify({
+						capabilities: { database: { collections: { numbers: { visitors: "read" } } } },
+					}),
+				)
+				const id = idIn(yield* save(session.id, "Dashboard", "/workspace/board"))
+				const call = (args: unknown) =>
+					Effect.map(
+						Effect.promise(() => sessionArtifactData(session.id, 1, args)),
+						(result) => ({
+							error: result.isError,
+							text: result.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+						}),
+					)
+				const done = (args: DataArguments) =>
+					Effect.map(call({ name: "Dashboard", ...args }), ({ error, text }) => {
+						expect(error ? text : "served").toBe("served")
+						return JSON.parse(text) as ToolReply
+					})
+
+				const revenue = yield* done({
+					collection: "numbers",
+					operation: "put",
+					id: "revenue",
+					data: { q3: 1200, growth: 0.18 },
+				})
+				expect(revenue).toMatchObject({
+					id: "revenue",
+					type: "artifact_document",
+					artifact_id: id,
+					collection: "numbers",
+					data: { q3: 1200, growth: 0.18 },
+				})
+				expect(yield* done({ collection: "numbers", operation: "get", id: "revenue" })).toEqual(
+					revenue,
+				)
+				const added = yield* done({ collection: "notes", operation: "add", data: null })
+				expect(added.data).toBeNull()
+				yield* done({ collection: "numbers", operation: "add", data: [1, 2] })
+				const first = yield* done({ collection: "numbers", operation: "list", limit: 1 })
+				expect(first.data).toEqual([revenue])
+				const rest = yield* done({
+					collection: "numbers",
+					operation: "list",
+					page: first.next_page ?? null,
+				})
+				expect(
+					(rest.data as ReadonlyArray<{ data: unknown }>).map((document) => document.data),
+				).toEqual([[1, 2]])
+				expect(yield* done({ collection: "notes", operation: "delete", id: added.id })).toEqual({
+					id: added.id,
+					type: "artifact_document_deleted",
+				})
+
+				const seen = yield* json<{ data: ReadonlyArray<{ id: string }> }>(
+					yield* request(apiFetch, "GET", `/v1/artifacts/${id}/data/numbers`),
+				)
+				expect(seen.data.map((document) => document.id)).toContain("revenue")
+				yield* request(apiFetch, "PUT", `/v1/artifacts/${id}/data/numbers/revenue`, {
+					data: "set by the owner",
+				})
+				expect((yield* done({ collection: "numbers", operation: "get", id: "revenue" })).data).toBe(
+					"set by the owner",
+				)
+
+				const refusal = (args: unknown) =>
+					Effect.map(call(args), ({ error, text }) => [error, text] as const)
+				const numbers = { name: "Dashboard", collection: "numbers" }
+				expect(yield* refusal({ ...numbers, operation: "get" })).toEqual([
+					true,
+					"get needs the document's id.",
+				])
+				expect(yield* refusal({ ...numbers, operation: "put", id: "a" })).toEqual([
+					true,
+					"put needs data: the JSON value to store.",
+				])
+				expect(yield* refusal({ ...numbers, operation: "get", id: "missing" })).toEqual([
+					true,
+					"Document missing not found in numbers.",
+				])
+				expect((yield* refusal({ ...numbers, operation: "get", id: "has.dot" }))[1]).toContain(
+					"id must be",
+				)
+				expect(
+					(yield* refusal({ name: "Dashboard", collection: "Numbers", operation: "list" }))[1],
+				).toContain("collection must be")
+				expect((yield* refusal({ ...numbers, operation: "everything" }))[1]).toContain(
+					"artifact_data needs name",
+				)
+				expect(
+					(yield* refusal({
+						...numbers,
+						operation: "put",
+						id: "big",
+						data: "x".repeat(70_000),
+					}))[1],
+				).toContain("at most 65536 bytes")
+				expect(
+					yield* refusal({ name: "Someone else's", collection: "numbers", operation: "list" }),
+				).toEqual([
+					true,
+					'No artifact named "Someone else\'s" has been saved in this session. Save it with save_artifact first.',
+				])
+
+				for (const value of [false, 0, ""]) {
+					expect(
+						(yield* done({ collection: "flags", operation: "put", id: "falsy", data: value })).data,
+					).toBe(value)
+				}
+				expect(
+					(yield* refusal({
+						...numbers,
+						operation: "add",
+						data: JSON.parse(`${"[".repeat(33)}1${"]".repeat(33)}`),
+					}))[1],
+				).toContain("nested at most 32 deep")
+				for (const limit of [0, 101, 1.5]) {
+					expect((yield* refusal({ ...numbers, operation: "list", limit }))[1]).toContain(
+						"limit an integer from 1 to 100",
+					)
+				}
+				for (const page of ["abc", "1e3", "-1", "007"]) {
+					expect(yield* refusal({ ...numbers, operation: "list", page })).toEqual([
+						true,
+						"page must be the next_page of an earlier list.",
+					])
+				}
+
+				for (const [name, bytes] of [
+					["first", 15_000],
+					["second", 15_000],
+					["third", 15_000],
+					["huge", 50_000],
+					["last", 10],
+				] as const) {
+					yield* done({
+						collection: "large",
+						operation: "put",
+						id: name,
+						data: "x".repeat(bytes),
+					})
+				}
+				const pages: Array<ReadonlyArray<string>> = []
+				let page: string | null = null
+				do {
+					const listed: ToolReply = yield* done({ collection: "large", operation: "list", page })
+					const documents = listed.data as ReadonlyArray<{
+						id: string
+						data?: string
+						data_omitted?: string
+					}>
+					pages.push(
+						documents.map((document) =>
+							document.data_omitted === undefined ? document.id : `${document.id} (omitted)`,
+						),
+					)
+					expect(JSON.stringify(listed).length).toBeLessThan(50 * 1024)
+					page = listed.next_page ?? null
+				} while (typeof page === "string")
+				expect(pages).toEqual([["first", "second"], ["third"], ["huge (omitted)"], ["last"]])
+				const huge = yield* done({ collection: "large", operation: "get", id: "huge" })
+				expect(huge).toMatchObject({
+					id: "huge",
+					data_omitted: "50002 bytes of JSON, more than this tool can return",
+				})
+				expect("data" in huge).toBe(false)
+
+				const other = yield* createSession
+				expect(
+					(yield* Effect.promise(() =>
+						sessionArtifactData(other.id, 1, { ...numbers, operation: "list" }),
+					)).content,
+				).toEqual([
+					{
+						type: "text",
+						text: 'No artifact named "Dashboard" has been saved in this session. Save it with save_artifact first.',
+					},
+				])
+				expect((yield* request(apiFetch, "DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
+				expect((yield* refusal({ ...numbers, operation: "list" }))[1]).toContain(
+					"No artifact named",
 				)
 			}),
 		))

@@ -29,6 +29,28 @@ export const SavedSessionArtifact = Schema.Union([
 ])
 export type SavedSessionArtifact = typeof SavedSessionArtifact.Type
 
+export const DEFAULT_ARTIFACT_DATA_LIMIT = 50
+export const MAX_ARTIFACT_DATA_LIMIT = 100
+export const ARTIFACT_DATA_RESULT_BYTES = 40 * 1024
+
+export const ARTIFACT_DATA_OPERATIONS = ["list", "get", "add", "put", "delete"] as const
+
+export const SessionDataRequest = Schema.Struct({
+	operation: Schema.Literals(ARTIFACT_DATA_OPERATIONS),
+	collection: Schema.String,
+	id: Schema.String,
+	data: Schema.String,
+	page: Schema.String,
+	limit: Schema.Int,
+})
+export type SessionDataRequest = typeof SessionDataRequest.Type
+
+export const SessionDataResult = Schema.Union([
+	Schema.Struct({ ok: Schema.Literal(true), text: Schema.String }),
+	Refused,
+])
+export type SessionDataResult = typeof SessionDataResult.Type
+
 export const SessionArtifactToolCalls = {
 	sessionFileSave: {
 		args: Schema.Tuple([Session, Turn, Schema.String, Schema.Uint8Array]),
@@ -37,5 +59,9 @@ export const SessionArtifactToolCalls = {
 	sessionArtifactSave: {
 		args: Schema.Tuple([Session, Turn, Schema.String, Schema.Array(SessionArtifactEntry)]),
 		result: SavedSessionArtifact,
+	},
+	sessionArtifactData: {
+		args: Schema.Tuple([Session, Turn, Schema.String, SessionDataRequest]),
+		result: SessionDataResult,
 	},
 }

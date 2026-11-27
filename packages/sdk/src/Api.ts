@@ -473,6 +473,7 @@ export const RESERVED_TOOL_NAMES: ReadonlyArray<string> = [
 	"delete",
 	"bash",
 	"save_artifact",
+	"artifact_data",
 	"codemode",
 	"tool_search",
 ]
