@@ -9,12 +9,12 @@
 			"schemas": {
 				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
-				"event:Checkfu.Agent/agent.created": "577e442e70db2103263d5ba4d8b3f3d5baf8fe679959d26cfccd0ef59b0439c8",
-				"event:Checkfu.Agent/agent.updated": "1d5bf1ff72adf9890df7d5d867c8a67e44abbc04985461987c5a1b1f1265d1af",
+				"event:Checkfu.Agent/agent.created": "09d20bd66cdd1deedd5487fe64b0918106c3b1d2f98257207ca6d8d38ddbb0ae",
+				"event:Checkfu.Agent/agent.updated": "059d625a1443504eb752b642d8006b9577d64db5d834b8a2c0033eaf326377eb",
 				"command-reply:Checkfu/ArchiveAgent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.Environment": "0c5d8220ee3f83a8422f1d67486b0b3bfe0143847474e818d326a9459abcb1f1",
-				"event:Checkfu.Environment/environment.created": "42b0e29ebeb664625fef1062a706fe9c40c183f24733d2c03f39c3f9cf89f1ca",
-				"event:Checkfu.Environment/environment.updated": "9b41c95248b07dc0389012143685e803b5843cf3f58bc454a0042294b2f05381",
+				"event:Checkfu.Environment/environment.created": "b60f7ea7dd7b67d23286de6aab10444c8655b3b8a86a83fc7c2a1292b630caf9",
+				"event:Checkfu.Environment/environment.updated": "297557bf2d815e74147e8d41c852b83f2b99749476a6abc37431e556912dd204",
 				"event:Checkfu.Environment/environment.archived": "cc40307a097fb02a89b0665b3b30d55b529c5c22181145057e4c8342f0bb7e76",
 				"event:Checkfu.Environment/environment.deleted": "d8cc5c454e7e4a7da5915e355883b5e36af2c92eced63ec03032fd4f5e663a45",
 				"command-reply:Checkfu/CreateEnvironment": "10e48fa01759f910250d262f57fbc7db43e63b384b33b800c7ce34fbc37e0983",
@@ -145,9 +145,9 @@
 				"command-reply:Checkfu/ArchiveEnvironmentIfCurrent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/WriteMemory": "010c37d5d6f817f241c5e10e1ec6eedb66edb39506f331c24b65bdaa916bc24a",
 				"command-reply:Checkfu/DeleteMemory": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"view:Checkfu.AgentView@v3": "36594e5684bc6c2d24b1594f5d8ae38dacc218f211dcfd64b96d52b7e62ff610",
-				"view:Checkfu.AgentVersionByNumberView@v4": "7a9f1e3b1d8dd34aba1cfa2c527d324654363858701396cd0525ad6f7be1e89f",
-				"view:Checkfu.EnvironmentView@v0": "e88f0b2a5e305927998bd8476a68bd0fe680620aa08decf10dd2df928a2c7e47",
+				"view:Checkfu.AgentView@v3": "118a2b6d8066032e89c7e47e1fc19a8e83c089f39cd5b063d9f682491f82329f",
+				"view:Checkfu.AgentVersionByNumberView@v4": "c0116151c98a3a04e724bac074a1757ca57cdaecba68f2439156c7fb54d06bf5",
+				"view:Checkfu.EnvironmentView@v0": "0347b87a4b5a89e6dbaad3339fa6322eabc86ad4d28ba6f48721955efd8d58b7",
 				"view:Checkfu.SessionView@v6": "812c81c7cb06296edd7d12ea159e5b5021e9e04067409d2d20eba719f7145174",
 				"view:Checkfu.SessionTurnCompletion@v1": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
 				"view:Checkfu.TurnInput@v5": "41cb2d3bdb3fc00d0213f321b7772bedc91f00f1aaa7003052112f604d5563ca",
@@ -167,12 +167,12 @@
 				"policy-delivery:Checkfu.PublishSessionOutputs/Session": "256a19cb0eed039cbea2c464dd65e825c57baf6b36b71a1cc898eeb9e7cff6da",
 				"policy-delivery:Checkfu.ExpireArtifactReservations/Artifact": "2c4debc1b87204ece46e7d374a7f51c948c9c3dd6f5ecb61ec5ab25dcecf6f46",
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
 				"saga-input:Checkfu.RunTurn": "56b5422c6cc2f000891b60dfda037ee81cd6c9f86ce7ff528cc2a913eecfbfe1",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "0b173c30d84e4e7ba5f9491f5b7e1594dfb33c3dcaff8b9c8e42aa00bcd74eb5",
@@ -477,105 +477,105 @@
 						"_tag": "agent.created",
 						"version": 99,
 						"version_id": "\udc00",
-						"name": ":4G3XU]')?",
+						"name": "GX])?",
 						"model": {
 							"id": "prototype"
 						},
 						"system": null,
-						"description": "",
-						"mcp_servers": " ",
-						"tools": "0N~G~3ng#"
+						"description": "Sq0",
+						"mcp_servers": "😀",
+						"tools": "😀"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 35,
 						"version_id": "-1",
-						"name": "U",
+						"name": "wHy)-",
 						"model": {
 							"id": "\udc00"
 						},
 						"system": null,
-						"description": ")-;r",
-						"mcp_servers": "[G}nH2'/)Y",
-						"tools": "0"
+						"description": "H𥍪𨾘񾜟󫰪o",
+						"mcp_servers": "]<0JW`}NVF",
+						"tools": "\n"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 101,
 						"version_id": "\u0000",
-						"name": "igRSiS+K;",
+						"name": "iRi+;n+<1E",
 						"model": {
-							"id": "\ud800"
+							"id": "L'U3K%11m+"
 						},
-						"system": null,
-						"description": "\u0000",
-						"mcp_servers": "",
-						"tools": "L'U3K%11m+"
+						"system": "Ea2,?X3*`G",
+						"description": null,
+						"mcp_servers": "__proto__",
+						"tools": ")p]Yv"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 100,
 						"version_id": "\u0000",
-						"name": "\ud800",
+						"name": "񿠓",
 						"model": {
-							"id": "\udc00"
+							"id": "😀"
 						},
-						"system": "😀",
-						"description": null,
-						"mcp_servers": "\udc00",
-						"tools": "\u0000"
+						"system": null,
+						"description": "񮑾􈜆",
+						"mcp_servers": "",
+						"tools": "__proto__"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 11,
 						"version_id": "-1",
-						"name": "#`!WGu2UA*",
+						"name": "!Gu",
 						"model": {
-							"id": "R"
+							"id": "__proto__"
 						},
-						"system": null,
-						"description": "\n",
-						"mcp_servers": "s",
-						"tools": "\u0000"
+						"system": "8T'W*1(;nf",
+						"description": "񱫜",
+						"mcp_servers": "",
+						"tools": "😀"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 4,
 						"version_id": "\udc00",
-						"name": "wFM0{Q",
+						"name": "M􇛐h򾤫7'^I",
 						"model": {
-							"id": ":"
+							"id": "😀"
 						},
-						"system": " ",
-						"description": null,
-						"mcp_servers": "",
-						"tools": "52_XZ8J%rC"
+						"system": "򮘽񒟪",
+						"description": "",
+						"mcp_servers": "\t",
+						"tools": "\t"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 6,
 						"version_id": "w[$A>5%CLs",
-						"name": "😀",
+						"name": "L#SiUX`Ub;",
 						"model": {
-							"id": "4294967295"
+							"id": "eN(\\XdN"
 						},
-						"system": "\n",
+						"system": null,
 						"description": null,
-						"mcp_servers": "URXp`kUn",
-						"tools": ""
+						"mcp_servers": "😀",
+						"tools": "0"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 86,
 						"version_id": "&'1J[U0",
-						"name": "M_",
+						"name": "?B)OF0`m\\",
 						"model": {
-							"id": "\u0000"
+							"id": "~"
 						},
-						"system": " ",
+						"system": null,
 						"description": null,
-						"mcp_servers": "\udc00",
-						"tools": "\udc00"
+						"mcp_servers": "__proto__",
+						"tools": "etb"
 					}
 				],
 				"event:Checkfu.Agent/agent.updated": [
@@ -583,105 +583,105 @@
 						"_tag": "agent.updated",
 						"version": 97,
 						"version_id": "toString",
-						"name": "B",
+						"name": ";򂎊w",
 						"model": {
-							"id": "Jw.:<Gc0PG"
+							"id": "\u0000"
 						},
-						"system": "",
-						"description": "\n",
-						"mcp_servers": "",
-						"tools": "prototype"
+						"system": "P*$<6F.I5R",
+						"description": "",
+						"mcp_servers": "]L~>\\]?Azc",
+						"tools": "toString"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 99,
 						"version_id": "toString",
-						"name": "H",
+						"name": "R򚈉񖅰q",
 						"model": {
-							"id": "S&:qn"
+							"id": "&"
 						},
-						"system": "Q`$-,2h1~1",
+						"system": null,
 						"description": null,
-						"mcp_servers": "0",
-						"tools": "__proto__"
+						"mcp_servers": ",2h1~1\\JCB",
+						"tools": "0z )v{5k'?"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 52,
 						"version_id": "R",
-						"name": "\ud800",
+						"name": ")",
 						"model": {
-							"id": "1h~S$T'\\^m"
+							"id": "toString"
 						},
-						"system": "4294967295",
+						"system": null,
 						"description": null,
-						"mcp_servers": "0",
-						"tools": "4294967295"
+						"mcp_servers": "4294967295",
+						"tools": "__proto__"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 39,
 						"version_id": "\udc00",
-						"name": "(f/#i",
+						"name": "/󔹀󣌈:F}&a",
 						"model": {
-							"id": "\ud800"
+							"id": "?9[;ot"
 						},
-						"system": null,
-						"description": "0",
-						"mcp_servers": "",
-						"tools": "prototype"
+						"system": ":􈐧^(񔭻",
+						"description": "1D6Fqc`M",
+						"mcp_servers": "7!<0y>YQ",
+						"tools": ""
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 2,
 						"version_id": "__proto__",
-						"name": "4294967295",
+						"name": "@",
 						"model": {
-							"id": "\ud800"
+							"id": "\\^"
 						},
-						"system": "\\",
-						"description": null,
-						"mcp_servers": "__proto__",
-						"tools": "tk/0"
+						"system": "k𼡰󕵩]l",
+						"description": "0jTANoWV5[",
+						"mcp_servers": "-1",
+						"tools": "fUteO-CT}_"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 95,
 						"version_id": "aIoC?07E",
-						"name": "^",
+						"name": "o󹚚",
 						"model": {
-							"id": "enj[lt%P>&"
+							"id": "[lt%P>&/"
 						},
-						"system": "\t",
+						"system": "\\3*xTC.PC(",
 						"description": null,
 						"mcp_servers": "__proto__",
-						"tools": "\t"
+						"tools": ","
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 100,
 						"version_id": "}}=",
-						"name": "\t",
+						"name": "򍏤",
 						"model": {
-							"id": "-1"
+							"id": "\ud800"
 						},
-						"system": "\ud800",
-						"description": "toString",
-						"mcp_servers": "K-]2~)M5`S",
-						"tools": "prototype"
+						"system": "QK]~M`5m&\\",
+						"description": "",
+						"mcp_servers": "8|\"e.&D.,Z",
+						"tools": ""
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 66,
 						"version_id": "j7Qy$)y",
-						"name": "\t",
+						"name": "zW`'{Tx*MG",
 						"model": {
-							"id": "😀"
+							"id": "\ud800"
 						},
-						"system": null,
-						"description": null,
+						"system": "",
+						"description": "",
 						"mcp_servers": "prototype",
-						"tools": "{6T`x3*{MG"
+						"tools": "Bi?eqi]L3}"
 					}
 				],
 				"command-reply:Checkfu/ArchiveAgent": [
@@ -803,22 +803,127 @@
 					{
 						"_tag": "environment.created",
 						"version": 1,
-						"name": "__proto__",
+						"name": "W>%kYY=-Ub",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
-								"allow_mcp_servers": false,
+								"allow_mcp_servers": true,
 								"allow_package_managers": true,
-								"allowed_hosts": []
+								"allowed_hosts": [
+									"}",
+									"A&+u$lj",
+									",{,gk7K(N",
+									"\u0000",
+									"Y*X]",
+									"HA:(b1NxA)",
+									"\u0000",
+									" ",
+									"v9`S-n9Q7X",
+									"😀"
+								]
 							}
 						}
 					},
 					{
 						"_tag": "environment.created",
 						"version": 97,
-						"name": "0",
+						"name": "s}/Cc7rhE:",
+						"description": "OZ)~N;\\{rR",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "unrestricted"
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 99,
+						"name": "񸭃𞣌𨋬񲵉",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": []
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 99,
+						"name": "]sL{fBdxeT",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": []
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 5,
+						"name": "YU<\"P",
+						"description": "z6zn8?oS/b",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"z",
+									"4294967295",
+									"G",
+									"4294967295",
+									"dxo2U+A(",
+									"7",
+									"\u0000",
+									"Fl",
+									"\u0000",
+									"7XE"
+								]
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 38,
+						"name": "񂘡",
+						"description": "U]>n0R=8aE",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"😀",
+									"cOs6",
+									"D \\75}~@4+",
+									"4294967295",
+									"0",
+									"i[Q*!\"E{Kk",
+									"P>b?,?^I?G",
+									"-1",
+									"|[*O",
+									"b"
+								]
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 25,
+						"name": ".f:f9Oe~NS",
 						"description": "",
 						"config": {
 							"type": "cloud",
@@ -829,101 +934,8 @@
 					},
 					{
 						"_tag": "environment.created",
-						"version": 99,
-						"name": "Z^F9%M(Dq~",
-						"description": "0",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 99,
-						"name": "4294967295",
-						"description": null,
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": false,
-								"allowed_hosts": [
-									"fzBfd,x-e",
-									"L4*jq%V",
-									"t`Cb:='+Pi",
-									"-1",
-									"X"
-								]
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 5,
-						"name": ">",
-						"description": "d<<\"P,$ZVz",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"N",
-									"😀",
-									"@/bU~W?~p;",
-									"😀",
-									"4294967295",
-									"G"
-								]
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 38,
-						"name": "\n",
-						"description": "\t",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 25,
-						"name": ".;fa:If&9'",
-						"description": "toString",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"\u0000",
-									"\t",
-									"l",
-									"\u0000",
-									")F",
-									"\n",
-									"prototype",
-									"Xo52@InTgQ",
-									"\n",
-									"__proto__"
-								]
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
 						"version": 2,
-						"name": "\ud800",
+						"name": "񐇘",
 						"description": "",
 						"config": {
 							"type": "cloud",
@@ -937,31 +949,20 @@
 					{
 						"_tag": "environment.updated",
 						"version": 43,
-						"name": "B5?/",
-						"description": null,
+						"name": "?~yga_ow7",
+						"description": "󘐘񣀓񞐈",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"{o w7?lB2f",
-									">=;6",
-									">\\ U&)XLZ6",
-									"\n",
-									"\ud800",
-									"[d-m[",
-									"4294967295"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
 					{
 						"_tag": "environment.updated",
 						"version": 100,
-						"name": "\t",
-						"description": "FOM`&&mOX+",
+						"name": "6",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -972,7 +973,7 @@
 					{
 						"_tag": "environment.updated",
 						"version": 6,
-						"name": "tm6f.=D",
+						"name": "t6.D=~Zcig",
 						"description": null,
 						"config": {
 							"type": "cloud",
@@ -984,8 +985,8 @@
 					{
 						"_tag": "environment.updated",
 						"version": 100,
-						"name": "}e|k ",
-						"description": "-1",
+						"name": "}| 9 XEbku",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -996,34 +997,23 @@
 					{
 						"_tag": "environment.updated",
 						"version": 55,
-						"name": "\ud800",
+						"name": "TDsAy/f5pP",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
-								"allow_mcp_servers": false,
+								"allow_mcp_servers": true,
 								"allow_package_managers": false,
-								"allowed_hosts": [
-									"0",
-									"/",
-									"toString",
-									"pPwpOG0l3Z",
-									"😀",
-									" ",
-									"9M",
-									"😀",
-									"0Y8+yTL",
-									"\\"
-								]
+								"allowed_hosts": []
 							}
 						}
 					},
 					{
 						"_tag": "environment.updated",
 						"version": 83,
-						"name": "\ud800",
-						"description": "",
+						"name": "񫠐",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -1034,34 +1024,23 @@
 					{
 						"_tag": "environment.updated",
 						"version": 5,
-						"name": "#",
-						"description": "",
+						"name": "Rb",
+						"description": "PpX",
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": false,
-								"allowed_hosts": [
-									"X|L6#~\"=T",
-									"vw`X_Y",
-									"P.",
-									"Bc8`5O\\",
-									"'$+#76gO`l",
-									" ",
-									"zdw6Uw$q:,",
-									"0",
-									"4",
-									"__proto__"
-								]
+								"allow_mcp_servers": false,
+								"allow_package_managers": true,
+								"allowed_hosts": []
 							}
 						}
 					},
 					{
 						"_tag": "environment.updated",
 						"version": 4,
-						"name": "0",
-						"description": "4294967295",
+						"name": "Q",
+						"description": "xQWkO*}}G",
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -6951,137 +6930,165 @@
 						"type": "agent",
 						"version": 94,
 						"current_version_id": "8C``HW&OpE",
-						"name": "Ri^VH-0bT_",
+						"name": "^񽈿𽦨b",
 						"model": {
-							"id": "~"
+							"id": "!$~m~<Tf`w"
 						},
-						"system": null,
-						"description": null,
-						"mcp_servers": [],
-						"tools": [
+						"system": "ov^!𡯎e|2",
+						"description": "",
+						"mcp_servers": [
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "lT_8_1_S_-"
+								"type": "url",
+								"name": "sxA_z",
+								"url": "n{t=*"
 							},
 							{
-								"type": "custom",
-								"name": "FtBMlBGQ",
-								"description": "^~rw{",
-								"input_schema": {
-									"😀": ""
-								}
+								"type": "url",
+								"name": "g",
+								"url": "`p3F\"6h4gG"
 							},
 							{
-								"type": "custom",
-								"name": "R",
-								"description": "prototype",
-								"input_schema": {
-									"0": {},
-									"T#\"zAU/=YP": true,
-									"3%[poU7kgW": {
-										"-1": [
-											false,
-											false,
-											false,
-											"",
-											null,
-											{
-												"0": {}
-											},
-											false,
-											null
-										]
-									},
-									"__proto__": " ",
-									"\ud800": "\ud800",
-									"": "\udc00",
-									" ": true,
-									"+": true,
-									"CTu/": false,
-									"\udc00": {}
-								}
+								"type": "url",
+								"name": "d_2",
+								"url": "R"
 							},
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "v"
+								"type": "url",
+								"name": "F1_4P",
+								"url": "u}B*['Cb!,"
 							},
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "yy54g",
-								"configs": [
-									{
-										"name": "z"
-									},
-									{
-										"name": "\t"
-									},
-									{
-										"name": "4294967295",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "^",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "?SSQ^mJ6'<",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "0d>B^HBb"
-									},
-									{
-										"name": "x"
-									},
-									{
-										"name": "4294967295"
-									},
-									{
-										"name": "0",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "4294967295",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									}
-								]
+								"type": "url",
+								"name": "w0xS_w_E_e",
+								"url": ":?S"
 							},
 							{
-								"type": "custom",
-								"name": "1KyU",
-								"description": "F\"6",
-								"input_schema": {
-									";=4]j%\\:$R": [],
-									"\n": null
-								}
+								"type": "url",
+								"name": "R3qa_k",
+								"url": "toString"
 							},
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "q7",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "\udc00"
-									},
-									{
-										"name": "prototype"
-									}
-								]
+								"type": "url",
+								"name": "P",
+								"url": "toString"
+							},
+							{
+								"type": "url",
+								"name": "a",
+								"url": "NgB>M]*R%5"
+							},
+							{
+								"type": "url",
+								"name": "vR7RU_41_x",
+								"url": "__proto__"
+							},
+							{
+								"type": "url",
+								"name": "Lts2qY_krA",
+								"url": "4294967295"
 							}
 						],
-						"created_at": "-114296-08-16T06:24:15.143Z",
-						"updated_at": "-271821-04-20T00:00:00.036Z",
-						"archived_at": "+104424-11-20T16:05:34.237Z"
+						"tools": [
+							{
+								"type": "custom",
+								"name": "d",
+								"description": "4294967295",
+								"input_schema": {
+									"0": {},
+									"": false,
+									"kt)0~S7": null,
+									"__proto__": " ",
+									"I%WLvD)BSm": " ",
+									"CTu/": false,
+									"\ud800": -5.4e-323,
+									"\u0000": {
+										"0": null,
+										"h>-L#": null,
+										"😀": null,
+										".": {},
+										" ": false,
+										"": "",
+										"\udc00": [],
+										"prototype": "\ud800",
+										"__proto__": [],
+										"IU?R~qyT!^": null
+									},
+									"\udc00": [],
+									"t {\\:YlHuh": "1a_"
+								}
+							},
+							{
+								"type": "custom",
+								"name": "KiDTj5ZLWJ",
+								"description": "\u0000",
+								"input_schema": {
+									"ih+zEea}`H": 6.4e-323,
+									"": {},
+									"b_tD_4UVAV": null,
+									"!f9Iw{-qN%": "😀",
+									"toString": true,
+									"\udc00": -1.7976931348623145e+308,
+									"4294967295": {},
+									"{": {},
+									"__proto__": false,
+									"prototype": null
+								}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "A3mW1DH_b"
+							},
+							{
+								"type": "custom",
+								"name": "TLuyH7Zm",
+								"description": "-1",
+								"input_schema": {
+									" ": "",
+									"#1'/?:F>QM": [],
+									"4294967295": [],
+									"": "\n",
+									"-1": {},
+									"(.^": false,
+									"Z8gJrZDuA3": true,
+									"Aw3iBr,rfX": 9.384415201294825e+202,
+									"\udc00": [],
+									"y\\x-?7": []
+								}
+							},
+							{
+								"type": "custom",
+								"name": "i28XGB",
+								"description": "prototype",
+								"input_schema": {
+									"0": 69170419148038680,
+									"8": [],
+									"": [],
+									"\udc00": [],
+									"4294967295": {},
+									"bv~FR$wW3C": "\ud800",
+									"\t": "😀",
+									"7k`": [],
+									"\ud800": false,
+									"\n": []
+								}
+							},
+							{
+								"type": "custom",
+								"name": "7Tlo",
+								"description": "4294967295",
+								"input_schema": {
+									"\ud800": "-1",
+									"36/ZIld&XW": [],
+									"5SKpg*|\\2": null,
+									"\n": [],
+									"\t": false,
+									"IRZ^-_vsRy": -1.7976931348623127e+308
+								}
+							}
+						],
+						"created_at": "-271821-04-20T00:00:00.050Z",
+						"updated_at": "+269001-07-27T03:09:30.856Z",
+						"archived_at": "+132074-01-07T04:29:01.888Z"
 					},
 					null,
 					{
@@ -7089,23 +7096,13 @@
 						"type": "agent",
 						"version": 43,
 						"current_version_id": "4294967295",
-						"name": "\u0000",
+						"name": "gWF$6iyKjf",
 						"model": {
-							"id": "toString"
+							"id": "\t"
 						},
-						"system": "",
-						"description": null,
+						"system": "~",
+						"description": "",
 						"mcp_servers": [
-							{
-								"type": "url",
-								"name": "Z",
-								"url": "Njf!*"
-							},
-							{
-								"type": "url",
-								"name": "A",
-								"url": "C_}9"
-							},
 							{
 								"type": "url",
 								"name": "6RagCb_3_6",
@@ -7115,257 +7112,11 @@
 								"type": "url",
 								"name": "A_g9Jv",
 								"url": "=W"
-							},
-							{
-								"type": "url",
-								"name": "a",
-								"url": "pQD"
-							},
-							{
-								"type": "url",
-								"name": "nYOd_XT_R8",
-								"url": "k"
-							},
-							{
-								"type": "url",
-								"name": "v_c_J0_F",
-								"url": "\n"
-							},
-							{
-								"type": "url",
-								"name": "s_Q_D_3_W6",
-								"url": "T_<dJ+Sv{<"
-							},
-							{
-								"type": "url",
-								"name": "o6ZTNb_o6",
-								"url": "-1"
-							},
-							{
-								"type": "url",
-								"name": "hk_1jV_Q",
-								"url": "F"
 							}
 						],
-						"tools": [
-							{
-								"type": "custom",
-								"name": "vgQJY4FS8w",
-								"description": "UA^~mT;0iF",
-								"input_schema": {}
-							},
-							{
-								"type": "custom",
-								"name": "h2h",
-								"description": "toString",
-								"input_schema": {}
-							},
-							{
-								"type": "custom",
-								"name": "hY",
-								"description": "g;Bij_Sf|o",
-								"input_schema": {
-									"": false,
-									"\n": [],
-									"&NiS@}PM": null,
-									"prototype": null,
-									"-1": null,
-									"4294967295": 8e-323
-								}
-							},
-							{
-								"type": "custom",
-								"name": "5TVDYm_6FN",
-								"description": "Zpc{A{=7I",
-								"input_schema": {}
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "QGb2a-",
-								"configs": [
-									{
-										"name": "%V>a)*(V",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "prototype",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "4294967295",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "\udc00"
-									},
-									{
-										"name": "+l|w3;npYS",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "\u0000",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": ".ssHcO,nT7",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "Que,j:FD<.",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": " ",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "prototype",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									}
-								]
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "P_st9",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "\t",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "0"
-									},
-									{
-										"name": "😀"
-									},
-									{
-										"name": "__proto__"
-									},
-									{
-										"name": "\n",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "{sCwD&}K/f"
-									},
-									{
-										"name": "4294967295"
-									},
-									{
-										"name": "😀"
-									},
-									{
-										"name": "a",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									}
-								]
-							},
-							{
-								"type": "custom",
-								"name": "Of_gY4JJPO",
-								"description": "\u0000",
-								"input_schema": {
-									"😀": true,
-									"-1": {},
-									"": {
-										"": -2.5e-323,
-										"&cC?[": true,
-										"a\"h]S\"S=C,": "😀",
-										"e2J|": false,
-										"toString": 1.7976931348623123e+308,
-										"l_| wLNg6|": [],
-										" nV>=8i>t/": false,
-										"😀": {
-											"\udc00": "toString"
-										},
-										"\n": ")Wl"
-									},
-									"g": true,
-									" ": []
-								}
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "eVUAQ_8op1",
-								"default_config": {}
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "c",
-								"configs": [
-									{
-										"name": "\u0000"
-									},
-									{
-										"name": "WPtD,.ydKG",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "Ld%xWs'c}O"
-									},
-									{
-										"name": "D"
-									}
-								]
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "Qbj_1te_WU",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "\ud800"
-									},
-									{
-										"name": "=FN"
-									},
-									{
-										"name": "[",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "toString",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "_kX"
-									}
-								]
-							}
-						],
-						"created_at": "-085377-09-09T10:28:12.436Z",
-						"updated_at": "-074456-02-01T12:09:19.419Z",
+						"tools": [],
+						"created_at": "+069552-03-10T04:18:19.055Z",
+						"updated_at": "-104493-10-29T04:23:08.569Z",
 						"archived_at": null
 					},
 					null,
@@ -7374,68 +7125,60 @@
 						"type": "agent",
 						"version": 50,
 						"current_version_id": "+47Lm}",
-						"name": "-Po)tXf]vZ",
+						"name": "otfvPn`B",
 						"model": {
-							"id": ";"
+							"id": "__proto__"
 						},
 						"system": null,
-						"description": "__proto__",
+						"description": null,
 						"mcp_servers": [
 							{
 								"type": "url",
-								"name": "73Z_jsu",
-								"url": "__proto__"
-							},
-							{
-								"type": "url",
-								"name": "4jfPnY_Yo",
-								"url": "t0 P_R"
-							},
-							{
-								"type": "url",
-								"name": "GQiyku_Z_g",
-								"url": "__proto__"
-							},
-							{
-								"type": "url",
-								"name": "W",
-								"url": "XMx"
-							},
-							{
-								"type": "url",
-								"name": "1",
-								"url": "7"
-							},
-							{
-								"type": "url",
-								"name": "1le_u_O3",
+								"name": "A",
 								"url": "0"
 							},
 							{
 								"type": "url",
-								"name": "ZApNeJ4V_Q",
-								"url": "kjo'h+,s[H"
+								"name": "d_u_Y",
+								"url": "Y(7f{`\""
 							},
 							{
 								"type": "url",
-								"name": "s_Q",
-								"url": "'^/"
+								"name": "YYoyt-f7_c",
+								"url": "I'd@}%gWvs"
 							},
 							{
 								"type": "url",
-								"name": "8X6Bxl_m4x",
-								"url": "\udc00"
+								"name": "JGsn_E",
+								"url": "B"
 							},
 							{
 								"type": "url",
-								"name": "3",
-								"url": "\udc00"
+								"name": "f",
+								"url": "\ud800"
+							},
+							{
+								"type": "url",
+								"name": "H",
+								"url": " "
+							},
+							{
+								"type": "url",
+								"name": "tS_O_3_I",
+								"url": "0"
 							}
 						],
-						"tools": [],
-						"created_at": "1970-01-01T00:00:00.023Z",
-						"updated_at": "1970-01-01T00:00:00.004Z",
-						"archived_at": "1970-01-01T00:00:00.034Z"
+						"tools": [
+							{
+								"type": "custom",
+								"name": "oN",
+								"description": "prototype",
+								"input_schema": {}
+							}
+						],
+						"created_at": "-223050-10-01T10:27:48.281Z",
+						"updated_at": "+213181-06-28T14:11:23.922Z",
+						"archived_at": null
 					},
 					null,
 					{
@@ -7443,41 +7186,36 @@
 						"type": "agent",
 						"version": 7,
 						"current_version_id": " ",
-						"name": "toString",
+						"name": "|WO_zKsemY",
 						"model": {
-							"id": "😀"
+							"id": "&}l0w"
 						},
-						"system": "&_Lzc",
-						"description": "e4mYZVN&",
+						"system": "]ig5[",
+						"description": null,
 						"mcp_servers": [
 							{
 								"type": "url",
-								"name": "XO_lk_c_El",
-								"url": "_%g<m*V@Ne"
+								"name": "e_H6KiNPbO",
+								"url": " "
 							},
 							{
 								"type": "url",
-								"name": "3n_bQ_GPEi",
-								"url": "t"
+								"name": "GPE_i9",
+								"url": ";Q`"
 							},
 							{
 								"type": "url",
-								"name": "f",
-								"url": "toString"
+								"name": "GR5V_qCQL7",
+								"url": "0"
 							},
 							{
 								"type": "url",
-								"name": "R",
-								"url": "😀"
+								"name": "zh72_u2",
+								"url": "dp50?x/X8]"
 							},
 							{
 								"type": "url",
-								"name": "wWm35_LesQ",
-								"url": "v%"
-							},
-							{
-								"type": "url",
-								"name": "igqAvadx_m",
+								"name": "m",
 								"url": "-Y3?q+kT\\l"
 							},
 							{
@@ -7489,11 +7227,141 @@
 								"type": "url",
 								"name": "N87p0cmnFo",
 								"url": "prototype"
+							},
+							{
+								"type": "url",
+								"name": "F",
+								"url": "[]+;"
+							},
+							{
+								"type": "url",
+								"name": "M",
+								"url": "0"
+							},
+							{
+								"type": "url",
+								"name": "Ah",
+								"url": "\n"
 							}
 						],
-						"tools": [],
-						"created_at": "-121451-02-08T11:39:15.782Z",
-						"updated_at": "-082721-03-24T13:08:13.258Z",
+						"tools": [
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "bqfPn_t0_i"
+							},
+							{
+								"type": "custom",
+								"name": "XGJH7BcnIy",
+								"description": "__proto__",
+								"input_schema": {}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "pU_qKxO_i",
+								"default_config": {}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "fJ8"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "n"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "y"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "7Q12DB_O",
+								"configs": [
+									{
+										"name": "Y"
+									},
+									{
+										"name": "V",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "\t",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "__proto__",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "\ud800"
+									},
+									{
+										"name": "toString",
+										"permission_policy": {
+											"type": "always_ask"
+										}
+									},
+									{
+										"name": "-1"
+									},
+									{
+										"name": "B_x7S|BbUY",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "y!G\"w_f/rL",
+										"permission_policy": {
+											"type": "always_ask"
+										}
+									},
+									{
+										"name": "JoO\"9T;LP:"
+									}
+								]
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "V"
+							},
+							{
+								"type": "custom",
+								"name": "oevRlY99sC",
+								"description": " ",
+								"input_schema": {
+									"-1": "vor^$wJ6e@",
+									"[": "\ud800",
+									"h ": "😀",
+									"": {
+										" ": [],
+										"\n": 1.797693134862313e+308,
+										"WP ": [
+											"",
+											[
+												null,
+												{},
+												null,
+												null,
+												[]
+											]
+										]
+									},
+									"0I": null
+								}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "8zcqd_tP"
+							}
+						],
+						"created_at": "1970-01-01T00:00:00.003Z",
+						"updated_at": "+275760-09-12T23:59:59.970Z",
 						"archived_at": null
 					},
 					null
@@ -7505,66 +7373,66 @@
 						"agent_id": "\ud800",
 						"type": "agent",
 						"version": 7,
-						"name": "toString",
+						"name": "򸘘",
 						"model": {
-							"id": "\n"
+							"id": "k%^F_HA)Lu"
 						},
 						"system": null,
-						"description": null,
+						"description": "򔋕𘇼6򿬦󹹯J",
 						"mcp_servers": [
 							{
 								"type": "url",
-								"name": "O",
-								"url": ")Lun YUQl\""
+								"name": "VvYPbs0XqA",
+								"url": "prototype"
 							},
 							{
 								"type": "url",
-								"name": "D_gu",
+								"name": "5TaR_T_fFb",
+								"url": "L"
+							},
+							{
+								"type": "url",
+								"name": "ANDghAin_q",
 								"url": "\n"
 							},
 							{
 								"type": "url",
-								"name": "t",
+								"name": "p_T",
+								"url": " "
+							},
+							{
+								"type": "url",
+								"name": "alx2a_xLPu",
+								"url": "/C9T7iZ~"
+							},
+							{
+								"type": "url",
+								"name": "BrDpsL_j_U",
+								"url": "r"
+							},
+							{
+								"type": "url",
+								"name": "hkfVB6_E_I",
+								"url": "3w>!o#K7(<"
+							},
+							{
+								"type": "url",
+								"name": "s_P_b",
 								"url": "4294967295"
 							},
 							{
 								"type": "url",
-								"name": "NzD_su_x_7",
-								"url": "CI*+N<W|J\\"
+								"name": "orNMD",
+								"url": "prototype"
 							},
 							{
 								"type": "url",
-								"name": "c",
-								"url": "SYf"
-							},
-							{
-								"type": "url",
-								"name": "D",
-								"url": "1OD}5"
-							},
-							{
-								"type": "url",
-								"name": "qjw_q_B",
-								"url": "}o]N'&#DMi"
-							},
-							{
-								"type": "url",
-								"name": "x2as",
-								"url": "[G~w"
-							},
-							{
-								"type": "url",
-								"name": "MXlz5d_A",
-								"url": "Tod"
-							},
-							{
-								"type": "url",
-								"name": "f9_h3",
-								"url": "XOb-gi`%Q}"
+								"name": "P0Dj8McW_B",
+								"url": "0"
 							}
 						],
 						"tools": [],
-						"created_at": "1969-12-31T23:59:59.967Z"
+						"created_at": "-071968-11-03T12:34:48.496Z"
 					},
 					null,
 					null,
@@ -7576,77 +7444,55 @@
 						"agent_id": "[&|#z Ly ",
 						"type": "agent",
 						"version": 100,
-						"name": "(-ww$*2qQg",
+						"name": "w$2q",
 						"model": {
-							"id": "toString"
+							"id": "bx"
 						},
-						"system": null,
-						"description": "\ud800",
-						"mcp_servers": [
-							{
-								"type": "url",
-								"name": "R_eE_-_4_h",
-								"url": "toString"
-							},
-							{
-								"type": "url",
-								"name": "C",
-								"url": "-<hy @>a"
-							},
-							{
-								"type": "url",
-								"name": "XG_3Dv_E_X",
-								"url": " "
-							},
-							{
-								"type": "url",
-								"name": "zB_SYS_d_j",
-								"url": "*~C@$s[ Nt"
-							},
-							{
-								"type": "url",
-								"name": "M",
-								"url": "v1{52;:R"
-							},
-							{
-								"type": "url",
-								"name": "S",
-								"url": "4294967295"
-							},
-							{
-								"type": "url",
-								"name": "m374UAcW_y",
-								"url": "'"
-							}
-						],
+						"system": "",
+						"description": null,
+						"mcp_servers": [],
 						"tools": [
 							{
 								"type": "custom",
-								"name": "3",
-								"description": "SG",
+								"name": "4ztPs1mA7L",
+								"description": "\u0000",
+								"input_schema": {}
+							},
+							{
+								"type": "custom",
+								"name": "C",
+								"description": "-<hy @>a",
 								"input_schema": {
-									"prototype": [
-										null
-									],
-									"-1": null,
-									"\t": {
-										"0": [],
-										"v/4]bD": false,
-										"Y]OK@": {
-											"\u0000": "\udc00"
-										},
-										"\t": false,
-										"-1": -6.290354070061791e-306,
-										"\ud800": " c_\"5(BfcX",
-										"prototype": null,
-										"toString": []
+									"0": -3e-323,
+									"-1": "",
+									"": -1.7976931348623143e+308,
+									"4294967295": -1.7976931348623147e+308,
+									"😀": {
+										"#T}Lj\\Gf}q": {},
+										"😀": true,
+										"\udc00": "-1",
+										"": true,
+										"v1{52;:": "😀",
+										" ": null,
+										"S&(-K(gO": "\t",
+										"\"}Z=Y": null,
+										"4zTkp9#?;>": {},
+										"Q3": -5e-323
 									},
-									"_Rz": false
+									"YB?uG9M9r": -1.254859053417741e-27,
+									"Q": [],
+									"toString": 1.0122217217417197e+209,
+									"prototype": "\n",
+									"\ud800": []
 								}
 							},
 							{
 								"type": "mcp_toolset",
-								"mcp_server_name": "5Xt_Vh_6_J",
+								"mcp_server_name": "n"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "o",
 								"default_config": {
 									"permission_policy": {
 										"type": "always_ask"
@@ -7654,45 +7500,64 @@
 								},
 								"configs": [
 									{
-										"name": "F~hRd"
-									},
-									{
-										"name": "Z"
-									},
-									{
-										"name": "wPJE#b\\`}X"
-									},
-									{
-										"name": "<",
+										"name": "4",
 										"permission_policy": {
 											"type": "always_allow"
 										}
 									},
 									{
-										"name": "\udc00"
-									},
-									{
-										"name": "4(G~3tDGJt",
+										"name": "MZlGjIw",
 										"permission_policy": {
 											"type": "always_ask"
 										}
 									},
 									{
-										"name": "\ud800"
+										"name": "\udc00"
 									},
 									{
-										"name": "toString",
+										"name": "9",
 										"permission_policy": {
 											"type": "always_allow"
 										}
 									},
 									{
-										"name": " "
+										"name": "w54)eS t"
 									},
 									{
-										"name": "\udc00"
+										"name": "]cr+%?ar3-",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "~",
+										"permission_policy": {
+											"type": "always_ask"
+										}
+									},
+									{
+										"name": "=AZItT{wPJ",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "}Xrq$:<"
+									},
+									{
+										"name": "\n"
 									}
 								]
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "9",
+								"default_config": {
+									"permission_policy": {
+										"type": "always_allow"
+									}
+								},
+								"configs": []
 							},
 							{
 								"type": "custom",
@@ -7701,53 +7566,33 @@
 								"input_schema": {}
 							},
 							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "P",
+								"default_config": {}
+							},
+							{
 								"type": "custom",
-								"name": "wmFKJwFCO7",
-								"description": "YB?uG9M9r",
+								"name": "3",
+								"description": "SG",
+								"input_schema": {
+									"prototype": [],
+									"CL'#/{bp{|": "",
+									"@RjT": true,
+									"@qrkM": false
+								}
+							},
+							{
+								"type": "custom",
+								"name": "d",
+								"description": "c",
 								"input_schema": {}
 							},
 							{
 								"type": "mcp_toolset",
-								"mcp_server_name": "oj",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "toString"
-									},
-									{
-										"name": "\u0000",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "0"
-									},
-									{
-										"name": "\"Jpd;XbE+^"
-									},
-									{
-										"name": "0"
-									},
-									{
-										"name": "l"
-									},
-									{
-										"name": "(*mG6~|B\\4"
-									},
-									{
-										"name": "YMZlGj"
-									},
-									{
-										"name": " qXQ "
-									},
-									{
-										"name": "4294967295"
-									}
-								]
+								"mcp_server_name": "8"
 							}
 						],
-						"created_at": "1970-01-01T00:00:00.041Z"
+						"created_at": "1969-12-31T23:59:59.986Z"
 					}
 				],
 				"view:Checkfu.EnvironmentView@v0": [
@@ -7758,70 +7603,53 @@
 						"id": ")",
 						"type": "environment",
 						"version": 5,
-						"name": "4294967295",
-						"description": "C",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						},
-						"created_at": "-051318-04-05T14:37:44.711Z",
-						"updated_at": "1970-01-01T00:00:00.039Z",
-						"archived_at": "-271821-04-20T00:00:00.020Z"
-					},
-					null,
-					{
-						"id": "X\"o!mTNWqi",
-						"type": "environment",
-						"version": 36,
-						"name": "&hvoZ?$z.k",
-						"description": "",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						},
-						"created_at": "+097491-08-04T12:12:00.400Z",
-						"updated_at": "1970-01-01T00:00:00.015Z",
-						"archived_at": "1970-01-01T00:00:00.032Z"
-					},
-					{
-						"id": "Jq>IP;GE",
-						"type": "environment",
-						"version": 46,
-						"name": "}teJhK+&/.",
+						"name": "u+E~D-s$E-",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
 								"allow_mcp_servers": false,
-								"allow_package_managers": true,
+								"allow_package_managers": false,
 								"allowed_hosts": [
+									"2",
+									"qQjSc{]Yz(",
+									"\udc00",
+									"`--X(_/)",
+									"A",
 									"l",
-									"[[Yop",
-									"\ud800",
-									"__proto__",
-									"😀",
-									"\n",
-									"l",
-									"`h}qD%;%m]",
-									"*V,<2qEG-.",
-									"/|\"P"
+									"-1",
+									"{Jxe)O=",
+									"s>OY.E*E@x"
 								]
 							}
 						},
-						"created_at": "-271821-04-20T00:00:00.017Z",
-						"updated_at": "1969-12-31T23:59:59.991Z",
+						"created_at": "1969-12-31T23:59:59.999Z",
+						"updated_at": "-116827-08-15T07:30:38.873Z",
+						"archived_at": "1969-12-31T23:59:59.993Z"
+					},
+					null,
+					{
+						"id": "X\"o!mTNWqi",
+						"type": "environment",
+						"version": 36,
+						"name": "vZ$.k",
+						"description": "]Q",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "unrestricted"
+							}
+						},
+						"created_at": "1969-12-31T23:59:59.989Z",
+						"updated_at": "1970-01-01T00:00:00.032Z",
 						"archived_at": null
 					},
 					{
-						"id": "Wf`SY.C ",
+						"id": "Jq>IP;GE",
 						"type": "environment",
-						"version": 2,
-						"name": "'nemK2G!",
+						"version": 46,
+						"name": "󋽽򁱪",
 						"description": null,
 						"config": {
 							"type": "cloud",
@@ -7829,9 +7657,25 @@
 								"type": "unrestricted"
 							}
 						},
-						"created_at": "+153622-01-02T18:00:11.065Z",
-						"updated_at": "1970-01-01T00:00:00.031Z",
-						"archived_at": "-271821-04-20T00:00:00.048Z"
+						"created_at": "1969-12-31T23:59:59.964Z",
+						"updated_at": "-271821-04-20T00:00:00.046Z",
+						"archived_at": "1970-01-01T00:00:00.000Z"
+					},
+					{
+						"id": "Wf`SY.C ",
+						"type": "environment",
+						"version": 2,
+						"name": "eKGlr|f",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "unrestricted"
+							}
+						},
+						"created_at": "+275760-09-12T23:59:59.956Z",
+						"updated_at": "-271821-04-20T00:00:00.048Z",
+						"archived_at": "-143302-06-09T19:18:30.107Z"
 					}
 				],
 				"view:Checkfu.SessionView@v6": [
@@ -9473,26 +9317,12 @@
 					{
 						"_tag": "environment.created",
 						"version": 4,
-						"name": "\n",
+						"name": "pioIhn0BG2",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"h",
-									"\ud800",
-									"\n",
-									"0",
-									"tE\\8G$;:k_",
-									"p;G2sN=sJ",
-									"\u0000",
-									"itFj*_m",
-									"\n",
-									"/<"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
@@ -9502,8 +9332,8 @@
 					{
 						"_tag": "environment.updated",
 						"version": 31,
-						"name": "\n",
-						"description": "\u0000",
+						"name": "=",
+						"description": "\"ss!4u;*vt",
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -9537,13 +9367,13 @@
 						"_tag": "agent.created",
 						"version": 1,
 						"version_id": "aV0lpvh>:b",
-						"name": " ",
+						"name": "E,/TD7k2Gg",
 						"model": {
-							"id": ","
+							"id": "4294967295"
 						},
-						"system": "4294967295",
-						"description": null,
-						"mcp_servers": "7Zk72cGgMQ",
+						"system": "",
+						"description": "0%t{!['\"h_",
+						"mcp_servers": "",
 						"tools": "-1"
 					},
 					{
@@ -9568,15 +9398,12 @@
 					{
 						"_tag": "environment.created",
 						"version": 6,
-						"name": "@",
-						"description": null,
+						"name": "g򵊧",
+						"description": "",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": []
+								"type": "unrestricted"
 							}
 						}
 					}
@@ -9591,25 +9418,12 @@
 					{
 						"_tag": "environment.updated",
 						"version": 47,
-						"name": "0",
-						"description": null,
+						"name": "󸡰",
+						"description": "𭧱!|O0jyz&",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"\udc00",
-									"\t",
-									"|",
-									"0",
-									"yh",
-									"n",
-									"\t",
-									".4R#8d&_",
-									"__proto__"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
@@ -9632,13 +9446,13 @@
 						"_tag": "agent.updated",
 						"version": 26,
 						"version_id": ">WT|a~P5N'",
-						"name": "4[\"ijp",
+						"name": "\"jA𖣲Fw",
 						"model": {
-							"id": "\t"
+							"id": "0"
 						},
-						"system": "G@BNIWRKo}",
-						"description": "8)I",
-						"mcp_servers": "toString",
+						"system": "Ro%m8Ih#rl",
+						"description": "DK",
+						"mcp_servers": "😀",
 						"tools": ""
 					},
 					{
@@ -9689,12 +9503,26 @@
 					{
 						"_tag": "environment.updated",
 						"version": 2,
-						"name": "__proto__",
-						"description": "",
+						"name": "]^#c]Dn7_8",
+						"description": "&;򻌡򩤱`u",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "unrestricted"
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"😀",
+									"\u0000",
+									"4294967295",
+									")",
+									"0[Yy8i$7@",
+									">",
+									"-~97Wm/f{",
+									"\t",
+									"1",
+									"-1"
+								]
 							}
 						}
 					},
@@ -9737,25 +9565,12 @@
 					{
 						"_tag": "environment.updated",
 						"version": 100,
-						"name": "z6v9X$]%y#",
-						"description": "^l,Y)F-=uE",
+						"name": "vX]%",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"<iIhXuvn-[",
-									" ",
-									"B,CW",
-									"8xp4|G\"m8)",
-									"?",
-									"x",
-									"isF)u>{`",
-									"0",
-									"__proto__"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
@@ -9804,27 +9619,27 @@
 						"_tag": "agent.created",
 						"version": 9,
 						"version_id": "0",
-						"name": "\ud800",
+						"name": "w",
 						"model": {
 							"id": "\t"
 						},
 						"system": null,
-						"description": "toString",
-						"mcp_servers": "\ud800",
-						"tools": "0"
+						"description": "󍧶𚅼􎻝",
+						"mcp_servers": "__proto__",
+						"tools": " "
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 3,
 						"version_id": "|<tBDf<d4\"",
-						"name": " ",
+						"name": "0",
 						"model": {
-							"id": "T"
+							"id": "k("
 						},
-						"system": null,
-						"description": "QV`rm_3sWK",
-						"mcp_servers": "\t",
-						"tools": ""
+						"system": "_󰯴򅚇񀪄H󽊮",
+						"description": null,
+						"mcp_servers": "",
+						"tools": "toString"
 					},
 					{
 						"_tag": "artifact.published",
@@ -18281,12 +18096,12 @@
 			"schemas": {
 				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
-				"event:Checkfu.Agent/agent.created": "577e442e70db2103263d5ba4d8b3f3d5baf8fe679959d26cfccd0ef59b0439c8",
-				"event:Checkfu.Agent/agent.updated": "1d5bf1ff72adf9890df7d5d867c8a67e44abbc04985461987c5a1b1f1265d1af",
+				"event:Checkfu.Agent/agent.created": "09d20bd66cdd1deedd5487fe64b0918106c3b1d2f98257207ca6d8d38ddbb0ae",
+				"event:Checkfu.Agent/agent.updated": "059d625a1443504eb752b642d8006b9577d64db5d834b8a2c0033eaf326377eb",
 				"command-reply:Checkfu/ArchiveAgent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"state:Checkfu.Environment": "0c5d8220ee3f83a8422f1d67486b0b3bfe0143847474e818d326a9459abcb1f1",
-				"event:Checkfu.Environment/environment.created": "42b0e29ebeb664625fef1062a706fe9c40c183f24733d2c03f39c3f9cf89f1ca",
-				"event:Checkfu.Environment/environment.updated": "9b41c95248b07dc0389012143685e803b5843cf3f58bc454a0042294b2f05381",
+				"event:Checkfu.Environment/environment.created": "b60f7ea7dd7b67d23286de6aab10444c8655b3b8a86a83fc7c2a1292b630caf9",
+				"event:Checkfu.Environment/environment.updated": "297557bf2d815e74147e8d41c852b83f2b99749476a6abc37431e556912dd204",
 				"event:Checkfu.Environment/environment.archived": "cc40307a097fb02a89b0665b3b30d55b529c5c22181145057e4c8342f0bb7e76",
 				"event:Checkfu.Environment/environment.deleted": "d8cc5c454e7e4a7da5915e355883b5e36af2c92eced63ec03032fd4f5e663a45",
 				"command-reply:Checkfu/CreateEnvironment": "10e48fa01759f910250d262f57fbc7db43e63b384b33b800c7ce34fbc37e0983",
@@ -18417,9 +18232,9 @@
 				"command-reply:Checkfu/ArchiveEnvironmentIfCurrent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/WriteMemory": "010c37d5d6f817f241c5e10e1ec6eedb66edb39506f331c24b65bdaa916bc24a",
 				"command-reply:Checkfu/DeleteMemory": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"view:Checkfu.AgentView@v3": "36594e5684bc6c2d24b1594f5d8ae38dacc218f211dcfd64b96d52b7e62ff610",
-				"view:Checkfu.AgentVersionByNumberView@v4": "7a9f1e3b1d8dd34aba1cfa2c527d324654363858701396cd0525ad6f7be1e89f",
-				"view:Checkfu.EnvironmentView@v0": "e88f0b2a5e305927998bd8476a68bd0fe680620aa08decf10dd2df928a2c7e47",
+				"view:Checkfu.AgentView@v3": "118a2b6d8066032e89c7e47e1fc19a8e83c089f39cd5b063d9f682491f82329f",
+				"view:Checkfu.AgentVersionByNumberView@v4": "c0116151c98a3a04e724bac074a1757ca57cdaecba68f2439156c7fb54d06bf5",
+				"view:Checkfu.EnvironmentView@v0": "0347b87a4b5a89e6dbaad3339fa6322eabc86ad4d28ba6f48721955efd8d58b7",
 				"view:Checkfu.SessionView@v6": "812c81c7cb06296edd7d12ea159e5b5021e9e04067409d2d20eba719f7145174",
 				"view:Checkfu.SessionTurnCompletion@v1": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
 				"view:Checkfu.TurnInput@v5": "41cb2d3bdb3fc00d0213f321b7772bedc91f00f1aaa7003052112f604d5563ca",
@@ -18439,12 +18254,12 @@
 				"policy-delivery:Checkfu.PublishSessionOutputs/Session": "256a19cb0eed039cbea2c464dd65e825c57baf6b36b71a1cc898eeb9e7cff6da",
 				"policy-delivery:Checkfu.ExpireArtifactReservations/Artifact": "2c4debc1b87204ece46e7d374a7f51c948c9c3dd6f5ecb61ec5ab25dcecf6f46",
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "a058b5bf3901943bc803915fe2170425e355dbbab487ad1bec34326b0d07faa8",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
 				"saga-input:Checkfu.RunTurn": "56b5422c6cc2f000891b60dfda037ee81cd6c9f86ce7ff528cc2a913eecfbfe1",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "0b173c30d84e4e7ba5f9491f5b7e1594dfb33c3dcaff8b9c8e42aa00bcd74eb5",
@@ -18752,105 +18567,105 @@
 						"_tag": "agent.created",
 						"version": 99,
 						"version_id": "\udc00",
-						"name": ":4G3XU]')?",
+						"name": "GX])?",
 						"model": {
 							"id": "prototype"
 						},
 						"system": null,
-						"description": "",
-						"mcp_servers": " ",
-						"tools": "0N~G~3ng#"
+						"description": "Sq0",
+						"mcp_servers": "😀",
+						"tools": "😀"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 35,
 						"version_id": "-1",
-						"name": "U",
+						"name": "wHy)-",
 						"model": {
 							"id": "\udc00"
 						},
 						"system": null,
-						"description": ")-;r",
-						"mcp_servers": "[G}nH2'/)Y",
-						"tools": "0"
+						"description": "H𥍪𨾘񾜟󫰪o",
+						"mcp_servers": "]<0JW`}NVF",
+						"tools": "\n"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 101,
 						"version_id": "\u0000",
-						"name": "igRSiS+K;",
+						"name": "iRi+;n+<1E",
 						"model": {
-							"id": "\ud800"
+							"id": "L'U3K%11m+"
 						},
-						"system": null,
-						"description": "\u0000",
-						"mcp_servers": "",
-						"tools": "L'U3K%11m+"
+						"system": "Ea2,?X3*`G",
+						"description": null,
+						"mcp_servers": "__proto__",
+						"tools": ")p]Yv"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 100,
 						"version_id": "\u0000",
-						"name": "\ud800",
+						"name": "񿠓",
 						"model": {
-							"id": "\udc00"
+							"id": "😀"
 						},
-						"system": "😀",
-						"description": null,
-						"mcp_servers": "\udc00",
-						"tools": "\u0000"
+						"system": null,
+						"description": "񮑾􈜆",
+						"mcp_servers": "",
+						"tools": "__proto__"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 11,
 						"version_id": "-1",
-						"name": "#`!WGu2UA*",
+						"name": "!Gu",
 						"model": {
-							"id": "R"
+							"id": "__proto__"
 						},
-						"system": null,
-						"description": "\n",
-						"mcp_servers": "s",
-						"tools": "\u0000"
+						"system": "8T'W*1(;nf",
+						"description": "񱫜",
+						"mcp_servers": "",
+						"tools": "😀"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 4,
 						"version_id": "\udc00",
-						"name": "wFM0{Q",
+						"name": "M􇛐h򾤫7'^I",
 						"model": {
-							"id": ":"
+							"id": "😀"
 						},
-						"system": " ",
-						"description": null,
-						"mcp_servers": "",
-						"tools": "52_XZ8J%rC"
+						"system": "򮘽񒟪",
+						"description": "",
+						"mcp_servers": "\t",
+						"tools": "\t"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 6,
 						"version_id": "w[$A>5%CLs",
-						"name": "😀",
+						"name": "L#SiUX`Ub;",
 						"model": {
-							"id": "4294967295"
+							"id": "eN(\\XdN"
 						},
-						"system": "\n",
+						"system": null,
 						"description": null,
-						"mcp_servers": "URXp`kUn",
-						"tools": ""
+						"mcp_servers": "😀",
+						"tools": "0"
 					},
 					{
 						"_tag": "agent.created",
 						"version": 86,
 						"version_id": "&'1J[U0",
-						"name": "M_",
+						"name": "?B)OF0`m\\",
 						"model": {
-							"id": "\u0000"
+							"id": "~"
 						},
-						"system": " ",
+						"system": null,
 						"description": null,
-						"mcp_servers": "\udc00",
-						"tools": "\udc00"
+						"mcp_servers": "__proto__",
+						"tools": "etb"
 					}
 				],
 				"event:Checkfu.Agent/agent.updated": [
@@ -18858,105 +18673,105 @@
 						"_tag": "agent.updated",
 						"version": 97,
 						"version_id": "toString",
-						"name": "B",
+						"name": ";򂎊w",
 						"model": {
-							"id": "Jw.:<Gc0PG"
+							"id": "\u0000"
 						},
-						"system": "",
-						"description": "\n",
-						"mcp_servers": "",
-						"tools": "prototype"
+						"system": "P*$<6F.I5R",
+						"description": "",
+						"mcp_servers": "]L~>\\]?Azc",
+						"tools": "toString"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 99,
 						"version_id": "toString",
-						"name": "H",
+						"name": "R򚈉񖅰q",
 						"model": {
-							"id": "S&:qn"
+							"id": "&"
 						},
-						"system": "Q`$-,2h1~1",
+						"system": null,
 						"description": null,
-						"mcp_servers": "0",
-						"tools": "__proto__"
+						"mcp_servers": ",2h1~1\\JCB",
+						"tools": "0z )v{5k'?"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 52,
 						"version_id": "R",
-						"name": "\ud800",
+						"name": ")",
 						"model": {
-							"id": "1h~S$T'\\^m"
+							"id": "toString"
 						},
-						"system": "4294967295",
+						"system": null,
 						"description": null,
-						"mcp_servers": "0",
-						"tools": "4294967295"
+						"mcp_servers": "4294967295",
+						"tools": "__proto__"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 39,
 						"version_id": "\udc00",
-						"name": "(f/#i",
+						"name": "/󔹀󣌈:F}&a",
 						"model": {
-							"id": "\ud800"
+							"id": "?9[;ot"
 						},
-						"system": null,
-						"description": "0",
-						"mcp_servers": "",
-						"tools": "prototype"
+						"system": ":􈐧^(񔭻",
+						"description": "1D6Fqc`M",
+						"mcp_servers": "7!<0y>YQ",
+						"tools": ""
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 2,
 						"version_id": "__proto__",
-						"name": "4294967295",
+						"name": "@",
 						"model": {
-							"id": "\ud800"
+							"id": "\\^"
 						},
-						"system": "\\",
-						"description": null,
-						"mcp_servers": "__proto__",
-						"tools": "tk/0"
+						"system": "k𼡰󕵩]l",
+						"description": "0jTANoWV5[",
+						"mcp_servers": "-1",
+						"tools": "fUteO-CT}_"
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 95,
 						"version_id": "aIoC?07E",
-						"name": "^",
+						"name": "o󹚚",
 						"model": {
-							"id": "enj[lt%P>&"
+							"id": "[lt%P>&/"
 						},
-						"system": "\t",
+						"system": "\\3*xTC.PC(",
 						"description": null,
 						"mcp_servers": "__proto__",
-						"tools": "\t"
+						"tools": ","
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 100,
 						"version_id": "}}=",
-						"name": "\t",
+						"name": "򍏤",
 						"model": {
-							"id": "-1"
+							"id": "\ud800"
 						},
-						"system": "\ud800",
-						"description": "toString",
-						"mcp_servers": "K-]2~)M5`S",
-						"tools": "prototype"
+						"system": "QK]~M`5m&\\",
+						"description": "",
+						"mcp_servers": "8|\"e.&D.,Z",
+						"tools": ""
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 66,
 						"version_id": "j7Qy$)y",
-						"name": "\t",
+						"name": "zW`'{Tx*MG",
 						"model": {
-							"id": "😀"
+							"id": "\ud800"
 						},
-						"system": null,
-						"description": null,
+						"system": "",
+						"description": "",
 						"mcp_servers": "prototype",
-						"tools": "{6T`x3*{MG"
+						"tools": "Bi?eqi]L3}"
 					}
 				],
 				"command-reply:Checkfu/ArchiveAgent": [
@@ -19078,22 +18893,127 @@
 					{
 						"_tag": "environment.created",
 						"version": 1,
-						"name": "__proto__",
+						"name": "W>%kYY=-Ub",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
-								"allow_mcp_servers": false,
+								"allow_mcp_servers": true,
 								"allow_package_managers": true,
-								"allowed_hosts": []
+								"allowed_hosts": [
+									"}",
+									"A&+u$lj",
+									",{,gk7K(N",
+									"\u0000",
+									"Y*X]",
+									"HA:(b1NxA)",
+									"\u0000",
+									" ",
+									"v9`S-n9Q7X",
+									"😀"
+								]
 							}
 						}
 					},
 					{
 						"_tag": "environment.created",
 						"version": 97,
-						"name": "0",
+						"name": "s}/Cc7rhE:",
+						"description": "OZ)~N;\\{rR",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "unrestricted"
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 99,
+						"name": "񸭃𞣌𨋬񲵉",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": []
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 99,
+						"name": "]sL{fBdxeT",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": []
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 5,
+						"name": "YU<\"P",
+						"description": "z6zn8?oS/b",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"z",
+									"4294967295",
+									"G",
+									"4294967295",
+									"dxo2U+A(",
+									"7",
+									"\u0000",
+									"Fl",
+									"\u0000",
+									"7XE"
+								]
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 38,
+						"name": "񂘡",
+						"description": "U]>n0R=8aE",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"😀",
+									"cOs6",
+									"D \\75}~@4+",
+									"4294967295",
+									"0",
+									"i[Q*!\"E{Kk",
+									"P>b?,?^I?G",
+									"-1",
+									"|[*O",
+									"b"
+								]
+							}
+						}
+					},
+					{
+						"_tag": "environment.created",
+						"version": 25,
+						"name": ".f:f9Oe~NS",
 						"description": "",
 						"config": {
 							"type": "cloud",
@@ -19104,101 +19024,8 @@
 					},
 					{
 						"_tag": "environment.created",
-						"version": 99,
-						"name": "Z^F9%M(Dq~",
-						"description": "0",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 99,
-						"name": "4294967295",
-						"description": null,
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": false,
-								"allowed_hosts": [
-									"fzBfd,x-e",
-									"L4*jq%V",
-									"t`Cb:='+Pi",
-									"-1",
-									"X"
-								]
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 5,
-						"name": ">",
-						"description": "d<<\"P,$ZVz",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"N",
-									"😀",
-									"@/bU~W?~p;",
-									"😀",
-									"4294967295",
-									"G"
-								]
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 38,
-						"name": "\n",
-						"description": "\t",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
-						"version": 25,
-						"name": ".;fa:If&9'",
-						"description": "toString",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"\u0000",
-									"\t",
-									"l",
-									"\u0000",
-									")F",
-									"\n",
-									"prototype",
-									"Xo52@InTgQ",
-									"\n",
-									"__proto__"
-								]
-							}
-						}
-					},
-					{
-						"_tag": "environment.created",
 						"version": 2,
-						"name": "\ud800",
+						"name": "񐇘",
 						"description": "",
 						"config": {
 							"type": "cloud",
@@ -19212,31 +19039,20 @@
 					{
 						"_tag": "environment.updated",
 						"version": 43,
-						"name": "B5?/",
-						"description": null,
+						"name": "?~yga_ow7",
+						"description": "󘐘񣀓񞐈",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"{o w7?lB2f",
-									">=;6",
-									">\\ U&)XLZ6",
-									"\n",
-									"\ud800",
-									"[d-m[",
-									"4294967295"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
 					{
 						"_tag": "environment.updated",
 						"version": 100,
-						"name": "\t",
-						"description": "FOM`&&mOX+",
+						"name": "6",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -19247,7 +19063,7 @@
 					{
 						"_tag": "environment.updated",
 						"version": 6,
-						"name": "tm6f.=D",
+						"name": "t6.D=~Zcig",
 						"description": null,
 						"config": {
 							"type": "cloud",
@@ -19259,8 +19075,8 @@
 					{
 						"_tag": "environment.updated",
 						"version": 100,
-						"name": "}e|k ",
-						"description": "-1",
+						"name": "}| 9 XEbku",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -19271,34 +19087,23 @@
 					{
 						"_tag": "environment.updated",
 						"version": 55,
-						"name": "\ud800",
+						"name": "TDsAy/f5pP",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
-								"allow_mcp_servers": false,
+								"allow_mcp_servers": true,
 								"allow_package_managers": false,
-								"allowed_hosts": [
-									"0",
-									"/",
-									"toString",
-									"pPwpOG0l3Z",
-									"😀",
-									" ",
-									"9M",
-									"😀",
-									"0Y8+yTL",
-									"\\"
-								]
+								"allowed_hosts": []
 							}
 						}
 					},
 					{
 						"_tag": "environment.updated",
 						"version": 83,
-						"name": "\ud800",
-						"description": "",
+						"name": "񫠐",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -19309,34 +19114,23 @@
 					{
 						"_tag": "environment.updated",
 						"version": 5,
-						"name": "#",
-						"description": "",
+						"name": "Rb",
+						"description": "PpX",
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": false,
-								"allowed_hosts": [
-									"X|L6#~\"=T",
-									"vw`X_Y",
-									"P.",
-									"Bc8`5O\\",
-									"'$+#76gO`l",
-									" ",
-									"zdw6Uw$q:,",
-									"0",
-									"4",
-									"__proto__"
-								]
+								"allow_mcp_servers": false,
+								"allow_package_managers": true,
+								"allowed_hosts": []
 							}
 						}
 					},
 					{
 						"_tag": "environment.updated",
 						"version": 4,
-						"name": "0",
-						"description": "4294967295",
+						"name": "Q",
+						"description": "xQWkO*}}G",
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -25226,137 +25020,165 @@
 						"type": "agent",
 						"version": 94,
 						"current_version_id": "8C``HW&OpE",
-						"name": "Ri^VH-0bT_",
+						"name": "^񽈿𽦨b",
 						"model": {
-							"id": "~"
+							"id": "!$~m~<Tf`w"
 						},
-						"system": null,
-						"description": null,
-						"mcp_servers": [],
-						"tools": [
+						"system": "ov^!𡯎e|2",
+						"description": "",
+						"mcp_servers": [
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "lT_8_1_S_-"
+								"type": "url",
+								"name": "sxA_z",
+								"url": "n{t=*"
 							},
 							{
-								"type": "custom",
-								"name": "FtBMlBGQ",
-								"description": "^~rw{",
-								"input_schema": {
-									"😀": ""
-								}
+								"type": "url",
+								"name": "g",
+								"url": "`p3F\"6h4gG"
 							},
 							{
-								"type": "custom",
-								"name": "R",
-								"description": "prototype",
-								"input_schema": {
-									"0": {},
-									"T#\"zAU/=YP": true,
-									"3%[poU7kgW": {
-										"-1": [
-											false,
-											false,
-											false,
-											"",
-											null,
-											{
-												"0": {}
-											},
-											false,
-											null
-										]
-									},
-									"__proto__": " ",
-									"\ud800": "\ud800",
-									"": "\udc00",
-									" ": true,
-									"+": true,
-									"CTu/": false,
-									"\udc00": {}
-								}
+								"type": "url",
+								"name": "d_2",
+								"url": "R"
 							},
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "v"
+								"type": "url",
+								"name": "F1_4P",
+								"url": "u}B*['Cb!,"
 							},
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "yy54g",
-								"configs": [
-									{
-										"name": "z"
-									},
-									{
-										"name": "\t"
-									},
-									{
-										"name": "4294967295",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "^",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "?SSQ^mJ6'<",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "0d>B^HBb"
-									},
-									{
-										"name": "x"
-									},
-									{
-										"name": "4294967295"
-									},
-									{
-										"name": "0",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "4294967295",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									}
-								]
+								"type": "url",
+								"name": "w0xS_w_E_e",
+								"url": ":?S"
 							},
 							{
-								"type": "custom",
-								"name": "1KyU",
-								"description": "F\"6",
-								"input_schema": {
-									";=4]j%\\:$R": [],
-									"\n": null
-								}
+								"type": "url",
+								"name": "R3qa_k",
+								"url": "toString"
 							},
 							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "q7",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "\udc00"
-									},
-									{
-										"name": "prototype"
-									}
-								]
+								"type": "url",
+								"name": "P",
+								"url": "toString"
+							},
+							{
+								"type": "url",
+								"name": "a",
+								"url": "NgB>M]*R%5"
+							},
+							{
+								"type": "url",
+								"name": "vR7RU_41_x",
+								"url": "__proto__"
+							},
+							{
+								"type": "url",
+								"name": "Lts2qY_krA",
+								"url": "4294967295"
 							}
 						],
-						"created_at": "-114296-08-16T06:24:15.143Z",
-						"updated_at": "-271821-04-20T00:00:00.036Z",
-						"archived_at": "+104424-11-20T16:05:34.237Z"
+						"tools": [
+							{
+								"type": "custom",
+								"name": "d",
+								"description": "4294967295",
+								"input_schema": {
+									"0": {},
+									"": false,
+									"kt)0~S7": null,
+									"__proto__": " ",
+									"I%WLvD)BSm": " ",
+									"CTu/": false,
+									"\ud800": -5.4e-323,
+									"\u0000": {
+										"0": null,
+										"h>-L#": null,
+										"😀": null,
+										".": {},
+										" ": false,
+										"": "",
+										"\udc00": [],
+										"prototype": "\ud800",
+										"__proto__": [],
+										"IU?R~qyT!^": null
+									},
+									"\udc00": [],
+									"t {\\:YlHuh": "1a_"
+								}
+							},
+							{
+								"type": "custom",
+								"name": "KiDTj5ZLWJ",
+								"description": "\u0000",
+								"input_schema": {
+									"ih+zEea}`H": 6.4e-323,
+									"": {},
+									"b_tD_4UVAV": null,
+									"!f9Iw{-qN%": "😀",
+									"toString": true,
+									"\udc00": -1.7976931348623145e+308,
+									"4294967295": {},
+									"{": {},
+									"__proto__": false,
+									"prototype": null
+								}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "A3mW1DH_b"
+							},
+							{
+								"type": "custom",
+								"name": "TLuyH7Zm",
+								"description": "-1",
+								"input_schema": {
+									" ": "",
+									"#1'/?:F>QM": [],
+									"4294967295": [],
+									"": "\n",
+									"-1": {},
+									"(.^": false,
+									"Z8gJrZDuA3": true,
+									"Aw3iBr,rfX": 9.384415201294825e+202,
+									"\udc00": [],
+									"y\\x-?7": []
+								}
+							},
+							{
+								"type": "custom",
+								"name": "i28XGB",
+								"description": "prototype",
+								"input_schema": {
+									"0": 69170419148038680,
+									"8": [],
+									"": [],
+									"\udc00": [],
+									"4294967295": {},
+									"bv~FR$wW3C": "\ud800",
+									"\t": "😀",
+									"7k`": [],
+									"\ud800": false,
+									"\n": []
+								}
+							},
+							{
+								"type": "custom",
+								"name": "7Tlo",
+								"description": "4294967295",
+								"input_schema": {
+									"\ud800": "-1",
+									"36/ZIld&XW": [],
+									"5SKpg*|\\2": null,
+									"\n": [],
+									"\t": false,
+									"IRZ^-_vsRy": -1.7976931348623127e+308
+								}
+							}
+						],
+						"created_at": "-271821-04-20T00:00:00.050Z",
+						"updated_at": "+269001-07-27T03:09:30.856Z",
+						"archived_at": "+132074-01-07T04:29:01.888Z"
 					},
 					null,
 					{
@@ -25364,23 +25186,13 @@
 						"type": "agent",
 						"version": 43,
 						"current_version_id": "4294967295",
-						"name": "\u0000",
+						"name": "gWF$6iyKjf",
 						"model": {
-							"id": "toString"
+							"id": "\t"
 						},
-						"system": "",
-						"description": null,
+						"system": "~",
+						"description": "",
 						"mcp_servers": [
-							{
-								"type": "url",
-								"name": "Z",
-								"url": "Njf!*"
-							},
-							{
-								"type": "url",
-								"name": "A",
-								"url": "C_}9"
-							},
 							{
 								"type": "url",
 								"name": "6RagCb_3_6",
@@ -25390,257 +25202,11 @@
 								"type": "url",
 								"name": "A_g9Jv",
 								"url": "=W"
-							},
-							{
-								"type": "url",
-								"name": "a",
-								"url": "pQD"
-							},
-							{
-								"type": "url",
-								"name": "nYOd_XT_R8",
-								"url": "k"
-							},
-							{
-								"type": "url",
-								"name": "v_c_J0_F",
-								"url": "\n"
-							},
-							{
-								"type": "url",
-								"name": "s_Q_D_3_W6",
-								"url": "T_<dJ+Sv{<"
-							},
-							{
-								"type": "url",
-								"name": "o6ZTNb_o6",
-								"url": "-1"
-							},
-							{
-								"type": "url",
-								"name": "hk_1jV_Q",
-								"url": "F"
 							}
 						],
-						"tools": [
-							{
-								"type": "custom",
-								"name": "vgQJY4FS8w",
-								"description": "UA^~mT;0iF",
-								"input_schema": {}
-							},
-							{
-								"type": "custom",
-								"name": "h2h",
-								"description": "toString",
-								"input_schema": {}
-							},
-							{
-								"type": "custom",
-								"name": "hY",
-								"description": "g;Bij_Sf|o",
-								"input_schema": {
-									"": false,
-									"\n": [],
-									"&NiS@}PM": null,
-									"prototype": null,
-									"-1": null,
-									"4294967295": 8e-323
-								}
-							},
-							{
-								"type": "custom",
-								"name": "5TVDYm_6FN",
-								"description": "Zpc{A{=7I",
-								"input_schema": {}
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "QGb2a-",
-								"configs": [
-									{
-										"name": "%V>a)*(V",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "prototype",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "4294967295",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "\udc00"
-									},
-									{
-										"name": "+l|w3;npYS",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "\u0000",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": ".ssHcO,nT7",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "Que,j:FD<.",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": " ",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "prototype",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									}
-								]
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "P_st9",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "\t",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "0"
-									},
-									{
-										"name": "😀"
-									},
-									{
-										"name": "__proto__"
-									},
-									{
-										"name": "\n",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "{sCwD&}K/f"
-									},
-									{
-										"name": "4294967295"
-									},
-									{
-										"name": "😀"
-									},
-									{
-										"name": "a",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									}
-								]
-							},
-							{
-								"type": "custom",
-								"name": "Of_gY4JJPO",
-								"description": "\u0000",
-								"input_schema": {
-									"😀": true,
-									"-1": {},
-									"": {
-										"": -2.5e-323,
-										"&cC?[": true,
-										"a\"h]S\"S=C,": "😀",
-										"e2J|": false,
-										"toString": 1.7976931348623123e+308,
-										"l_| wLNg6|": [],
-										" nV>=8i>t/": false,
-										"😀": {
-											"\udc00": "toString"
-										},
-										"\n": ")Wl"
-									},
-									"g": true,
-									" ": []
-								}
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "eVUAQ_8op1",
-								"default_config": {}
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "c",
-								"configs": [
-									{
-										"name": "\u0000"
-									},
-									{
-										"name": "WPtD,.ydKG",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "Ld%xWs'c}O"
-									},
-									{
-										"name": "D"
-									}
-								]
-							},
-							{
-								"type": "mcp_toolset",
-								"mcp_server_name": "Qbj_1te_WU",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "\ud800"
-									},
-									{
-										"name": "=FN"
-									},
-									{
-										"name": "[",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "toString",
-										"permission_policy": {
-											"type": "always_ask"
-										}
-									},
-									{
-										"name": "_kX"
-									}
-								]
-							}
-						],
-						"created_at": "-085377-09-09T10:28:12.436Z",
-						"updated_at": "-074456-02-01T12:09:19.419Z",
+						"tools": [],
+						"created_at": "+069552-03-10T04:18:19.055Z",
+						"updated_at": "-104493-10-29T04:23:08.569Z",
 						"archived_at": null
 					},
 					null,
@@ -25649,68 +25215,60 @@
 						"type": "agent",
 						"version": 50,
 						"current_version_id": "+47Lm}",
-						"name": "-Po)tXf]vZ",
+						"name": "otfvPn`B",
 						"model": {
-							"id": ";"
+							"id": "__proto__"
 						},
 						"system": null,
-						"description": "__proto__",
+						"description": null,
 						"mcp_servers": [
 							{
 								"type": "url",
-								"name": "73Z_jsu",
-								"url": "__proto__"
-							},
-							{
-								"type": "url",
-								"name": "4jfPnY_Yo",
-								"url": "t0 P_R"
-							},
-							{
-								"type": "url",
-								"name": "GQiyku_Z_g",
-								"url": "__proto__"
-							},
-							{
-								"type": "url",
-								"name": "W",
-								"url": "XMx"
-							},
-							{
-								"type": "url",
-								"name": "1",
-								"url": "7"
-							},
-							{
-								"type": "url",
-								"name": "1le_u_O3",
+								"name": "A",
 								"url": "0"
 							},
 							{
 								"type": "url",
-								"name": "ZApNeJ4V_Q",
-								"url": "kjo'h+,s[H"
+								"name": "d_u_Y",
+								"url": "Y(7f{`\""
 							},
 							{
 								"type": "url",
-								"name": "s_Q",
-								"url": "'^/"
+								"name": "YYoyt-f7_c",
+								"url": "I'd@}%gWvs"
 							},
 							{
 								"type": "url",
-								"name": "8X6Bxl_m4x",
-								"url": "\udc00"
+								"name": "JGsn_E",
+								"url": "B"
 							},
 							{
 								"type": "url",
-								"name": "3",
-								"url": "\udc00"
+								"name": "f",
+								"url": "\ud800"
+							},
+							{
+								"type": "url",
+								"name": "H",
+								"url": " "
+							},
+							{
+								"type": "url",
+								"name": "tS_O_3_I",
+								"url": "0"
 							}
 						],
-						"tools": [],
-						"created_at": "1970-01-01T00:00:00.023Z",
-						"updated_at": "1970-01-01T00:00:00.004Z",
-						"archived_at": "1970-01-01T00:00:00.034Z"
+						"tools": [
+							{
+								"type": "custom",
+								"name": "oN",
+								"description": "prototype",
+								"input_schema": {}
+							}
+						],
+						"created_at": "-223050-10-01T10:27:48.281Z",
+						"updated_at": "+213181-06-28T14:11:23.922Z",
+						"archived_at": null
 					},
 					null,
 					{
@@ -25718,41 +25276,36 @@
 						"type": "agent",
 						"version": 7,
 						"current_version_id": " ",
-						"name": "toString",
+						"name": "|WO_zKsemY",
 						"model": {
-							"id": "😀"
+							"id": "&}l0w"
 						},
-						"system": "&_Lzc",
-						"description": "e4mYZVN&",
+						"system": "]ig5[",
+						"description": null,
 						"mcp_servers": [
 							{
 								"type": "url",
-								"name": "XO_lk_c_El",
-								"url": "_%g<m*V@Ne"
+								"name": "e_H6KiNPbO",
+								"url": " "
 							},
 							{
 								"type": "url",
-								"name": "3n_bQ_GPEi",
-								"url": "t"
+								"name": "GPE_i9",
+								"url": ";Q`"
 							},
 							{
 								"type": "url",
-								"name": "f",
-								"url": "toString"
+								"name": "GR5V_qCQL7",
+								"url": "0"
 							},
 							{
 								"type": "url",
-								"name": "R",
-								"url": "😀"
+								"name": "zh72_u2",
+								"url": "dp50?x/X8]"
 							},
 							{
 								"type": "url",
-								"name": "wWm35_LesQ",
-								"url": "v%"
-							},
-							{
-								"type": "url",
-								"name": "igqAvadx_m",
+								"name": "m",
 								"url": "-Y3?q+kT\\l"
 							},
 							{
@@ -25764,11 +25317,141 @@
 								"type": "url",
 								"name": "N87p0cmnFo",
 								"url": "prototype"
+							},
+							{
+								"type": "url",
+								"name": "F",
+								"url": "[]+;"
+							},
+							{
+								"type": "url",
+								"name": "M",
+								"url": "0"
+							},
+							{
+								"type": "url",
+								"name": "Ah",
+								"url": "\n"
 							}
 						],
-						"tools": [],
-						"created_at": "-121451-02-08T11:39:15.782Z",
-						"updated_at": "-082721-03-24T13:08:13.258Z",
+						"tools": [
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "bqfPn_t0_i"
+							},
+							{
+								"type": "custom",
+								"name": "XGJH7BcnIy",
+								"description": "__proto__",
+								"input_schema": {}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "pU_qKxO_i",
+								"default_config": {}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "fJ8"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "n"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "y"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "7Q12DB_O",
+								"configs": [
+									{
+										"name": "Y"
+									},
+									{
+										"name": "V",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "\t",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "__proto__",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "\ud800"
+									},
+									{
+										"name": "toString",
+										"permission_policy": {
+											"type": "always_ask"
+										}
+									},
+									{
+										"name": "-1"
+									},
+									{
+										"name": "B_x7S|BbUY",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "y!G\"w_f/rL",
+										"permission_policy": {
+											"type": "always_ask"
+										}
+									},
+									{
+										"name": "JoO\"9T;LP:"
+									}
+								]
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "V"
+							},
+							{
+								"type": "custom",
+								"name": "oevRlY99sC",
+								"description": " ",
+								"input_schema": {
+									"-1": "vor^$wJ6e@",
+									"[": "\ud800",
+									"h ": "😀",
+									"": {
+										" ": [],
+										"\n": 1.797693134862313e+308,
+										"WP ": [
+											"",
+											[
+												null,
+												{},
+												null,
+												null,
+												[]
+											]
+										]
+									},
+									"0I": null
+								}
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "8zcqd_tP"
+							}
+						],
+						"created_at": "1970-01-01T00:00:00.003Z",
+						"updated_at": "+275760-09-12T23:59:59.970Z",
 						"archived_at": null
 					},
 					null
@@ -25780,66 +25463,66 @@
 						"agent_id": "\ud800",
 						"type": "agent",
 						"version": 7,
-						"name": "toString",
+						"name": "򸘘",
 						"model": {
-							"id": "\n"
+							"id": "k%^F_HA)Lu"
 						},
 						"system": null,
-						"description": null,
+						"description": "򔋕𘇼6򿬦󹹯J",
 						"mcp_servers": [
 							{
 								"type": "url",
-								"name": "O",
-								"url": ")Lun YUQl\""
+								"name": "VvYPbs0XqA",
+								"url": "prototype"
 							},
 							{
 								"type": "url",
-								"name": "D_gu",
+								"name": "5TaR_T_fFb",
+								"url": "L"
+							},
+							{
+								"type": "url",
+								"name": "ANDghAin_q",
 								"url": "\n"
 							},
 							{
 								"type": "url",
-								"name": "t",
+								"name": "p_T",
+								"url": " "
+							},
+							{
+								"type": "url",
+								"name": "alx2a_xLPu",
+								"url": "/C9T7iZ~"
+							},
+							{
+								"type": "url",
+								"name": "BrDpsL_j_U",
+								"url": "r"
+							},
+							{
+								"type": "url",
+								"name": "hkfVB6_E_I",
+								"url": "3w>!o#K7(<"
+							},
+							{
+								"type": "url",
+								"name": "s_P_b",
 								"url": "4294967295"
 							},
 							{
 								"type": "url",
-								"name": "NzD_su_x_7",
-								"url": "CI*+N<W|J\\"
+								"name": "orNMD",
+								"url": "prototype"
 							},
 							{
 								"type": "url",
-								"name": "c",
-								"url": "SYf"
-							},
-							{
-								"type": "url",
-								"name": "D",
-								"url": "1OD}5"
-							},
-							{
-								"type": "url",
-								"name": "qjw_q_B",
-								"url": "}o]N'&#DMi"
-							},
-							{
-								"type": "url",
-								"name": "x2as",
-								"url": "[G~w"
-							},
-							{
-								"type": "url",
-								"name": "MXlz5d_A",
-								"url": "Tod"
-							},
-							{
-								"type": "url",
-								"name": "f9_h3",
-								"url": "XOb-gi`%Q}"
+								"name": "P0Dj8McW_B",
+								"url": "0"
 							}
 						],
 						"tools": [],
-						"created_at": "1969-12-31T23:59:59.967Z"
+						"created_at": "-071968-11-03T12:34:48.496Z"
 					},
 					null,
 					null,
@@ -25851,77 +25534,55 @@
 						"agent_id": "[&|#z Ly ",
 						"type": "agent",
 						"version": 100,
-						"name": "(-ww$*2qQg",
+						"name": "w$2q",
 						"model": {
-							"id": "toString"
+							"id": "bx"
 						},
-						"system": null,
-						"description": "\ud800",
-						"mcp_servers": [
-							{
-								"type": "url",
-								"name": "R_eE_-_4_h",
-								"url": "toString"
-							},
-							{
-								"type": "url",
-								"name": "C",
-								"url": "-<hy @>a"
-							},
-							{
-								"type": "url",
-								"name": "XG_3Dv_E_X",
-								"url": " "
-							},
-							{
-								"type": "url",
-								"name": "zB_SYS_d_j",
-								"url": "*~C@$s[ Nt"
-							},
-							{
-								"type": "url",
-								"name": "M",
-								"url": "v1{52;:R"
-							},
-							{
-								"type": "url",
-								"name": "S",
-								"url": "4294967295"
-							},
-							{
-								"type": "url",
-								"name": "m374UAcW_y",
-								"url": "'"
-							}
-						],
+						"system": "",
+						"description": null,
+						"mcp_servers": [],
 						"tools": [
 							{
 								"type": "custom",
-								"name": "3",
-								"description": "SG",
+								"name": "4ztPs1mA7L",
+								"description": "\u0000",
+								"input_schema": {}
+							},
+							{
+								"type": "custom",
+								"name": "C",
+								"description": "-<hy @>a",
 								"input_schema": {
-									"prototype": [
-										null
-									],
-									"-1": null,
-									"\t": {
-										"0": [],
-										"v/4]bD": false,
-										"Y]OK@": {
-											"\u0000": "\udc00"
-										},
-										"\t": false,
-										"-1": -6.290354070061791e-306,
-										"\ud800": " c_\"5(BfcX",
-										"prototype": null,
-										"toString": []
+									"0": -3e-323,
+									"-1": "",
+									"": -1.7976931348623143e+308,
+									"4294967295": -1.7976931348623147e+308,
+									"😀": {
+										"#T}Lj\\Gf}q": {},
+										"😀": true,
+										"\udc00": "-1",
+										"": true,
+										"v1{52;:": "😀",
+										" ": null,
+										"S&(-K(gO": "\t",
+										"\"}Z=Y": null,
+										"4zTkp9#?;>": {},
+										"Q3": -5e-323
 									},
-									"_Rz": false
+									"YB?uG9M9r": -1.254859053417741e-27,
+									"Q": [],
+									"toString": 1.0122217217417197e+209,
+									"prototype": "\n",
+									"\ud800": []
 								}
 							},
 							{
 								"type": "mcp_toolset",
-								"mcp_server_name": "5Xt_Vh_6_J",
+								"mcp_server_name": "n"
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "o",
 								"default_config": {
 									"permission_policy": {
 										"type": "always_ask"
@@ -25929,45 +25590,64 @@
 								},
 								"configs": [
 									{
-										"name": "F~hRd"
-									},
-									{
-										"name": "Z"
-									},
-									{
-										"name": "wPJE#b\\`}X"
-									},
-									{
-										"name": "<",
+										"name": "4",
 										"permission_policy": {
 											"type": "always_allow"
 										}
 									},
 									{
-										"name": "\udc00"
-									},
-									{
-										"name": "4(G~3tDGJt",
+										"name": "MZlGjIw",
 										"permission_policy": {
 											"type": "always_ask"
 										}
 									},
 									{
-										"name": "\ud800"
+										"name": "\udc00"
 									},
 									{
-										"name": "toString",
+										"name": "9",
 										"permission_policy": {
 											"type": "always_allow"
 										}
 									},
 									{
-										"name": " "
+										"name": "w54)eS t"
 									},
 									{
-										"name": "\udc00"
+										"name": "]cr+%?ar3-",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "~",
+										"permission_policy": {
+											"type": "always_ask"
+										}
+									},
+									{
+										"name": "=AZItT{wPJ",
+										"permission_policy": {
+											"type": "always_allow"
+										}
+									},
+									{
+										"name": "}Xrq$:<"
+									},
+									{
+										"name": "\n"
 									}
 								]
+							},
+							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "9",
+								"default_config": {
+									"permission_policy": {
+										"type": "always_allow"
+									}
+								},
+								"configs": []
 							},
 							{
 								"type": "custom",
@@ -25976,53 +25656,33 @@
 								"input_schema": {}
 							},
 							{
+								"type": "mcp_toolset",
+								"mcp_server_name": "P",
+								"default_config": {}
+							},
+							{
 								"type": "custom",
-								"name": "wmFKJwFCO7",
-								"description": "YB?uG9M9r",
+								"name": "3",
+								"description": "SG",
+								"input_schema": {
+									"prototype": [],
+									"CL'#/{bp{|": "",
+									"@RjT": true,
+									"@qrkM": false
+								}
+							},
+							{
+								"type": "custom",
+								"name": "d",
+								"description": "c",
 								"input_schema": {}
 							},
 							{
 								"type": "mcp_toolset",
-								"mcp_server_name": "oj",
-								"default_config": {},
-								"configs": [
-									{
-										"name": "toString"
-									},
-									{
-										"name": "\u0000",
-										"permission_policy": {
-											"type": "always_allow"
-										}
-									},
-									{
-										"name": "0"
-									},
-									{
-										"name": "\"Jpd;XbE+^"
-									},
-									{
-										"name": "0"
-									},
-									{
-										"name": "l"
-									},
-									{
-										"name": "(*mG6~|B\\4"
-									},
-									{
-										"name": "YMZlGj"
-									},
-									{
-										"name": " qXQ "
-									},
-									{
-										"name": "4294967295"
-									}
-								]
+								"mcp_server_name": "8"
 							}
 						],
-						"created_at": "1970-01-01T00:00:00.041Z"
+						"created_at": "1969-12-31T23:59:59.986Z"
 					}
 				],
 				"view:Checkfu.EnvironmentView@v0": [
@@ -26033,70 +25693,53 @@
 						"id": ")",
 						"type": "environment",
 						"version": 5,
-						"name": "4294967295",
-						"description": "C",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						},
-						"created_at": "-051318-04-05T14:37:44.711Z",
-						"updated_at": "1970-01-01T00:00:00.039Z",
-						"archived_at": "-271821-04-20T00:00:00.020Z"
-					},
-					null,
-					{
-						"id": "X\"o!mTNWqi",
-						"type": "environment",
-						"version": 36,
-						"name": "&hvoZ?$z.k",
-						"description": "",
-						"config": {
-							"type": "cloud",
-							"networking": {
-								"type": "unrestricted"
-							}
-						},
-						"created_at": "+097491-08-04T12:12:00.400Z",
-						"updated_at": "1970-01-01T00:00:00.015Z",
-						"archived_at": "1970-01-01T00:00:00.032Z"
-					},
-					{
-						"id": "Jq>IP;GE",
-						"type": "environment",
-						"version": 46,
-						"name": "}teJhK+&/.",
+						"name": "u+E~D-s$E-",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
 								"type": "limited",
 								"allow_mcp_servers": false,
-								"allow_package_managers": true,
+								"allow_package_managers": false,
 								"allowed_hosts": [
+									"2",
+									"qQjSc{]Yz(",
+									"\udc00",
+									"`--X(_/)",
+									"A",
 									"l",
-									"[[Yop",
-									"\ud800",
-									"__proto__",
-									"😀",
-									"\n",
-									"l",
-									"`h}qD%;%m]",
-									"*V,<2qEG-.",
-									"/|\"P"
+									"-1",
+									"{Jxe)O=",
+									"s>OY.E*E@x"
 								]
 							}
 						},
-						"created_at": "-271821-04-20T00:00:00.017Z",
-						"updated_at": "1969-12-31T23:59:59.991Z",
+						"created_at": "1969-12-31T23:59:59.999Z",
+						"updated_at": "-116827-08-15T07:30:38.873Z",
+						"archived_at": "1969-12-31T23:59:59.993Z"
+					},
+					null,
+					{
+						"id": "X\"o!mTNWqi",
+						"type": "environment",
+						"version": 36,
+						"name": "vZ$.k",
+						"description": "]Q",
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "unrestricted"
+							}
+						},
+						"created_at": "1969-12-31T23:59:59.989Z",
+						"updated_at": "1970-01-01T00:00:00.032Z",
 						"archived_at": null
 					},
 					{
-						"id": "Wf`SY.C ",
+						"id": "Jq>IP;GE",
 						"type": "environment",
-						"version": 2,
-						"name": "'nemK2G!",
+						"version": 46,
+						"name": "󋽽򁱪",
 						"description": null,
 						"config": {
 							"type": "cloud",
@@ -26104,9 +25747,25 @@
 								"type": "unrestricted"
 							}
 						},
-						"created_at": "+153622-01-02T18:00:11.065Z",
-						"updated_at": "1970-01-01T00:00:00.031Z",
-						"archived_at": "-271821-04-20T00:00:00.048Z"
+						"created_at": "1969-12-31T23:59:59.964Z",
+						"updated_at": "-271821-04-20T00:00:00.046Z",
+						"archived_at": "1970-01-01T00:00:00.000Z"
+					},
+					{
+						"id": "Wf`SY.C ",
+						"type": "environment",
+						"version": 2,
+						"name": "eKGlr|f",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "unrestricted"
+							}
+						},
+						"created_at": "+275760-09-12T23:59:59.956Z",
+						"updated_at": "-271821-04-20T00:00:00.048Z",
+						"archived_at": "-143302-06-09T19:18:30.107Z"
 					}
 				],
 				"view:Checkfu.SessionView@v6": [
@@ -27748,26 +27407,12 @@
 					{
 						"_tag": "environment.created",
 						"version": 4,
-						"name": "\n",
+						"name": "pioIhn0BG2",
 						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"h",
-									"\ud800",
-									"\n",
-									"0",
-									"tE\\8G$;:k_",
-									"p;G2sN=sJ",
-									"\u0000",
-									"itFj*_m",
-									"\n",
-									"/<"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
@@ -27777,8 +27422,8 @@
 					{
 						"_tag": "environment.updated",
 						"version": 31,
-						"name": "\n",
-						"description": "\u0000",
+						"name": "=",
+						"description": "\"ss!4u;*vt",
 						"config": {
 							"type": "cloud",
 							"networking": {
@@ -27812,13 +27457,13 @@
 						"_tag": "agent.created",
 						"version": 1,
 						"version_id": "aV0lpvh>:b",
-						"name": " ",
+						"name": "E,/TD7k2Gg",
 						"model": {
-							"id": ","
+							"id": "4294967295"
 						},
-						"system": "4294967295",
-						"description": null,
-						"mcp_servers": "7Zk72cGgMQ",
+						"system": "",
+						"description": "0%t{!['\"h_",
+						"mcp_servers": "",
 						"tools": "-1"
 					},
 					{
@@ -27843,15 +27488,12 @@
 					{
 						"_tag": "environment.created",
 						"version": 6,
-						"name": "@",
-						"description": null,
+						"name": "g򵊧",
+						"description": "",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": []
+								"type": "unrestricted"
 							}
 						}
 					}
@@ -27866,25 +27508,12 @@
 					{
 						"_tag": "environment.updated",
 						"version": 47,
-						"name": "0",
-						"description": null,
+						"name": "󸡰",
+						"description": "𭧱!|O0jyz&",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": true,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"\udc00",
-									"\t",
-									"|",
-									"0",
-									"yh",
-									"n",
-									"\t",
-									".4R#8d&_",
-									"__proto__"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
@@ -27907,13 +27536,13 @@
 						"_tag": "agent.updated",
 						"version": 26,
 						"version_id": ">WT|a~P5N'",
-						"name": "4[\"ijp",
+						"name": "\"jA𖣲Fw",
 						"model": {
-							"id": "\t"
+							"id": "0"
 						},
-						"system": "G@BNIWRKo}",
-						"description": "8)I",
-						"mcp_servers": "toString",
+						"system": "Ro%m8Ih#rl",
+						"description": "DK",
+						"mcp_servers": "😀",
 						"tools": ""
 					},
 					{
@@ -27964,12 +27593,26 @@
 					{
 						"_tag": "environment.updated",
 						"version": 2,
-						"name": "__proto__",
-						"description": "",
+						"name": "]^#c]Dn7_8",
+						"description": "&;򻌡򩤱`u",
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "unrestricted"
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"😀",
+									"\u0000",
+									"4294967295",
+									")",
+									"0[Yy8i$7@",
+									">",
+									"-~97Wm/f{",
+									"\t",
+									"1",
+									"-1"
+								]
 							}
 						}
 					},
@@ -28012,25 +27655,12 @@
 					{
 						"_tag": "environment.updated",
 						"version": 100,
-						"name": "z6v9X$]%y#",
-						"description": "^l,Y)F-=uE",
+						"name": "vX]%",
+						"description": null,
 						"config": {
 							"type": "cloud",
 							"networking": {
-								"type": "limited",
-								"allow_mcp_servers": false,
-								"allow_package_managers": true,
-								"allowed_hosts": [
-									"<iIhXuvn-[",
-									" ",
-									"B,CW",
-									"8xp4|G\"m8)",
-									"?",
-									"x",
-									"isF)u>{`",
-									"0",
-									"__proto__"
-								]
+								"type": "unrestricted"
 							}
 						}
 					},
@@ -28079,27 +27709,27 @@
 						"_tag": "agent.created",
 						"version": 9,
 						"version_id": "0",
-						"name": "\ud800",
+						"name": "w",
 						"model": {
 							"id": "\t"
 						},
 						"system": null,
-						"description": "toString",
-						"mcp_servers": "\ud800",
-						"tools": "0"
+						"description": "󍧶𚅼􎻝",
+						"mcp_servers": "__proto__",
+						"tools": " "
 					},
 					{
 						"_tag": "agent.updated",
 						"version": 3,
 						"version_id": "|<tBDf<d4\"",
-						"name": " ",
+						"name": "0",
 						"model": {
-							"id": "T"
+							"id": "k("
 						},
-						"system": null,
-						"description": "QV`rm_3sWK",
-						"mcp_servers": "\t",
-						"tools": ""
+						"system": "_󰯴򅚇񀪄H󽊮",
+						"description": null,
+						"mcp_servers": "",
+						"tools": "toString"
 					},
 					{
 						"_tag": "artifact.published",

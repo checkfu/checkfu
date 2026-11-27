@@ -1,13 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import {
-	AgentDescription,
-	AgentModel,
-	AgentName,
-	AgentSystem,
-	NonEmptyString,
-	PositiveInt,
-} from "./AgentTypes.ts"
+import { AgentDescription, AgentModel, AgentName, AgentSystem, PositiveInt } from "./AgentTypes.ts"
 import { AgentToolsText, McpServersText } from "../Mcp/McpServers.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentArchivedError } from "./AgentArchived.rejection.ts"
@@ -17,10 +10,10 @@ import { AgentVersionId } from "./AgentVersion.id.ts"
 export class AgentUpdated extends Domain.Event("agent.updated", {
 	version: PositiveInt,
 	version_id: AgentVersionId,
-	name: NonEmptyString,
+	name: AgentName,
 	model: AgentModel,
-	system: Schema.NullOr(Schema.String),
-	description: Schema.NullOr(Schema.String),
+	system: Schema.NullOr(AgentSystem),
+	description: Schema.NullOr(AgentDescription),
 	mcp_servers: McpServersText,
 	tools: AgentToolsText,
 }) {}

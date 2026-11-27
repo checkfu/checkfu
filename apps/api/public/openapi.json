@@ -411,7 +411,8 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"model": {
 											"type": "object",
@@ -427,7 +428,8 @@
 										"system": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 100000
 												},
 												{
 													"type": "null"
@@ -437,7 +439,8 @@
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 2048
 												},
 												{
 													"type": "null"
@@ -1350,7 +1353,8 @@
 													},
 													"name": {
 														"type": "string",
-														"minLength": 1
+														"minLength": 1,
+														"maxLength": 256
 													},
 													"model": {
 														"type": "object",
@@ -1366,7 +1370,8 @@
 													"system": {
 														"anyOf": [
 															{
-																"type": "string"
+																"type": "string",
+																"maxLength": 100000
 															},
 															{
 																"type": "null"
@@ -1376,7 +1381,8 @@
 													"description": {
 														"anyOf": [
 															{
-																"type": "string"
+																"type": "string",
+																"maxLength": 2048
 															},
 															{
 																"type": "null"
@@ -1970,7 +1976,8 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"model": {
 											"type": "object",
@@ -1986,7 +1993,8 @@
 										"system": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 100000
 												},
 												{
 													"type": "null"
@@ -1996,7 +2004,8 @@
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 2048
 												},
 												{
 													"type": "null"
@@ -2561,7 +2570,8 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"model": {
 											"type": "object",
@@ -2577,7 +2587,8 @@
 										"system": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 100000
 												},
 												{
 													"type": "null"
@@ -2587,7 +2598,8 @@
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 2048
 												},
 												{
 													"type": "null"
@@ -3487,7 +3499,8 @@
 													},
 													"name": {
 														"type": "string",
-														"minLength": 1
+														"minLength": 1,
+														"maxLength": 256
 													},
 													"model": {
 														"type": "object",
@@ -3503,7 +3516,8 @@
 													"system": {
 														"anyOf": [
 															{
-																"type": "string"
+																"type": "string",
+																"maxLength": 100000
 															},
 															{
 																"type": "null"
@@ -3513,7 +3527,8 @@
 													"description": {
 														"anyOf": [
 															{
-																"type": "string"
+																"type": "string",
+																"maxLength": 2048
 															},
 															{
 																"type": "null"
@@ -4109,7 +4124,8 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"model": {
 											"type": "object",
@@ -4125,7 +4141,8 @@
 										"system": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 100000
 												},
 												{
 													"type": "null"
@@ -4135,7 +4152,8 @@
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 2048
 												},
 												{
 													"type": "null"
@@ -4730,12 +4748,14 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 1024
 												},
 												{
 													"type": "null"
@@ -5479,12 +5499,14 @@
 													},
 													"name": {
 														"type": "string",
-														"minLength": 1
+														"minLength": 1,
+														"maxLength": 256
 													},
 													"description": {
 														"anyOf": [
 															{
-																"type": "string"
+																"type": "string",
+																"maxLength": 1024
 															},
 															{
 																"type": "null"
@@ -6001,12 +6023,14 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 1024
 												},
 												{
 													"type": "null"
@@ -6496,12 +6520,14 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 1024
 												},
 												{
 													"type": "null"
@@ -7615,12 +7641,14 @@
 										},
 										"name": {
 											"type": "string",
-											"minLength": 1
+											"minLength": 1,
+											"maxLength": 256
 										},
 										"description": {
 											"anyOf": [
 												{
-													"type": "string"
+													"type": "string",
+													"maxLength": 1024
 												},
 												{
 													"type": "null"
@@ -8242,7 +8270,8 @@
 												},
 												"name": {
 													"type": "string",
-													"minLength": 1
+													"minLength": 1,
+													"maxLength": 256
 												},
 												"model": {
 													"type": "object",
@@ -8258,7 +8287,8 @@
 												"system": {
 													"anyOf": [
 														{
-															"type": "string"
+															"type": "string",
+															"maxLength": 100000
 														},
 														{
 															"type": "null"
@@ -8268,7 +8298,8 @@
 												"description": {
 													"anyOf": [
 														{
-															"type": "string"
+															"type": "string",
+															"maxLength": 2048
 														},
 														{
 															"type": "null"
@@ -9680,7 +9711,8 @@
 															},
 															"name": {
 																"type": "string",
-																"minLength": 1
+																"minLength": 1,
+																"maxLength": 256
 															},
 															"model": {
 																"type": "object",
@@ -9696,7 +9728,8 @@
 															"system": {
 																"anyOf": [
 																	{
-																		"type": "string"
+																		"type": "string",
+																		"maxLength": 100000
 																	},
 																	{
 																		"type": "null"
@@ -9706,7 +9739,8 @@
 															"description": {
 																"anyOf": [
 																	{
-																		"type": "string"
+																		"type": "string",
+																		"maxLength": 2048
 																	},
 																	{
 																		"type": "null"
@@ -10669,7 +10703,8 @@
 												},
 												"name": {
 													"type": "string",
-													"minLength": 1
+													"minLength": 1,
+													"maxLength": 256
 												},
 												"model": {
 													"type": "object",
@@ -10685,7 +10720,8 @@
 												"system": {
 													"anyOf": [
 														{
-															"type": "string"
+															"type": "string",
+															"maxLength": 100000
 														},
 														{
 															"type": "null"
@@ -10695,7 +10731,8 @@
 												"description": {
 													"anyOf": [
 														{
-															"type": "string"
+															"type": "string",
+															"maxLength": 2048
 														},
 														{
 															"type": "null"
@@ -11633,7 +11670,8 @@
 												},
 												"name": {
 													"type": "string",
-													"minLength": 1
+													"minLength": 1,
+													"maxLength": 256
 												},
 												"model": {
 													"type": "object",
@@ -11649,7 +11687,8 @@
 												"system": {
 													"anyOf": [
 														{
-															"type": "string"
+															"type": "string",
+															"maxLength": 100000
 														},
 														{
 															"type": "null"
@@ -11659,7 +11698,8 @@
 												"description": {
 													"anyOf": [
 														{
-															"type": "string"
+															"type": "string",
+															"maxLength": 2048
 														},
 														{
 															"type": "null"

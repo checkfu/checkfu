@@ -4,15 +4,14 @@ import {
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentName,
-	NonEmptyString,
 	PositiveInt,
 } from "./EnvironmentTypes.ts"
 import { EnvironmentId } from "./Environment.id.ts"
 
 export class EnvironmentCreated extends Domain.Event("environment.created", {
 	version: PositiveInt,
-	name: NonEmptyString,
-	description: Schema.NullOr(Schema.String),
+	name: EnvironmentName,
+	description: Schema.NullOr(EnvironmentDescription),
 	config: EnvironmentConfig,
 }) {}
 

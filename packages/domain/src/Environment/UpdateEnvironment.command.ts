@@ -4,7 +4,6 @@ import {
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentName,
-	NonEmptyString,
 	PositiveInt,
 } from "./EnvironmentTypes.ts"
 import { EnvironmentId } from "./Environment.id.ts"
@@ -13,8 +12,8 @@ import { EnvironmentNotFound } from "./EnvironmentNotFound.rejection.ts"
 
 export class EnvironmentUpdated extends Domain.Event("environment.updated", {
 	version: PositiveInt,
-	name: NonEmptyString,
-	description: Schema.NullOr(Schema.String),
+	name: EnvironmentName,
+	description: Schema.NullOr(EnvironmentDescription),
 	config: EnvironmentConfig,
 }) {}
 
