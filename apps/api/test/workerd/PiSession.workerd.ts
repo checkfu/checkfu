@@ -5,6 +5,7 @@ import { spawn } from "node:child_process"
 import { createHash, createHmac } from "node:crypto"
 import type { ChildProcess } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type * as Schema from "effect/Schema"
@@ -30,6 +31,10 @@ import { authoredProjectJourney } from "./UserJourneys.ts"
 import { toolUseOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
 import { asInitialEvents, mixedInitialMessagesAt } from "../helpers/SessionInitialMessages.ts"
+import { WEBHOOK_FANOUT_PAGE_SIZE } from "../../src/Webhooks/WebhookEventsLive.ts"
+import { WEBHOOK_FANOUT_DEDUPE_TTL_MS } from "../../src/Webhooks/WebhookFanout.do.ts"
+import { WEBHOOK_EGRESS_TARGET_HEADER } from "../../src/Webhooks/WebhookEgressConfig.ts"
+import type { FanoutStatus } from "./WebhookFanoutFixture.ts"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
@@ -64,6 +69,12 @@ interface SessionEventItem {
 	readonly input?: Schema.JsonObject
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
 	readonly stop_reason?: { readonly type: string; readonly event_ids?: ReadonlyArray<string> }
+}
+
+interface ApiRequestOptions {
+	readonly method?: string
+	readonly body?: unknown
+	readonly headers?: Readonly<Record<string, string>>
 }
 
 const LOCAL_R2_ACCESS_KEY = "alchemy-local-r2"
@@ -216,11 +227,23 @@ const boundEnv = (stage: string, worker: (typeof WORKERS)[number]): object => {
 const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyArray<string> =>
 	Object.keys(boundEnv(stage, worker))
 
+const webhookFanoutFixture = {
+	config: "apps/api/test/workerd/WebhookFanoutFixture.stack.ts",
+	stack: "WebhookFanoutFixture",
+}
+
+interface WorkerdDevOptions {
+	readonly fixture?: typeof webhookFanoutFixture
+	readonly webhookEgressUrl?: string
+}
+
 const startAlchemyDev = async (
 	openAIBaseUrl: string,
 	gitHubBaseUrl: string,
 	stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`,
+	options?: WorkerdDevOptions,
 ) => {
+	const fixture = options?.fixture
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
 	const customProvidersJson = JSON.stringify({
@@ -252,6 +275,9 @@ const startAlchemyDev = async (
 				"CHECKFU_MCP_DOMAIN=none",
 				`CHECKFU_GITHUB_BASE_URL=${gitHubBaseUrl}`,
 				"CHECKFU_MACHINE_IDLE=10 seconds",
+				...(options?.webhookEgressUrl === undefined
+					? []
+					: [`CHECKFU_WEBHOOK_EGRESS_URL=${options.webhookEgressUrl}`]),
 				"",
 			].join("\n"),
 			{ flag: "wx", mode: 0o600 },
@@ -293,12 +319,24 @@ const startAlchemyDev = async (
 	const alchemyBin = join(REPO_ROOT, "node_modules", ".bin", "alchemy")
 	let child: ChildProcess
 	try {
-		child = spawn(alchemyBin, ["dev", "--stage", stage, "--no-input", "--env-file", envFile], {
-			cwd: REPO_ROOT,
-			env: childEnv,
-			detached: process.platform !== "win32",
-			stdio: ["ignore", "pipe", "pipe"],
-		})
+		child = spawn(
+			alchemyBin,
+			[
+				"dev",
+				"--stage",
+				stage,
+				"--no-input",
+				"--env-file",
+				envFile,
+				...(fixture === undefined ? [] : ["--config", fixture.config]),
+			],
+			{
+				cwd: REPO_ROOT,
+				env: childEnv,
+				detached: process.platform !== "win32",
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		)
 	} catch (error) {
 		rmSync(envDir, { recursive: true, force: true })
 		throw error
@@ -307,7 +345,7 @@ const startAlchemyDev = async (
 	const logs: Array<string> = []
 	let readyUrl: string | null = null
 	let apiUrl: string | null = null
-	let harnessReady = false
+	let harnessReady = fixture !== undefined
 	let resolveReady!: (url: string) => void
 	let rejectReady!: (err: Error) => void
 	const ready = new Promise<string>((res, rej) => {
@@ -320,7 +358,11 @@ const startAlchemyDev = async (
 			return
 		}
 		const clean = stripAnsi(line)
-		const match = clean.match(/\[ApiWorker\] ready at (http:\/\/[^\s]+)/)
+		const readyMessage =
+			fixture === undefined
+				? /\[ApiWorker\] ready at (http:\/\/[^\s]+)/
+				: /\[FanoutTestWorker\] ready at (http:\/\/[^\s]+)/
+		const match = clean.match(readyMessage)
 		if (match?.[1] !== undefined) {
 			apiUrl = match[1].replace(/\/+$/, "")
 		}
@@ -389,7 +431,7 @@ const startAlchemyDev = async (
 	}
 	const stop = async () => {
 		await halt()
-		removeStage(join(REPO_ROOT, ".alchemy"), "Checkfu", stage)
+		removeStage(join(REPO_ROOT, ".alchemy"), fixture?.stack ?? "Checkfu", stage)
 	}
 
 	try {
@@ -456,6 +498,241 @@ const userMessage = (text: string) => ({
 	content: [{ type: "text", text }],
 })
 
+const apiAt = (baseUrl: () => string) => {
+	const apiFetch = async (path: string, init?: ApiRequestOptions): Promise<Response> => {
+		const headers = {
+			...AUTH_HEADERS,
+			...(init?.body === undefined ? {} : { "content-type": "application/json" }),
+			...init?.headers,
+		}
+		return fetch(`${baseUrl()}${path}`, {
+			method: init?.method ?? "GET",
+			headers,
+			...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+		})
+	}
+
+	const apiJson = async <T>(
+		path: string,
+		init?: ApiRequestOptions,
+	): Promise<{ readonly status: number; readonly body: T }> => {
+		const res = await apiFetch(path, init)
+		const body = (await res.json()) as T
+		return { status: res.status, body }
+	}
+
+	return { apiFetch, apiJson }
+}
+
+it("retries one failed enqueue after the durable fan-out scan completes", async () => {
+	const unusedProvider = "http://127.0.0.1:1"
+	const worker = await startAlchemyDev(unusedProvider, unusedProvider, undefined, {
+		fixture: webhookFanoutFixture,
+	})
+	const send = async (path: string) => {
+		const response = await fetch(`${worker.baseUrl}${path}`, { method: "POST" })
+		expect(response.status, await response.text()).toBe(200)
+	}
+	const status = async () => {
+		const response = await fetch(`${worker.baseUrl}/status`)
+		const raw = await response.text()
+		expect(response.status, raw).toBe(200)
+		return parseResponseJson<FanoutStatus>("GET", "/status", response.status, raw)
+	}
+	try {
+		await send("/publish")
+		await expect.poll(status, { timeout: 15_000 }).toMatchObject({
+			started: true,
+			scanDone: true,
+			pendingCount: 1,
+			retryPending: true,
+		})
+		const pending = await status()
+		expect(pending.jobs.map(({ callback }) => callback)).toContain("retrySubscriber")
+		expect(pending.jobs.map(({ callback }) => callback)).not.toContain("cleanup")
+		expect(pending.deliveries).toHaveLength(pending.subscriberCount - 1)
+		expect(
+			pending.deliveries.some(({ webhookId }) => webhookId === pending.retrySubscriberId),
+		).toBe(false)
+		const releasedAt = Date.now()
+		await send("/release")
+		await expect.poll(status, { timeout: 15_000 }).toMatchObject({
+			started: true,
+			scanDone: true,
+			pendingCount: null,
+			retryPending: null,
+			jobs: [{ callback: "cleanup" }],
+		})
+		const settled = await status()
+		expect(settled.jobs[0]?.scheduled_at).toBeGreaterThanOrEqual(
+			releasedAt + WEBHOOK_FANOUT_DEDUPE_TTL_MS,
+		)
+		expect(settled.jobs[0]?.scheduled_at).toBeLessThanOrEqual(
+			Date.now() + WEBHOOK_FANOUT_DEDUPE_TTL_MS,
+		)
+		const retried = settled.attempts.filter(
+			({ webhookId }) => webhookId === settled.retrySubscriberId,
+		)
+		expect(retried).toHaveLength(2)
+		expect(retried[1]).toEqual(retried[0])
+		expect(
+			settled.attempts.filter(({ webhookId }) => webhookId !== settled.retrySubscriberId),
+		).toEqual(pending.deliveries)
+		expect(settled.deliveries).toEqual([...pending.deliveries, retried[0]])
+		await send("/publish")
+		const replay = await status()
+		expect(replay.attempts).toHaveLength(settled.attempts.length + WEBHOOK_FANOUT_PAGE_SIZE)
+		expect(replay.deliveries).toEqual(settled.deliveries)
+		expect(replay.jobs.map(({ callback }) => callback)).toEqual(["cleanup"])
+		await send("/cleanup")
+		await expect.poll(status, { timeout: 10_000 }).toMatchObject({
+			started: null,
+			scanDone: null,
+			pendingCount: null,
+			retryPending: null,
+			jobs: [],
+			deliveries: settled.deliveries,
+		})
+	} finally {
+		await worker.stop()
+	}
+}, 240_000)
+
+it("fans a single event out across three subscriber pages in Durable Objects", async () => {
+	interface Delivery {
+		readonly id: string
+		readonly webhook_id: string
+		readonly event_id: string
+		readonly event_type: string
+		readonly status: string
+	}
+	const received: Array<{ readonly target: string; readonly body: string }> = []
+	const receiver = createServer((request, response) => {
+		const target = request.headers[WEBHOOK_EGRESS_TARGET_HEADER]
+		if (request.method !== "POST" || request.url !== "/egress" || typeof target !== "string") {
+			response.writeHead(400).end()
+			return
+		}
+		let body = ""
+		request.setEncoding("utf8")
+		request.on("data", (chunk: string) => {
+			body += chunk
+		})
+		request.on("end", () => {
+			received.push({ target, body })
+			response.writeHead(200, { "content-type": "application/json" })
+			response.end(JSON.stringify({ kind: "response", status: 204 }))
+		})
+	})
+	try {
+		await new Promise<void>((resolveListen, rejectListen) => {
+			receiver.once("error", rejectListen)
+			receiver.listen(0, "127.0.0.1", resolveListen)
+		})
+		const address = receiver.address()
+		if (address === null || typeof address === "string") {
+			throw new Error("The local webhook receiver has no port.")
+		}
+		const unusedProvider = "http://127.0.0.1:1"
+		const worker = await startAlchemyDev(unusedProvider, unusedProvider, undefined, {
+			webhookEgressUrl: `http://127.0.0.1:${address.port}/egress`,
+		})
+		try {
+			const { apiJson } = apiAt(() => worker.baseUrl)
+			const register = async (label: string, eventType: string) => {
+				const url = `https://receiver.example.test/${label}`
+				const { status, body } = await apiJson<{ readonly id: string }>("/v1/webhooks", {
+					method: "POST",
+					body: { url, event_types: [eventType] },
+				})
+				expect(status).toBe(201)
+				return { id: body.id, url }
+			}
+			const deliveriesFor = async (id: string) => {
+				const page = await apiJson<{ readonly data: ReadonlyArray<Delivery> }>(
+					`/v1/webhooks/${id}/deliveries`,
+				)
+				expect(page.status).toBe(200)
+				return page.body.data
+			}
+			const nonmatching = await register("nonmatching", "agent.archived")
+			const matching: Array<Awaited<ReturnType<typeof register>>> = []
+			for (let index = 0; index < WEBHOOK_FANOUT_PAGE_SIZE * 2 + 1; index++) {
+				matching.push(await register(`subscriber-${index}`, "agent.created"))
+			}
+			const send = () =>
+				apiJson<{ readonly id: string }>("/v1/agents", {
+					method: "POST",
+					headers: { "idempotency-key": "three-webhook-subscriber-pages" },
+					body: {
+						name: "Webhook continuations",
+						model: `${TEST_CUSTOM_PROVIDER_ID}/custom-model-v1`,
+					},
+				})
+			const agent = await send()
+			expect(agent.status).toBe(201)
+			const eventId = `evt_agent_${agent.body.id}_1`
+			const late = await register("late", "agent.created")
+			const readDeliveries = () => Promise.all(matching.map(({ id }) => deliveriesFor(id)))
+			await expect
+				.poll(
+					async () => {
+						const pages = await readDeliveries()
+						return pages.flat().filter(({ status }) => status === "succeeded").length
+					},
+					{ timeout: 15_000 },
+				)
+				.toBe(matching.length)
+			const pages = await readDeliveries()
+			expect(
+				pages.map((page) =>
+					page.map(({ id, webhook_id, event_id, event_type, status }) => [
+						id,
+						webhook_id,
+						event_id,
+						event_type,
+						status,
+					]),
+				),
+			).toEqual(
+				matching.map(({ id }) => [
+					[
+						`wdel_${sha256Hex(`wdel:${id}:${eventId}`).slice(0, 24)}`,
+						id,
+						eventId,
+						"agent.created",
+						"succeeded",
+					],
+				]),
+			)
+			const replay = await send()
+			expect(replay.status).toBe(201)
+			expect(replay.body.id).toBe(agent.body.id)
+			expect(await readDeliveries()).toEqual(pages)
+			expect(await deliveriesFor(nonmatching.id)).toEqual([])
+			expect(await deliveriesFor(late.id)).toEqual([])
+			expect(received.map(({ target }) => target).sort()).toEqual(
+				matching.map(({ url }) => url).sort(),
+			)
+			for (const { body } of received) {
+				const payload: unknown = JSON.parse(body)
+				expect(payload).toMatchObject({
+					type: "event",
+					id: eventId,
+					data: { type: "agent.created", id: agent.body.id },
+				})
+			}
+		} finally {
+			await worker.stop()
+		}
+	} finally {
+		receiver.closeAllConnections()
+		await new Promise<void>((resolveClose) => {
+			receiver.close(() => resolveClose())
+		})
+	}
+}, 240_000)
+
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
 	let fakeGitHub: FakeGitHubServer
@@ -468,29 +745,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	let agentId: string
 	let environmentId: string
 
-	const apiFetch = async (
-		path: string,
-		init?: { readonly method?: string; readonly body?: unknown },
-	): Promise<Response> => {
-		const headers = {
-			...AUTH_HEADERS,
-			...(init?.body === undefined ? {} : { "content-type": "application/json" }),
-		}
-		return fetch(`${baseUrl}${path}`, {
-			method: init?.method ?? "GET",
-			headers,
-			...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-		})
-	}
-
-	const apiJson = async <T>(
-		path: string,
-		init?: { readonly method?: string; readonly body?: unknown },
-	): Promise<{ readonly status: number; readonly body: T }> => {
-		const res = await apiFetch(path, init)
-		const body = (await res.json()) as T
-		return { status: res.status, body }
-	}
+	const { apiFetch, apiJson } = apiAt(() => baseUrl)
 
 	const pollResourceReady = async <T>(
 		resourcePath: string,
