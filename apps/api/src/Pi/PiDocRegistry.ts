@@ -1,7 +1,6 @@
 import { ModelUsage, NonNegativeInt } from "@checkfu/domain/Session/SessionTypes"
 import type { ServiceFreeSchema } from "@checkfu/snapshots/VersionedSnapshot"
 import { defineDoc, defineDocFamily } from "@earendil-works/pi-durable"
-import type { JsonObject } from "@earendil-works/pi-durable"
 import * as Schema from "effect/Schema"
 
 export interface CheckfuPiDocSpec {
@@ -13,14 +12,9 @@ export interface CheckfuPiDocSpec {
 			readonly history?: "latest" | "rewindable"
 			readonly fork?: "asOf" | "current" | "initial"
 			readonly family?: true
-			readonly migrate?: (value: JsonObject, fromVersion: number) => JsonObject
 		}
 	}
 	readonly schema: ServiceFreeSchema
-	readonly previous?: ReadonlyArray<{
-		readonly version: number
-		readonly schema: ServiceFreeSchema
-	}>
 }
 
 export const ACTIVE_USAGE_DOC_VERSION = 1 as const

@@ -1,6 +1,5 @@
 import { RUN_TURN_ACTIVITIES } from "@checkfu/domain/Session/RunTurn.saga"
 import { copyJson } from "@earendil-works/chord/json"
-import type { JsonObject } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
@@ -68,7 +67,7 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 	"saga-result":
 		"A completed run keeps its result. Add a field only with a decoding default, or give the saga a new name.",
 	"pi-doc":
-		"Pi durable documents survive deployments and are read when resuming or replaying turns. Keep the document's scope and family fixed, and bump its `version` with a `migrate` handler whenever its fields change.",
+		"Check the current Pi document's schema, scope, family and version against its runtime registration. Replace the pre-release baseline after reviewing an intentional shape change.",
 	"session-table":
 		"The table already exists in every session object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"webhook-table":
@@ -287,13 +286,16 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 		}
 		conversationSemantics = { history: def.history, fork: def.fork }
 	}
-	const makeWireEnvelope = (version: number, valueDoc: unknown) => {
-		const value = Schema.Record(Schema.String, Schema.Json).annotate({
-			description: JSON.stringify(valueDoc),
-		})
-		return conversationSemantics !== null
+	const runtimeSchema = Schema.toType(spec.schema)
+	const runtimeCodecJson = Schema.toCodecJson(runtimeSchema)
+	const validateCurrent = Schema.decodeUnknownEffect(runtimeSchema)
+	const value = Schema.Record(Schema.String, Schema.Json).annotate({
+		description: JSON.stringify(Schema.toJsonSchemaDocument(runtimeCodecJson)),
+	})
+	const wireSchema =
+		conversationSemantics !== null
 			? Schema.Struct({
-					version: Schema.Literal(version),
+					version: Schema.Literal(def.version),
 					scope: Schema.Literal("conversation" as const),
 					history: Schema.Literal(conversationSemantics.history),
 					fork: Schema.Literal(conversationSemantics.fork),
@@ -301,129 +303,17 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 					value,
 				})
 			: Schema.Struct({
-					version: Schema.Literal(version),
+					version: Schema.Literal(def.version),
 					scope: Schema.Literal(def.scope),
 					family: Schema.Literal(family),
 					value,
 				})
-	}
-	const previous = [...(spec.previous ?? [])].sort((a, b) => a.version - b.version)
-	for (let i = 0; i < previous.length; i++) {
-		const step = previous[i]
-		if (step === undefined) {
-			continue
-		}
-		if (step.version >= def.version) {
-			throw new Error(
-				`Pi doc "${def.kind}" previous version ${step.version} must be less than current version ${def.version}`,
-			)
-		}
-		if (previous[i - 1]?.version === step.version) {
-			throw new Error(`Pi doc "${def.kind}" has duplicate previous version ${step.version}`)
-		}
-	}
-	if (previous.length > 0 && typeof def.migrate !== "function") {
-		throw new Error(
-			`Pi doc "${def.kind}" declares previous versions but defines no migrate() handler`,
-		)
-	}
-
-	const runtimeSchema = Schema.toType(spec.schema)
-	const runtimeCodecJson = Schema.toCodecJson(runtimeSchema)
-	const validateCurrent = Schema.decodeUnknownEffect(runtimeSchema)
-
-	const currentWireEnvelope = makeWireEnvelope(
-		def.version,
-		Schema.toJsonSchemaDocument(runtimeCodecJson),
-	)
-
-	const previousBranches = previous.map((step) => {
-		const stepRuntime = Schema.toType(step.schema)
-		return {
-			version: step.version,
-			validator: Schema.decodeUnknownEffect(stepRuntime),
-			envelope: makeWireEnvelope(
-				step.version,
-				Schema.toJsonSchemaDocument(Schema.toCodecJson(stepRuntime)),
-			),
-		}
-	})
-
-	const wireSchema = (previousBranches.length === 0
-		? currentWireEnvelope
-		: Schema.Union([
-				...previousBranches.map((branch) => branch.envelope),
-				currentWireEnvelope,
-			])) as unknown as Schema.Codec<
-		| {
-				readonly version: number
-				readonly scope: "conversation"
-				readonly history: "latest" | "rewindable"
-				readonly fork: "asOf" | "current" | "initial"
-				readonly family: boolean
-				readonly value: Readonly<Record<string, Schema.Json>>
-		  }
-		| {
-				readonly version: number
-				readonly scope: "session" | "conversation" | "task"
-				readonly family: boolean
-				readonly value: Readonly<Record<string, Schema.Json>>
-		  }
-	>
-
-	const stepValidators = new Map(
-		previousBranches.map((branch) => [branch.version, branch.validator]),
-	)
-
-	const migrate = def.migrate
 	return wireSchema.pipe(
 		Schema.decodeTo(
 			runtimeCodecJson,
 			SchemaTransformation.transformEffect({
-				decode: (rawEnvelope) => {
-					const envelope = rawEnvelope as {
-						readonly version: number
-						readonly value: JsonObject
-					}
-					if (envelope.version === def.version) {
-						return validatePiDocRuntimeValue(def.kind, def.version, validateCurrent, envelope.value)
-					}
-					const validateOld = stepValidators.get(envelope.version)
-					if (validateOld === undefined || migrate === undefined) {
-						return Effect.fail(
-							new SchemaIssue.InvalidValue(
-								{
-									message: `Unsupported previous version ${envelope.version} for Pi doc "${def.kind}"`,
-								},
-								envelope.version,
-							),
-						)
-					}
-					return validatePiDocRuntimeValue(
-						def.kind,
-						envelope.version,
-						validateOld,
-						envelope.value,
-					).pipe(
-						Effect.flatMap((rawJson) =>
-							Effect.try({
-								try: () => migrate(rawJson as JsonObject, envelope.version),
-								catch: (cause) =>
-									new SchemaIssue.InvalidValue(
-										{
-											message: `Pi doc "${def.kind}" migrate(v${envelope.version}) threw: ${
-												cause instanceof Error ? cause.message : String(cause)
-											}`,
-										},
-										rawJson,
-									),
-							}),
-						),
-						Effect.flatMap((migrated) =>
-							validatePiDocRuntimeValue(def.kind, def.version, validateCurrent, migrated),
-						),
-					)
-				},
+				decode: (envelope) =>
+					validatePiDocRuntimeValue(def.kind, def.version, validateCurrent, envelope.value),
 				encode: (value: Schema.Json) =>
 					validatePiDocRuntimeValue(def.kind, def.version, validateCurrent, value).pipe(
 						Effect.map((copied) =>
