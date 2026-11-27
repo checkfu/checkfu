@@ -897,4 +897,103 @@ describe("WebhookDeliveryEngine (real SQLite)", () => {
 				db.close()
 			}).pipe(Effect.provide(CryptoLive)),
 	)
+
+	it.effect(
+		"skips queued retries whose event_type was unsubscribed during backoff without skipping remaining subscribed deliveries",
+		() =>
+			Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				const db = new DatabaseSync(":memory:")
+				const webhookId = WebhookId.make("whe_sub_edit")
+				const engine = new WebhookDeliveryEngine(webhookId, sqliteStorage(db))
+				const mac = yield* Mac.Mac
+				const masterKey = yield* makeWebhookMasterKey("sub-edit-master")
+				let endpoint = activeEndpoint({
+					event_types: "session.status_idled,agent.created",
+					definition_revision: 1,
+				})
+				const sent: Array<WebhookHttpRequest> = []
+				const outcomes: Array<string> = []
+
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_unsub"),
+						event_id: WebhookEventId.make("evt_unsub"),
+						event_type: "session.status_idled",
+						dedupe_key: "evt_unsub",
+						payload_json: JSON.stringify({ id: "evt_unsub", type: "session.status_idled" }),
+					},
+					T0,
+				)
+				engine.enqueue(
+					{
+						delivery_id: WebhookDeliveryId.make("wdel_kept"),
+						event_id: WebhookEventId.make("evt_kept"),
+						event_type: "agent.created",
+						dedupe_key: "evt_kept",
+						payload_json: JSON.stringify({ id: "evt_kept", type: "agent.created" }),
+					},
+					T0,
+				)
+
+				// First attempt fails transiently so both enter retry backoff.
+				yield* engine.drainDue({
+					readEndpoint: Effect.sync(() => endpoint),
+					recordOutcome: (input) =>
+						Effect.sync(() => {
+							outcomes.push(input.outcome)
+							return endpoint
+						}),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: (req) =>
+							Effect.sync(() => {
+								sent.push(req)
+								return { kind: "response", status: 503 }
+							}),
+					},
+				})
+				expect(sent).toHaveLength(2)
+
+				// Operator edits the endpoint during backoff to unsubscribe from session.status_idled.
+				endpoint = activeEndpoint({
+					event_types: "agent.created",
+					definition_revision: 2,
+				})
+				const retryAt = engine.nextAlarmAt()!
+				yield* TestClock.setTime(retryAt + 10)
+				const outcomesBeforeRetry = outcomes.length
+
+				yield* engine.drainDue({
+					readEndpoint: Effect.sync(() => endpoint),
+					recordOutcome: (input) =>
+						Effect.sync(() => {
+							outcomes.push(input.outcome)
+							return endpoint
+						}),
+					mac,
+					masterKey: Effect.succeed(masterKey),
+					sender: {
+						send: (req) =>
+							Effect.sync(() => {
+								sent.push(req)
+								return { kind: "response", status: 200 }
+							}),
+					},
+				})
+
+				// Only agent.created was sent on retry; session.status_idled was skipped without touching endpoint health.
+				expect(sent).toHaveLength(3)
+				expect(sent[2]?.headers[STANDARD_WEBHOOK_HEADERS.id]).toBe("evt_kept")
+				expect(outcomes).toHaveLength(outcomesBeforeRetry)
+				const skipped = engine.getDelivery(WebhookDeliveryId.make("wdel_unsub"), retryAt + 10)
+				const delivered = engine.getDelivery(WebhookDeliveryId.make("wdel_kept"), retryAt + 10)
+				expect(skipped?.status).toBe("skipped")
+				expect(skipped?.next_attempt_at).toBeNull()
+				expect(skipped?.last_error).toContain("session.status_idled")
+				expect(delivered?.status).toBe("succeeded")
+				db.close()
+			}).pipe(Effect.provide(CryptoLive)),
+	)
 })

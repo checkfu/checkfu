@@ -2,13 +2,17 @@ import {
 	WEBHOOK_MAX_ATTEMPTS,
 	queueDelivery,
 	recordDeliveryAttempt,
+	skipDelivery,
 } from "@checkfu/domain/Webhook/WebhookDeliveryLifecycle"
 import type {
 	AttemptResult,
 	DeliveryLifecycle,
 } from "@checkfu/domain/Webhook/WebhookDeliveryLifecycle"
 import type { WebhookEndpointState } from "@checkfu/domain/Webhook/WebhookEndpoint.aggregate"
-import { WebhookOutcomeKind } from "@checkfu/domain/Webhook/WebhookTypes"
+import {
+	WebhookOutcomeKind,
+	matchesWebhookSubscription,
+} from "@checkfu/domain/Webhook/WebhookTypes"
 import { parsePublicHttpsWebhookUrl } from "@checkfu/domain/Webhook/WebhookUrl"
 import {
 	WebhookDeliveryId,
@@ -648,6 +652,21 @@ export class WebhookDeliveryEngine {
 		)
 	}
 
+	#skipDelivery(row: StoredRow, at: number, reason: string): void {
+		const skipped = skipDelivery(lifecycleOf(row), at)
+		this.#sql.exec(
+			"UPDATE webhook_deliveries " +
+				"SET status = ?, next_attempt_at = ?, completed_at = ?, updated_at = ?, last_error = ? " +
+				"WHERE delivery_id = ?",
+			skipped.status,
+			skipped.next_attempt_at,
+			skipped.completed_at,
+			at,
+			truncateError(reason),
+			row.delivery_id,
+		)
+	}
+
 	#flushHealthOutcomes(
 		deps: DrainWebhookDeliveriesDeps,
 		currentEndpoint: WebhookEndpointState,
@@ -759,6 +778,15 @@ export class WebhookDeliveryEngine {
 				if (endpoint.status !== "active") {
 					self.#skipAllPending(attemptAt, `Webhook endpoint is ${endpoint.status}.`)
 					break
+				}
+				if (!matchesWebhookSubscription(endpoint.event_types, row.event_type)) {
+					self.#skipDelivery(
+						row,
+						attemptAt,
+						`Webhook endpoint is no longer subscribed to ${row.event_type}.`,
+					)
+					processed += 1
+					continue
 				}
 
 				const attemptRevision = endpoint.definition_revision
