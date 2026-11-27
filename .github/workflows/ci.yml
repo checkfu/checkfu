@@ -97,6 +97,34 @@ jobs:
         env:
           RESULT: ${{ needs.test-packages.result }}
 
+  trial-vitest-doctor:
+    name: doctor (${{ matrix.pkg.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg:
+          - name: cli
+            dir: apps/cli
+            args: --testTimeout=20000
+          - name: app
+            dir: apps/app
+            args: ""
+          - name: mcp
+            dir: apps/mcp
+            args: ""
+          - name: release
+            dir: tools/release
+            args: ""
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun x vitest doctor --pool=threads ${{ matrix.pkg.args }}
+        working-directory: ${{ matrix.pkg.dir }}
+
   # Long Z3 proofs get their own runners. The other domain files share one, in parallel.
   domain-proofs:
     name: domain (${{ matrix.shard.name }})
@@ -150,65 +178,6 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain-checkfu
-      - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts
-        env:
-          CHECKFU_PROVE: "1"
-      - if: ${{ !cancelled() }}
-        name: Fail if a test changed any tracked file
-        run: git diff --exit-code
-
-  domain-checkfu-arm:
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          turbo-cache: trial-arm-domain-checkfu
-      - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts
-        env:
-          CHECKFU_PROVE: "1"
-      - if: ${{ !cancelled() }}
-        name: Fail if a test changed any tracked file
-        run: git diff --exit-code
-
-  trial-cold-install:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - run: node -v && time bun install --frozen-lockfile
-      - run: rm -rf node_modules ~/.bun/install/cache && time bun install --frozen-lockfile
-
-  trial-vitest-doctor:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: bun x turbo run typecheck --filter=@checkfu/api^...
-      - run: bun x vitest doctor --pool=threads
-        working-directory: apps/api
-
-  domain-checkfu-x64:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          turbo-cache: trial-x64-domain-checkfu
       - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts
         env:
           CHECKFU_PROVE: "1"
