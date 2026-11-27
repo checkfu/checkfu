@@ -25,6 +25,12 @@ bun checkfu deploy
 
 Signs in to Cloudflare, prompts for a provider key, deploys the stack, and writes `CHECKFU_API_KEY` to `.env` and `~/.config/checkfu/config.json`.
 
+Deploy from a Checkfu source checkout. If you use the standalone CLI for other commands, run `bun checkfu deploy` from the checkout.
+
+The first deploy defaults to `live`. Later deploys reuse the stage recorded in `.checkfu/deployment.json` unless you pass `--stage`.
+
+Use `bun checkfu deploy --stage production` to deploy to the protected stage. On `production`, Alchemy refuses removal or replacement of protected resources such as the artifact bucket. The stack also requires a committed persisted-data baseline. Run `bun run persisted:check` to verify it locally. If the first baseline is missing, a release maintainer runs `bun run persisted:cut` and commits `apps/api/test/persisted/Persisted.lock.json` before deployment.
+
 ```sh
 bun checkfu agents create --name Assistant --model your-model-id
 bun checkfu environments create --name default
