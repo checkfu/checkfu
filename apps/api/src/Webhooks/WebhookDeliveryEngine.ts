@@ -1,3 +1,12 @@
+import {
+	WEBHOOK_MAX_ATTEMPTS,
+	queueDelivery,
+	recordDeliveryAttempt,
+} from "@checkfu/domain/Webhook/WebhookDeliveryLifecycle"
+import type {
+	AttemptResult,
+	DeliveryLifecycle,
+} from "@checkfu/domain/Webhook/WebhookDeliveryLifecycle"
 import type { WebhookEndpointState } from "@checkfu/domain/Webhook/WebhookEndpoint.aggregate"
 import type { WebhookOutcomeKind } from "@checkfu/domain/Webhook/WebhookTypes"
 import { parsePublicHttpsWebhookUrl } from "@checkfu/domain/Webhook/WebhookUrl"
@@ -25,7 +34,7 @@ import {
 	signStandardWebhook,
 } from "./WebhookSigning.ts"
 
-export const WEBHOOK_MAX_ATTEMPTS = 6
+export { WEBHOOK_MAX_ATTEMPTS }
 export const WEBHOOK_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 3_600_000, 14_400_000] as const
 export const WEBHOOK_DELIVERY_TIMEOUT_MS = 10_000
 export const WEBHOOK_MAX_STORED_DELIVERIES = 500
@@ -44,7 +53,7 @@ export const WEBHOOK_DELIVERIES_TABLE =
 	"payload_json TEXT NOT NULL, " +
 	"status TEXT NOT NULL, " +
 	"attempt_count INTEGER NOT NULL DEFAULT 0, " +
-	"max_attempts INTEGER NOT NULL DEFAULT 6, " +
+	`max_attempts INTEGER NOT NULL DEFAULT ${WEBHOOK_MAX_ATTEMPTS}, ` +
 	"next_attempt_at INTEGER, " +
 	"last_attempt_at INTEGER, " +
 	"last_http_status INTEGER, " +
@@ -144,6 +153,14 @@ interface StoredRow {
 	readonly updated_at: number
 	readonly completed_at: number | null
 }
+
+const lifecycleOf = (row: StoredRow): DeliveryLifecycle => ({
+	status: row.status,
+	attempts: row.attempt_count,
+	max_attempts: row.max_attempts,
+	next_attempt_at: row.next_attempt_at,
+	completed_at: row.completed_at,
+})
 
 interface StoredHealthOutcome {
 	readonly outcome_id: string
@@ -479,18 +496,21 @@ export class WebhookDeliveryEngine {
 					`Webhook ${this.#webhookId} pending delivery queue is full (${WEBHOOK_MAX_PENDING_DELIVERIES}).`,
 				)
 			}
+			const delivery = queueDelivery(WEBHOOK_MAX_ATTEMPTS, nowMillis)
 			this.#sql.exec(
 				"INSERT INTO webhook_deliveries (" +
 					"delivery_id, event_id, event_type, dedupe_key, payload_json, status, " +
 					"attempt_count, max_attempts, next_attempt_at, created_at, updated_at" +
-					") VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)",
+					") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 				input.delivery_id,
 				input.event_id,
 				input.event_type,
 				input.dedupe_key,
 				input.payload_json,
-				WEBHOOK_MAX_ATTEMPTS,
-				nowMillis,
+				delivery.status,
+				delivery.attempts,
+				delivery.max_attempts,
+				delivery.next_attempt_at,
 				nowMillis,
 				nowMillis,
 			)
@@ -649,6 +669,30 @@ export class WebhookDeliveryEngine {
 		this.#sql.exec("DELETE FROM webhook_health_outcomes WHERE outcome_id = ?", outcomeId)
 	}
 
+	#writeAttempt(
+		deliveryId: string,
+		delivery: DeliveryLifecycle,
+		at: number,
+		result: ClassifiedHttpResult,
+	): void {
+		this.#sql.exec(
+			"UPDATE webhook_deliveries " +
+				"SET status = ?, attempt_count = ?, next_attempt_at = ?, completed_at = ?, " +
+				"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
+				"updated_at = ? WHERE delivery_id = ?",
+			delivery.status,
+			delivery.attempts,
+			delivery.next_attempt_at,
+			delivery.completed_at,
+			at,
+			result.httpStatus,
+			result.deliveryOutcome,
+			result.errorMessage,
+			at,
+			deliveryId,
+		)
+	}
+
 	#skipAllPending(nowMillis: number, reason: string): void {
 		this.#sql.exec(
 			"UPDATE webhook_deliveries " +
@@ -777,196 +821,78 @@ export class WebhookDeliveryEngine {
 				const nextAttemptCount = row.attempt_count + 1
 				const outcomeId = `${row.delivery_id}:${nextAttemptCount}`
 				const validatedUrl = parsePublicHttpsWebhookUrl(endpoint.url)
+				let classified: ClassifiedHttpResult
+				let finishedAt = attemptAt
 				if (validatedUrl === null) {
-					processed += 1
-					self.#transaction(() => {
-						self.#sql.exec(
-							"UPDATE webhook_deliveries " +
-								"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
-								"last_attempt_at = ?, last_outcome = 'invalid_destination', last_error = ?, " +
-								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-							nextAttemptCount,
-							attemptAt,
-							"Webhook destination URL is not a permitted public HTTPS address.",
-							attemptAt,
-							attemptAt,
-							row.delivery_id,
-						)
-						self.#recordPendingHealthOutcome({
-							outcome_id: outcomeId,
-							definition_revision: attemptRevision,
-							outcome: "failed",
-							observed_at: attemptAt,
-							created_at: attemptAt,
-						})
+					classified = {
+						...classifyHttpResult({
+							kind: "invalid_destination",
+							message: "Webhook destination URL is not a permitted public HTTPS address.",
+						}),
+						httpStatus: row.last_http_status,
+					}
+				} else {
+					cachedMasterKey ??= yield* deps.masterKey
+					const secrets = yield* self.#deriveSecretsForAttempt(
+						deps,
+						cachedMasterKey,
+						endpoint,
+						attemptAt,
+					)
+					const timestampSeconds = Math.floor(attemptAt / 1000)
+					const webhookId = signingIdForDelivery(row)
+					const signature = yield* signStandardWebhook(deps.mac, {
+						secrets,
+						webhookId,
+						timestampSeconds,
+						payload: row.payload_json,
 					})
-					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
-					if (endpoint.status === "" || endpoint.status === "deleted") {
-						self.purge()
-						return { processed, purged: true, nextAlarmAt: null }
-					}
-					if (endpoint.status !== "active") {
-						self.#skipAllPending(attemptAt, `Webhook endpoint is ${endpoint.status}.`)
-						break
-					}
-					continue
+					const httpResult = yield* deps.sender.send({
+						url: validatedUrl,
+						headers: {
+							"user-agent": WEBHOOK_USER_AGENT,
+							[STANDARD_WEBHOOK_HEADERS.id]: webhookId,
+							[STANDARD_WEBHOOK_HEADERS.timestamp]: String(timestampSeconds),
+							[STANDARD_WEBHOOK_HEADERS.signature]: signature,
+						},
+						body: row.payload_json,
+						timeoutMs: WEBHOOK_DELIVERY_TIMEOUT_MS,
+					})
+					finishedAt = yield* Clock.currentTimeMillis
+					classified = classifyHttpResult(httpResult)
 				}
-
-				cachedMasterKey ??= yield* deps.masterKey
-				const secrets = yield* self.#deriveSecretsForAttempt(
-					deps,
-					cachedMasterKey,
-					endpoint,
-					attemptAt,
-				)
-				const timestampSeconds = Math.floor(attemptAt / 1000)
-				const webhookId = signingIdForDelivery(row)
-				const signature = yield* signStandardWebhook(deps.mac, {
-					secrets,
-					webhookId,
-					timestampSeconds,
-					payload: row.payload_json,
-				})
-				const httpResult = yield* deps.sender.send({
-					url: validatedUrl,
-					headers: {
-						"user-agent": WEBHOOK_USER_AGENT,
-						[STANDARD_WEBHOOK_HEADERS.id]: webhookId,
-						[STANDARD_WEBHOOK_HEADERS.timestamp]: String(timestampSeconds),
-						[STANDARD_WEBHOOK_HEADERS.signature]: signature,
-					},
-					body: row.payload_json,
-					timeoutMs: WEBHOOK_DELIVERY_TIMEOUT_MS,
-				})
 				processed += 1
-				const finishedAt = yield* Clock.currentTimeMillis
-				const classified = classifyHttpResult(httpResult)
 
-				if (classified.healthOutcome === "delivered") {
-					const shouldClearHealth = endpoint.failure_window_started_at !== 0
-					self.#transaction(() => {
-						self.#sql.exec(
-							"UPDATE webhook_deliveries " +
-								"SET status = 'succeeded', attempt_count = ?, next_attempt_at = NULL, " +
-								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = NULL, " +
-								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-							nextAttemptCount,
-							finishedAt,
-							classified.httpStatus,
-							classified.deliveryOutcome,
-							finishedAt,
-							finishedAt,
-							row.delivery_id,
-						)
-						if (shouldClearHealth) {
-							self.#recordPendingHealthOutcome({
-								outcome_id: outcomeId,
-								definition_revision: attemptRevision,
-								outcome: "delivered",
-								observed_at: finishedAt,
-								created_at: finishedAt,
-							})
-						}
-					})
-					if (shouldClearHealth) {
-						endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
-						if (endpoint.status === "" || endpoint.status === "deleted") {
-							self.purge()
-							return { processed, purged: true, nextAlarmAt: null }
-						}
-						if (endpoint.status !== "active") {
-							self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
-							break
-						}
-					}
-					continue
-				}
-
-				if (classified.healthOutcome === "redirect") {
-					self.#transaction(() => {
-						self.#sql.exec(
-							"UPDATE webhook_deliveries " +
-								"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
-								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
-								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-							nextAttemptCount,
-							finishedAt,
-							classified.httpStatus,
-							classified.deliveryOutcome,
-							classified.errorMessage,
-							finishedAt,
-							finishedAt,
-							row.delivery_id,
-						)
-						self.#recordPendingHealthOutcome({
-							outcome_id: outcomeId,
-							definition_revision: attemptRevision,
-							outcome: "redirect",
-							observed_at: finishedAt,
-							created_at: finishedAt,
-						})
-					})
-					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
-					if (endpoint.status === "" || endpoint.status === "deleted") {
-						self.purge()
-						return { processed, purged: true, nextAlarmAt: null }
-					}
-					if (endpoint.status !== "active") {
-						self.#skipAllPending(finishedAt, `Webhook endpoint is ${endpoint.status}.`)
-						break
-					}
-					continue
-				}
-
-				const jitter = deps.jitterFraction === undefined ? 0 : yield* deps.jitterFraction
-				const delay =
-					classified.retryable && nextAttemptCount < row.max_attempts
-						? retryDelayMsForAttempt(nextAttemptCount, jitter)
-						: null
-
+				const result: AttemptResult =
+					classified.healthOutcome === "delivered"
+						? "delivered"
+						: classified.retryable
+							? "retryable"
+							: "permanent"
+				const jitter =
+					result === "retryable" && deps.jitterFraction !== undefined
+						? yield* deps.jitterFraction
+						: 0
+				const retryDelay =
+					result === "retryable" ? (retryDelayMsForAttempt(nextAttemptCount, jitter) ?? 0) : 0
+				const delivery = recordDeliveryAttempt(lifecycleOf(row), result, finishedAt, retryDelay)
+				const healthOutcome =
+					classified.healthOutcome === "delivered" && endpoint.failure_window_started_at === 0
+						? null
+						: classified.healthOutcome
 				self.#transaction(() => {
-					if (delay !== null) {
-						self.#sql.exec(
-							"UPDATE webhook_deliveries " +
-								"SET status = 'pending', attempt_count = ?, next_attempt_at = ?, " +
-								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
-								"updated_at = ? WHERE delivery_id = ?",
-							nextAttemptCount,
-							finishedAt + delay,
-							finishedAt,
-							classified.httpStatus,
-							classified.deliveryOutcome,
-							classified.errorMessage,
-							finishedAt,
-							row.delivery_id,
-						)
-					} else {
-						self.#sql.exec(
-							"UPDATE webhook_deliveries " +
-								"SET status = 'failed', attempt_count = ?, next_attempt_at = NULL, " +
-								"last_attempt_at = ?, last_http_status = ?, last_outcome = ?, last_error = ?, " +
-								"updated_at = ?, completed_at = ? WHERE delivery_id = ?",
-							nextAttemptCount,
-							finishedAt,
-							classified.httpStatus,
-							classified.deliveryOutcome,
-							classified.errorMessage,
-							finishedAt,
-							finishedAt,
-							row.delivery_id,
-						)
-					}
-					if (classified.healthOutcome !== null) {
+					self.#writeAttempt(row.delivery_id, delivery, finishedAt, classified)
+					if (healthOutcome !== null) {
 						self.#recordPendingHealthOutcome({
 							outcome_id: outcomeId,
 							definition_revision: attemptRevision,
-							outcome: classified.healthOutcome,
+							outcome: healthOutcome,
 							observed_at: finishedAt,
 							created_at: finishedAt,
 						})
 					}
 				})
-				if (classified.healthOutcome !== null) {
+				if (healthOutcome !== null) {
 					endpoint = yield* self.#flushHealthOutcomes(deps, endpoint)
 					if (endpoint.status === "" || endpoint.status === "deleted") {
 						self.purge()

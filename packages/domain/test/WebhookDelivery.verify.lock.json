@@ -1,0 +1,39 @@
+{
+	"version": 1,
+	"rules": {
+		"WebhookDelivery": {
+			"AttemptsStayWithinTheLimit": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.attempts <= s.max_attempts, s.max_attempts <= WEBHOOK_MAX_ATTEMPTS].every((ok) => ok)"
+			},
+			"PendingDeliveryHasAnAttemptLeft": {
+				"kind": "invariant",
+				"source": "(s) => s.status !== \"pending\" || s.attempts < s.max_attempts"
+			},
+			"PendingExactlyWhenANextAttemptIsSet": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t(s.status === \"pending\") === (s.next_attempt_at !== null)"
+			},
+			"FinishedExactlyWhenCompleted": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"succeeded\", s.status === \"failed\", s.status === \"skipped\"].some((ok) => ok) ===\n\t\t\t(s.completed_at !== null)"
+			},
+			"AFinishedDeliveryNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tbefore.status === \"pending\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.attempts === before.attempts,\n\t\t\t\t\tafter.max_attempts === before.max_attempts,\n\t\t\t\t\tafter.next_attempt_at === before.next_attempt_at,\n\t\t\t\t\tafter.completed_at === before.completed_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"AnAttemptCountsOnce": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookAttempt\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn (\n\t\t\t\tafter.attempts === (before.status === \"pending\" ? before.attempts + 1 : before.attempts)\n\t\t\t)\n\t\t}"
+			},
+			"ARetryNeedsARetryableResultBelowTheLimit": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookAttempt\" || before.status !== \"pending\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn (\n\t\t\t\t(after.status === \"pending\") ===\n\t\t\t\t[\n\t\t\t\t\tcommand.result === \"retryable\",\n\t\t\t\t\tafter.attempts < after.max_attempts,\n\t\t\t\t\tcommand.retry_delay_ms > 0,\n\t\t\t\t].every((ok) => ok)\n\t\t\t)\n\t\t}"
+			},
+			"ADeliveredAttemptSucceeds": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordWebhookAttempt\" || before.status !== \"pending\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn (after.status === \"succeeded\") === (command.result === \"delivered\")\n\t\t}"
+			}
+		}
+	}
+}
