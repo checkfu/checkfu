@@ -1,12 +1,9 @@
 import { ArtifactDataGrant, MAX_ARTIFACT_GRANT_TEXT_LENGTH } from "@checkfu/sdk/Schemas"
-import type {
-	ArtifactAccessLevel,
-	ArtifactCapabilities,
-	ArtifactVisitorAccess,
-} from "@checkfu/sdk/Schemas"
+import type { ArtifactVisitorAccess } from "@checkfu/sdk/Schemas"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
+export { accessAt, declaredFor, grantAt } from "@checkfu/sdk/ArtifactAccess"
 export { ArtifactAccessLevel, ArtifactDataGrant } from "@checkfu/sdk/Schemas"
 
 export type CollectionAccess = typeof ArtifactVisitorAccess.Type
@@ -24,45 +21,12 @@ const ALLOWED: Readonly<Record<CollectionAccess, ReadonlyArray<DataOperation>>> 
 export const permits = (access: CollectionAccess, operation: DataOperation): boolean =>
 	ALLOWED[access].includes(operation)
 
-export const accessAt = (
-	level: ArtifactAccessLevel,
-	visitors: CollectionAccess,
-): CollectionAccess => {
-	if (level === "write") {
-		return visitors
-	}
-	return level === "read" && (visitors === "read" || visitors === "write") ? "read" : "none"
-}
-
 export const both = (one: CollectionAccess, other: CollectionAccess): CollectionAccess => {
 	if (one === other || other === "write") {
 		return one
 	}
 	return one === "write" ? other : "none"
 }
-
-export const declaredFor = (
-	capabilities: ArtifactCapabilities,
-	collection: string,
-): CollectionAccess => {
-	const collections = capabilities.database?.collections ?? {}
-	return Object.hasOwn(collections, collection)
-		? (collections[collection]?.visitors ?? "none")
-		: "none"
-}
-
-export const grantAt = (
-	level: ArtifactAccessLevel,
-	capabilities: ArtifactCapabilities,
-): ArtifactDataGrant =>
-	Object.fromEntries(
-		Object.keys(capabilities.database?.collections ?? {})
-			.toSorted()
-			.flatMap((collection) => {
-				const access = accessAt(level, declaredFor(capabilities, collection))
-				return access === "none" ? [] : [[collection, access]]
-			}),
-	)
 
 export const grantedFor = (grant: ArtifactDataGrant, collection: string): CollectionAccess =>
 	Object.hasOwn(grant, collection) ? (grant[collection] ?? "none") : "none"

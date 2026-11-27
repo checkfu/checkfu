@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { ArtifactDataGrant } from "@checkfu/sdk/Schemas"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import * as Clock from "effect/Clock"
@@ -53,6 +54,8 @@ interface PublicationBody {
 	readonly address: string
 	readonly url: string
 	readonly version: number | null
+	readonly access: "view" | "read" | "write"
+	readonly grants: ArtifactDataGrant
 	readonly published_at: string
 }
 
@@ -241,6 +244,58 @@ describe("Publishing an artifact", () => {
 
 				expect(yield* publish(api, id, { version: 1 })).toMatchObject({ url, version: 1 })
 				expect(yield* text(yield* open(url))).toBe("one")
+			}),
+		))
+
+	it("applies a grant only to the reviewed artifact version and publication settings", () =>
+		withPublishing(({ api }) =>
+			Effect.gen(function* () {
+				const id = yield* createArtifact(api, "one")
+				const root = `/v1/artifacts/${id}`
+				const path = `${root}/publication`
+				const initial = yield* publish(api, id, {
+					access: "write",
+					if_current: { version: 1, publication: null },
+				})
+				const settings = {
+					address: initial.address,
+					version: initial.version,
+					access: initial.access,
+					grants: initial.grants,
+				}
+				const reviewed = { access: "view", if_current: { version: 1, publication: settings } }
+				yield* addVersion(api, id, 1, "two")
+				expect((yield* api("POST", path, reviewed)).status).toBe(409)
+				const replacement = yield* publish(api, id, { version: 1 })
+				const stale = { access: "view", if_current: { version: 2, publication: settings } }
+				expect((yield* api("POST", path, stale)).status).toBe(409)
+				const pinned = { ...settings, version: 1 }
+				const current = {
+					version: 1,
+					access: "view",
+					if_current: { version: 2, publication: pinned },
+				}
+				const key = { "idempotency-key": "apply-reviewed-access" }
+				const updated = yield* api("POST", path, current, key)
+				expect(updated.status).toBe(200)
+				expect((yield* json<ArtifactBody>(updated)).publication).toMatchObject({
+					address: replacement.address,
+					access: "view",
+					version: 1,
+				})
+				expect((yield* api("DELETE", path)).status).toBe(200)
+				expect((yield* api("POST", path, current)).status).toBe(409)
+				const retry = yield* api("POST", path, current, key)
+				expect(retry.status).toBe(200)
+				expect((yield* json<ArtifactBody>(retry)).publication).toBe(null)
+				expect(
+					(yield* api(
+						"POST",
+						path,
+						{ ...current, if_current: { version: 2, publication: null } },
+						key,
+					)).status,
+				).toBe(409)
 			}),
 		))
 

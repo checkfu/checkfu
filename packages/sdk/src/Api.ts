@@ -1232,6 +1232,24 @@ export const PublishArtifactBody = Schema.Struct({
 				"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view",
 		}),
 	),
+	if_current: Schema.optionalKey(
+		Schema.Struct({
+			version: PositiveInt.annotate({
+				description: "The current artifact version you reviewed, regardless of the version served",
+			}),
+			publication: Schema.NullOr(
+				ArtifactPublication.mapFields(
+					({ url: _url, published_at: _publishedAt, ...settings }) => settings,
+				),
+			).annotate({
+				description:
+					"The address and settings you reviewed, or null if the artifact was unpublished",
+			}),
+		}).annotate({
+			description:
+				"Require the artifact version and publication settings to match the values you reviewed. Answers 409 if either changed",
+		}),
+	),
 })
 export type PublishArtifactBody = typeof PublishArtifactBody.Type
 

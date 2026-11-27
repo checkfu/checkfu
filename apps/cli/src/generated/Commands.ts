@@ -671,6 +671,14 @@ const artifactsPublishCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "ifCurrent",
+			flagName: "if-current",
+			wireName: "if_current",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -698,6 +706,13 @@ const artifactsPublishCommand = CommandMake(
 		access: FlagLiterals("access", ["view", "read", "write"]).pipe(
 			FlagWithDescription(
 				"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view",
+			),
+			FlagOptional,
+		),
+		ifCurrent: FlagString("if-current").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Require the artifact version and publication settings to match the values you reviewed. Answers 409 if either changed (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),

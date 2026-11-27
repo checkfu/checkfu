@@ -29841,6 +29841,68 @@
 										"type": "string",
 										"enum": ["view", "read", "write"],
 										"description": "What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view"
+									},
+									"if_current": {
+										"type": "object",
+										"properties": {
+											"version": {
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 9007199254740991,
+												"description": "The current artifact version you reviewed, regardless of the version served"
+											},
+											"publication": {
+												"anyOf": [
+													{
+														"type": "object",
+														"properties": {
+															"address": {
+																"type": "string",
+																"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$"
+															},
+															"version": {
+																"anyOf": [
+																	{
+																		"type": "integer",
+																		"minimum": 1,
+																		"maximum": 9007199254740991
+																	},
+																	{
+																		"type": "null"
+																	}
+																],
+																"description": "The version served, or null when the latest version is served"
+															},
+															"access": {
+																"type": "string",
+																"enum": ["view", "read", "write"],
+																"description": "What anyone with the address may do: view the files only, also read the artifact's data, or also write it"
+															},
+															"grants": {
+																"type": "object",
+																"patternProperties": {
+																	"^[a-z][a-z0-9_-]{0,31}$": {
+																		"type": "string",
+																		"enum": ["read", "add", "write"]
+																	}
+																},
+																"additionalProperties": false,
+																"description": "The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it"
+															}
+														},
+														"required": ["address", "version", "access", "grants"],
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												],
+												"description": "The address and settings you reviewed, or null if the artifact was unpublished"
+											}
+										},
+										"required": ["version", "publication"],
+										"additionalProperties": false,
+										"description": "Require the artifact version and publication settings to match the values you reviewed. Answers 409 if either changed"
 									}
 								},
 								"additionalProperties": false

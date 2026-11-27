@@ -149,6 +149,10 @@
 			"Artifact.ACommittedCreationKeepsItsRequest": {
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\t[before.version === 0, before.creation_request === after.creation_request].some((ok) => ok)"
+			},
+			"Artifact.AChangedPublicationMatchesItsCondition": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\" || command.if_current === undefined) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tconst expected = command.if_current\n\t\t\treturn [\n\t\t\t\t[\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.public_access === before.public_access,\n\t\t\t\t\tafter.public_grant === before.public_grant,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.version === expected.head_version,\n\t\t\t\t\tbefore.publication_token === expected.token,\n\t\t\t\t\tbefore.pinned_version === expected.pinned_version,\n\t\t\t\t\tbefore.public_access === expected.access,\n\t\t\t\t\tbefore.public_grant === expected.grant,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
 			}
 		}
 	}

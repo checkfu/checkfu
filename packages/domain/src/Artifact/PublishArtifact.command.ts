@@ -22,6 +22,24 @@ export class ArtifactVersionNotFound extends Domain.Rejection(
 	{ httpApiStatus: 404, description: "Artifact version does not exist." },
 ) {}
 
+export class ArtifactPublicationConflict extends Domain.Rejection(
+	"ArtifactPublicationConflict",
+	{ artifact_id: ArtifactId },
+	{
+		httpApiStatus: 409,
+		description: "The artifact version or public address settings have changed.",
+	},
+) {}
+
+export const PublicationCondition = Schema.Struct({
+	head_version: PositiveInt,
+	token: Schema.String.check(Schema.isMaxLength(32)),
+	pinned_version: NonNegativeInt,
+	access: RequestedAccess,
+	grant: GrantText,
+})
+export type PublicationCondition = typeof PublicationCondition.Type
+
 export class PublishArtifact extends Domain.Command("PublishArtifact", {
 	input: {
 		artifact_id: ArtifactId,
@@ -29,7 +47,8 @@ export class PublishArtifact extends Domain.Command("PublishArtifact", {
 		pinned_version: NonNegativeInt,
 		access: RequestedAccess,
 		grant: GrantText,
+		if_current: Schema.optionalKey(PublicationCondition),
 	},
 	events: [ArtifactPublished],
-	rejects: [ArtifactNotFound, ArtifactVersionNotFound],
+	rejects: [ArtifactNotFound, ArtifactPublicationConflict, ArtifactVersionNotFound],
 }) {}

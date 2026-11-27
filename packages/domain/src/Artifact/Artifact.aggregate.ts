@@ -22,6 +22,7 @@ import {
 	ExpireArtifactReservation,
 } from "./ExpireArtifactReservation.command.ts"
 import {
+	ArtifactPublicationConflict,
 	ArtifactPublished,
 	ArtifactVersionNotFound,
 	PublishArtifact,
@@ -269,6 +270,27 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				].every((ok) => ok),
 			].some((ok) => ok)
 		},
+		AChangedPublicationMatchesItsCondition: ({ before, after, command }) => {
+			if (command._tag !== "PublishArtifact" || command.if_current === undefined) {
+				return true
+			}
+			const expected = command.if_current
+			return [
+				[
+					after.publication_token === before.publication_token,
+					after.pinned_version === before.pinned_version,
+					after.public_access === before.public_access,
+					after.public_grant === before.public_grant,
+				].every((ok) => ok),
+				[
+					before.version === expected.head_version,
+					before.publication_token === expected.token,
+					before.pinned_version === expected.pinned_version,
+					before.public_access === expected.access,
+					before.public_grant === expected.grant,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
 		APublicationStartsAtViewUnlessGranted: ({ before, after, command }) => {
 			if (command._tag !== "PublishArtifact") {
 				return true
@@ -387,6 +409,19 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		PublishArtifact: (state, cmd, ctx) => {
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
+			}
+			const expected = cmd.if_current
+			if (
+				expected !== undefined &&
+				![
+					state.version === expected.head_version,
+					state.publication_token === expected.token,
+					state.pinned_version === expected.pinned_version,
+					state.public_access === expected.access,
+					state.public_grant === expected.grant,
+				].every((matches) => matches)
+			) {
+				return new ArtifactPublicationConflict({ artifact_id: ctx.id })
 			}
 			if (cmd.pinned_version > state.version) {
 				return new ArtifactVersionNotFound({ artifact_id: ctx.id, version: cmd.pinned_version })

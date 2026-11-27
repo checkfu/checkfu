@@ -12,10 +12,12 @@ import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { File } from "@checkfu/domain/File/File.aggregate"
 import type { FileId } from "@checkfu/domain/File/File.id"
 import {
+	ArtifactPublicationConflict,
 	ArtifactVersionNotFound,
 	KEEP_ACCESS,
 	PublishArtifact,
 } from "@checkfu/domain/Artifact/PublishArtifact.command"
+import type { PublicationCondition } from "@checkfu/domain/Artifact/PublishArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
 import { UnpublishArtifact } from "@checkfu/domain/Artifact/UnpublishArtifact.command"
 import * as Context from "effect/Context"
@@ -59,6 +61,7 @@ import { ArtifactStore, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts
 import {
 	DEFAULT_LINK_TTL_SECONDS,
 	newPublicationToken,
+	parsePublicationAddress,
 	publicationAddress,
 } from "../Content/ArtifactLink.ts"
 import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
@@ -481,6 +484,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						readonly operation: "publish"
 						readonly pinned_version: number
 						readonly access: string
+						readonly if_current?: PublicationCondition
 				  }
 				| { readonly operation: "unpublish" },
 		) =>
@@ -700,10 +704,39 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const pinned_version =
 						payload.version === undefined || payload.version === "latest" ? 0 : payload.version
 					const access = payload.access ?? KEEP_ACCESS
+					const expected = payload.if_current
+					let condition: PublicationCondition | undefined
+					if (expected !== undefined) {
+						const publication = expected.publication
+						if (publication === null) {
+							condition = {
+								head_version: expected.version,
+								pinned_version: 0,
+								token: "",
+								access: KEEP_ACCESS,
+								grant: "",
+							}
+						} else {
+							const address = parsePublicationAddress(publication.address)
+							const grant = encodeGrant(publication.grants)
+							if (address?.artifactId !== id || grant === undefined) {
+								return yield* new ArtifactPublicationConflict({ artifact_id: id })
+							}
+							condition = {
+								head_version: expected.version,
+								token: address.token,
+								pinned_version: publication.version ?? 0,
+								access: publication.access,
+								grant,
+							}
+						}
+					}
+					const precondition = condition === undefined ? {} : { if_current: condition }
 					const sendOptions = yield* sentWith(id, headers["idempotency-key"], {
 						operation: "publish",
 						pinned_version,
 						access,
+						...precondition,
 					})
 					const state = yield* requireActive(id)
 					const served = pinned_version === 0 ? state.version : pinned_version
@@ -726,6 +759,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							pinned_version,
 							access,
 							grant,
+							...precondition,
 						}),
 						sendOptions,
 					)

@@ -7,7 +7,6 @@ import type {
 	CreateEnvironmentBody,
 	CreateMemoryBody,
 	CreateMemoryStoreBody,
-	PublishArtifactBody,
 	SendSessionEventsBody,
 	UpdateAgentBody,
 	UpdateAutomationBody,
@@ -396,8 +395,11 @@ export const checkfu = {
 			}),
 		link: (artifact_id: string, version: number, body: CreateArtifactLinkBody) =>
 			request("artifacts.versions.link", { path: { artifact_id, version }, body }),
-		publish: (artifact_id: string, body: PublishArtifactBody, idempotencyKey: string) =>
-			request("artifacts.publish", { path: { artifact_id }, body, idempotencyKey }),
+		publish: (
+			artifact_id: string,
+			body: NonNullable<FetchInput<"artifacts.publish">["body"]>,
+			idempotencyKey: string,
+		) => request("artifacts.publish", { path: { artifact_id }, body, idempotencyKey }),
 		unpublish: (artifact_id: string, idempotencyKey: string) =>
 			request("artifacts.unpublish", { path: { artifact_id }, idempotencyKey }),
 		delete: (artifact_id: string) => request("artifacts.delete", { path: { artifact_id } }),

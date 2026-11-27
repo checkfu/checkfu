@@ -8,7 +8,9 @@ import { Select } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { ArtifactFileContent } from "@checkfu/sdk/Api"
+import { grantAt } from "@checkfu/sdk/ArtifactAccess"
 
+import type { ArtifactAccessLevel, ArtifactDataGrant } from "@checkfu/sdk/Schemas"
 import type { JsonArtifact } from "@checkfu/sdk/client"
 import { useIsMutating, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
@@ -24,7 +26,7 @@ import {
 	publicationLabel,
 	webUrl,
 } from "../artifact-view.ts"
-import { checkfu, errorMessage, isSignedOut } from "../api.ts"
+import { ApiError, checkfu, errorMessage, isSignedOut } from "../api.ts"
 import type { JsonArtifactLink } from "../api.ts"
 import { Pager } from "../pager.tsx"
 import {
@@ -444,6 +446,51 @@ export function FileBody({ file }: { readonly file: ArtifactFileContent }): Reac
 	}
 }
 
+const ACCESS_LEVELS = [
+	{ value: "view", label: "Files only" },
+	{ value: "read", label: "Allow data reads" },
+	{ value: "write", label: "Allow data writes" },
+] as const
+
+const GRANT_LABELS = {
+	read: "Read",
+	add: "Add only",
+	write: "Read and write",
+} as const
+
+function AccessSelect({
+	label,
+	value,
+	set,
+	disabled,
+}: {
+	readonly label: string
+	readonly value: ArtifactAccessLevel
+	readonly set: (access: ArtifactAccessLevel) => void
+	readonly disabled: boolean
+}): React.JSX.Element {
+	return (
+		<Field label={label} className="w-48">
+			<Select
+				value={value}
+				disabled={disabled}
+				onChange={(event) => {
+					const selected = ACCESS_LEVELS.find((level) => level.value === event.currentTarget.value)
+					if (selected !== undefined) {
+						set(selected.value)
+					}
+				}}
+			>
+				{ACCESS_LEVELS.map((level) => (
+					<option value={level.value} key={level.value}>
+						{level.label}
+					</option>
+				))}
+			</Select>
+		</Field>
+	)
+}
+
 function LinkSection({
 	artifactId,
 	version,
@@ -452,10 +499,11 @@ function LinkSection({
 	readonly version: number
 }): React.JSX.Element {
 	const [seconds, setSeconds] = useState(DEFAULT_LINK_SECONDS)
+	const [access, setAccess] = useState<ArtifactAccessLevel>("view")
 	const [link, setLink] = useState<JsonArtifactLink | null>(null)
 	const create = useAction(
-		(target: number, expiresIn: number) =>
-			checkfu.artifacts.link(artifactId, target, { expires_in: expiresIn }),
+		(target: number, expiresIn: number, level: ArtifactAccessLevel) =>
+			checkfu.artifacts.link(artifactId, target, { expires_in: expiresIn, access: level }),
 		{ then: setLink },
 	)
 	return (
@@ -463,7 +511,8 @@ function LinkSection({
 			<div className="space-y-1">
 				<h2 className="text-sm font-medium">Viewing link</h2>
 				<p className="text-control text-muted-foreground">
-					A link that opens v{version} in a browser until it expires. Anyone who has it can view it.
+					Anyone with the link can open v{version} until it expires. Each collection applies its
+					visitor permissions.
 				</p>
 			</div>
 			<div className="flex flex-wrap items-end gap-2">
@@ -476,24 +525,193 @@ function LinkSection({
 						))}
 					</Select>
 				</Field>
+				<AccessSelect
+					label="Link data access"
+					value={access}
+					set={setAccess}
+					disabled={create.pending}
+				/>
 				<Button
 					variant="outline"
 					disabled={create.pending}
-					onClick={() => create.run(version, seconds)}
+					onClick={() => create.run(version, seconds, access)}
 				>
 					Create link
 				</Button>
 			</div>
 			{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-			{link === null ? null : (
-				<div className="space-y-1">
-					<Address url={link.url} />
-					<p className="text-xs text-muted-foreground">
-						v{link.version} · {expiry(link.expires_at)}
-					</p>
-				</div>
-			)}
+			{link === null ? null : <Address url={link.url} />}
+			<p role="status" className="text-xs text-muted-foreground">
+				{link === null ? null : (
+					<>
+						Link ready for v{link.version} · {expiry(link.expires_at)} ·{" "}
+						{ACCESS_LEVELS.find((level) => level.value === link.access)?.label}
+					</>
+				)}
+			</p>
 		</section>
+	)
+}
+
+function GrantedCollections({ grants }: { readonly grants: ArtifactDataGrant }): React.JSX.Element {
+	const entries = Object.entries(grants)
+	return entries.length === 0 ? (
+		<>Files only</>
+	) : (
+		<>
+			{entries.map(([collection, grant]) => (
+				<span key={collection} className="mr-3 inline-block">
+					{collection} · {GRANT_LABELS[grant]}
+				</span>
+			))}
+		</>
+	)
+}
+
+const publicationCondition = (artifact: JsonArtifact) => {
+	const publication = artifact.publication
+	return {
+		version: artifact.version,
+		publication:
+			publication === null
+				? null
+				: {
+						address: publication.address,
+						version: publication.version,
+						access: publication.access,
+						grants: publication.grants,
+					},
+	}
+}
+
+const sameGrants = (previous: ArtifactDataGrant, proposed: ArtifactDataGrant): boolean => {
+	const saved = Object.entries(previous)
+	return (
+		saved.length === Object.keys(proposed).length &&
+		saved.every(([collection, grant]) => proposed[collection] === grant)
+	)
+}
+
+function GrantPreview({
+	version,
+	grants,
+	error,
+}: {
+	readonly version: number
+	readonly grants: ArtifactDataGrant | undefined
+	readonly error: Error | null
+}): React.JSX.Element {
+	const preview =
+		grants !== undefined ? (
+			<p className="text-control text-muted-foreground">
+				Proposed grants for v{version}. <GrantedCollections grants={grants} />
+			</p>
+		) : error === null ? (
+			<p className="text-control text-muted-foreground">Loading v{version} grants…</p>
+		) : null
+	return (
+		<>
+			<div role="status">{preview}</div>
+			{grants === undefined && error !== null ? (
+				<Callout tone="error">{errorMessage(error)}</Callout>
+			) : null}
+		</>
+	)
+}
+
+const publicationGrantAction = (
+	saved: JsonArtifact["publication"],
+	access: ArtifactAccessLevel,
+	proposal: ArtifactDataGrant | undefined,
+) => {
+	if (saved === null) {
+		return { label: "Publish", enabled: proposal !== undefined, variant: "default" as const }
+	}
+	const changed =
+		proposal !== undefined && (access !== saved.access || !sameGrants(saved.grants, proposal))
+	return {
+		label: changed && access === saved.access ? "Approve updated grants" : "Apply access",
+		enabled: changed,
+		variant: "outline" as const,
+	}
+}
+
+function PublicationGrantEditor({
+	artifact,
+	target,
+	pending,
+	apply,
+	children,
+}: {
+	readonly artifact: JsonArtifact
+	readonly target: number | "latest"
+	readonly pending: boolean
+	readonly apply: (level: ArtifactAccessLevel) => void
+	readonly children?: React.ReactNode
+}): React.JSX.Element {
+	const served = target === "latest" ? artifact.version : target
+	const saved = artifact.publication
+	const savedLevel = saved?.access ?? "view"
+	const [access, setAccess] = useState<ArtifactAccessLevel>(savedLevel)
+	const historical = useQuery({
+		...artifactVersionQuery(artifact.id, served),
+		enabled: served !== artifact.version && access !== "view",
+	})
+	const capabilities =
+		served === artifact.version ? artifact.capabilities : historical.data?.capabilities
+	const proposal =
+		access === "view" || capabilities !== undefined
+			? grantAt(access, capabilities ?? {})
+			: undefined
+	const action = publicationGrantAction(saved, access, proposal)
+	return (
+		<div className="space-y-2">
+			<div className="flex flex-wrap items-end gap-2">
+				{children}
+				<AccessSelect
+					label="Public data access"
+					value={access}
+					set={setAccess}
+					disabled={pending}
+				/>
+				<Button
+					variant={action.variant}
+					disabled={pending || !action.enabled}
+					onClick={() => apply(access)}
+				>
+					{action.label}
+				</Button>
+			</div>
+			<GrantPreview version={served} grants={proposal} error={historical.error} />
+		</div>
+	)
+}
+
+function PublicationDetails({
+	publication,
+	latestVersion,
+}: {
+	readonly publication: NonNullable<JsonArtifact["publication"]>
+	readonly latestVersion: number
+}): React.JSX.Element {
+	return (
+		<>
+			<Address url={publication.url} />
+			<DescriptionList>
+				<Description label="Serves">
+					{publication.version === null
+						? `The latest version, now v${latestVersion}`
+						: `v${publication.version}, pinned`}
+				</Description>
+				<Description label="Published">{timeAgo(publication.published_at)}</Description>
+				<Description label="Saved data access">
+					{ACCESS_LEVELS.find((level) => level.value === publication.access)?.label}
+				</Description>
+				<Description label="Saved collection grants">
+					<GrantedCollections grants={publication.grants} />
+				</Description>
+			</DescriptionList>
+		</>
 	)
 }
 
@@ -505,8 +723,11 @@ function PublicationSection({
 	readonly version: number
 }): React.JSX.Element {
 	const { publication } = artifact
+	const condition = publicationCondition(artifact)
+	const editorKey = JSON.stringify(condition)
 	const queryClient = useQueryClient()
 	const [serve, setServe] = useState<"latest" | "pinned">("latest")
+	const [notice, setNotice] = useState("")
 	const [confirmAddress, setConfirmAddress] = useState<string | null>(null)
 	const confirmation = useRef<string | null>(null)
 	const setConfirmation = (address: string | null) => {
@@ -519,7 +740,7 @@ function PublicationSection({
 	const publishKey = useSubmissionKey()
 	const unpublishKey = useSubmissionKey()
 	const change = useAction(
-		async (target: number | "latest" | "unpublish") => {
+		async (target: number | "latest" | "unpublish", level?: ArtifactAccessLevel) => {
 			const { queryKey } = artifactQuery(artifact.id)
 			let updated: JsonArtifact
 			if (target === "unpublish") {
@@ -531,22 +752,37 @@ function PublicationSection({
 				setConfirmation(null)
 				setServe("latest")
 			} else {
-				const body = { version: target }
-				updated = await checkfu.artifacts.publish(
-					artifact.id,
-					body,
-					publishKey.keyFor({ body, publication }),
-				)
+				const body = {
+					version: target,
+					...(level === undefined ? {} : { access: level }),
+					if_current: condition,
+				}
+				updated = await checkfu.artifacts
+					.publish(artifact.id, body, publishKey.keyFor({ body, publication }))
+					.catch(async (error: unknown) => {
+						if (error instanceof ApiError && error.status === 409) {
+							await queryClient.invalidateQueries({ queryKey, exact: true })
+						}
+						throw error
+					})
 				publishKey.settle()
+				if (
+					level !== undefined &&
+					updated.publication !== null &&
+					(publication === null || updated.publication.address === publication.address)
+				) {
+					setNotice(publication === null ? "Artifact published." : "Public data access updated.")
+				}
 			}
 			await queryClient.cancelQueries({ queryKey, exact: true })
 			queryClient.setQueryData(queryKey, updated)
 		},
 		{ mutationKey, invalidates: [["artifacts"]] },
 	)
-	const run = (target: number | "latest" | "unpublish") => {
+	const run = (target: number | "latest" | "unpublish", level?: ArtifactAccessLevel) => {
 		if (queryClient.isMutating(filter) === 0) {
-			change.run(target)
+			setNotice("")
+			change.run(target, level)
 		}
 	}
 	return (
@@ -555,12 +791,18 @@ function PublicationSection({
 				<h2 className="text-sm font-medium">Public address</h2>
 				<p className="text-control text-muted-foreground">
 					{publication === null
-						? "Not published. Publishing serves the artifact at a lasting address that anyone who has it can view."
-						: "Anyone who has this address can view the artifact."}
+						? "Not published. Publishing gives the artifact a lasting address."
+						: "Anyone with this address can open the artifact. Public data access is limited by the saved grants and the version served."}
 				</p>
 			</div>
 			{publication === null ? (
-				<div className="flex flex-wrap items-end gap-2">
+				<PublicationGrantEditor
+					key={editorKey}
+					artifact={artifact}
+					target={serve === "pinned" ? version : "latest"}
+					pending={pending}
+					apply={(level) => run(serve === "pinned" ? version : "latest", level)}
+				>
 					<Field label="Serve" className="w-48">
 						<Select
 							value={serve}
@@ -571,21 +813,10 @@ function PublicationSection({
 							<option value="pinned">Pin v{version}</option>
 						</Select>
 					</Field>
-					<Button disabled={pending} onClick={() => run(serve === "pinned" ? version : "latest")}>
-						Publish
-					</Button>
-				</div>
+				</PublicationGrantEditor>
 			) : (
 				<>
-					<Address url={publication.url} />
-					<DescriptionList>
-						<Description label="Serves">
-							{publication.version === null
-								? `The latest version, now v${artifact.version}`
-								: `v${publication.version}, pinned`}
-						</Description>
-						<Description label="Published">{timeAgo(publication.published_at)}</Description>
-					</DescriptionList>
+					<PublicationDetails publication={publication} latestVersion={artifact.version} />
 					{confirmAddress === publication.address ? (
 						<Confirm
 							label="Unpublish"
@@ -605,38 +836,55 @@ function PublicationSection({
 							gives it a new one.
 						</Confirm>
 					) : (
-						<div className="flex flex-wrap gap-2">
-							{publication.version === version ? null : (
-								<Button variant="outline" size="sm" disabled={pending} onClick={() => run(version)}>
-									Pin to v{version}
-								</Button>
-							)}
-							{publication.version === null ? null : (
+						<div className="space-y-3">
+							<PublicationGrantEditor
+								key={editorKey}
+								artifact={artifact}
+								target={publication.version ?? "latest"}
+								pending={pending}
+								apply={(level) => run(publication.version ?? "latest", level)}
+							/>
+							<div className="flex flex-wrap gap-2">
+								{publication.version === version ? null : (
+									<Button
+										variant="outline"
+										size="sm"
+										disabled={pending}
+										onClick={() => run(version)}
+									>
+										Pin to v{version}
+									</Button>
+								)}
+								{publication.version === null ? null : (
+									<Button
+										variant="outline"
+										size="sm"
+										disabled={pending}
+										onClick={() => run("latest")}
+									>
+										Follow latest
+									</Button>
+								)}
 								<Button
-									variant="outline"
+									variant="destructive"
 									size="sm"
 									disabled={pending}
-									onClick={() => run("latest")}
+									onClick={() => {
+										if (queryClient.isMutating(filter) === 0) {
+											setConfirmation(publication.address)
+										}
+									}}
 								>
-									Follow latest
+									Unpublish
 								</Button>
-							)}
-							<Button
-								variant="destructive"
-								size="sm"
-								disabled={pending}
-								onClick={() => {
-									if (queryClient.isMutating(filter) === 0) {
-										setConfirmation(publication.address)
-									}
-								}}
-							>
-								Unpublish
-							</Button>
+							</div>
 						</div>
 					)}
 				</>
 			)}
+			<p role="status" className="text-control text-muted-foreground">
+				{notice}
+			</p>
 			{change.error === undefined ? null : <Callout tone="error">{change.error}</Callout>}
 		</section>
 	)

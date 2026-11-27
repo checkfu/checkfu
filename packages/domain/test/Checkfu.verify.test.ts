@@ -178,6 +178,7 @@ const STANDING = {
 	"Artifact.OnlyAReadOrWritePublicationGrantsData": "proved",
 	"Artifact.PinnedVersionWithinHead": "proved",
 	"Artifact.AWriteRecordsItsRequest": "proved",
+	"Artifact.AChangedPublicationMatchesItsCondition": "proved",
 	"Artifact.ACommittedCreationKeepsItsRequest": "proved",
 	"Artifact.AReservationIsOpenOnlyBeforeCreation": "proved",
 	"Artifact.OnlyTheLatestReservationIsOpen": "proved",

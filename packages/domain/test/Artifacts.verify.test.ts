@@ -30,6 +30,7 @@ const STANDING = {
 	"Artifact.UnpublishDropsTheToken": "proved",
 	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
 	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
+	"Artifact.AChangedPublicationMatchesItsCondition": "proved",
 	"Artifact.APublicationStartsAtViewUnlessGranted": "proved",
 	"Artifact.OnlyAnExplicitGrantChangesWhatThePublicMayDo": "proved",
 	"Artifact.AnExplicitGrantIsRecordedAsGiven": "proved",
