@@ -136,8 +136,8 @@ jobs:
         run: git diff --exit-code
 
   # Builds the image of the sessions' machines and runs them under the runner's Docker.
-  # The tests that share one Alchemy stack run on one runner, and every other workerd test on another.
-  # The two name patterns are each other's complement, so each test runs once.
+  # PiSession.workerd.ts, whose tests share one Alchemy stack, runs on a runner of its own,
+  # and every other workerd file on another.
   workerd-tests:
     name: workerd (${{ matrix.leg.name }})
     runs-on: ubuntu-latest
@@ -146,18 +146,16 @@ jobs:
       fail-fast: false
       matrix:
         leg:
-          - name: stack
-            pattern: ^PiSession real Durable Object under workerd
+          - name: pi-session
+            args: test/workerd/PiSession.workerd.ts
           - name: rest
-            pattern: ^(?!PiSession real Durable Object under workerd)
+            args: --exclude test/workerd/PiSession.workerd.ts
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run test:workerd -t "$PATTERN"
-        env:
-          PATTERN: ${{ matrix.leg.pattern }}
+      - run: bun run test:workerd ${{ matrix.leg.args }}
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
