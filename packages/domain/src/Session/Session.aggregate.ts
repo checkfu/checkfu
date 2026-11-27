@@ -96,7 +96,7 @@ export const SessionStateSnapshot = versionedSnapshot({
 type ActiveState = Extract<SessionState, { readonly _tag: "Idle" | "Running" }>
 type RunningState = Extract<SessionState, { readonly _tag: "Running" }>
 
-const shouldDrainQueue = (pending_user_messages: number, stop_reason: StopReason): boolean =>
+export const shouldDrainQueue = (pending_user_messages: number, stop_reason: StopReason): boolean =>
 	pending_user_messages > 0 &&
 	(stop_reason.type === "end_turn" ||
 		stop_reason.type === "retries_exhausted" ||

@@ -1,4 +1,4 @@
-import { emptySessionFold, foldSessionEvent } from "@checkfu/sdk/SessionFold"
+import { emptySessionFold, foldSessionEvent, startsQueuedTurn } from "@checkfu/sdk/SessionFold"
 import type { SessionFold, SessionFoldEvent } from "@checkfu/sdk/SessionFold"
 
 export interface TurnFailure {
@@ -175,12 +175,6 @@ export const hasInterruptReceipt = (data: ReadonlyArray<unknown>): boolean => {
 		first.type === "user.interrupt"
 	)
 }
-
-export const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
-	stopReason !== undefined &&
-	stopReason !== "end_turn" &&
-	stopReason !== "interrupted" &&
-	stopReason !== "retries_exhausted"
 
 export const beginMessageSend = (state: ConnectState): readonly [SendSnapshot, ConnectState] => [
 	{
@@ -407,7 +401,8 @@ export const applySessionEvent = (
 				(next.targetTurn > 0 && settledTurnOf(next) >= next.targetTurn) ||
 				(next.unsettledQueuedTurns.has(next.targetTurn) &&
 					settledTurnOf(next) === next.targetTurn - 1 &&
-					isQueueHaltingStopReason(stopReason))
+					stopReason !== undefined &&
+					!startsQueuedTurn(stopReason))
 			return { state: next, duplicate: false, shouldWakeWaiter }
 		}
 		case "session.status_terminated":
@@ -489,12 +484,14 @@ export const evaluatePipedSettlement = (state: ConnectState): PipedSettlementAct
 	) {
 		return "awaiting_action"
 	}
+	const stopReason = state.calls.settled.stopReason
 	if (
 		statusOf(state) === "idle" &&
 		state.unsettledQueuedTurns.has(state.targetTurn) &&
 		settledTurnOf(state) === state.targetTurn - 1 &&
 		observedTurnOf(state) < state.targetTurn &&
-		isQueueHaltingStopReason(state.calls.settled.stopReason)
+		stopReason !== undefined &&
+		!startsQueuedTurn(stopReason)
 	) {
 		return "check_halted_queue"
 	}

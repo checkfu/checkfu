@@ -8,6 +8,7 @@ import type {
 import { describe, expect, it } from "@effect/vitest"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import fc from "fast-check"
 import * as Schedule from "effect/Schedule"
 import type * as Layer from "effect/Layer"
@@ -22,6 +23,8 @@ import { encodeAgentTools, encodeMcpServers } from "@checkfu/domain/Mcp/McpServe
 import { AbandonTurn } from "@checkfu/domain/Session/AbandonTurn.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId, toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
+import { emptySessionFold, foldSessionEvents } from "@checkfu/sdk"
+import { SessionEvent, SessionResource } from "@checkfu/sdk/Api"
 import { idempotentCommandId } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { conversationName } from "../src/Pi/PiDurableHarness.ts"
@@ -311,6 +314,111 @@ const confirm = (tool_use_id: string, result: "allow" | "deny", deny_message?: s
 const ANSWER_RUNS = Number(
 	process.env["PI_PROPERTY_RUNS"] ?? (process.env["CI"] === undefined ? 20 : 5),
 )
+
+it("keeps the SDK event fold aligned with session resources after generated input sequences", async () => {
+	const steps = fc.constantFrom("send", "ask", "allow", "deny", "interrupt", "archive")
+	const decodeEvents = Schema.decodeUnknownEffect(Schema.toCodecJson(Schema.Array(SessionEvent)))
+	const decodeSession = Schema.decodeUnknownEffect(Schema.toCodecJson(SessionResource))
+	await fc.assert(
+		fc.asyncProperty(fc.array(steps, { minLength: 1, maxLength: 6 }), async (sequence) => {
+			await world((call) =>
+				Effect.gen(function* () {
+					const id = yield* session(call)
+					let turn = 0
+					let pending: string | undefined
+					const sessionPath = `/v1/sessions/${id}`
+					const check = (status: "idle" | "running" | "terminated") =>
+						Effect.gen(function* () {
+							const resource = yield* call("GET", sessionPath).pipe(
+								Effect.flatMap((response) => decodeSession(response.body)),
+								Effect.orDie,
+								Effect.repeat({
+									schedule: Schedule.spaced("10 millis"),
+									times: 500,
+									until: (current) => current.status === status && current.turn === turn,
+								}),
+							)
+							expect([resource.status, resource.turn]).toEqual([status, turn])
+							const all = yield* decodeEvents(yield* events(call, id)).pipe(Effect.orDie)
+							expect(all.length).toBeLessThan(100)
+							const fold = foldSessionEvents(emptySessionFold(), all)
+							expect(fold.ended).toBe(resource.status === "terminated")
+							expect(fold.turn.status === "running").toBe(resource.status === "running")
+							expect(fold.turn.turn).toBe(resource.turn)
+							if (status === "idle") {
+								expect(fold.turn.status).toBe(pending === undefined ? "settled" : "paused")
+							}
+						})
+					const idleForTurn = (pause: boolean) => (all: ReadonlyArray<Ev>) =>
+						idles(all).some(
+							(event) =>
+								event.turn === turn && (event.stop_reason.type === "requires_action") === pause,
+						)
+
+					for (const step of sequence) {
+						if (step === "archive") {
+							expect((yield* call("POST", `${sessionPath}/archive`)).status).toBe(200)
+							yield* until(
+								call,
+								id,
+								(all) => all.some((event) => event.type === "session.archived"),
+								"no archive event",
+							)
+							yield* check("terminated")
+							break
+						}
+						if ((step === "send" || step === "ask") && pending === undefined) {
+							expect(
+								(yield* send(call, id, [message(step === "ask" ? "hold" : "hello")])).status,
+							).toBe(200)
+							turn += 1
+							const all = yield* until(
+								call,
+								id,
+								idleForTurn(step === "ask"),
+								"no idle event for input",
+							)
+							if (step === "ask") {
+								pending = all.findLast((event) => event.type === "agent.mcp_tool_use")?.tool_use_id
+								expect(pending).toBeDefined()
+							}
+						} else if ((step === "allow" || step === "deny") && pending !== undefined) {
+							const confirmation = confirm(pending, step)
+							const gate = Promise.withResolvers<void>()
+							held = gate.promise
+							yield* Effect.gen(function* () {
+								expect((yield* send(call, id, [confirmation])).status).toBe(200)
+								yield* check("running")
+							}).pipe(
+								Effect.ensuring(
+									Effect.sync(() => {
+										held = Promise.resolve()
+										gate.resolve()
+									}),
+								),
+							)
+							yield* until(call, id, idleForTurn(false), "no idle event after confirmation")
+							pending = undefined
+						} else if (step === "interrupt" && pending !== undefined) {
+							expect((yield* send(call, id, [{ type: "user.interrupt" }])).status).toBe(200)
+							yield* until(call, id, idleForTurn(false), "no idle event after interruption")
+							pending = undefined
+						}
+						yield* check("idle")
+					}
+				}),
+			)
+		}),
+		{
+			numRuns: ANSWER_RUNS,
+			examples: [
+				[["ask", "allow", "send", "archive"]],
+				[["ask", "deny", "ask", "interrupt", "archive"]],
+				[["ask", "archive"]],
+			],
+		},
+	)
+}, 600_000)
 
 describe("What a round of approved and denied calls publishes", () => {
 	it("runs exactly the allowed calls, marks the denied ones blocked, and publishes each once", async () => {

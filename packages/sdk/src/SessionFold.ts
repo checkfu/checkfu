@@ -7,6 +7,9 @@ type Body<E> = E extends unknown
 
 export type SessionFoldEvent = Body<SessionEvent>
 
+export const startsQueuedTurn = (stopReason: string | undefined): boolean =>
+	stopReason === "end_turn" || stopReason === "interrupted" || stopReason === "retries_exhausted"
+
 type EventOf<T extends SessionFoldEvent["type"]> = Extract<SessionFoldEvent, { readonly type: T }>
 type Use = EventOf<"agent.tool_use" | "agent.mcp_tool_use" | "agent.custom_tool_use">
 

@@ -40,6 +40,7 @@ export {
 	foldSessionEvent,
 	foldSessionEvents,
 	outstandingCalls,
+	startsQueuedTurn,
 } from "./SessionFold.ts"
 export type {
 	SessionFold,
