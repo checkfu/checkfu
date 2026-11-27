@@ -306,6 +306,24 @@ const redelivered = await run(["webhooks:deliveries", "redeliver", ...deliveryId
 assert.equal(redelivered.webhook_id, webhook.id)
 await run(["webhooks", "delete", ...webhookId])
 
+// A file uploaded from disk comes back byte for byte, and is gone once deleted.
+const uploadedBytes = Buffer.from(Array.from({ length: 200_000 }, (_, index) => (index * 31) % 251))
+const uploadPath = join(project, "upload.bin")
+await writeFile(uploadPath, uploadedBytes)
+const file = await run(["files", "upload", uploadPath, "--filename", "data.bin"])
+const fileId = ["--file-id", file.id]
+assert.equal(file.size, uploadedBytes.byteLength)
+assert.equal(file.sha256, createHash("sha256").update(uploadedBytes).digest("hex"))
+assert.equal((await get(`files/${file.id}`)).filename, "data.bin")
+assert.equal((await run(["files", "retrieve", ...fileId])).content_type, "application/octet-stream")
+await listed(["files", "list"], file.id)
+const downloadPath = join(project, "download.bin")
+await run(["files", "download", ...fileId, "--output", downloadPath])
+assert.deepEqual(await readFile(downloadPath), uploadedBytes)
+await fails(["files", "download", ...fileId, "--output", downloadPath], /already exists/)
+await run(["files", "delete", ...fileId])
+await fails(["files", "retrieve", ...fileId], /404/)
+
 await run(["artifacts", "delete", ...artifactId])
 await run(["memory-stores:memories", "delete", ...memoryId], { precondition: { type: "none" } })
 await run(["memory-stores", "archive", ...storeId])
