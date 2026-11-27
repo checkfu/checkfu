@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import { unpackTar } from "modern-tar"
 import * as Schema from "effect/Schema"
 
@@ -62,7 +63,14 @@ const bytes = async (response: Response, limit: number): Promise<Uint8Array> => 
 	return result
 }
 
-export const makeGithubDistribution = (request: typeof fetch = fetch): Distribution => {
+export const makeGithubDistribution = (
+	request: typeof fetch = fetch,
+	options: {
+		readonly pause?: (signal: AbortSignal) => Promise<void>
+		readonly announce?: (message: string) => void
+	} = {},
+): Distribution => {
+	const pause = options.pause ?? ((signal) => delay(60_000, undefined, { signal }))
 	const download: Distribution["download"] = async (url, signal) =>
 		bytes(
 			await request(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(180_000)]) }),
@@ -86,17 +94,31 @@ export const makeGithubDistribution = (request: typeof fetch = fetch): Distribut
 			if (!REVISION.test(sha)) {
 				throw new Error("GitHub returned an invalid main revision.")
 			}
-			const { workflow_runs: runs } = await get(
-				`actions/workflows/ci.yml/runs?event=push&head_sha=${sha}&per_page=1`,
-				decodeRuns,
-			)
-			const run = runs[0]
-			if (run?.head_sha !== sha || run.status !== "completed" || run.conclusion !== "success") {
-				throw new Error(
-					`origin/main (${sha.slice(0, 12)}) has not passed CI. Nothing was deployed. Wait for CI to pass and run checkfu deploy again.`,
+			for (let attempt = 0; ; attempt++) {
+				signal.throwIfAborted()
+				const { workflow_runs: runs } = await get(
+					`actions/workflows/ci.yml/runs?event=push&head_sha=${sha}&per_page=1`,
+					decodeRuns,
 				)
+				const run = runs[0]
+				if (run !== undefined && (run.head_sha !== sha || run.status === "completed")) {
+					if (run?.head_sha === sha && run.conclusion === "success") {
+						return sha
+					}
+					throw new Error(
+						`origin/main (${sha.slice(0, 12)}) has not passed CI. Nothing was deployed. Check CI and run checkfu deploy again after it passes.`,
+					)
+				}
+				if (attempt === 30) {
+					throw new Error(
+						`Timed out waiting for CI on ${sha.slice(0, 12)}. Nothing was deployed. Run checkfu deploy again when CI passes.`,
+					)
+				}
+				options.announce?.(
+					`Waiting for CI on ${sha.slice(0, 12)} (${run?.status ?? "not started"}); no cloud changes yet. Ctrl-C cancels.`,
+				)
+				await pause(signal)
 			}
-			return sha
 		},
 		source: (revision, signal) =>
 			download(`https://codeload.github.com/checkfu/checkfu/tar.gz/${revision}`, signal),
@@ -104,7 +126,9 @@ export const makeGithubDistribution = (request: typeof fetch = fetch): Distribut
 	}
 }
 
-export const githubDistribution = makeGithubDistribution()
+export const githubDistribution = makeGithubDistribution(fetch, {
+	announce: (message) => process.stderr.write(`${message}\n`),
+})
 
 /** No links, absolute paths, traversal, device entries, or executable archive modes. */
 export const extract = async (archive: Uint8Array, directory: string): Promise<void> => {
