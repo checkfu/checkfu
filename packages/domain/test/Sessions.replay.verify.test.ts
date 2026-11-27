@@ -37,7 +37,7 @@ describe("Sessions Z3 formal verification, replayed", () => {
 					story,
 					instances: 1,
 					depth: 2,
-					budget: 2000,
+					budget: 20_000,
 					faults: { redeliver: true, reorder: true, rerun: false },
 					walks: { count: 0 },
 					opaque: [
