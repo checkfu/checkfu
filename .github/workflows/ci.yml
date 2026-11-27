@@ -76,7 +76,8 @@ jobs:
   # The Z3 proofs in packages/domain take minutes, so they get a runner of their own.
   domain:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The two Sessions files each retain a ten-minute deadline and now run serially.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
         with:
