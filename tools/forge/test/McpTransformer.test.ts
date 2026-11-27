@@ -50,7 +50,7 @@ const searchAgents = {
 } satisfies Operation
 
 const project = (openApiJson: string) => {
-	using forge = parse(openApiJson)
+	const forge = parse(openApiJson)
 	return projectMcpTools(forge, openApiJson)
 }
 
@@ -707,7 +707,7 @@ describe("MCP tool projection", () => {
 
 	it("emits one module that carries the API version and the tool manifest", () => {
 		const openApiJson = exportDeterministicOpenApiJson()
-		using forge = parse(openApiJson)
+		const forge = parse(openApiJson)
 		const files = generateMcpFiles(forge, openApiJson)
 		expect(files.map((file) => file.path)).toEqual(["Tools.ts"])
 		expect(files[0]?.content).toContain(`GENERATED_API_VERSION = "${forge.version}"`)

@@ -251,7 +251,7 @@
     "@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/934b80b15c5ae2bf2be4dd44e478713f9755b51b53f8218ab22eec555b2bae72.tgz",
     "@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/d3c8dbf7b350aa08ddf41791ae5d834f2eb57f96df420795f5ec9a5db1b45b96.tgz",
     "@cloudflare/computer": "0.11.4",
-    "@cloudflare/forge": "0.2.0",
+    "@cloudflare/forge": "0.3.0",
     "@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
     "@earendil-works/chord": "1.7.0",
     "@earendil-works/pi-ai": "1.7.0",
@@ -418,19 +418,19 @@
 
     "@cloudflare/computer": ["@cloudflare/computer@0.11.4", "", { "dependencies": { "capnweb": "^0.12.0" }, "peerDependencies": { "@cloudflare/workers-types": "^4.20260616.1 || ^5.20260921.1", "@platformatic/vfs": "*", "ai": "^6.0.196 || ^7.0.0", "just-bash": "^3.6.0", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0", "zod": "^4.6.6" }, "optionalPeers": ["@cloudflare/workers-types", "@platformatic/vfs", "ai", "just-bash", "vite", "zod"] }, "sha512-OFjc8pTkXmc/lYEcLQHDE8OEfIYD1051xLv7K1eoeQLCrkHqKLuHntfB4K7u5AkO7JfXIEGy3sgmbtDoSou0KQ=="],
 
-    "@cloudflare/forge": ["@cloudflare/forge@0.2.0", "", { "optionalDependencies": { "@cloudflare/forge-darwin-arm64": "0.2.0", "@cloudflare/forge-darwin-x64": "0.2.0", "@cloudflare/forge-linux-arm64": "0.2.0", "@cloudflare/forge-linux-x64": "0.2.0", "@cloudflare/forge-win32-arm64": "0.2.0", "@cloudflare/forge-win32-x64": "0.2.0" }, "peerDependencies": { "@bytecodealliance/jco": "^1.37.0" }, "optionalPeers": ["@bytecodealliance/jco"], "bin": { "forge": "bin/forge.cjs", "forge-plugin": "bin/forge-plugin.mjs" } }, "sha512-EN8NAKt82nvdomOVoGJzYTpWglyWBC2IAdb1/jlYdPLjgQ4Lwsm+q/zXyL1Vj2t4uQBtmsYgRPjNmVVBvKYxLg=="],
+    "@cloudflare/forge": ["@cloudflare/forge@0.3.0", "", { "optionalDependencies": { "@cloudflare/forge-darwin-arm64": "0.3.0", "@cloudflare/forge-darwin-x64": "0.3.0", "@cloudflare/forge-linux-arm64": "0.3.0", "@cloudflare/forge-linux-x64": "0.3.0", "@cloudflare/forge-win32-arm64": "0.3.0", "@cloudflare/forge-win32-x64": "0.3.0" }, "peerDependencies": { "@bytecodealliance/jco": "^1.37.0" }, "optionalPeers": ["@bytecodealliance/jco"], "bin": { "forge": "bin/forge.cjs", "forge-plugin": "bin/forge-plugin.mjs" } }, "sha512-jAD61Rr0tBntk19CVXcCtsK2trUhOw/iaAE0YB604y7V2LNyJwd90wRXiidvhfhT/FcxV5jiPCxzcjmRkKAzCg=="],
 
-    "@cloudflare/forge-darwin-arm64": ["@cloudflare/forge-darwin-arm64@0.2.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-y9HpyHYUXwQ8rQm+eZ06bY2LtJ3gxO3CwHtcTqaIg8tRMddAFDreIWxnfoP5Ncz7xaaaWHagnxfYl/H1nbavUA=="],
+    "@cloudflare/forge-darwin-arm64": ["@cloudflare/forge-darwin-arm64@0.3.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-x4st6CAMjyZ16QtY/JOkhfd5q2AvZyhNiSx2NMV5GD5d5xw+/Is7dbpa/6jSsb6mG9FYOCjiDTbdQZY3D84ECg=="],
 
-    "@cloudflare/forge-darwin-x64": ["@cloudflare/forge-darwin-x64@0.2.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-+ueT98BcAlM9HRf4yQUWPxLnhvDMCdXlBE30SUmfUqo0Nq3qxDdWHSE6S8pe2RK9WwDLeghbo/8dbbVLzXSQ+g=="],
+    "@cloudflare/forge-darwin-x64": ["@cloudflare/forge-darwin-x64@0.3.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-ikJh+vhj+ZOSAY1SOREnhGjAsAIGHryjiKrtzew+QoKUqMiFMFnvIPzno+N0hi4cCV4QkvZasGxDmn2HYcz04Q=="],
 
-    "@cloudflare/forge-linux-arm64": ["@cloudflare/forge-linux-arm64@0.2.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-MWoacSBfmzJWgHd5o/3Vy1vddKA51TKfF3EBwFcvzkDYPlCAyDUP/LVI1mP9tL81DyCqNxUe/tjMv/iekMpLjQ=="],
+    "@cloudflare/forge-linux-arm64": ["@cloudflare/forge-linux-arm64@0.3.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-IVfOLdZwj1/jCJ3EtVXEMfiOfStfNOh38PicMXKzmnT5pes2PHMpFSD9Td3XVNXIEZWEFgRSZJxez+JujgTXww=="],
 
-    "@cloudflare/forge-linux-x64": ["@cloudflare/forge-linux-x64@0.2.0", "", { "os": "linux", "cpu": "x64" }, "sha512-DsC6ymbeWFqYnLkivm/u0KAcUZ2yjd10aLL679MY/zlUXEFllgTnjRmA3vsrSnMwPDlZxm84LTO8ffKEGGR88Q=="],
+    "@cloudflare/forge-linux-x64": ["@cloudflare/forge-linux-x64@0.3.0", "", { "os": "linux", "cpu": "x64" }, "sha512-9b1MaYc8ZfIYXG213zgva+FvqzBYfKozi7qtNsp8btrAur3+SrM8R+wNG510aGdC7W9a8TlgxEmhkRsfaIgh0w=="],
 
-    "@cloudflare/forge-win32-arm64": ["@cloudflare/forge-win32-arm64@0.2.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-dKu8+hc7ZSgYxI/SxgtgH4ojXOeTnPCRkd9mVCfeS7G6OvNIBt0I8kmAXny48JJouJmkfalbkMEAeVYXEhbX+g=="],
+    "@cloudflare/forge-win32-arm64": ["@cloudflare/forge-win32-arm64@0.3.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-91Pm0piO5uBE4aRtBik/Sd/Z1K2OryDDd+NXfQsYCs+VPQYu0eLsbdnKK+NVbHaMC4XzLPmRUswzNF4V8YpAPw=="],
 
-    "@cloudflare/forge-win32-x64": ["@cloudflare/forge-win32-x64@0.2.0", "", { "os": "win32", "cpu": "x64" }, "sha512-lpzGHcFLJDYny1hj3Ke/m6VVqP1vIJw4VnOcpdvTSpCo/M3P+P2VKFFrssxKAKf4q6y7IZrssGi5uoztB/70/g=="],
+    "@cloudflare/forge-win32-x64": ["@cloudflare/forge-win32-x64@0.3.0", "", { "os": "win32", "cpu": "x64" }, "sha512-8x0jNunYzwUmo7FwwYeGoEv1K8+4CM6z3gV2/2MMsdmEDZRdztt8Ux50YfHNMv2w3rVglpZEP3Hw9iorTkVB6A=="],
 
     "@cloudflare/oxlint-config": ["@cloudflare/oxlint-config@0.1.0", "", { "dependencies": { "@nkzw/oxlint-config": "3.0.0" }, "peerDependencies": { "oxlint": "^1.94.0", "tsrs": ">=0.25.0-ts7.1.0-beta" } }, "sha512-ZIajMHdEImUjtKZEHbpddrXsnNBpQT7Gy1MZg2lOL3ketdmWYpNWtZghkkKAlhgi2R8z/HATZyas4OOpMy6TIQ=="],
 
