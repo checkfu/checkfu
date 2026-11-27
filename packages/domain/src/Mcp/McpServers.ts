@@ -119,24 +119,36 @@ export interface CredentialRequest {
 	}>
 }
 
+interface CredentialRefusal {
+	readonly kind: "invalid_request" | "invalid_credential" | "ambiguous_credentials"
+	readonly message: string
+}
+
 export const resolveMcpServerCredentials = ({
 	servers,
 	explicit,
 	vaults,
-}: CredentialRequest): Result.Result<ReadonlyArray<McpServerCredential>, string> => {
+}: CredentialRequest): Result.Result<ReadonlyArray<McpServerCredential>, CredentialRefusal> => {
 	const named = new Map<string, (typeof explicit)[number]>()
 	for (const pair of explicit) {
 		if (named.has(pair.mcp_server_name)) {
-			return Result.fail(`mcp_server_credentials names "${pair.mcp_server_name}" more than once.`)
+			return Result.fail({
+				kind: "invalid_request",
+				message: `mcp_server_credentials names "${pair.mcp_server_name}" more than once.`,
+			})
 		}
 		const server = servers.find((declared) => declared.name === pair.mcp_server_name)
 		if (server === undefined) {
-			return Result.fail(`The agent has no MCP server named "${pair.mcp_server_name}".`)
+			return Result.fail({
+				kind: "invalid_request",
+				message: `The agent has no MCP server named "${pair.mcp_server_name}".`,
+			})
 		}
 		if (pair.vault_id === null || pair.target !== server.url) {
-			return Result.fail(
-				`Credential ${pair.credential_id} is not an active credential for MCP server "${server.name}".`,
-			)
+			return Result.fail({
+				kind: "invalid_credential",
+				message: `Credential ${pair.credential_id} is not an active credential for MCP server "${server.name}".`,
+			})
 		}
 		named.set(pair.mcp_server_name, pair)
 	}
@@ -154,9 +166,10 @@ export const resolveMcpServerCredentials = ({
 					),
 		)
 		if (matches.size > 1) {
-			return Result.fail(
-				`More than one credential matches MCP server "${server.name}". Name one in mcp_server_credentials.`,
-			)
+			return Result.fail({
+				kind: "ambiguous_credentials",
+				message: `More than one credential matches MCP server "${server.name}". Name one in mcp_server_credentials.`,
+			})
 		}
 		for (const [credential_id, vault_id] of matches) {
 			resolved.push({ mcp_server_name: server.name, credential_id, vault_id })

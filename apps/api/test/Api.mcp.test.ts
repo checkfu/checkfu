@@ -205,6 +205,7 @@ describe("Session credentials", () => {
 				const both = yield* create({ vault_ids: [first.vault, second.vault] })
 				expect(both.status).toBe(400)
 				expect(both.body.error.message).toContain('"docs"')
+				expect(both.body.error.code).toBe("mcp_server_credentials_ambiguous")
 
 				const named = yield* create({
 					vault_ids: [first.vault, second.vault],
@@ -218,13 +219,15 @@ describe("Session credentials", () => {
 				expect(read.body.mcp_server_credentials).toEqual(placed(second))
 
 				const elsewhere = yield* credentialIn(call, "https://elsewhere.mcp.example/mcp")
-				for (const refused of [
-					pair(elsewhere.credential),
-					pair("cred_missing"),
-					[{ mcp_server_name: "files", credential_id: first.credential }],
-					[...pair(first.credential), ...pair(second.credential)],
-				]) {
-					expect((yield* create({ mcp_server_credentials: refused })).status).toBe(400)
+				for (const [refused, code] of [
+					[pair(elsewhere.credential), "mcp_server_credential_invalid"],
+					[pair("cred_missing"), "mcp_server_credential_invalid"],
+					[[{ mcp_server_name: "files", credential_id: first.credential }], undefined],
+					[[...pair(first.credential), ...pair(second.credential)], undefined],
+				] as const) {
+					const result = yield* create({ mcp_server_credentials: refused })
+					expect(result.status).toBe(400)
+					expect(result.body.error.code).toBe(code)
 				}
 				expect(JSON.stringify([none.body, one.body, named.body])).not.toContain(TOKEN)
 			}),
@@ -279,6 +282,7 @@ describe("Session credentials", () => {
 				})
 				expect(refused.status).toBe(400)
 				expect(refused.body.error.message).toContain("docs.mcp.example")
+				expect(refused.body.error.code).toBe("mcp_server_blocked")
 				const open = yield* environment(call, limited(["docs.mcp.example"]))
 				const allowed = yield* call("POST", "/v1/sessions", {
 					agent: agent.id,

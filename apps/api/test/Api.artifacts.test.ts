@@ -715,6 +715,7 @@ describe("Artifacts API", () => {
 					error: {
 						type: "conflict_error",
 						message: "Idempotency-Key was already used for a different request.",
+						code: "idempotency_key_reused",
 					},
 				})
 				const renamed = yield* call("POST", "/v1/artifacts", { ...body, name: "B" }, headers)

@@ -412,6 +412,7 @@ describe("Vaults", () => {
 				]) {
 					const reused = yield* call("POST", path, changed, key)
 					expect(reused.status).toBe(409)
+					expect(reused.body).toMatchObject({ error: { code: "idempotency_key_reused" } })
 					expect(JSON.stringify(reused.body)).toContain("Idempotency-Key")
 				}
 				expect(vaults.secretOf(credential.id)).toBe(TOKEN)
@@ -554,6 +555,13 @@ describe("Vaults", () => {
 				const first = (yield* createCredential(call, vault.id)).body as CredentialBody
 				const refused = yield* createCredential(call, vault.id, `${GITHUB}#again`)
 				expect(refused.status).toBe(409)
+				expect(refused.body).toMatchObject({
+					error: {
+						type: "conflict_error",
+						message: "The vault already holds an active credential for this MCP server URL.",
+						code: "credential_url_taken",
+					},
+				})
 				expect(vaults.calls.filter((entry) => entry.operation === "put")).toHaveLength(1)
 				expect(vaults.rowsOf(first.id).secrets).toEqual([first.id])
 				expect(vaults.secretOf(first.id)).toBe(TOKEN)

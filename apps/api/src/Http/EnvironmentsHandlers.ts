@@ -21,7 +21,7 @@ import * as Option from "effect/Option"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	archiveAndRead,
 	bestEffortAfterCommit,
 	commitForStream,
@@ -110,11 +110,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 							}),
 							sendOptions,
 						)
-						.pipe(
-							Effect.catchTag("EnvironmentAlreadyExists", () =>
-								reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" }),
-							),
-						)
+						.pipe(Effect.catchTag("EnvironmentAlreadyExists", () => reusedKey))
 					const result = yield* environmentViews
 						.get(Environment.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "environment"))

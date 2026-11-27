@@ -135,6 +135,9 @@ describe("Webhooks HTTP API", () => {
 						},
 					})
 					expect(createConflict.status).toBe(409)
+					expect(yield* Effect.promise(() => createConflict.json())).toMatchObject({
+						error: { code: "idempotency_key_reused" },
+					})
 
 					// GET and LIST never expose signing_secret.
 					const getRes = yield* sendRequest(apiFetch, {

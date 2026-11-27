@@ -1,4 +1,6 @@
 export * from "./Effect.ts"
+export { ERROR_CODES } from "./ErrorCodes.ts"
+export type { ErrorCode } from "./ErrorCodes.ts"
 export {
 	APIPromise,
 	Checkfu,

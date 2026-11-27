@@ -1,3 +1,4 @@
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import type { SessionEventType, TextBlock } from "@checkfu/sdk/Schemas"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
@@ -122,7 +123,7 @@ import type {
 	SessionResourceItem,
 } from "./Api.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	archiveAndRead,
 	commitForStream,
 	createIdentity,
@@ -169,8 +170,6 @@ export const SessionReadWaitTimeout = Context.Reference<Duration.Input>(
 const SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
 const IDEMPOTENCY_CONFLICT_MESSAGE =
 	"Event id or Idempotency-Key was already used for a different event."
-
-const rejectReusedSessionKey = () => reject(409, IDEMPOTENCY_KEY_REUSED)
 
 const sessionEventCommandId = (
 	digest: Digest.Digest["Service"],
@@ -562,6 +561,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return yield* reject(
 							400,
 							`MCP server "${server.name}" (${host}) is not allowed by the environment's network rules.`,
+							{ code: ERROR_CODES.mcpServerBlocked },
 						)
 					}
 				}
@@ -591,7 +591,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				)
 				const resolved = resolveMcpServerCredentials({ servers, explicit, vaults: claimed })
 				if (Result.isFailure(resolved)) {
-					return yield* reject(400, resolved.failure)
+					const { kind, message } = resolved.failure
+					if (kind === "invalid_credential") {
+						return yield* reject(400, message, { code: ERROR_CODES.mcpServerCredentialInvalid })
+					}
+					if (kind === "ambiguous_credentials") {
+						return yield* reject(400, message, { code: ERROR_CODES.mcpServerCredentialsAmbiguous })
+					}
+					return yield* reject(400, message)
 				}
 				const text = encodeMcpServerCredentials(resolved.success)
 				if (text === undefined) {
@@ -911,7 +918,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						title,
 						resources,
 					}
-					const refused = { SessionAlreadyExists: rejectReusedSessionKey, ...missing }
+					const refused = { SessionAlreadyExists: () => reusedKey, ...missing }
 					// The host looks up the original command receipt before deciding against the current state.
 					const send =
 						initialPlan !== undefined
@@ -1192,7 +1199,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									event._tag === "idempotency_key.claimed" && event.fingerprint === fingerprint,
 							)
 						) {
-							return yield* reject(409, IDEMPOTENCY_KEY_REUSED)
+							return yield* reusedKey
 						}
 					}
 

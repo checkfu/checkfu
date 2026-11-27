@@ -1,4 +1,5 @@
 import type { PendingCreate, ProjectLockfile } from "@checkfu/authoring/lockfile"
+import { ERROR_CODES } from "@checkfu/sdk"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import type { CheckfuClient } from "../Client.ts"
@@ -23,16 +24,16 @@ import type { AppliedReference, Definition, ProjectResource } from "./Source.ts"
 const isCapacityRejection = (error: unknown): boolean =>
 	isApiErrorEnvelope(error) &&
 	error.error.type === "rate_limit_error" &&
-	error.error.code === "automation_capacity_reached"
+	error.error.code === ERROR_CODES.automationCapacityReached
 
 const isRejectedCreate = (error: unknown, fresh: boolean): boolean =>
 	isCapacityRejection(error) ||
 	(isApiErrorEnvelope(error) &&
 		(((error.error.type === "conflict_error" || error.error.type === "not_found_error") &&
-			error.error.code === "automation_reference_unavailable") ||
+			error.error.code === ERROR_CODES.automationReferenceUnavailable) ||
 			(error.error.type === "invalid_request_error" &&
-				(error.error.code === "agent_model_unavailable" ||
-					error.error.code === "automation_schedule_unusable")) ||
+				(error.error.code === ERROR_CODES.agentModelUnavailable ||
+					error.error.code === ERROR_CODES.automationScheduleUnusable)) ||
 			(fresh && [400, 401, 404, 413, 415].includes(apiErrorStatus(error)))))
 
 const matchesDefinition = (hash: string) => (resource: Resource) =>

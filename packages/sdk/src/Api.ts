@@ -1,4 +1,4 @@
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
@@ -11,6 +11,8 @@ import type * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { ERROR_CODES } from "./ErrorCodes.ts"
+import type { ErrorCode } from "./ErrorCodes.ts"
 import { CLIENT_EVENT_ID_MAX_LENGTH } from "./IdempotencyKey.ts"
 import * as SchemaGetter from "effect/SchemaGetter"
 import * as Struct from "effect/Struct"
@@ -158,9 +160,16 @@ export type ErrorStatus = keyof typeof ERROR_TYPES
 export type HandlerErrorType = (typeof HANDLER_ERROR_TYPES)[HandlerErrorStatus]
 export type ApiErrorType = (typeof ERROR_TYPES)[ErrorStatus]
 
-export const ERROR_CODES = {
-	sessionAwaitingAction: "session_awaiting_action",
-} as const
+export { ERROR_CODES } from "./ErrorCodes.ts"
+export type { ErrorCode } from "./ErrorCodes.ts"
+
+const ErrorCodeSchema = Schema.Literals(Object.values(ERROR_CODES)).annotate({
+	identifier: "ErrorCode",
+})
+
+export const ErrorCodeField = Schema.optionalKey(ErrorCodeSchema).pipe(
+	Schema.catchDecoding(() => Effect.succeedNone),
+)
 
 const errorEnvelope = <const S extends ErrorStatus>(status: S) =>
 	Schema.Struct({
@@ -168,7 +177,7 @@ const errorEnvelope = <const S extends ErrorStatus>(status: S) =>
 		error: Schema.Struct({
 			type: Schema.Literal(ERROR_TYPES[status]),
 			message: Schema.String,
-			code: Schema.optionalKey(Schema.String),
+			code: ErrorCodeField,
 		}),
 		request_id: RequestId,
 		accepted: Schema.optionalKey(ErrorAccepted),
@@ -192,7 +201,7 @@ export type ApiError = (typeof ERRORS)[ErrorStatus]["Type"]
 export type HandlerError = (typeof ERRORS)[HandlerErrorStatus]["Type"]
 
 interface ApiErrorExtra {
-	readonly code?: string
+	readonly code?: ErrorCode
 	readonly accepted?: ReadonlyArray<unknown>
 	readonly failed_index?: number
 	readonly unconfirmed_index?: number
@@ -291,7 +300,7 @@ const HandlerErrorInput = Schema.Struct({
 			HANDLER_ERROR_TYPES[503],
 		]),
 		message: Schema.String,
-		code: Schema.optional(Schema.String),
+		code: Schema.optional(ErrorCodeSchema),
 	}),
 	accepted: Schema.optional(ErrorAccepted),
 	failed_index: Schema.optional(ErrorIndex),

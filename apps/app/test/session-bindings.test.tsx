@@ -1,4 +1,6 @@
 import type { JsonAgent, JsonSession, JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
+import type { ErrorCode } from "@checkfu/sdk/ErrorCodes"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
@@ -74,7 +76,7 @@ const NETWORK =
 	'MCP server "linear" (mcp.linear.app) is not allowed by the environment\'s network rules.'
 
 const render = (
-	message: string | undefined,
+	error: { readonly message: string; readonly code: ErrorCode } | undefined,
 	list: Partial<VaultList> = {},
 	held: {
 		readonly a: ReadonlyArray<JsonVaultCredential>
@@ -107,7 +109,7 @@ const render = (
 				onVaults={() => undefined}
 				explicit={{}}
 				onExplicit={() => undefined}
-				error={placeError(message, servers)}
+				error={placeError(error?.message, error?.code, servers)}
 			/>
 		</QueryClientProvider>,
 	)
@@ -198,22 +200,27 @@ describe("session credential bindings", () => {
 	})
 
 	it("puts the ambiguity refusal next to the server it names", () => {
-		expect(placeError(AMBIGUOUS, servers)).toEqual({ server: "github", message: AMBIGUOUS })
-		const html = render(AMBIGUOUS)
+		const code = ERROR_CODES.mcpServerCredentialsAmbiguous
+		expect(placeError(AMBIGUOUS, code, servers)).toMatchObject({
+			server: "github",
+			message: AMBIGUOUS,
+		})
+		expect(placeError(AMBIGUOUS, undefined, servers).server).toBeUndefined()
+		const html = render({ message: AMBIGUOUS, code })
 		const at = html.indexOf("More than one credential matches")
 		expect(at).toBeGreaterThan(html.indexOf("Credential for github"))
 		expect(at).toBeLessThan(html.indexOf("Credential for linear"))
 	})
 
 	it("says how to fix an environment's network refusal, next to that server", () => {
-		const html = render(NETWORK)
+		const html = render({ message: NETWORK, code: ERROR_CODES.mcpServerBlocked })
 		const at = html.indexOf("not allowed by the environment")
 		expect(at).toBeGreaterThan(html.indexOf("Credential for linear"))
 		expect(html).toContain("Allow its host in the environment")
 	})
 
 	it("leaves a refusal about no declared server with the form", () => {
-		expect(placeError("Vault vlt_x is not an active vault.", servers)).toEqual({
+		expect(placeError("Vault vlt_x is not an active vault.", undefined, servers)).toMatchObject({
 			server: undefined,
 			message: "Vault vlt_x is not an active vault.",
 		})

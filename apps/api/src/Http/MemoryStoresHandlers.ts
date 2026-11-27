@@ -28,7 +28,7 @@ import {
 	bestEffortAfterCommit,
 	commitForStream,
 	createIdentity,
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	handled,
 	isPending,
 	orPending,
@@ -158,11 +158,7 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 							new CreateMemoryStore({ memory_store_id: id, name: payload.name, description }),
 							identity.options,
 						)
-						.pipe(
-							Effect.catchTag("MemoryStoreAlreadyExists", () =>
-								reject(409, IDEMPOTENCY_KEY_REUSED),
-							),
-						)
+						.pipe(Effect.catchTag("MemoryStoreAlreadyExists", () => reusedKey))
 					const caughtUp = yield* storeViews
 						.get(MemoryStore.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "memory_store"))

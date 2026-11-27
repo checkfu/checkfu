@@ -3,7 +3,7 @@ import * as Data from "effect/Data"
 import * as HttpClientError from "effect/http/HttpClientError"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { API_ERROR_TYPE_LITERALS, statusOfErrorType } from "./Api.ts"
+import { API_ERROR_TYPE_LITERALS, ErrorCodeField, statusOfErrorType } from "./Api.ts"
 import type { ApiError as ApiErrorEnvelopeWire, ErrorStatus } from "./Api.ts"
 
 const ApiErrorEnvelopeSchema = Schema.Struct({
@@ -11,7 +11,7 @@ const ApiErrorEnvelopeSchema = Schema.Struct({
 	error: Schema.Struct({
 		type: Schema.Literals(API_ERROR_TYPE_LITERALS),
 		message: Schema.String,
-		code: Schema.optionalKey(Schema.String),
+		code: ErrorCodeField,
 	}),
 	request_id: Schema.optional(Schema.String),
 	accepted: Schema.optional(Schema.Array(Schema.Unknown)),
@@ -23,6 +23,8 @@ export type ApiErrorEnvelope = typeof ApiErrorEnvelopeSchema.Type
 
 export const isApiErrorEnvelope: (value: unknown) => value is ApiErrorEnvelope =
 	Schema.is(ApiErrorEnvelopeSchema)
+
+export const decodeApiErrorEnvelope = Schema.decodeUnknownOption(ApiErrorEnvelopeSchema)
 
 export const apiErrorStatus = (error: ApiErrorEnvelope): ErrorStatus =>
 	statusOfErrorType(error.error.type)

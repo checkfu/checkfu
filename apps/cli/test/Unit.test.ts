@@ -15,6 +15,7 @@ import {
 	makeCheckfuClient,
 	normalizeApiUrl,
 	resolveBaseUrl,
+	verifyApiKey,
 } from "../src/Client.ts"
 import {
 	escapeTerminalControlCharacters,
@@ -28,6 +29,35 @@ const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
 
 const getRequestHeaders = (input: RequestInfo | URL, init?: RequestInit): Headers =>
 	new Headers(typeof input === "string" || "href" in input ? init?.headers : input.headers)
+
+it.live("recognizes API key verification replies with unrecognized refusal codes", () => {
+	const fetch: typeof globalThis.fetch = async (input, init) => {
+		const authorization = getRequestHeaders(input, init).get("authorization")
+		return authorization === "Bearer ck_valid"
+			? Response.json({ type: "authentication_verified" })
+			: Response.json(
+					{
+						type: "error",
+						error: {
+							type: "authentication_error",
+							message: "Key refused.",
+							code: "other",
+						},
+					},
+					{ status: 401 },
+				)
+	}
+	return Effect.gen(function* () {
+		const url = "https://api.example.test"
+		yield* verifyApiKey(url, "ck_valid")
+		const refusal = yield* Effect.flip(verifyApiKey(url, "ck_wrong"))
+		expect(refusal.message).toContain("rejected the API key (HTTP 401): Key refused.")
+	}).pipe(
+		Effect.provide(
+			FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
+		),
+	)
+})
 
 describe("normalizeApiUrl", () => {
 	it("accepts https URLs and loopback http URLs and strips trailing / and /v1", async () => {

@@ -223,7 +223,7 @@ export function NewSessionPage(): React.JSX.Element {
 			},
 		},
 	)
-	const startError = placeError(start.error, servers)
+	const startError = placeError(start.error, start.errorCode, servers)
 	return (
 		<>
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />

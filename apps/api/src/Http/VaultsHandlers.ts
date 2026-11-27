@@ -1,9 +1,13 @@
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import { ArchiveCredential } from "@checkfu/domain/Vault/ArchiveCredential.command"
 import { ArchiveCredentialDecision } from "@checkfu/domain/Vault/ArchiveCredential.decision"
 import { ArchiveVault } from "@checkfu/domain/Vault/ArchiveVault.command"
 import { ConfirmCredentialStored } from "@checkfu/domain/Vault/ConfirmCredentialStored.command"
 import { ConfirmCredentialStoredDecision } from "@checkfu/domain/Vault/ConfirmCredentialStored.decision"
-import { CreateCredential } from "@checkfu/domain/Vault/CreateCredential.command"
+import {
+	CreateCredential,
+	CredentialUrlConflict,
+} from "@checkfu/domain/Vault/CreateCredential.command"
 import { CreateCredentialDecision } from "@checkfu/domain/Vault/CreateCredential.decision"
 import { CreateVault } from "@checkfu/domain/Vault/CreateVault.command"
 import { Credential } from "@checkfu/domain/Vault/Credential.aggregate"
@@ -37,7 +41,7 @@ import * as Option from "effect/Option"
 import { CheckfuApi } from "./Api.ts"
 import { makeVaultListers } from "./Listing.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	bestEffortAfterCommit,
 	commitForStream,
 	createIdentity,
@@ -235,7 +239,7 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 							new CreateVault({ vault_id: id, display_name: payload.display_name }),
 							identity.options,
 						)
-						.pipe(Effect.catchTag("VaultAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)))
+						.pipe(Effect.catchTag("VaultAlreadyExists", () => reusedKey))
 					const result = yield* vaultAfter(id, receipt)
 					if (isPending(result)) {
 						return result
@@ -343,7 +347,17 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 							identity.options,
 						)
 						.pipe(
-							Effect.catchTag("CredentialAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+							Effect.catchTags({
+								CredentialAlreadyExists: () => reusedKey,
+								CredentialUrlConflict: () =>
+									reject(
+										409,
+										CredentialUrlConflict.annotations.description ?? "Request rejected.",
+										{
+											code: ERROR_CODES.credentialUrlTaken,
+										},
+									),
+							}),
 						)
 					yield* secrets
 						.put({

@@ -5,6 +5,8 @@ import { shortId } from "@checkfu/ui/format"
 import { Select } from "@checkfu/ui/input"
 import { Description, DescriptionList } from "@checkfu/ui/page-header"
 import type { JsonAgent, JsonSession, JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
+import type { ErrorCode } from "@checkfu/sdk/ErrorCodes"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { MAX_SESSION_VAULTS } from "@checkfu/sdk/Limits"
 import { Link } from "@tanstack/react-router"
@@ -193,21 +195,34 @@ const SERVER_IN_MESSAGE = /MCP server "([^"]+)"/u
 
 export const placeError = (
 	message: string | undefined,
+	code: ErrorCode | undefined,
 	servers: ReadonlyArray<Server>,
-): { readonly server: string | undefined; readonly message: string | undefined } => {
-	const name = message === undefined ? undefined : SERVER_IN_MESSAGE.exec(message)?.[1]
-	return servers.some((server) => server.name === name)
-		? { server: name, message }
-		: { server: undefined, message }
+) => {
+	const networkBlocked = code === ERROR_CODES.mcpServerBlocked
+	const namesServer =
+		networkBlocked ||
+		code === ERROR_CODES.mcpServerCredentialInvalid ||
+		code === ERROR_CODES.mcpServerCredentialsAmbiguous
+	const name =
+		message !== undefined && namesServer ? SERVER_IN_MESSAGE.exec(message)?.[1] : undefined
+	return {
+		server: servers.find((server) => server.name === name)?.name,
+		message,
+		networkBlocked,
+	}
 }
 
-const isNetworkRefusal = (message: string): boolean => message.includes("network rules")
-
-function ServerError({ message }: { readonly message: string }): React.JSX.Element {
+function ServerError({
+	message,
+	networkBlocked,
+}: {
+	readonly message: string
+	readonly networkBlocked: boolean
+}): React.JSX.Element {
 	return (
 		<Callout tone="error">
 			{message}
-			{isNetworkRefusal(message)
+			{networkBlocked
 				? " Allow its host in the environment's networking, or choose another environment."
 				: null}
 		</Callout>
@@ -253,7 +268,7 @@ export function SessionCredentialFields({
 	readonly onVaults: (ids: ReadonlyArray<string>) => void
 	readonly explicit: ExplicitCredentials
 	readonly onExplicit: (explicit: ExplicitCredentials) => void
-	readonly error: { readonly server: string | undefined; readonly message: string | undefined }
+	readonly error: ReturnType<typeof placeError>
 }): React.JSX.Element | null {
 	const servers = agent?.mcp_servers ?? []
 	const {
@@ -427,7 +442,7 @@ export function SessionCredentialFields({
 							</Callout>
 						)}
 						{error.server === server.name && error.message !== undefined ? (
-							<ServerError message={error.message} />
+							<ServerError message={error.message} networkBlocked={error.networkBlocked} />
 						) : null}
 					</div>
 				)

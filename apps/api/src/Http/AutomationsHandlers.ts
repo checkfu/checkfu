@@ -1,3 +1,4 @@
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import {
 	ArchiveAutomationIfCurrent,
 	ArchiveAutomationIfCurrentDecision,
@@ -53,7 +54,7 @@ import * as Schedule from "effect/Schedule"
 import { CheckfuApi } from "./Api.ts"
 import { listPage, makeLister } from "./Listing.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	commitForStream,
 	createIdentity,
 	handled,
@@ -157,7 +158,14 @@ const textOf = (
 	)
 
 const rejectUnavailableReference = (status: 404 | 409, description: string | undefined) =>
-	reject(status, description ?? "Request rejected.", { code: "automation_reference_unavailable" })
+	reject(status, description ?? "Request rejected.", {
+		code: ERROR_CODES.automationReferenceUnavailable,
+	})
+
+const rejectUnusableSchedule = () =>
+	reject(400, AutomationScheduleUnusable.annotations.description ?? "Invalid schedule.", {
+		code: ERROR_CODES.automationScheduleUnusable,
+	})
 
 const UPDATE_RETRIES = 3
 
@@ -287,16 +295,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 							Effect.catchTags({
 								AutomationAlreadyExists: () =>
 									isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)
-										? reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" })
-										: Effect.fail(new AutomationScheduleUnusable(payload.schedule)),
-								AutomationScheduleUnusable: () =>
-									reject(
-										400,
-										AutomationScheduleUnusable.annotations.description ?? "Invalid schedule.",
-										{
-											code: "automation_schedule_unusable",
-										},
-									),
+										? reusedKey
+										: rejectUnusableSchedule(),
+								AutomationScheduleUnusable: rejectUnusableSchedule,
 								AgentNotFound: () =>
 									rejectUnavailableReference(404, AgentNotFound.annotations.description),
 								AgentVersionNotFound: () =>
@@ -312,7 +313,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 										429,
 										AutomationLimitReached.annotations.description ?? "Request rejected.",
 										{
-											code: "automation_capacity_reached",
+											code: ERROR_CODES.automationCapacityReached,
 										},
 									),
 							}),
@@ -360,7 +361,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						}
 						const reschedule = !sameSchedule(next.schedule, current.schedule)
 						if (reschedule && !isUsableSchedule(next.schedule.expression, next.schedule.timezone)) {
-							return yield* new AutomationScheduleUnusable(next.schedule)
+							return yield* rejectUnusableSchedule()
 						}
 						const agent_id_changed = next.agent_id !== current.agent_id
 						const environment_changed = next.environment_id !== current.environment_id
@@ -394,7 +395,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 										.waitFor(ref, { revision: { gte: error.current_revision } }, { timeout })
 										.pipe(Effect.as(true))
 								: false,
-					})
+					}).pipe(Effect.catchTag("AutomationScheduleUnusable", rejectUnusableSchedule))
 					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }
 						: yield* after(id, committed)

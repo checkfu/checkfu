@@ -1,3 +1,4 @@
+import { readFile, readdir } from "node:fs/promises"
 import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "@checkfu/domain/Mcp/McpServers"
 import { AutomationInventoryChanged } from "@checkfu/domain/Automation/GuardedArchives"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
@@ -973,6 +974,20 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		])
 	})
 
+	it("declares HTTP error codes in the shared registry", async () => {
+		const directory = new URL("../src/Http/", import.meta.url)
+		const handlers = (await readdir(directory)).filter((name) => name.endsWith(".ts"))
+		const violations = await Promise.all(
+			handlers.map(async (name) => ({
+				name,
+				source: await readFile(new URL(name, directory), "utf8"),
+			})),
+		)
+		expect(
+			violations.filter(({ source }) => /\bcode:\s*["'`]/u.test(source)).map(({ name }) => name),
+		).toEqual([])
+	})
+
 	it("maps every error envelope to its numeric HTTP status and rejects empty request IDs", () => {
 		const requestId = RequestId.make("req_test_status_map")
 		for (const status of [400, 401, 404, 409, 413, 415, 429, 500, 503] as const) {
@@ -1027,6 +1042,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			{ type: "error", error: null, accepted: [{ id: "evt_1" }] },
 			{ type: "error", error: { type: "unsupported_error_type", message: "Nope." } },
 			{ type: "error", error: { type: "conflict_error", message: 123 } },
+			{ type: "error", error: { type: "conflict_error", message: "Bad.", code: "unknown" } },
 			{
 				type: "error",
 				error: { type: "conflict_error", message: "Bad." },

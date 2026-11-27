@@ -4,7 +4,7 @@ import type {
 	SessionEvent,
 	SessionStreamEvent as SessionStreamPayload,
 } from "@checkfu/sdk/Api"
-import { isAPIError, isApiErrorEnvelope } from "@checkfu/sdk/Errors"
+import { decodeApiErrorEnvelope, isAPIError, isApiErrorEnvelope } from "@checkfu/sdk/Errors"
 import type { CheckfuSdkError } from "@checkfu/sdk/Errors"
 import {
 	streamApiSse as sdkStreamApiSse,
@@ -149,9 +149,10 @@ const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
 			VERIFY_BODY_TIMEOUT_MS,
 		)
 		const body = Option.getOrNull(decodeJsonOption(text))
+		const refusal = Option.getOrUndefined(decodeApiErrorEnvelope(body))
 		return {
 			status: response.status,
-			error: isApiErrorEnvelope(body) ? body.error : undefined,
+			error: refusal?.error,
 			verified: response.status === 200 && isVerified(body),
 		}
 	}).pipe(

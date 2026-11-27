@@ -1298,6 +1298,14 @@ describe("Automations API", () => {
 				const key = { "idempotency-key": "create-morning-report" }
 				const first = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", body, key)
 				expect(first.status).toBe(201)
+				const unusableUpdate = yield* call<ErrorBody>(
+					apiFetch,
+					"POST",
+					`/v1/automations/${first.body.id}`,
+					{ schedule: { type: "cron", expression: "0 0 31 2 *", timezone: "UTC" } },
+				)
+				expect(unusableUpdate.status).toBe(400)
+				expect(unusableUpdate.body.error).toEqual(unusable.body.error)
 				yield* call(apiFetch, "POST", `/v1/agents/${agentId}/archive`)
 				const retried = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", body, key)
 				expect(retried.status).toBe(201)
@@ -1310,6 +1318,7 @@ describe("Automations API", () => {
 					key,
 				)
 				expect(changed.status).toBe(409)
+				expect(changed.body.error.code).toBe("idempotency_key_reused")
 				const unusableUnderTheSameKey = yield* call<ErrorBody>(
 					apiFetch,
 					"POST",
@@ -1321,7 +1330,7 @@ describe("Automations API", () => {
 					key,
 				)
 				expect(unusableUnderTheSameKey.status).toBe(400)
-				expect(unusableUnderTheSameKey.body.error.code).toBeUndefined()
+				expect(unusableUnderTheSameKey.body.error).toEqual(unusable.body.error)
 			}),
 		))
 

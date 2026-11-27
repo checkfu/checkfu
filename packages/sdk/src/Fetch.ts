@@ -1,4 +1,6 @@
 import { parseJsonAs } from "./Boundary.ts"
+import { ERROR_CODES } from "./ErrorCodes.ts"
+import type { ErrorCode } from "./ErrorCodes.ts"
 import { CLIENT_EVENT_ID_MESSAGE, isClientEventId } from "./IdempotencyKey.ts"
 import { SDK_OPERATION_BINDINGS } from "./generated/OperationBindings.ts"
 import type { CheckfuOperations } from "./generated/Resources.ts"
@@ -76,7 +78,7 @@ export type FetchClient = <Op extends JsonOperationId>(
 ) => Promise<FetchResult<Op>>
 
 export interface CheckfuFetchErrorDetails {
-	readonly code?: string | undefined
+	readonly code?: ErrorCode | undefined
 	readonly requestId?: string | undefined
 	readonly accepted?: ReadonlyArray<unknown> | undefined
 	readonly failedIndex?: number | undefined
@@ -86,7 +88,7 @@ export interface CheckfuFetchErrorDetails {
 export class CheckfuFetchError extends Error {
 	readonly status: number
 	readonly type: string | null
-	readonly code: string | undefined
+	readonly code: ErrorCode | undefined
 	readonly requestId: string | undefined
 	readonly accepted: ReadonlyArray<unknown> | undefined
 	readonly failedIndex: number | undefined
@@ -282,7 +284,7 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 				stringOr(envelope.error?.type) ?? null,
 				stringOr(envelope.error?.message) ?? `Request failed with status ${response.status}.`,
 				{
-					code: stringOr(envelope.error?.code),
+					code: Object.values(ERROR_CODES).find((code) => code === envelope.error?.code),
 					requestId:
 						stringOr(envelope.request_id) ??
 						response.headers.get("request-id") ??

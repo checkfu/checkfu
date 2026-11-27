@@ -1,4 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Schema from "effect/Schema"
+import { ERRORS } from "../src/Api.ts"
+import Checkfu from "../src/Checkfu.ts"
+import { ERROR_CODES } from "../src/ErrorCodes.ts"
 import {
 	AuthenticationError,
 	BadRequestError,
@@ -12,12 +16,48 @@ import {
 	UnexpectedStatusError,
 	UnprocessableEntityError,
 	UnsupportedMediaTypeError,
+	decodeApiErrorEnvelope,
 	isAPIError,
+	isApiErrorEnvelope,
 	isCheckfuError,
 } from "../src/Errors.ts"
 
 describe("errors for a non-2xx response", () => {
 	const fields = { message: "m", requestId: "req_1", body: "raw body" }
+
+	it("recognizes response codes from the API registry", () => {
+		const error = { type: "invalid_request_error", message: "m" }
+		expect(isApiErrorEnvelope({ type: "error", error })).toBe(true)
+		for (const code of Object.values(ERROR_CODES)) {
+			expect(isApiErrorEnvelope({ type: "error", error: { ...error, code } })).toBe(true)
+		}
+		expect(isApiErrorEnvelope({ type: "error", error: { ...error, code: "other" } })).toBe(false)
+	})
+
+	it("keeps a refusal when a response includes an unrecognized code", async () => {
+		const error = { type: "invalid_request_error", message: "This request was refused." }
+		const envelope = { type: "error", error: { ...error, code: "other" }, request_id: "req_1" }
+		expect(decodeApiErrorEnvelope(envelope)).toMatchObject({ value: { ...envelope, error } })
+		expect(Schema.encodeUnknownResult(ERRORS[400])(envelope)._tag).toBe("Failure")
+		const client = new Checkfu({
+			apiKey: "ck_test",
+			baseUrl: "http://localhost:1337",
+			maxRetries: 0,
+			fetch: async () => Response.json(envelope, { status: 400 }),
+		})
+		try {
+			await expect(
+				client.agents.create({ name: "Test", model: "test-model" }),
+			).rejects.toMatchObject({
+				status: 400,
+				message: error.message,
+				requestID: envelope.request_id,
+				body: { ...envelope, error },
+			})
+		} finally {
+			await client.close()
+		}
+	})
 
 	it("says which statuses may succeed later, and exposes the request id and body", () => {
 		const errors = [

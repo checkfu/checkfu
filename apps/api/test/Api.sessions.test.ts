@@ -3505,7 +3505,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(conflictSessRes.status).toBe(409)
 					expect(yield* Effect.promise(() => conflictSessRes.json())).toMatchObject({
 						type: "error",
-						error: { type: "conflict_error" },
+						error: { type: "conflict_error", code: "idempotency_key_reused" },
 					})
 					expect(new Set(admittedSessionIds)).toEqual(new Set([sess1.id]))
 					expect(yield* realSessions.get(SessionId.make(sess1.id))).toEqual(sessionBeforeConflict)

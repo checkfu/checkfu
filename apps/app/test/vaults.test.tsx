@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import { createMemoryHistory, createRouter, useRouterState } from "@tanstack/react-router"
 import { waitFor } from "@testing-library/react"
 import type * as React from "react"
@@ -248,8 +249,9 @@ describe("vault pages", () => {
 						status: 409,
 						body: {
 							error: {
-								type: "invalid_request_error",
-								message: "The vault already holds an active credential for this MCP server URL.",
+								type: "conflict_error",
+								message: "A credential already exists for this server.",
+								code: ERROR_CODES.credentialUrlTaken,
 							},
 						},
 					}
@@ -284,7 +286,16 @@ describe("vault pages", () => {
 			attempts += 1
 			return attempts === 1
 				? { status: 503, body: { error: { type: "service_unavailable", message: "unavailable" } } }
-				: { status: 409, body: { error: { type: "invalid_request_error", message: taken } } }
+				: {
+						status: 409,
+						body: {
+							error: {
+								type: "conflict_error",
+								message: taken,
+								code: ERROR_CODES.credentialUrlTaken,
+							},
+						},
+					}
 		})
 		const page = await mount(<VaultView vault={vault} />, withCredentials([credential]))
 		const form = [...page.container.querySelectorAll("form")].find((candidate) =>
@@ -312,7 +323,16 @@ describe("vault pages", () => {
 			attempts += 1
 			return attempts === 1
 				? { status: 503, body: { error: { type: "service_unavailable", message: "unavailable" } } }
-				: { status: 409, body: { error: { type: "invalid_request_error", message: taken } } }
+				: {
+						status: 409,
+						body: {
+							error: {
+								type: "conflict_error",
+								message: taken,
+								code: ERROR_CODES.credentialUrlTaken,
+							},
+						},
+					}
 		})
 		const page = await mount(<VaultView vault={vault} />, withCredentials([credential]))
 		const form = [...page.container.querySelectorAll("form")].find((candidate) =>

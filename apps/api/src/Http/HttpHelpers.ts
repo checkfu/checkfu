@@ -277,7 +277,9 @@ export const idempotentCommandId = (
 	scope: ReadonlyArray<unknown>,
 ): Effect.Effect<string> => Effect.map(sha256Json(digest, scope), (hash) => `${prefix}:${hash}`)
 
-export const IDEMPOTENCY_KEY_REUSED = "Idempotency-Key was already used for a different request."
+export const reusedKey = reject(409, "Idempotency-Key was already used for a different request.", {
+	code: ERROR_CODES.idempotencyKeyReused,
+})
 
 export const createCommandId = (
 	digest: Digest.Digest["Service"],

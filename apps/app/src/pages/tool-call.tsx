@@ -5,7 +5,8 @@ import type { Tone } from "@checkfu/ui/chip"
 import { Input, Textarea } from "@checkfu/ui/input"
 import { useState } from "react"
 import type * as React from "react"
-import { ApiError, SESSION_AWAITING_ACTION, errorMessage } from "../api.ts"
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
+import { ApiError, errorMessage } from "../api.ts"
 import { TOOL_REJECTIONS, allowEvent, customResultEvent, denyEvent } from "../tool-calls.ts"
 import type { AnswerEvent, ToolCall, ToolCallStatus } from "../tool-calls.ts"
 import { useAction, useSubmissionKey } from "../use-action.ts"
@@ -16,7 +17,7 @@ export const WAITING_REFUSES_MESSAGES =
 	"The agent is waiting for answers to its tool calls. Answer them first, then send your message."
 
 export const sendFailure = (error: unknown): Error =>
-	error instanceof ApiError && error.code === SESSION_AWAITING_ACTION
+	error instanceof ApiError && error.code === ERROR_CODES.sessionAwaitingAction
 		? new Error(WAITING_REFUSES_MESSAGES)
 		: error instanceof Error
 			? error

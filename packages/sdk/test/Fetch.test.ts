@@ -503,6 +503,26 @@ describe("the fetch client", () => {
 		})
 	})
 
+	it.each([
+		["idempotency_key_reused", "idempotency_key_reused"],
+		["other", undefined],
+	])("exposes registered response codes from fetch (%s)", async (code, expected) => {
+		const reply = recording(
+			409,
+			JSON.stringify({ error: { type: "conflict_error", message: "Conflict.", code } }),
+		)
+		await expect(
+			createFetchClient({ fetch: reply.fetch })("agents.retrieve", {
+				path: { agent_id: "agent_1" },
+			}),
+		).rejects.toMatchObject({
+			status: 409,
+			type: "conflict_error",
+			message: "Conflict.",
+			code: expected,
+		})
+	})
+
 	it("fills every placeholder of every generated operation from its listed path parameters", () => {
 		for (const binding of SDK_OPERATION_BINDINGS) {
 			const path = Object.fromEntries(binding.pathParams.map((name) => [name, "x"]))

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
 import { useRef } from "react"
-import { errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
+import { ApiError, errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
 
 export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 	action: (...args: Args) => Promise<Result>,
@@ -35,6 +35,7 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 			}
 		},
 		pending: mutation.isPending,
+		errorCode: mutation.error instanceof ApiError ? mutation.error.code : undefined,
 		error:
 			mutation.error === null || isSignedOut(mutation.error)
 				? undefined

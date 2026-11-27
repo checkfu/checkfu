@@ -46,7 +46,7 @@ import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
 import { CheckfuApi, apiError } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	createCommandId,
 	currentRequestId,
 	errorResponse,
@@ -300,7 +300,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							event.fingerprint === fingerprint,
 					)
 				) {
-					return yield* reject(409, IDEMPOTENCY_KEY_REUSED)
+					return yield* reusedKey
 				}
 				const commandId = yield* idempotentCommandId(digest, `${request.operation}-artifact`, [
 					request.operation,
@@ -391,7 +391,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					).pipe(
 						Effect.catchTags({
 							ArtifactReservationLapsed: () => interrupted,
-							ArtifactAlreadyExists: () => reject(409, IDEMPOTENCY_KEY_REUSED),
+							ArtifactAlreadyExists: () => reusedKey,
 						}),
 					)
 					const settled = yield* artifacts.get(id).pipe(orPending(id, "artifact"))

@@ -174,7 +174,11 @@ describe("Memory stores", () => {
 				const first = yield* json<StoreBody>(yield* create("Team"))
 				const second = yield* json<StoreBody>(yield* create("Team"))
 				expect(second).toEqual(first)
-				expect((yield* create("Other")).status).toBe(409)
+				const reused = yield* create("Other")
+				expect(reused.status).toBe(409)
+				expect(yield* json<unknown>(reused)).toMatchObject({
+					error: { code: "idempotency_key_reused" },
+				})
 				const path = `/v1/memory_stores/${first.id}`
 				expect((yield* request(apiFetch, "POST", path, { name: "Renamed" })).status).toBe(200)
 				expect(yield* json<StoreBody>(yield* create("Team"))).toEqual(first)

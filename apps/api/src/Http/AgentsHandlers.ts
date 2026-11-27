@@ -1,3 +1,4 @@
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import {
 	ArchiveAgentIfCurrent,
 	ArchiveAgentIfCurrentDecision,
@@ -44,7 +45,7 @@ import { CheckfuApi } from "./Api.ts"
 import { hydratePage, listPage, makeLister } from "./Listing.ts"
 import { CustomToolFaults } from "./ToolSchemas.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	archiveAndRead,
 	commitForStream,
 	createIdentity,
@@ -75,7 +76,7 @@ const unsupportedModel = (model: AgentModel, emptyCreate = false) =>
 		model.id.length > MAX_MODEL_ID_LENGTH
 			? `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`
 			: `Unsupported model "${model.id}".`,
-		emptyCreate ? { code: "agent_model_unavailable" } : undefined,
+		emptyCreate ? { code: ERROR_CODES.agentModelUnavailable } : undefined,
 	)
 
 const versionPage = (id: AgentId, version: number): string =>
@@ -349,11 +350,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							}),
 							sendOptions,
 						)
-						.pipe(
-							Effect.catchTag("AgentAlreadyExists", () =>
-								reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" }),
-							),
-						)
+						.pipe(Effect.catchTag("AgentAlreadyExists", () => reusedKey))
 					return yield* loadCommittedAgentVersion(
 						id,
 						receipt.reply.version,

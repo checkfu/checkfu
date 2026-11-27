@@ -42,7 +42,7 @@ import {
 } from "../Webhooks/WebhookSigning.ts"
 import { CheckfuApi } from "./Api.ts"
 import {
-	IDEMPOTENCY_KEY_REUSED,
+	reusedKey,
 	handled,
 	idempotentCommandId,
 	idempotentId,
@@ -201,9 +201,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 								}),
 								{ commandId },
 							)
-							.pipe(
-								Effect.catchTag("WebhookAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
-							)
+							.pipe(Effect.catchTag("WebhookAlreadyExists", () => reusedKey))
 
 						const state = yield* requireLive(webhookId)
 						if (idempotencyKey !== undefined && state.secret_revision !== 1) {
@@ -356,7 +354,7 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 										event.fingerprint === fingerprint,
 								)
 							) {
-								return yield* reject(409, IDEMPOTENCY_KEY_REUSED)
+								return yield* reusedKey
 							}
 							const commandId = yield* idempotentCommandId(digest, "rotate-webhook-secret", [
 								params.webhook_id,

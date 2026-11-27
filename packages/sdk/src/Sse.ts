@@ -14,6 +14,7 @@ import type { ApiError, CheckfuHttpApiClient, SessionEvent, SessionPreviewType }
 import {
 	APIConnectionError,
 	BadRequestError,
+	decodeApiErrorEnvelope,
 	fromApiErrorEnvelope,
 	isApiErrorEnvelope,
 	isTransientHttpStatus,
@@ -262,8 +263,8 @@ const decodeBoundedHttpError = (
 			MAX_SSE_ERROR_BODY_BYTES,
 			errorBodyTimeoutMs,
 		)
-		const parsed = decodeUnknownJson(bodyText)
-		if (Option.isSome(parsed) && isApiErrorEnvelope(parsed.value)) {
+		const parsed = Option.flatMap(decodeUnknownJson(bodyText), decodeApiErrorEnvelope)
+		if (Option.isSome(parsed)) {
 			return fromApiErrorEnvelope(parsed.value, {
 				status: response.status,
 				headers: response.headers,

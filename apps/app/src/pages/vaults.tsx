@@ -6,6 +6,7 @@ import { Input } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
+import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import {
 	useQuery,
 	useQueryClient,
@@ -356,13 +357,11 @@ function useSecretField() {
 	}
 }
 
-const URL_TAKEN = "The vault already holds an active credential for this MCP server URL."
-
 const MAYBE_CREATED =
 	"An earlier attempt may already have created this credential with the token sent then. Find it in the list and use Replace token to set this one."
 
 const isUrlTaken = (error: unknown): error is ApiError =>
-	error instanceof ApiError && error.status === 409 && error.message === URL_TAKEN
+	error instanceof ApiError && error.code === ERROR_CODES.credentialUrlTaken
 
 const isAmbiguous = (error: unknown): boolean => !(error instanceof ApiError) || error.status >= 500
 

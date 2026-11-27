@@ -112,9 +112,10 @@ describe("The credential each MCP server gets", () => {
 					duplicate || unknown || mistargeted || ambiguous.length > 0,
 				)
 				if (Result.isFailure(resolved) && !duplicate && !unknown && !mistargeted) {
-					expect(ambiguous.some((server) => resolved.failure.includes(`"${server.name}"`))).toBe(
-						true,
-					)
+					expect(resolved.failure.kind).toBe("ambiguous_credentials")
+					expect(
+						ambiguous.some((server) => resolved.failure.message.includes(`"${server.name}"`)),
+					).toBe(true)
 				}
 			}),
 			{ numRuns: 2000 },
