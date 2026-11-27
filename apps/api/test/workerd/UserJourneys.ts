@@ -155,7 +155,9 @@ export const authoredProjectJourney = async (options: {
 			automationId,
 		)
 		await expect
-			.poll(async () => (await sdk.automations.runs.list(automationId)).data[0]?.session_id)
+			.poll(async () => (await sdk.automations.runs.list(automationId)).data[0]?.session_id, {
+				timeout: 10_000,
+			})
 			.toBeTruthy()
 		const run = await sdk.automations.runs.retrieve(automationId, queued.run)
 		expect(run.status).toBe("started")
