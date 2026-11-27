@@ -17,6 +17,28 @@ const LockEntry = Schema.Struct({
 })
 export type LockEntry = typeof LockEntry.Type
 
+const uniqueOwners = <Entry>(identityOf: (entry: Entry) => string) =>
+	Schema.makeFilter((resources: Readonly<Record<string, Entry>>) => {
+		const owners = new Map<string, string>()
+		for (const path of Object.keys(resources).sort()) {
+			const entry = resources[path]
+			if (entry === undefined) {
+				continue
+			}
+			const identity = identityOf(entry)
+			const previous = owners.get(identity)
+			if (previous !== undefined) {
+				return `${identity} is owned by both ${previous} and ${path}.`
+			}
+			owners.set(identity, path)
+		}
+		return true
+	})
+
+const settledResources = Schema.Record(resourceKey, LockEntry).check(
+	uniqueOwners((entry: LockEntry) => `${entry.kind} ${entry.id}`),
+)
+
 const pendingIdentity = {
 	key: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/u)),
 	hash: fingerprint,
@@ -38,12 +60,16 @@ const PendingCreate = Schema.Union([
 ])
 export type PendingCreate = typeof PendingCreate.Type
 
+const pendingCreates = Schema.Record(resourceKey, PendingCreate).check(
+	uniqueOwners((entry: PendingCreate) => `${entry.kind} create request ${entry.key}`),
+)
+
 export const ProjectLockfile = Schema.fromJsonString(
 	Schema.Struct({
 		version: Schema.Literal(1),
 		base_url: Schema.String,
-		resources: Schema.Record(resourceKey, LockEntry),
-		pending_creates: Schema.optionalKey(Schema.Record(resourceKey, PendingCreate)),
+		resources: settledResources,
+		pending_creates: Schema.optionalKey(pendingCreates),
 	}),
 )
 export type ProjectLockfile = typeof ProjectLockfile.Type

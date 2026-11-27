@@ -169,6 +169,62 @@ describe("session workspace", () => {
 		expect(order).toEqual(["write finished", "drained"])
 	})
 
+	it.each([1, 2])("cancels task %i without aborting the other task", async (firstId) => {
+		const fence = makeTurnFence<string>(store())
+		const token = turn(1)
+		const caller = new AbortController()
+		const start = (id: number) => {
+			const entered = Promise.withResolvers<AbortSignal>()
+			const finish = Promise.withResolvers<string>()
+			const ended = fence.runTask(token, id, caller.signal, (signal) => {
+				entered.resolve(signal)
+				return finish.promise
+			})
+			return { id, signal: entered.promise, finish: finish.resolve, ended }
+		}
+		const one = start(1)
+		const two = start(2)
+		const [first, remaining] = firstId === 1 ? [one, two] : [two, one]
+		const duplicate = fence.runTask(token, firstId, caller.signal, () => {
+			throw new Error("The same task started twice")
+		})
+		const [firstSignal, remainingSignal] = await Promise.all([first.signal, remaining.signal])
+		const stopping = fence.stopTask(token, first.id)
+		expect(firstSignal.aborted).toBe(true)
+		expect(remainingSignal.aborted).toBe(false)
+		first.finish("stopped")
+		await stopping
+		expect(await first.ended).toBe("stopped")
+		expect(await duplicate).toBe("stopped")
+		await fence.stopTask(token, first.id)
+		expect(remainingSignal.aborted).toBe(false)
+		const stoppingRemaining = fence.stopTask(token, remaining.id)
+		expect(remainingSignal.aborted).toBe(true)
+		remaining.finish("finished")
+		await stoppingRemaining
+		expect(await remaining.ended).toBe("finished")
+	})
+
+	it("registers tasks before running them and ignores stops for previous turns", async () => {
+		const fence = makeTurnFence<string>(store())
+		const caller = new AbortController()
+		const stoppedBeforeStart = fence.runTask(turn(1), 1, caller.signal, () => {
+			throw new Error("A stopped task started")
+		})
+		await fence.stopTask(turn(1), 1)
+		expect(await stoppedBeforeStart).toBeUndefined()
+		const started = Promise.withResolvers<AbortSignal>()
+		const running = fence.runTask(turn(2), 1, caller.signal, (signal) => {
+			started.resolve(signal)
+			return untilAborted(signal)
+		})
+		const signal = await started.promise
+		await fence.stopTask(turn(1), 1)
+		expect(signal.aborted).toBe(false)
+		caller.abort()
+		expect(await running).toBe("stopped")
+	})
+
 	it("lets Pi run again only the tools that change nothing", () => {
 		const tool = (name: string): WorkspaceTool => ({
 			name,

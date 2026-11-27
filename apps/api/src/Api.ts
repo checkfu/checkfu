@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import type * as Effect from "effect/Effect"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Struct from "effect/Struct"
 import { SessionArtifactCalls } from "./Workspace/SessionArtifacts.ts"
 import { SessionArtifactToolCalls } from "./Workspace/SessionArtifactTool.ts"
 import { SessionMemoryCalls } from "./Workspace/SessionMemory.ts"
@@ -78,3 +79,30 @@ export type ApiShape = {
 }
 
 export class ApiWorker extends Cloudflare.Worker<ApiWorker, ApiShape>()("ApiWorker") {}
+
+export type ApiCaller = "harness" | "content"
+
+export const bindApiAs = <R>(caller: ApiCaller, api: Effect.Effect<Cloudflare.Worker, never, R>) =>
+	Effect.gen(function* () {
+		const self = yield* Cloudflare.Worker
+		const worker = yield* api
+		yield* self.bind`${worker}`({
+			bindings: [
+				{ type: "service", name: worker.LogicalId, service: worker.workerName, props: { caller } },
+			],
+		})
+		return Cloudflare.Workers.makeRpcStub<ApiShape>(
+			Effect.map(Cloudflare.Workers.WorkerEnvironment, Struct.get(worker.LogicalId)),
+		)
+	})
+
+export const calledBy =
+	(allowed: ApiCaller) =>
+	<A, E, R>(call: Effect.Effect<A, E, R>) =>
+		Effect.flatMap(Cloudflare.WorkerExecutionContext, (ctx) =>
+			Effect.flatMap(ctx.props, ({ caller }) =>
+				caller === allowed
+					? call
+					: Effect.die(new Error(`Only the ${allowed} Worker may make this call.`)),
+			),
+		)

@@ -1,6 +1,6 @@
 import { Checkfu, accumulateSessionEvent } from "@checkfu/sdk"
 import type { SessionMessagePreview } from "@checkfu/sdk"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import type { FakeGitHubServer } from "./FakeGitHubServer.ts"
 import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import { startFakeMcpServer } from "./FakeMcpServer.ts"
@@ -88,6 +88,15 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		await fakeOpenAI?.close()
 		await fakeGitHub?.close()
 	}, 30_000)
+
+	afterEach(({ task }) => {
+		if (task.tags?.includes("acceptance")) {
+			Object.assign(task.meta, {
+				workerLogs: workerLogs.join("").slice(-30_000),
+				modelRequests: fakeOpenAI.requests.length,
+			})
+		}
+	})
 
 	it("reaches memory stores in a turn Pi resumes after the Workers restart mid-turn", async () => {
 		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
@@ -383,174 +392,186 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		return (await response.json()) as { readonly id: string }
 	}
 
-	it("places uploaded files in the uploads directory, where the model can read them and cannot change them", async () => {
-		const sales = await uploadText("sales.csv", "region,total\nEMEA,4217\n")
-		const notes = await uploadText("notes.md", "Totals are in thousands.")
-		const session = await createResource<SessionResource>("/v1/sessions", {
-			agent: agentId,
-			environment_id: environmentId,
-			resources: [
-				{ type: "file", file_id: sales.id, mount_path: "data/q3.csv" },
-				{ type: "file", file_id: notes.id },
-			],
-		})
-		const uploads = "/mnt/session/uploads"
-		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
-			Object.entries({
-				"What did EMEA sell?": [
-					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/data/q3.csv` } },
+	it(
+		"places uploaded files in the uploads directory, where the model can read them and cannot change them",
+		{ timeout: 180_000, tags: ["acceptance", "file-mount"] },
+		async () => {
+			const sales = await uploadText("sales.csv", "region,total\nEMEA,4217\n")
+			const notes = await uploadText("notes.md", "Totals are in thousands.")
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agentId,
+				environment_id: environmentId,
+				resources: [
+					{ type: "file", file_id: sales.id, mount_path: "data/q3.csv" },
+					{ type: "file", file_id: notes.id },
 				],
-				"Fix the total.": [
-					{
-						kind: "tool_call",
-						name: "write",
-						arguments: { path: `${uploads}/data/q3.csv`, content: "EMEA,0" },
+			})
+			const uploads = "/mnt/session/uploads"
+			const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+				Object.entries({
+					"What did EMEA sell?": [
+						{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/data/q3.csv` } },
+					],
+					"Fix the total.": [
+						{
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: `${uploads}/data/q3.csv`, content: "EMEA,0" },
+						},
+						{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/data/q3.csv` } },
+						{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/notes.md` } },
+					],
+					"What is there?": [
+						{ kind: "tool_call", name: "find", arguments: { pattern: "**/*", path: uploads } },
+					],
+				}),
+			)
+			fakeOpenAI.setHandler(
+				(req) =>
+					steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+						kind: "reply",
+						text: `Done: ${req.toolOutputs.join(" | ")}`,
 					},
-					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/data/q3.csv` } },
-					{ kind: "tool_call", name: "read", arguments: { path: `${uploads}/notes.md` } },
+			)
+			const startCount = fakeOpenAI.requests.length
+
+			expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
+			const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
+			expect(refused).toContain(`read-only mount at ${uploads}: cannot modify`)
+			expect(refused).toContain("EMEA,4217")
+			expect(refused).toContain("Totals are in thousands.")
+			const found = await replyAfterTurn(session.id, "What is there?", 3)
+			expect(found).toContain("data/q3.csv")
+			expect(found).toContain("notes.md")
+
+			const systemText = fakeOpenAI.requests[startCount]?.messages
+				.filter((message) => message.role === "system" || message.role === "developer")
+				.map((message) => message.text)
+				.join("\n")
+			expect(systemText).toContain(`- ${uploads}/data/q3.csv (23 bytes)`)
+			expect(systemText).toContain(`- ${uploads}/notes.md (24 bytes)`)
+		},
+	)
+
+	it(
+		"mounts an artifact version as read-only files the model can read and cannot change",
+		{ timeout: 180_000, tags: ["acceptance", "artifact-mount"] },
+		async () => {
+			const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
+				name: "Q3 Data",
+				files: [
+					{ path: "sales.csv", content: "region,total\nEMEA,4217\n" },
+					{ path: "img/pixel.bin", content: "AAEC/w==", encoding: "base64" },
 				],
-				"What is there?": [
-					{ kind: "tool_call", name: "find", arguments: { pattern: "**/*", path: uploads } },
-				],
-			}),
-		)
-		fakeOpenAI.setHandler(
-			(req) =>
-				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
-					kind: "reply",
-					text: `Done: ${req.toolOutputs.join(" | ")}`,
-				},
-		)
-		const startCount = fakeOpenAI.requests.length
-
-		expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
-		const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
-		expect(refused).toContain(`read-only mount at ${uploads}: cannot modify`)
-		expect(refused).toContain("EMEA,4217")
-		expect(refused).toContain("Totals are in thousands.")
-		const found = await replyAfterTurn(session.id, "What is there?", 3)
-		expect(found).toContain("data/q3.csv")
-		expect(found).toContain("notes.md")
-
-		const systemText = fakeOpenAI.requests[startCount]?.messages
-			.filter((message) => message.role === "system" || message.role === "developer")
-			.map((message) => message.text)
-			.join("\n")
-		expect(systemText).toContain(`- ${uploads}/data/q3.csv (23 bytes)`)
-		expect(systemText).toContain(`- ${uploads}/notes.md (24 bytes)`)
-	}, 180_000)
-
-	it("mounts an artifact version as read-only files the model can read and cannot change", async () => {
-		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
-			name: "Q3 Data",
-			files: [
-				{ path: "sales.csv", content: "region,total\nEMEA,4217\n" },
-				{ path: "img/pixel.bin", content: "AAEC/w==", encoding: "base64" },
-			],
-		})
-		const session = await createResource<SessionResource>("/v1/sessions", {
-			agent: agentId,
-			environment_id: environmentId,
-			resources: [{ type: "artifact", artifact_id: artifact.id }],
-		})
-		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
-			Object.entries({
-				"What did EMEA sell?": [
-					{
-						kind: "tool_call",
-						name: "read",
-						arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+			})
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agentId,
+				environment_id: environmentId,
+				resources: [{ type: "artifact", artifact_id: artifact.id }],
+			})
+			const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+				Object.entries({
+					"What did EMEA sell?": [
+						{
+							kind: "tool_call",
+							name: "read",
+							arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+						},
+					],
+					"Fix the total.": [
+						{
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: "/mnt/artifacts/q3-data/sales.csv", content: "EMEA,0" },
+						},
+						{
+							kind: "tool_call",
+							name: "read",
+							arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+						},
+					],
+					"What else is there?": [
+						{
+							kind: "tool_call",
+							name: "find",
+							arguments: { pattern: "**/*.bin", path: "/mnt/artifacts/q3-data" },
+						},
+					],
+				}),
+			)
+			fakeOpenAI.setHandler(
+				(req) =>
+					steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+						kind: "reply",
+						text: `Done: ${req.toolOutputs.join(" | ")}`,
 					},
-				],
-				"Fix the total.": [
-					{
-						kind: "tool_call",
-						name: "write",
-						arguments: { path: "/mnt/artifacts/q3-data/sales.csv", content: "EMEA,0" },
-					},
-					{
-						kind: "tool_call",
-						name: "read",
-						arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
-					},
-				],
-				"What else is there?": [
-					{
-						kind: "tool_call",
-						name: "find",
-						arguments: { pattern: "**/*.bin", path: "/mnt/artifacts/q3-data" },
-					},
-				],
-			}),
-		)
-		fakeOpenAI.setHandler(
-			(req) =>
-				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
-					kind: "reply",
-					text: `Done: ${req.toolOutputs.join(" | ")}`,
-				},
-		)
-		const startCount = fakeOpenAI.requests.length
+			)
+			const startCount = fakeOpenAI.requests.length
 
-		expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
-		const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
-		expect(refused).toContain("read-only mount at /mnt/artifacts: cannot modify")
-		expect(refused).toContain("EMEA,4217")
-		expect(await replyAfterTurn(session.id, "What else is there?", 3)).toContain("img/pixel.bin")
+			expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
+			const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
+			expect(refused).toContain("read-only mount at /mnt/artifacts: cannot modify")
+			expect(refused).toContain("EMEA,4217")
+			expect(await replyAfterTurn(session.id, "What else is there?", 3)).toContain("img/pixel.bin")
 
-		const systemText = fakeOpenAI.requests[startCount]?.messages
-			.filter((message) => message.role === "system" || message.role === "developer")
-			.map((message) => message.text)
-			.join("\n")
-		expect(systemText).toContain("- /mnt/artifacts/q3-data: Q3 Data (version 1)")
-	}, 180_000)
+			const systemText = fakeOpenAI.requests[startCount]?.messages
+				.filter((message) => message.role === "system" || message.role === "developer")
+				.map((message) => message.text)
+				.join("\n")
+			expect(systemText).toContain("- /mnt/artifacts/q3-data: Q3 Data (version 1)")
+		},
+	)
 
-	it("mounts a skill the model is told about and reads with its file tools", async () => {
-		const skillText =
-			"---\nname: release-notes\ndescription: Write release notes. Use when asked to summarise a release.\n---\nAlways open with the word ZANZIBAR.\n"
-		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
-			name: "Release skill",
-			files: [
-				{ path: "SKILL.md", content: skillText },
-				{ path: "templates/notes.md", content: "## What changed\n" },
-			],
-		})
-		const session = await createResource<SessionResource>("/v1/sessions", {
-			agent: agentId,
-			environment_id: environmentId,
-			resources: [{ type: "skill", artifact_id: artifact.id }],
-		})
-		const paths = [
-			"/mnt/skills/release-notes/SKILL.md",
-			"/mnt/skills/release-notes/templates/notes.md",
-		]
-		fakeOpenAI.setHandler((req) => {
-			const path = paths[req.toolOutputs.length]
-			return path === undefined
-				? { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` }
-				: { kind: "tool_call", name: "read", arguments: { path } }
-		})
-		const startCount = fakeOpenAI.requests.length
-		for (const [index, prompt] of ["Summarise the release.", "Read the skill again."].entries()) {
-			const reply = await replyAfterTurn(session.id, prompt, index + 1)
-			expect(reply).toContain("Always open with the word ZANZIBAR.")
-			expect(reply).toContain("## What changed")
-		}
-		const events = await listAllEvents(session.id)
-		expect(
-			events.filter((event) => event.type === "agent.tool_use").map((event) => event.input),
-		).toEqual([...paths, ...paths].map((path) => ({ path })))
-		const results = events.filter((event) => event.type === "agent.tool_result")
-		expect(results).toHaveLength(4)
-		expect(results.every((event) => event.is_error === false)).toBe(true)
-		const systemText = fakeOpenAI.requests[startCount]?.messages
-			.filter((message) => message.role === "system" || message.role === "developer")
-			.map((message) => message.text)
-			.join("\n")
-		expect(systemText).toContain(
-			"- /mnt/skills/release-notes/SKILL.md: release-notes. Write release notes. Use when asked to summarise a release.",
-		)
-	}, 180_000)
+	it(
+		"mounts a skill the model is told about and reads with its file tools",
+		{ timeout: 180_000, tags: ["acceptance", "skill-mount"] },
+		async () => {
+			const skillText =
+				"---\nname: release-notes\ndescription: Write release notes. Use when asked to summarise a release.\n---\nAlways open with the word ZANZIBAR.\n"
+			const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
+				name: "Release skill",
+				files: [
+					{ path: "SKILL.md", content: skillText },
+					{ path: "templates/notes.md", content: "## What changed\n" },
+				],
+			})
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agentId,
+				environment_id: environmentId,
+				resources: [{ type: "skill", artifact_id: artifact.id }],
+			})
+			const paths = [
+				"/mnt/skills/release-notes/SKILL.md",
+				"/mnt/skills/release-notes/templates/notes.md",
+			]
+			fakeOpenAI.setHandler((req) => {
+				const path = paths[req.toolOutputs.length]
+				return path === undefined
+					? { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` }
+					: { kind: "tool_call", name: "read", arguments: { path } }
+			})
+			const startCount = fakeOpenAI.requests.length
+			for (const [index, prompt] of ["Summarise the release.", "Read the skill again."].entries()) {
+				const reply = await replyAfterTurn(session.id, prompt, index + 1)
+				expect(reply).toContain("Always open with the word ZANZIBAR.")
+				expect(reply).toContain("## What changed")
+			}
+			const events = await listAllEvents(session.id)
+			expect(
+				events.filter((event) => event.type === "agent.tool_use").map((event) => event.input),
+			).toEqual([...paths, ...paths].map((path) => ({ path })))
+			const results = events.filter((event) => event.type === "agent.tool_result")
+			expect(results).toHaveLength(4)
+			expect(results.every((event) => event.is_error === false)).toBe(true)
+			const systemText = fakeOpenAI.requests[startCount]?.messages
+				.filter((message) => message.role === "system" || message.role === "developer")
+				.map((message) => message.text)
+				.join("\n")
+			expect(systemText).toContain(
+				"- /mnt/skills/release-notes/SKILL.md: release-notes. Write release notes. Use when asked to summarise a release.",
+			)
+		},
+	)
 
 	it("checks out the branch it was asked for when a tag has the same name", async () => {
 		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
@@ -672,100 +693,104 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		expect(archived.status).toBe(200)
 	}, 300_000)
 
-	it("saves what the model leaves in the outputs directory as files, byte for byte", async () => {
-		const outputs = "/mnt/session/outputs"
-		const report = "# Q3\n\nSales rose 12%.\n"
-		const totals = "region,total\nEMEA,4217\n"
-		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
-			Object.entries({
-				"Write the report.": [
+	it(
+		"saves what the model leaves in the outputs directory as files, byte for byte",
+		{ timeout: 180_000, tags: ["acceptance", "output-bytes"] },
+		async () => {
+			const outputs = "/mnt/session/outputs"
+			const report = "# Q3\n\nSales rose 12%.\n"
+			const totals = "region,total\nEMEA,4217\n"
+			const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+				Object.entries({
+					"Write the report.": [
+						{
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: `${outputs}/report.md`, content: report },
+						},
+						{
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: `${outputs}/data/totals.csv`, content: totals },
+						},
+						{
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: "/workspace/notes.md", content: "private" },
+						},
+					],
+					"Add a summary.": [
+						{
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: `${outputs}/summary.md`, content: "Up 12%.\n" },
+						},
+					],
+				}),
+			)
+			fakeOpenAI.setHandler(
+				(req) =>
+					steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+						kind: "reply",
+						text: `Done: ${req.toolOutputs.join(" | ")}`,
+					},
+			)
+			const startCount = fakeOpenAI.requests.length
+			const session = await createSession()
+			expect(await outputsAt(session.id, 0)).toMatchObject({ turn: 0, status: "none", files: [] })
+			await replyAfterTurn(session.id, "Write the report.", 1)
+			const first = await outputsAt(session.id, 1)
+			expect(first).toMatchObject({
+				turn: 1,
+				status: "saved",
+				files: [
 					{
-						kind: "tool_call",
-						name: "write",
-						arguments: { path: `${outputs}/report.md`, content: report },
+						sha256: sha256(Buffer.from(totals)),
+						size: Buffer.byteLength(totals),
+						content_type: "text/csv",
+						origin: { type: "session", session_id: session.id, turn: 1, path: "data/totals.csv" },
 					},
 					{
-						kind: "tool_call",
-						name: "write",
-						arguments: { path: `${outputs}/data/totals.csv`, content: totals },
-					},
-					{
-						kind: "tool_call",
-						name: "write",
-						arguments: { path: "/workspace/notes.md", content: "private" },
+						sha256: sha256(Buffer.from(report)),
+						size: Buffer.byteLength(report),
+						content_type: "text/markdown",
+						origin: { type: "session", session_id: session.id, turn: 1, path: "report.md" },
 					},
 				],
-				"Add a summary.": [
-					{
-						kind: "tool_call",
-						name: "write",
-						arguments: { path: `${outputs}/summary.md`, content: "Up 12%.\n" },
-					},
-				],
-			}),
-		)
-		fakeOpenAI.setHandler(
-			(req) =>
-				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
-					kind: "reply",
-					text: `Done: ${req.toolOutputs.join(" | ")}`,
-				},
-		)
-		const startCount = fakeOpenAI.requests.length
-		const session = await createSession()
-		expect(await outputsAt(session.id, 0)).toMatchObject({ turn: 0, status: "none", files: [] })
-		await replyAfterTurn(session.id, "Write the report.", 1)
-		const first = await outputsAt(session.id, 1)
-		expect(first).toMatchObject({
-			turn: 1,
-			status: "saved",
-			files: [
-				{
-					sha256: sha256(Buffer.from(totals)),
-					size: Buffer.byteLength(totals),
-					content_type: "text/csv",
-					origin: { type: "session", session_id: session.id, turn: 1, path: "data/totals.csv" },
-				},
-				{
-					sha256: sha256(Buffer.from(report)),
-					size: Buffer.byteLength(report),
-					content_type: "text/markdown",
-					origin: { type: "session", session_id: session.id, turn: 1, path: "report.md" },
-				},
-			],
-			skipped: [],
-		})
-		expect((await fileBytes(first.files[1]?.id ?? "")).toString()).toBe(report)
+				skipped: [],
+			})
+			expect((await fileBytes(first.files[1]?.id ?? "")).toString()).toBe(report)
 
-		await replyAfterTurn(session.id, "Anything else?", 2)
-		expect((await outputsAt(session.id, 2)).files).toEqual(first.files)
+			await replyAfterTurn(session.id, "Anything else?", 2)
+			expect((await outputsAt(session.id, 2)).files).toEqual(first.files)
 
-		await replyAfterTurn(session.id, "Add a summary.", 3)
-		const second = await outputsAt(session.id, 3)
-		expect(second.files.map((file) => [file.origin.path, file.origin.turn])).toEqual([
-			["data/totals.csv", 1],
-			["report.md", 1],
-			["summary.md", 3],
-		])
-		for (const file of second.files) {
-			const bytes = await fileBytes(file.id)
-			expect([file.origin.path, bytes.byteLength, sha256(bytes)]).toEqual([
-				file.origin.path,
-				file.size,
-				file.sha256,
+			await replyAfterTurn(session.id, "Add a summary.", 3)
+			const second = await outputsAt(session.id, 3)
+			expect(second.files.map((file) => [file.origin.path, file.origin.turn])).toEqual([
+				["data/totals.csv", 1],
+				["report.md", 1],
+				["summary.md", 3],
 			])
-		}
+			for (const file of second.files) {
+				const bytes = await fileBytes(file.id)
+				expect([file.origin.path, bytes.byteLength, sha256(bytes)]).toEqual([
+					file.origin.path,
+					file.size,
+					file.sha256,
+				])
+			}
 
-		const systemText = fakeOpenAI.requests[startCount]?.messages
-			.filter((message) => message.role === "system" || message.role === "developer")
-			.map((message) => message.text)
-			.join("\n")
-		expect(systemText).toMatch(
-			/\/mnt\/session\/outputs\b[^.]*saved for the user[^.]*completed turn/u,
-		)
-		expect(systemText).toContain("A file over 1 MiB, or past 4 MiB in total, is not saved")
-		expect(systemText).toContain("With more than 64 files")
-	}, 180_000)
+			const systemText = fakeOpenAI.requests[startCount]?.messages
+				.filter((message) => message.role === "system" || message.role === "developer")
+				.map((message) => message.text)
+				.join("\n")
+			expect(systemText).toMatch(
+				/\/mnt\/session\/outputs\b[^.]*saved for the user[^.]*completed turn/u,
+			)
+			expect(systemText).toContain("A file over 1 MiB, or past 4 MiB in total, is not saved")
+			expect(systemText).toContain("With more than 64 files")
+		},
+	)
 
 	it("saves files at the exact limits from storage without starting a machine", async () => {
 		const chunkSize = 256 * 1024
@@ -2151,221 +2176,245 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		expect((await apiFetch(`/v1/webhooks/${webhookId}`)).status).toBe(404)
 	}, 30_000)
 
-	it("calls MCP servers from scripts and, once found, directly, keeping the credential in its connection", async () => {
-		const token = "tok/mcp+SECRET&workerd=1"
-		const secure = await startFakeMcpServer([token], { stateful: true })
-		const open = await startFakeMcpServer(null, { modern: true })
-		try {
-			const agent = await createResource<{ readonly id: string }>("/v1/agents", {
-				name: "MCP Agent",
-				model: "gpt-4o-mini",
-				mcp_servers: [
-					{ type: "url", name: "secure", url: secure.url },
-					{ type: "url", name: "open", url: open.url },
-				],
-				tools: ["secure", "open"].map((mcp_server_name) => ({
-					type: "mcp_toolset",
-					mcp_server_name,
-					default_config: { permission_policy: { type: "always_allow" } },
-				})),
-			})
-			const vaults = await Promise.all(
-				[0, 1].map(() =>
-					createResource<{ readonly id: string }>("/v1/vaults", { display_name: "mcp" }),
-				),
-			)
-			const credentials = await Promise.all(
-				vaults.map((vault) =>
-					createResource<{ readonly id: string }>(`/v1/vaults/${vault.id}/credentials`, {
-						auth: { type: "static_bearer", token, mcp_server_url: secure.url },
-					}),
-				),
-			)
-			const vault_ids = vaults.map((vault) => vault.id)
-			const ambiguous = await apiFetch("/v1/sessions", {
-				method: "POST",
-				body: { agent: agent.id, environment_id: environmentId, vault_ids },
-			})
-			expect(ambiguous.status).toBe(400)
-			expect(await ambiguous.text()).toContain(String.raw`\"secure\"`)
+	it(
+		"calls MCP servers from scripts and, once found, directly, keeping the credential in its connection",
+		{ timeout: 120_000, tags: ["acceptance", "agent-mcp-tools"] },
+		async () => {
+			const token = "tok/mcp+SECRET&workerd=1"
+			const secure = await startFakeMcpServer([token], { stateful: true })
+			const open = await startFakeMcpServer(null, { modern: true })
+			try {
+				const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+					name: "MCP Agent",
+					model: "gpt-4o-mini",
+					mcp_servers: [
+						{ type: "url", name: "secure", url: secure.url },
+						{ type: "url", name: "open", url: open.url },
+					],
+					tools: ["secure", "open"].map((mcp_server_name) => ({
+						type: "mcp_toolset",
+						mcp_server_name,
+						default_config: { permission_policy: { type: "always_allow" } },
+					})),
+				})
+				const vaults = await Promise.all(
+					[0, 1].map(() =>
+						createResource<{ readonly id: string }>("/v1/vaults", { display_name: "mcp" }),
+					),
+				)
+				const credentials = await Promise.all(
+					vaults.map((vault) =>
+						createResource<{ readonly id: string }>(`/v1/vaults/${vault.id}/credentials`, {
+							auth: { type: "static_bearer", token, mcp_server_url: secure.url },
+						}),
+					),
+				)
+				const vault_ids = vaults.map((vault) => vault.id)
+				const ambiguous = await apiFetch("/v1/sessions", {
+					method: "POST",
+					body: { agent: agent.id, environment_id: environmentId, vault_ids },
+				})
+				expect(ambiguous.status).toBe(400)
+				expect(await ambiguous.text()).toContain(String.raw`\"secure\"`)
 
-			const script =
-				'const leaked = await tools.mcp__secure__leak({}); const echoed = await tools.mcp__open__echo({ text: "from-script" }); return [JSON.stringify(leaked), echoed].join(" ");'
-			fakeOpenAI.setHandler((req) => {
-				switch (req.toolOutputs.length) {
-					case 0:
-						return { kind: "tool_call", name: "mcp__open__echo", arguments: { text: "too-early" } }
-					case 1:
-						return { kind: "tool_call", name: "codemode", arguments: { code: script } }
-					case 2:
-						return { kind: "tool_call", name: "tool_search", arguments: { query: "echo" } }
-					case 3:
-						return { kind: "tool_call", name: "mcp__open__echo", arguments: { text: "direct" } }
-					default:
-						return { kind: "reply", text: "Done." }
-				}
-			})
-			const run = async () => {
-				const session = await createResource<SessionResource & { mcp_server_credentials: unknown }>(
-					"/v1/sessions",
-					{
+				const script =
+					'const leaked = await tools.mcp__secure__leak({}); const echoed = await tools.mcp__open__echo({ text: "from-script" }); return [JSON.stringify(leaked), echoed].join(" ");'
+				fakeOpenAI.setHandler((req) => {
+					switch (req.toolOutputs.length) {
+						case 0:
+							return {
+								kind: "tool_call",
+								name: "mcp__open__echo",
+								arguments: { text: "too-early" },
+							}
+						case 1:
+							return { kind: "tool_call", name: "codemode", arguments: { code: script } }
+						case 2:
+							return { kind: "tool_call", name: "tool_search", arguments: { query: "echo" } }
+						case 3:
+							return { kind: "tool_call", name: "mcp__open__echo", arguments: { text: "direct" } }
+						default:
+							return { kind: "reply", text: "Done." }
+					}
+				})
+				const run = async () => {
+					const session = await createResource<
+						SessionResource & { mcp_server_credentials: unknown }
+					>("/v1/sessions", {
 						agent: agent.id,
 						environment_id: environmentId,
 						vault_ids,
 						mcp_server_credentials: [
 							{ mcp_server_name: "secure", credential_id: credentials[1]?.id },
 						],
-					},
-				)
-				expect(session.mcp_server_credentials).toEqual([
-					{
-						mcp_server_name: "secure",
-						credential_id: credentials[1]?.id,
-						vault_id: vaults[1]?.id,
-					},
-				])
-				const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
-					method: "POST",
-					body: {
-						events: [{ type: "user.message", content: [{ type: "text", text: "Use the tools." }] }],
-					},
-				})
-				expect(sent.status).toBe(200)
-				await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 60_000)
-				return { session, events: await listAllEvents(session.id) }
-			}
-
-			const first = await run()
-			const second = await run()
-
-			expect(secure.calls.map((call) => [call.tool, call.token])).toEqual([
-				["leak", token],
-				["leak", token],
-			])
-			const upstreamSessions = secure.calls.map((call) => call.session)
-			expect(new Set(upstreamSessions).size).toBe(2)
-			expect(open.calls.map((call) => [call.arguments, call.token])).toEqual([
-				[{ text: "from-script" }, undefined],
-				[{ text: "direct" }, undefined],
-				[{ text: "from-script" }, undefined],
-				[{ text: "direct" }, undefined],
-			])
-
-			const { events } = first
-			const mcpUses = events.filter((e) => e.type === "agent.mcp_tool_use")
-			expect(mcpUses.map((e) => [e.mcp_server_name, e.name])).toEqual([
-				["open", "echo"],
-				["open", "echo"],
-			])
-			expect(mcpUses.map((e) => e.input)).toEqual([{ text: "too-early" }, { text: "direct" }])
-			for (const use of mcpUses) {
-				expect(toolUseOf(toolUseIdFromEvent(first.session.id, use.tool_use_id ?? ""))).toBeDefined()
-			}
-			const mcpResults = events.filter((e) => e.type === "agent.mcp_tool_result")
-			expect(
-				mcpResults.map((e) => e.tool_use_id).toSorted((a, b) => (a ?? "").localeCompare(b ?? "")),
-			).toEqual(
-				mcpUses.map((e) => e.tool_use_id).toSorted((a, b) => (a ?? "").localeCompare(b ?? "")),
-			)
-			expect(mcpResults.find((e) => e.tool_use_id === mcpUses[0]?.tool_use_id)?.is_error).toBe(true)
-			expect(mcpResults.find((e) => e.tool_use_id === mcpUses[1]?.tool_use_id)?.is_error).toBe(
-				false,
-			)
-
-			const visible = JSON.stringify([first, second, workerLogs])
-			for (const form of [
-				token,
-				encodeURIComponent(token),
-				new URLSearchParams({ s: token }).toString().slice(2),
-				JSON.stringify(token).slice(1, -1),
-			]) {
-				expect(visible).not.toContain(form)
-			}
-			expect(visible).toContain("[redacted]")
-		} finally {
-			await secure.close()
-			await open.close()
-		}
-	}, 120_000)
-
-	it("sends a session's server nothing with a credential once its archive, its delete or its vault's archive has answered", async () => {
-		const token = "tok-revoked-workerd-secret-1"
-		const secure = await startFakeMcpServer([token])
-		try {
-			const agent = await createResource<{ readonly id: string }>("/v1/agents", {
-				name: "Revoked MCP Agent",
-				model: "gpt-4o-mini",
-				mcp_servers: [{ type: "url", name: "secure", url: secure.url }],
-				tools: [
-					{
-						type: "mcp_toolset",
-						mcp_server_name: "secure",
-						default_config: { permission_policy: { type: "always_allow" } },
-					},
-				],
-			})
-			const script =
-				'try { return await tools.mcp__secure__echo({ text: "hi" }) } catch (e) { return String(e) }'
-			const revocations: ReadonlyArray<
-				(vaultId: string, credentialId: string) => readonly [string, string]
-			> = [
-				(vaultId, credentialId) => [
-					"POST",
-					`/v1/vaults/${vaultId}/credentials/${credentialId}/archive`,
-				],
-				(vaultId, credentialId) => ["DELETE", `/v1/vaults/${vaultId}/credentials/${credentialId}`],
-				(vaultId) => ["POST", `/v1/vaults/${vaultId}/archive`],
-			]
-			for (const revoke of revocations) {
-				const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
-					display_name: "revoked",
-				})
-				const credential = await createResource<{ readonly id: string }>(
-					`/v1/vaults/${vault.id}/credentials`,
-					{ auth: { type: "static_bearer", token, mcp_server_url: secure.url } },
-				)
-				const session = await createResource<SessionResource>("/v1/sessions", {
-					agent: agent.id,
-					environment_id: environmentId,
-					vault_ids: [vault.id],
-				})
-				const turn = async (number: number) => {
-					fakeOpenAI.setHandler(runsScript(script))
+					})
+					expect(session.mcp_server_credentials).toEqual([
+						{
+							mcp_server_name: "secure",
+							credential_id: credentials[1]?.id,
+							vault_id: vaults[1]?.id,
+						},
+					])
 					const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
 						method: "POST",
 						body: {
-							events: [{ type: "user.message", content: [{ type: "text", text: "Call it." }] }],
+							events: [
+								{ type: "user.message", content: [{ type: "text", text: "Use the tools." }] },
+							],
 						},
 					})
 					expect(sent.status).toBe(200)
-					await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 60_000)
-					const events = await listAllEvents(session.id)
-					const use = events.filter((e) => e.type === "agent.tool_use" && e.name === "codemode")[
-						number - 1
-					]
-					return (
-						events
-							.find((e) => e.type === "agent.tool_result" && e.tool_use_id === use?.tool_use_id)
-							?.content?.map((block) => block.text)
-							.join("") ?? ""
-					)
+					await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 60_000)
+					return { session, events: await listAllEvents(session.id) }
 				}
 
-				expect(await turn(1)).toContain("echo:hi")
-				const authenticated = secure.tokens.filter((sent) => sent === token).length
-				expect(authenticated).toBeGreaterThan(0)
+				const first = await run()
+				const second = await run()
 
-				const [method, path] = revoke(vault.id, credential.id)
-				expect((await apiJson(path, { method })).status).toBe(200)
-				const after = await turn(2)
-				expect(after).toContain("archived or deleted")
-				expect(after).not.toContain("echo:hi")
-				expect(secure.tokens.filter((sent) => sent === token).length).toBe(authenticated)
+				expect(secure.calls.map((call) => [call.tool, call.token])).toEqual([
+					["leak", token],
+					["leak", token],
+				])
+				const upstreamSessions = secure.calls.map((call) => call.session)
+				expect(new Set(upstreamSessions).size).toBe(2)
+				expect(open.calls.map((call) => [call.arguments, call.token])).toEqual([
+					[{ text: "from-script" }, undefined],
+					[{ text: "direct" }, undefined],
+					[{ text: "from-script" }, undefined],
+					[{ text: "direct" }, undefined],
+				])
+
+				const { events } = first
+				const mcpUses = events.filter((e) => e.type === "agent.mcp_tool_use")
+				expect(mcpUses.map((e) => [e.mcp_server_name, e.name])).toEqual([
+					["open", "echo"],
+					["open", "echo"],
+				])
+				expect(mcpUses.map((e) => e.input)).toEqual([{ text: "too-early" }, { text: "direct" }])
+				for (const use of mcpUses) {
+					expect(
+						toolUseOf(toolUseIdFromEvent(first.session.id, use.tool_use_id ?? "")),
+					).toBeDefined()
+				}
+				const mcpResults = events.filter((e) => e.type === "agent.mcp_tool_result")
+				expect(
+					mcpResults.map((e) => e.tool_use_id).toSorted((a, b) => (a ?? "").localeCompare(b ?? "")),
+				).toEqual(
+					mcpUses.map((e) => e.tool_use_id).toSorted((a, b) => (a ?? "").localeCompare(b ?? "")),
+				)
+				expect(mcpResults.find((e) => e.tool_use_id === mcpUses[0]?.tool_use_id)?.is_error).toBe(
+					true,
+				)
+				expect(mcpResults.find((e) => e.tool_use_id === mcpUses[1]?.tool_use_id)?.is_error).toBe(
+					false,
+				)
+
+				const visible = JSON.stringify([first, second, workerLogs])
+				for (const form of [
+					token,
+					encodeURIComponent(token),
+					new URLSearchParams({ s: token }).toString().slice(2),
+					JSON.stringify(token).slice(1, -1),
+				]) {
+					expect(visible).not.toContain(form)
+				}
+				expect(visible).toContain("[redacted]")
+			} finally {
+				await secure.close()
+				await open.close()
 			}
-		} finally {
-			await secure.close()
-		}
-	}, 240_000)
+		},
+	)
+
+	it(
+		"sends a session's server nothing with a credential once its archive, its delete or its vault's archive has answered",
+		{ timeout: 240_000, tags: ["acceptance", "mcp-revocation"] },
+		async () => {
+			const token = "tok-revoked-workerd-secret-1"
+			const secure = await startFakeMcpServer([token])
+			try {
+				const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+					name: "Revoked MCP Agent",
+					model: "gpt-4o-mini",
+					mcp_servers: [{ type: "url", name: "secure", url: secure.url }],
+					tools: [
+						{
+							type: "mcp_toolset",
+							mcp_server_name: "secure",
+							default_config: { permission_policy: { type: "always_allow" } },
+						},
+					],
+				})
+				const script =
+					'try { return await tools.mcp__secure__echo({ text: "hi" }) } catch (e) { return String(e) }'
+				const revocations: ReadonlyArray<
+					(vaultId: string, credentialId: string) => readonly [string, string]
+				> = [
+					(vaultId, credentialId) => [
+						"POST",
+						`/v1/vaults/${vaultId}/credentials/${credentialId}/archive`,
+					],
+					(vaultId, credentialId) => [
+						"DELETE",
+						`/v1/vaults/${vaultId}/credentials/${credentialId}`,
+					],
+					(vaultId) => ["POST", `/v1/vaults/${vaultId}/archive`],
+				]
+				for (const revoke of revocations) {
+					const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
+						display_name: "revoked",
+					})
+					const credential = await createResource<{ readonly id: string }>(
+						`/v1/vaults/${vault.id}/credentials`,
+						{ auth: { type: "static_bearer", token, mcp_server_url: secure.url } },
+					)
+					const session = await createResource<SessionResource>("/v1/sessions", {
+						agent: agent.id,
+						environment_id: environmentId,
+						vault_ids: [vault.id],
+					})
+					const turn = async (number: number) => {
+						fakeOpenAI.setHandler(runsScript(script))
+						const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+							method: "POST",
+							body: {
+								events: [{ type: "user.message", content: [{ type: "text", text: "Call it." }] }],
+							},
+						})
+						expect(sent.status).toBe(200)
+						await waitForSession(
+							session.id,
+							(s) => s.status === "idle" && s.turn === number,
+							60_000,
+						)
+						const events = await listAllEvents(session.id)
+						const use = events.filter((e) => e.type === "agent.tool_use" && e.name === "codemode")[
+							number - 1
+						]
+						return (
+							events
+								.find((e) => e.type === "agent.tool_result" && e.tool_use_id === use?.tool_use_id)
+								?.content?.map((block) => block.text)
+								.join("") ?? ""
+						)
+					}
+
+					expect(await turn(1)).toContain("echo:hi")
+					const authenticated = secure.tokens.filter((sent) => sent === token).length
+					expect(authenticated).toBeGreaterThan(0)
+
+					const [method, path] = revoke(vault.id, credential.id)
+					expect((await apiJson(path, { method })).status).toBe(200)
+					const after = await turn(2)
+					expect(after).toContain("archived or deleted")
+					expect(after).not.toContain("echo:hi")
+					expect(secure.tokens.filter((sent) => sent === token).length).toBe(authenticated)
+				}
+			} finally {
+				await secure.close()
+			}
+		},
+	)
 
 	it("refuses at the session object what changed since admission, keeps one server's trouble to itself, and sends nothing once interrupted", async () => {
 		const raw = await startScriptedMcpServer()

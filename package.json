@@ -12,7 +12,7 @@
 			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/934b80b15c5ae2bf2be4dd44e478713f9755b51b53f8218ab22eec555b2bae72.tgz",
 			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/d3c8dbf7b350aa08ddf41791ae5d834f2eb57f96df420795f5ec9a5db1b45b96.tgz",
 			"@cloudflare/computer": "0.11.4",
-			"@cloudflare/forge": "0.2.0",
+			"@cloudflare/forge": "0.3.0",
 			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
 			"@earendil-works/chord": "1.7.0",
 			"@earendil-works/pi-ai": "1.7.0",
@@ -58,7 +58,8 @@
 		"check": "bun run generate:check && bun run format:check && bun run lint --type-check",
 		"persisted:check": "bun apps/api/test/persisted/main.ts check",
 		"persisted:cut": "bun apps/api/test/persisted/main.ts cut",
-		"release:build": "bun tools/release/Build.ts"
+		"release:build": "bun tools/release/Build.ts",
+		"verify": "bun tools/release/Verify.ts"
 	},
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",

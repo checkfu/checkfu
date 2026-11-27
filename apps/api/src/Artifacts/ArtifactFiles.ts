@@ -1,5 +1,6 @@
 import { encodeCapabilities } from "@checkfu/domain/Artifact/ArtifactCapabilities"
 import {
+	ARTIFACT_DECLARATION_FILE,
 	ARTIFACT_RESERVED_DIRECTORY,
 	ArtifactDeclaration,
 	ArtifactFile,
@@ -41,6 +42,13 @@ export {
 } from "@checkfu/sdk/Schemas"
 
 export const DEFAULT_ARTIFACT_CONTENT_TYPE = "application/octet-stream"
+
+export const SOURCE_ARTIFACT_DECLARATION_MESSAGE = `${ARTIFACT_DECLARATION_FILE} is supplied by the source version. Leave it out when using made_from.`
+
+export const reservedArtifactPathProblem = (path: string): string | undefined =>
+	path === ARTIFACT_RESERVED_DIRECTORY || path.startsWith(`${ARTIFACT_RESERVED_DIRECTORY}/`)
+		? `File "${path}" is under ${ARTIFACT_RESERVED_DIRECTORY}/, which is reserved for what the platform serves beside an artifact's files.`
+		: undefined
 
 export const ArtifactManifest = Schema.Struct({
 	files: Schema.Array(ArtifactFile),
@@ -198,13 +206,9 @@ export const buildArtifactVersion = (
 		let totalBytes = 0
 		let inlineBytes = 0
 		for (const file of files) {
-			if (
-				file.path === ARTIFACT_RESERVED_DIRECTORY ||
-				file.path.startsWith(`${ARTIFACT_RESERVED_DIRECTORY}/`)
-			) {
-				return yield* new InvalidArtifactFiles({
-					message: `File "${file.path}" is under ${ARTIFACT_RESERVED_DIRECTORY}/, which is reserved for what the platform serves beside an artifact's files.`,
-				})
+			const reserved = reservedArtifactPathProblem(file.path)
+			if (reserved !== undefined) {
+				return yield* new InvalidArtifactFiles({ message: reserved })
 			}
 			if ("sha256" in file) {
 				const size = file.size ?? kept.get(file.sha256)

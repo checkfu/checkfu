@@ -4,6 +4,7 @@ import type {
 	PassthroughStat,
 	WorkspaceErrorCode,
 } from "@cloudflare/computer"
+import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
 import type {
 	MemoryFileInfo,
 	MemoryMountInfo,
@@ -24,11 +25,37 @@ const refuse = (outcome: MemoryOutcome): string => {
 const encoder = new TextEncoder()
 const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 
-const decode = (bytes: ArrayBuffer, rel: string): string => {
+const decode = (bytes: Uint8Array, rel: string): string => {
 	try {
 		return strictUtf8.decode(bytes)
 	} catch {
 		throw failure("EINVAL", `A memory holds UTF-8 text; ${rel} is not.`)
+	}
+}
+
+const readWriteBody = async (body: ReadableStream<Uint8Array>, rel: string): Promise<string> => {
+	const reader = body.getReader()
+	let bytes: Uint8Array | undefined
+	let size = 0
+	try {
+		for (;;) {
+			const chunk = await reader.read()
+			if (chunk.done) {
+				return bytes === undefined ? "" : decode(bytes.subarray(0, size), rel)
+			}
+			const nextSize = size + chunk.value.byteLength
+			if (nextSize > MAX_MEMORY_CONTENT_BYTES) {
+				void reader.cancel().catch(() => undefined)
+				throw failure("EINVAL", `A memory holds at most ${MAX_MEMORY_CONTENT_BYTES} bytes.`)
+			}
+			if (nextSize > size) {
+				bytes ??= new Uint8Array(MAX_MEMORY_CONTENT_BYTES)
+				bytes.set(chunk.value, size)
+				size = nextSize
+			}
+		}
+	} finally {
+		reader.releaseLock()
 	}
 }
 
@@ -207,8 +234,7 @@ export const makeMemoryMount = (memory: SessionMemory, walkLimit = Infinity): Pa
 			if (at.path === "") {
 				throw failure("EISDIR", `Is a directory: ${rel}`)
 			}
-			const bytes = await new Response(body).arrayBuffer()
-			await write(at, decode(bytes, rel), options.exclusive === true)
+			await write(at, await readWriteBody(body, rel), options.exclusive === true)
 		},
 		mkdir: async (rel) => {
 			const at = await writable(rel, true)

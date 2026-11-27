@@ -1,6 +1,16 @@
-import { ArtifactName, ArtifactPath, FileName } from "@checkfu/sdk/Schemas"
+import {
+	ARTIFACT_DECLARATION_FILE,
+	ArtifactName,
+	ArtifactPath,
+	FileName,
+	MAX_ARTIFACT_DECLARATION_BYTES,
+} from "@checkfu/sdk/Schemas"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import {
+	reservedArtifactPathProblem,
+	SOURCE_ARTIFACT_DECLARATION_MESSAGE,
+} from "../Artifacts/ArtifactFiles.ts"
 import {
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
@@ -42,6 +52,11 @@ const told = (text: string, isError: boolean): WorkspaceToolResult => ({
 })
 
 const refused = (text: string) => told(text, true)
+
+const declarationTooLarge = () =>
+	refused(
+		`${ARTIFACT_DECLARATION_FILE} cannot be used: it is larger than ${MAX_ARTIFACT_DECLARATION_BYTES} bytes.`,
+	)
 
 const missingPath = (error: unknown) =>
 	Predicate.hasProperty(error, "code") && (error.code === "ENOENT" || error.code === "ENOTDIR")
@@ -120,6 +135,18 @@ export const saveArtifact = async (
 		if (!isFileName(path.slice(path.lastIndexOf("/") + 1))) {
 			return refused(`${JSON.stringify(path)} is not a path an artifact can hold. Rename it.`)
 		}
+		const reserved = reservedArtifactPathProblem(path)
+		if (reserved !== undefined) {
+			return refused(reserved)
+		}
+		if (path === ARTIFACT_DECLARATION_FILE) {
+			if (madeFrom !== "") {
+				return refused(SOURCE_ARTIFACT_DECLARATION_MESSAGE)
+			}
+			if (size > MAX_ARTIFACT_DECLARATION_BYTES) {
+				return declarationTooLarge()
+			}
+		}
 		if (size > MAX_TOOL_ARTIFACT_FILE_BYTES) {
 			return tooLarge(path)
 		}
@@ -137,19 +164,34 @@ export const saveArtifact = async (
 			`${paths.length} files; an artifact saved here holds at most ${MAX_TOOL_ARTIFACT_FILES}.`,
 		)
 	}
+	const read = async (path: string, limit: number) => {
+		signal?.throwIfAborted()
+		const bytes = await capture.read(path, limit + 1).catch((error: unknown) => {
+			if (missingPath(error)) {
+				return null
+			}
+			throw error
+		})
+		signal?.throwIfAborted()
+		return bytes
+	}
+	const declaration = paths.includes(ARTIFACT_DECLARATION_FILE)
+		? await read(ARTIFACT_DECLARATION_FILE, MAX_ARTIFACT_DECLARATION_BYTES)
+		: undefined
+	if (declaration === null) {
+		return refused(`${ARTIFACT_DECLARATION_FILE} could not be read.`)
+	}
+	if (declaration !== undefined && declaration.byteLength > MAX_ARTIFACT_DECLARATION_BYTES) {
+		return declarationTooLarge()
+	}
 	const entries: Array<{ readonly path: string; readonly file_id: string }> = []
 	let total = 0
 	for (const path of paths.toSorted()) {
 		signal?.throwIfAborted()
-		const bytes = await capture
-			.read(path, MAX_TOOL_ARTIFACT_FILE_BYTES + 1)
-			.catch((error: unknown) => {
-				if (missingPath(error)) {
-					return null
-				}
-				throw error
-			})
-		signal?.throwIfAborted()
+		const bytes =
+			path === ARTIFACT_DECLARATION_FILE && declaration !== undefined
+				? declaration
+				: await read(path, MAX_TOOL_ARTIFACT_FILE_BYTES)
 		if (bytes === null) {
 			return refused(`${path} could not be read.`)
 		}

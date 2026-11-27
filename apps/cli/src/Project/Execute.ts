@@ -1,4 +1,4 @@
-import type { PendingCreate, ProjectLockfile } from "@checkfu/authoring/lockfile"
+import type { LockEntry, PendingCreate, ProjectLockfile } from "@checkfu/authoring/lockfile"
 import { ERROR_CODES } from "@checkfu/sdk"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
@@ -191,6 +191,18 @@ export const executePlan = (
 								({ row, remote }) => row.action === "archive" && remote?.type === "automation",
 							)
 							if (cleanup !== undefined) {
+								const awaiting = Object.entries(pendingCreates).find(
+									([path, entry]) => path !== file && entry.kind === "automation",
+								)?.[0]
+								if (awaiting !== undefined) {
+									return clearPending().pipe(
+										Effect.andThen(
+											usageError(
+												`Confirm the pending create for ${awaiting} before archiving an automation to free capacity.`,
+											),
+										),
+									)
+								}
 								// The capacity slot is released by a policy after the archive commits.
 								return remove(cleanup).pipe(
 									Effect.tapError(clearPending),
@@ -216,6 +228,16 @@ export const executePlan = (
 					}),
 					Effect.mapError(formatClientError),
 				)
+				const ownsReceipt = ([other, entry]: [string, LockEntry]) =>
+					other !== file && entry.kind === requestBody.kind && entry.id === created.id
+				const owner =
+					Object.entries(resources).find(ownsReceipt)?.[0] ??
+					Object.entries(original.resources).find(ownsReceipt)?.[0]
+				if (owner !== undefined) {
+					return yield* usageError(
+						`${file}: the create returned ${requestBody.kind} ${created.id}, already owned by ${owner}.`,
+					)
+				}
 				// A create receipt identifies the resource even if its projection has since changed.
 				resources[file] = { kind: requestBody.kind, id: created.id, hash: requestHash }
 				delete pendingCreates[file]

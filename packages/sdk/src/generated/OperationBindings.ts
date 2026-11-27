@@ -242,7 +242,7 @@ export const SDK_OPERATION_BINDINGS = [
 		httpMethod: "DELETE",
 		path: "/v1/artifacts/{artifact_id}/publication",
 		pathParams: ["artifact_id"],
-		queryParams: [],
+		queryParams: ["if_current"],
 		requiredQueryParams: [],
 		kind: "unary",
 		retrySafety: "idempotency-key-gated",

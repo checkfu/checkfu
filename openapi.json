@@ -30065,6 +30065,16 @@
 							"description": "Optional Idempotency-Key header for safe retries"
 						},
 						"required": false
+					},
+					{
+						"name": "if_current",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$",
+							"description": "The public address to revoke"
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -30618,7 +30628,7 @@
 						}
 					}
 				},
-				"description": "Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+				"description": "Take down an artifact's public address and keep the artifact. Supply if_current to revoke a specific address. The request returns 409 if that address is no longer current. Retrying the same request with the same Idempotency-Key preserves any later publication.",
 				"summary": "Unpublish an artifact",
 				"x-forge-group-name": "artifacts",
 				"x-forge-method-name": "unpublish",

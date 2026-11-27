@@ -1,7 +1,11 @@
+import { File } from "@checkfu/domain/File/File.aggregate"
+import { FileId } from "@checkfu/domain/File/File.id"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Schedule from "effect/Schedule"
+import { FileStore } from "../src/Files/FileStore.ts"
+import { SessionArtifactSaves } from "../src/SessionArtifactSaves.ts"
 import { artifactData } from "../src/Workspace/ArtifactDataTool.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { MAX_TOOL_ARTIFACT_FILES } from "../src/Workspace/SessionArtifactTool.ts"
@@ -58,7 +62,7 @@ const withSessions = async (
 				madeFrom?: string,
 			) => Effect.Effect<string>
 		},
-	) => Effect.Effect<void>,
+	) => Effect.Effect<void, never, Effect.Services<typeof SessionArtifactSaves>>,
 ) => {
 	const pending = Promise.withResolvers<void>()
 	const { layer, closeAll, ...world } = makePiDurableTestLayer(async (model, _context, signal) => {
@@ -149,6 +153,119 @@ interface DataArguments {
 }
 
 describe("An artifact the agent saves", () => {
+	it("resolves each File once, checks every path, and keeps the storage-time guard", () =>
+		withSessions((apiFetch, { createSession, sessionArtifactSaves, runInWorld }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const saves = sessionArtifactSaves()
+				const seed = (path: string, data: string) =>
+					Effect.gen(function* () {
+						const saved = yield* Effect.promise(() =>
+							runInWorld(
+								saves.sessionFileSave(session.id, 1, path, new TextEncoder().encode(data)),
+							),
+						)
+						if (!saved.ok) {
+							throw new Error(saved.message)
+						}
+						return { path, file_id: saved.file_id }
+					})
+				const a = yield* seed("a.txt", "identical")
+				const b = yield* seed("b.txt", "identical")
+				expect(a.file_id).not.toBe(b.file_id)
+
+				const owners = yield* File
+				const reads: Array<string> = []
+				let afterRead: ((file: string) => Effect.Effect<void>) | undefined
+				const instrumented = SessionArtifactSaves.pipe(
+					Effect.provideService(File, {
+						...owners,
+						get: (...args) => {
+							const [target] = args
+							const id = typeof target === "string" ? target : target.id
+							reads.push(id)
+							return owners.get(...args).pipe(Effect.tap(() => afterRead?.(id) ?? Effect.void))
+						},
+					}),
+				)
+				const observed = yield* instrumented
+				const denied = yield* observed.sessionArtifactSave(
+					session.id,
+					1,
+					"Report",
+					[a, { ...a, path: "other.txt" }],
+					"",
+				)
+				expect(denied).toEqual({
+					ok: false,
+					message: "other.txt is not a file this session saved.",
+				})
+				expect(reads.splice(0)).toEqual([a.file_id])
+				const created = yield* observed.sessionArtifactSave(session.id, 1, "Report", [a, b], "")
+				expect(created).toMatchObject({ ok: true, version: 1, changed: true, file_count: 2 })
+				expect(reads.splice(0)).toEqual([a.file_id, b.file_id])
+
+				const c = yield* seed("c.txt", "gone before copy")
+				const storage = yield* FileStore
+				const deleting = yield* instrumented.pipe(
+					Effect.provideService(FileStore, {
+						...storage,
+						content: (file) =>
+							Effect.gen(function* () {
+								expect(file).toBe(c.file_id)
+								expect((yield* request(apiFetch, "DELETE", `/v1/files/${file}`)).status).toBe(200)
+								return yield* storage.content(file)
+							}),
+					}),
+				)
+				expect(yield* deleting.sessionArtifactSave(session.id, 1, "Report", [a, b, c], "")).toEqual(
+					{
+						ok: false,
+						message: `File ${c.file_id} not found.`,
+					},
+				)
+				expect(reads.splice(0)).toEqual([a.file_id, b.file_id, c.file_id])
+				const replay = yield* observed.sessionArtifactSave(session.id, 1, "Report", [a, b], "")
+				expect(replay).toEqual({ ...created, changed: false })
+				expect(reads.splice(0)).toEqual([a.file_id, b.file_id])
+
+				const overlapping = yield* seed("d.txt", "available during a concurrent delete")
+				const id = FileId.make(overlapping.file_id)
+				const retained = yield* Effect.orDie(storage.content(id))
+				expect(retained).not.toBeNull()
+				afterRead = (file) =>
+					file === id
+						? request(apiFetch, "DELETE", `/v1/files/${id}`).pipe(
+								Effect.tap((response) => Effect.sync(() => expect(response.status).toBe(200))),
+								Effect.asVoid,
+							)
+						: Effect.void
+				const pendingPurge = yield* instrumented.pipe(
+					Effect.provideService(FileStore, {
+						...storage,
+						content: (file) => (file === id ? Effect.succeed(retained) : storage.content(file)),
+					}),
+				)
+				expect(
+					yield* pendingPurge.sessionArtifactSave(session.id, 1, "Overlap", [overlapping], ""),
+				).toMatchObject({
+					ok: true,
+					version: 1,
+					changed: true,
+					file_count: 1,
+				})
+				expect(reads.splice(0)).toEqual([id])
+				afterRead = undefined
+				expect(
+					yield* pendingPurge.sessionArtifactSave(session.id, 1, "After delete", [overlapping], ""),
+				).toEqual({
+					ok: false,
+					message: `File ${id} not found.`,
+				})
+				expect(reads).toEqual([id])
+			}),
+		))
+
 	it("holds the directory's files under the given name, and gains a version only when they change", () =>
 		withSessions((apiFetch, { workspaceFiles, artifactStore, createSession, save }) =>
 			Effect.gen(function* () {
@@ -931,17 +1048,20 @@ describe("An artifact the agent saves", () => {
 				const session = yield* createSessionWith([{ type: "artifact", artifact_id: id }])
 				workspaceFiles(session.id).set("/workspace/out/content.md", "# Report")
 				artifactStore.setBeforeDelete(Effect.sync(() => artifactStore.setFailing(true)))
-				const deleted = yield* request(apiFetch, "DELETE", `/v1/artifacts/${id}`)
-				artifactStore.setBeforeDelete(Effect.void)
-				artifactStore.setFailing(false)
-				expect(deleted.status).toBe(503)
-				expect((yield* request(apiFetch, "GET", `/v1/artifacts/${id}`)).status).toBe(404)
-				expect(
-					[...artifactStore.objects.keys()].some((key) => key.includes(`/${id}/manifests/`)),
-				).toBe(true)
-				expect(yield* save(session.id, "Report", "/workspace/out", "/mnt/artifacts/template")).toBe(
-					`Artifact ${id} not found.`,
-				)
+				try {
+					const deleted = yield* request(apiFetch, "DELETE", `/v1/artifacts/${id}`)
+					expect(deleted.status).toBe(503)
+					expect((yield* request(apiFetch, "GET", `/v1/artifacts/${id}`)).status).toBe(404)
+					expect(
+						[...artifactStore.objects.keys()].some((key) => key.includes(`/${id}/manifests/`)),
+					).toBe(true)
+					expect(
+						yield* save(session.id, "Report", "/workspace/out", "/mnt/artifacts/template"),
+					).toBe(`Artifact ${id} not found.`)
+				} finally {
+					artifactStore.setBeforeDelete(Effect.void)
+					artifactStore.setFailing(false)
+				}
 			}),
 		))
 

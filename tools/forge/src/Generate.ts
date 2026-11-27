@@ -18,7 +18,7 @@ export interface EmittedArtifact {
 
 export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 	const openApiJson = exportDeterministicOpenApiJson()
-	using forge = parse(openApiJson)
+	const forge = parse(openApiJson)
 	const cliFiles = generateCliFiles(forge)
 	const sdkFiles = generateSdkFiles(forge)
 	const mcpFiles = generateMcpFiles(forge, openApiJson)

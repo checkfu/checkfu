@@ -15,7 +15,7 @@ import * as PubSub from "effect/PubSub"
 import * as Stream from "effect/Stream"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
-import { ApiWorker } from "../Api.ts"
+import { ApiWorker, bindApiAs } from "../Api.ts"
 import { Connection } from "../Connection/Connection.do.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
@@ -187,7 +187,7 @@ const piSessionInit = Effect.gen(function* () {
 		: yield* loadEnvPiProviderRuntime
 	const workspaces = yield* SessionWorkspace
 	const connections = yield* Connection
-	const api = yield* Cloudflare.Workers.bindWorker(Cloudflare.Worker.ref(ApiWorker))
+	const api = yield* bindApiAs("harness", Cloudflare.Worker.ref(ApiWorker))
 	const sandboxes = yield* codemodeSandboxes
 	const where = yield* Effect.orDie(placement)
 	return { state, providerRuntime, workspaces, connections, api, sandboxes, where }
@@ -291,14 +291,16 @@ export const PiSessionLive = PiSession.make(
 					}),
 				)
 
-				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal, taskId) =>
-					runPromise(
-						workspace()
-							.runTool(call, { turn: admittedTurn() }, taskId)
-							.pipe(Effect.onInterrupt(() => Effect.ignore(workspace().stopCall(call.id)))),
+				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal, taskId) => {
+					const token = { turn: admittedTurn() }
+					const owner = workspace()
+					return runPromise(
+						owner
+							.runTool(call, token, taskId)
+							.pipe(Effect.onInterrupt(() => Effect.ignore(owner.stopTask(token, taskId)))),
 						signal === undefined ? undefined : { signal },
-					),
-				)
+					)
+				})
 				let registry = createCheckfuRegistry()
 				const installTools = () => {
 					for (const extension of withToolSurface(sandbox, [

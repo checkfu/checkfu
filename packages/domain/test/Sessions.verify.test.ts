@@ -12,18 +12,21 @@ import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi } from "../src/Sessions.model.ts"
 import { PROVED, SESSIONS_PROOF_DEADLINE_MS, STANDING } from "./Sessions.verify.standing.ts"
 
+const RERUN_WALKS = 100
+
 describe("Sessions Z3 formal verification", () => {
 	it.live(
-		"proves every Session invariant and transition in Z3 and verifies turn execution with step reruns",
+		"proves every Session invariant and transition in Z3 and checks step reruns in seeded turn sequences",
 		() =>
 			Effect.gen(function* () {
 				const report = yield* Verify.model(Sessions, {
 					apis: [SessionsApi],
 					instances: 1,
-					depth: 2,
+					// Replay exhausts depth two without step reruns. The longer walks exercise reruns.
+					depth: 1,
 					budget: 30_000,
 					faults: { redeliver: true, reorder: true, rerun: true },
-					walks: { count: 25 },
+					walks: { count: RERUN_WALKS, seed: 1 },
 					opaque: [
 						decodeMcpServers,
 						decodeMcpServerCredentials,
@@ -57,7 +60,9 @@ describe("Sessions Z3 formal verification", () => {
 					},
 				])
 				expect(report.explored.truncated).toBe(false)
-				expect(report.explored.complete).toBe(2)
+				expect(report.explored.complete).toBe(1)
+				expect(report.explored.walks.count).toBe(RERUN_WALKS)
+				expect(report.explored.walks.longest).toBeGreaterThanOrEqual(3)
 				expect(report.explored.repeated).toContain(
 					"Harness.runTurn, by RunTurn in its step run-harness-turn",
 				)

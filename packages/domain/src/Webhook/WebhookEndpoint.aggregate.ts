@@ -328,6 +328,27 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 				after.status === (command.reactivate ? "active" : before.status),
 			].every((ok) => ok)
 		},
+		UnchangedUpdateKeepsDeliveryHealth: ({ before, after, command }) => {
+			if (command._tag !== "UpdateWebhookEndpoint") {
+				return true
+			}
+			const unchanged = [
+				(command.url ?? before.url) === before.url,
+				(command.description ?? before.description) === before.description,
+				(command.event_types ?? before.event_types) === before.event_types,
+				command.reactivate === false || before.status === "active",
+			].every((ok) => ok)
+			return [
+				!unchanged,
+				[
+					after.definition_revision === before.definition_revision,
+					after.updated_at === before.updated_at,
+					after.failure_window_started_at === before.failure_window_started_at,
+					after.last_failure_at === before.last_failure_at,
+					after.consecutive_failures === before.consecutive_failures,
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
 		PredatingSuccessLeavesFailureWindowUntouched: ({ before, after, command }) => {
 			if (command._tag !== "RecordWebhookOutcome") {
 				return true
@@ -388,11 +409,24 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			if (cmd.url !== null && !cmd.url.startsWith("https://")) {
 				return new WebhookInvalidUrl({ url: cmd.url })
 			}
+			const url = cmd.url ?? state.url
+			const description = cmd.description ?? state.description
+			const event_types = cmd.event_types ?? state.event_types
+			if (
+				[
+					url === state.url,
+					description === state.description,
+					event_types === state.event_types,
+					cmd.reactivate === false || state.status === "active",
+				].every((ok) => ok)
+			) {
+				return []
+			}
 			return [
 				new WebhookEndpointUpdated({
-					url: cmd.url === null ? state.url : cmd.url,
-					description: cmd.description === null ? state.description : cmd.description,
-					event_types: cmd.event_types === null ? state.event_types : cmd.event_types,
+					url,
+					description,
+					event_types,
 					reactivated: cmd.reactivate,
 				}),
 			]

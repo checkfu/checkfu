@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto"
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import { chmod, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { unpackTar } from "modern-tar"
 import * as Schema from "effect/Schema"
+import { readResponseBytes } from "./ResponseBytes.ts"
 
 export const REVISION = /^[a-f0-9]{40}$/
 export const STAGE = /^[a-z0-9]+[-_a-z0-9]*$/i
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 const decodeCommit = Schema.decodeUnknownSync(Schema.Struct({ sha: Schema.String }))
+const RUNTIME_MODE = 0o700
 
 export interface Distribution {
 	readonly latest: (signal: AbortSignal) => Promise<string>
@@ -24,31 +27,7 @@ const bytes = async (response: Response, limit: number): Promise<Uint8Array> => 
 	if (response.body === null) {
 		throw new Error("Download returned an empty response.")
 	}
-	const chunks: Array<Uint8Array> = []
-	const reader = response.body.getReader()
-	let size = 0
-	try {
-		for (;;) {
-			const next = await reader.read()
-			if (next.done) {
-				break
-			}
-			size += next.value.length
-			if (size > limit) {
-				throw new Error("Download exceeds the supported size.")
-			}
-			chunks.push(next.value)
-		}
-	} finally {
-		await reader.cancel()
-	}
-	const result = new Uint8Array(size)
-	let offset = 0
-	for (const chunk of chunks) {
-		result.set(chunk, offset)
-		offset += chunk.length
-	}
-	return result
+	return readResponseBytes(response.body, limit)
 }
 
 export const makeGithubDistribution = (request: typeof fetch = fetch): Distribution => {
@@ -160,24 +139,8 @@ export const installRuntime = async (
 	}
 	const runtimeRoot = join(root, `bun-${spec.version}-${target}`)
 	const executable = join(runtimeRoot, "bin", "bun")
-	try {
-		if ((await readFile(join(runtimeRoot, "integrity"), "utf8")) !== selected.integrity) {
-			throw new Error("Cached deployment runtime does not match its manifest.")
-		}
-		const expected = (await readFile(join(runtimeRoot, "sha256"), "utf8")).trim()
-		if (/^[a-f0-9]{64}$/.test(expected) && digest(await readFile(executable)) === expected) {
-			return executable
-		}
-	} catch (error) {
-		if (
-			!(
-				error instanceof Error &&
-				(("code" in error && error.code === "ENOENT") ||
-					error.message === "Cached deployment runtime does not match its manifest.")
-			)
-		) {
-			throw error
-		}
+	if (await readyRuntime(runtimeRoot, executable, selected.integrity)) {
+		return executable
 	}
 	await rm(runtimeRoot, { force: true, recursive: true })
 	const temporary = `${runtimeRoot}.partial`
@@ -189,12 +152,53 @@ export const installRuntime = async (
 		}
 		await extract(archive, temporary)
 		const binary = join(temporary, "bin", "bun")
-		await chmod(binary, 0o700)
+		await chmod(binary, RUNTIME_MODE)
 		await writeFile(join(temporary, "sha256"), digest(await readFile(binary)), { mode: 0o600 })
 		await writeFile(join(temporary, "integrity"), selected.integrity, { mode: 0o600 })
 		await rename(temporary, runtimeRoot)
 		return executable
 	} finally {
 		await rm(temporary, { force: true, recursive: true })
+	}
+}
+
+const readyRuntime = async (runtimeRoot: string, executable: string, integrity: string) => {
+	try {
+		if (
+			!(await lstat(runtimeRoot)).isDirectory() ||
+			!(await lstat(dirname(executable))).isDirectory() ||
+			(await readFile(join(runtimeRoot, "integrity"), "utf8")) !== integrity
+		) {
+			return false
+		}
+		const expected = (await readFile(join(runtimeRoot, "sha256"), "utf8")).trim()
+		if (!/^[a-f0-9]{64}$/.test(expected)) {
+			return false
+		}
+		const file = await open(
+			executable,
+			constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+		)
+		try {
+			const stat = await file.stat()
+			if (!stat.isFile() || stat.nlink !== 1 || digest(await file.readFile()) !== expected) {
+				return false
+			}
+			if ((stat.mode & 0o7777) !== RUNTIME_MODE) {
+				await file.chmod(RUNTIME_MODE)
+			}
+			return true
+		} finally {
+			await file.close()
+		}
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			"code" in error &&
+			(error.code === "ENOENT" || error.code === "ELOOP")
+		) {
+			return false
+		}
+		throw error
 	}
 }

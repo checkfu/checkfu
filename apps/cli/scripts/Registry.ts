@@ -1,7 +1,23 @@
 import { createHash } from "node:crypto"
 import * as Schema from "effect/Schema"
+import { readResponseBytes } from "../src/Deployment/ResponseBytes.ts"
 
 const DIGEST = /^sha256:[a-f0-9]{64}$/
+// The sandbox has one selected platform. Bound the index and image manifest independently.
+const MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+const MAX_TOKEN_BYTES = 64 * 1024
+const MAX_LAYER_BYTES = 300 * 1024 * 1024
+const LAYER_INTEGRITY_FAILURE =
+	"Sandbox image layer failed its integrity check. Nothing unverified was uploaded."
+
+const responseBytes = (response: Response, limit: number, tooLarge: string) =>
+	response.body === null ? new Uint8Array() : readResponseBytes(response.body, limit, tooLarge)
+
+const manifestBody = (response: Response) =>
+	responseBytes(response, MAX_MANIFEST_BYTES, "Sandbox image manifest exceeds the supported size.")
+
+const decodeJson = <A>(bytes: Uint8Array, decode: (value: unknown) => A): A =>
+	decode(JSON.parse(new TextDecoder().decode(bytes)))
 const Descriptor = Schema.Struct({
 	digest: Schema.String.check(Schema.isPattern(DIGEST)),
 	size: Schema.Finite,
@@ -70,7 +86,14 @@ export const copySandboxImage = async (
 			`The Checkfu sandbox image is unavailable (HTTP ${tokenResponse.status}). No local Docker is required; retry later.`,
 		)
 	}
-	const { token } = decodeToken(await tokenResponse.json())
+	const { token } = decodeJson(
+		await responseBytes(
+			tokenResponse,
+			MAX_TOKEN_BYTES,
+			"Sandbox registry token exceeds the supported size.",
+		),
+		decodeToken,
+	)
 	const source = async (path: string) => {
 		const response = await request(`https://ghcr.io/v2/${repository}/${path}`, {
 			signal: deadlineSignal,
@@ -82,9 +105,9 @@ export const copySandboxImage = async (
 		return response
 	}
 	let manifestResponse = await source(`manifests/${tag}`)
-	let manifestBytes = new Uint8Array(await manifestResponse.arrayBuffer())
+	let manifestBytes = await manifestBody(manifestResponse)
 	if (/image.index|manifest.list/.test(manifestResponse.headers.get("content-type") ?? "")) {
-		const index = decodeIndex(JSON.parse(new TextDecoder().decode(manifestBytes)))
+		const index = decodeJson(manifestBytes, decodeIndex)
 		const linux = index.manifests.find(
 			({ platform }) => platform?.os === "linux" && platform.architecture === "amd64",
 		)
@@ -92,13 +115,13 @@ export const copySandboxImage = async (
 			throw new Error("Sandbox image has no Linux amd64 manifest.")
 		}
 		manifestResponse = await source(`manifests/${linux.digest}`)
-		manifestBytes = new Uint8Array(await manifestResponse.arrayBuffer())
+		manifestBytes = await manifestBody(manifestResponse)
 		if (digestOf(manifestBytes) !== linux.digest) {
 			throw new Error("Sandbox image manifest failed its integrity check.")
 		}
 	}
 	const manifestDigest = digestOf(manifestBytes)
-	const manifest = decodeManifest(JSON.parse(new TextDecoder().decode(manifestBytes)))
+	const manifest = decodeJson(manifestBytes, decodeManifest)
 	const destination = `${target.origin}/v2/${target.repository}`
 	const push = (url: string, init: RequestInit) => {
 		const headers = new Headers(init.headers)
@@ -119,7 +142,7 @@ export const copySandboxImage = async (
 		if (
 			!Number.isSafeInteger(descriptor.size) ||
 			descriptor.size < 0 ||
-			descriptor.size > 300 * 1024 * 1024
+			descriptor.size > MAX_LAYER_BYTES
 		) {
 			throw new Error("Sandbox image layer exceeds the supported size.")
 		}
@@ -128,11 +151,13 @@ export const copySandboxImage = async (
 			continue
 		}
 		await checked(exists, [404])
-		const blob = new Uint8Array(await (await source(`blobs/${descriptor.digest}`)).arrayBuffer())
+		const blob = await responseBytes(
+			await source(`blobs/${descriptor.digest}`),
+			descriptor.size,
+			LAYER_INTEGRITY_FAILURE,
+		)
 		if (blob.length !== descriptor.size || digestOf(blob) !== descriptor.digest) {
-			throw new Error(
-				"Sandbox image layer failed its integrity check. Nothing unverified was uploaded.",
-			)
+			throw new Error(LAYER_INTEGRITY_FAILURE)
 		}
 		const start = await checked(
 			await push(`${destination}/blobs/uploads/`, { method: "POST" }),

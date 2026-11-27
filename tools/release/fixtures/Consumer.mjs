@@ -37,6 +37,20 @@ try {
 		}),
 	)
 	assert.equal(updated.version, 2)
+	await assert.rejects(
+		client.agents.update(first.id, {
+			version: first.version,
+			description: "Stale SDK edit must never be saved",
+		}),
+		{ status: 409 },
+	)
+	const independentlyRead = await fetch(`${baseUrl}/v1/agents/${first.id}`, {
+		headers: { authorization: `Bearer ${apiKey}` },
+	})
+	assert.equal(independentlyRead.status, 200)
+	const saved = await independentlyRead.json()
+	assert.equal(saved.version, 2)
+	assert.equal(saved.description, "New description")
 	assert.equal((await client.agents.retrieve(first.id, { version: 1 })).description, null)
 	const history = []
 	for await (const version of client.agents.versions.list(first.id, { limit: 1 })) {

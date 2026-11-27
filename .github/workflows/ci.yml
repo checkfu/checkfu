@@ -76,16 +76,17 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
-  # The required check: it passes only when every test leg passed.
+  # The required check includes both package tests and complete journey evidence.
   test:
-    needs: test-packages
+    needs: [test-packages, verification]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - run: test "$RESULT" = success
+      - run: test "$PACKAGES" = success && test "$JOURNEYS" = success
         env:
-          RESULT: ${{ needs.test-packages.result }}
+          PACKAGES: ${{ needs.test-packages.result }}
+          JOURNEYS: ${{ needs.verification.result }}
 
   # Long Z3 proofs get their own runners. The other domain files share one, in parallel.
   domain-proofs:
@@ -184,6 +185,58 @@ jobs:
       - run: test "$RESULT" = success
         env:
           RESULT: ${{ needs.workerd-tests.result }}
+
+  # Fresh executions retain provenance; Turbo's log cache is not evidence for a new SHA.
+  acceptance-evidence:
+    name: journeys (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [clients, ui, mcp, project, machines, domain]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run verify ${{ matrix.group }}
+        env:
+          CHECKFU_VERIFICATION_DIR: .checkfu/verification
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ matrix.group }}
+          path: .checkfu/verification/
+          include-hidden-files: true
+
+  verification:
+    needs: acceptance-evidence
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verification-*
+          path: .checkfu/results
+      - name: Derive the feature matrix from executed cases
+        shell: bash
+        run: |
+          mapfile -t reports < <(find .checkfu/results -type f -regextype posix-extended -regex '.*/(clients|ui|mcp|project|machines|domain)\.json' | sort)
+          bun run verify report "${reports[@]}"
+        env:
+          CHECKFU_VERIFICATION_DIR: .checkfu/verification
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-matrix
+          path: .checkfu/verification/
+          include-hidden-files: true
 
   # A deployable main includes its sandbox image. This is independent of npm CLI versions.
   cli-platforms:

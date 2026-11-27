@@ -177,6 +177,16 @@ const content = (block: McpSchema.ContentBlock): McpContent => {
 			return "text" in block.resource
 				? { type: "text", text: block.resource.text }
 				: { type: "text", text: `[${block.resource.mimeType ?? "binary"} resource]` }
+		case "resource_link":
+			return {
+				type: "text",
+				text: JSON.stringify({
+					type: block.type,
+					name: block.name,
+					uri: block.uri,
+					mimeType: block.mimeType,
+				}),
+			}
 		default:
 			return { type: "text", text: `[${block.type}]` }
 	}

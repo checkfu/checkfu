@@ -7,7 +7,8 @@ import { REDACTED, scrubValue, secretForms } from "../src/Connection/Scrub.ts"
 import { makeSecretCustody } from "../src/Connection/SecretCustody.ts"
 import { makeVaultConnection, makeVaultMcp } from "../src/Connection/VaultMcp.ts"
 import type { VaultMcp } from "../src/Connection/VaultMcp.ts"
-import { MAX_TOOL_LIST_BYTES } from "../src/Pi/PiMcp.ts"
+import { MAX_TOOL_LIST_BYTES, mcpExtension, mcpRegistry } from "../src/Pi/PiMcp.ts"
+import { MODEL_TEXT_LIMITS } from "../src/Pi/PiToolText.ts"
 import { connectMcp, describeMcpFailure } from "../src/Pi/PiMcpClient.ts"
 import { makeSessionMcp, vaultsOver } from "../src/Pi/PiMcpSession.ts"
 import type { SessionMcp, SessionVaults } from "../src/Pi/PiMcpSession.ts"
@@ -277,6 +278,67 @@ describe("A vault speaking MCP", () => {
 				{ type: "text", text: expect.stringContaining("image/svg+xml image left out") },
 			],
 		})
+	})
+
+	it.each([false, true])("carries resource links in result order (mixed: %s)", async (mixed) => {
+		const link = {
+			type: "resource_link",
+			name: "Quarterly report",
+			uri: "report://archive/2026-q3",
+			mimeType: "text/markdown",
+		}
+		const before = { type: "text", text: "Found one report." }
+		const after = { type: "text", text: "End of results." }
+		const server = await scripted({ callContent: mixed ? [before, link, after] : [link] })
+		const vault = makeVaultMcp(custodyOf({ cred_1: { target: server.url, token: TOKEN } }))
+		const answer = asCall(await within(vault.call("cred_1", "s", server.url, echo, {}, callId())))
+		const rendered = { type: "text", text: JSON.stringify(link) }
+
+		expect(answer).toMatchObject({
+			ok: true,
+			isError: false,
+			content: mixed ? [before, rendered, after] : [rendered],
+		})
+		expect(server.methods.filter((method) => method.startsWith("resources/"))).toEqual([])
+	})
+
+	it("scrubs and bounds a resource link before the model sees it", async () => {
+		const encoded = encodeURIComponent(TOKEN)
+		const server = await scripted({
+			callContent: [
+				{
+					type: "resource_link",
+					name: `Report ${TOKEN}`,
+					uri: `report://archive/${encoded}/${"x".repeat(MODEL_TEXT_LIMITS.maxBytes)}`,
+				},
+			],
+		})
+		const vault = makeVaultMcp(custodyOf({ cred_1: { target: server.url, token: TOKEN } }))
+		const binding = { name: "docs", url: server.url, credential_id: "cred_1", vault_id: "vault_1" }
+		const tools = { status: "listed" as const, tools: [echo] }
+		const registry = mcpRegistry([{ binding, tools }])
+		const [registration] =
+			mcpExtension(binding, tools, registry, async () => {
+				const outcome = asCall(await vault.call("cred_1", "s", server.url, echo, {}, callId()))
+				const raw = JSON.stringify(outcome)
+				expect(raw).not.toContain(TOKEN)
+				expect(raw).not.toContain(encoded)
+				expect(raw).toContain(REDACTED)
+				return outcome
+			}).tools ?? []
+		if (registration === undefined) {
+			throw new Error("The MCP tool was not registered")
+		}
+		const result = await registration.execute({}, {} as never, {} as never)
+		expect(result).toMatchObject({
+			output: [{ type: "text", text: expect.stringContaining("left out") }],
+			isError: false,
+		})
+		const visible = JSON.stringify(result)
+		expect(new TextEncoder().encode(visible).byteLength).toBeLessThan(MODEL_TEXT_LIMITS.maxBytes)
+		expect(visible).not.toContain(TOKEN)
+		expect(visible).not.toContain(encoded)
+		expect(server.methods.filter((method) => method.startsWith("resources/"))).toEqual([])
 	})
 
 	it("answers from an event stream the server never closes, with its data in pieces between other lines", async () => {

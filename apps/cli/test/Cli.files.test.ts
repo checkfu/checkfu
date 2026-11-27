@@ -17,6 +17,88 @@ interface Uploaded {
 }
 
 describe("CLI files", () => {
+	it.live("publishes only downloads that match the stored size and SHA-256", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const path = yield* Path.Path
+				const root = yield* fs.makeTempDirectoryScoped()
+				const cli = yield* makeTestServer()
+				const source = path.join(root, "source.bin")
+				const target = path.join(root, "copy.bin")
+				const original = Uint8Array.of(0, 30, 180, 255)
+				yield* fs.writeFile(source, original)
+				const options = { fileSystem: NodeFileSystem.layer }
+				const upload = yield* cli.run(["files", "upload", source], options)
+				expect(upload.exitCode).toBe(0)
+				const { id } = JSON.parse(upload.stdout) as Uploaded
+				const download = (fileId: string) => [
+					"files",
+					"download",
+					"--file-id",
+					fileId,
+					"--output",
+					target,
+				]
+
+				for (const [chunks, diagnostic] of [
+					[[original.subarray(0, 3)], "Expected 4 bytes and received 3"],
+					[[original, Uint8Array.of(1), Uint8Array.of(2)], "exceeds the expected 4 bytes"],
+					[[Uint8Array.of(1, 30, 180, 255)], "SHA-256 digest differs"],
+				] as const) {
+					let pulls = 0
+					let cancelled = false
+					const corrupt = yield* cli.run(download(id), {
+						...options,
+						interceptFetch: (next, request) =>
+							request.url.endsWith("/content")
+								? Promise.resolve(
+										new Response(
+											new ReadableStream<Uint8Array>(
+												{
+													pull(controller) {
+														const chunk = chunks[pulls]
+														pulls += 1
+														if (chunk === undefined) {
+															controller.close()
+														} else {
+															controller.enqueue(chunk)
+														}
+													},
+													cancel() {
+														cancelled = true
+													},
+												},
+												{ highWaterMark: 0 },
+											),
+											{ headers: { "content-type": "application/octet-stream" } },
+										),
+									)
+								: next(request),
+					})
+					expect(corrupt.exitCode).toBe(1)
+					expect(corrupt.errorMessage).toContain("failed integrity verification")
+					expect(corrupt.errorMessage).toContain(diagnostic)
+					expect(yield* fs.readDirectory(root)).toEqual(["source.bin"])
+					if (chunks.length > 1) {
+						expect(pulls).toBe(2)
+						expect(cancelled).toBe(true)
+					}
+				}
+
+				yield* fs.writeFile(source, new Uint8Array())
+				const empty = yield* cli.run(["files", "upload", source], options)
+				expect(empty.exitCode).toBe(0)
+				const { id: emptyId } = JSON.parse(empty.stdout) as Uploaded
+				const result = yield* cli.run(download(emptyId), options)
+				expect(result.exitCode).toBe(0)
+				expect(JSON.parse(result.stdout)).toEqual({ id: emptyId, path: target, size: 0 })
+				expect(yield* fs.readFile(target)).toHaveLength(0)
+				expect((yield* fs.readDirectory(root)).sort()).toEqual(["copy.bin", "source.bin"])
+			}),
+		).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, Path.layer))),
+	)
+
 	it.live(
 		"uploads a local file, lists it, downloads the same bytes, and refuses to overwrite",
 		() =>

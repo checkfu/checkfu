@@ -4,7 +4,6 @@ import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { encodeMadeFrom } from "@checkfu/domain/Artifact/ArtifactMadeFrom"
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
-import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { ARTIFACT_MOUNT_ROOT, artifactsOf } from "@checkfu/domain/Session/SessionResource"
@@ -39,6 +38,7 @@ import {
 	RESERVATION_LOST,
 	artifactReads,
 	artifactWrites,
+	resolveFiles,
 	startedFrom,
 } from "./Http/ArtifactsHandlers.ts"
 import type { ResolvedFiles } from "./Http/ArtifactsHandlers.ts"
@@ -128,10 +128,9 @@ const explained = <A, E, R>(what: string, sessionId: string, effect: Effect.Effe
 export const SessionArtifactSaves = Effect.gen(function* () {
 	const sessions = yield* Session
 	const artifacts = yield* Artifact
-	const files = yield* File
 	const digest = yield* Digest.Digest
 	const storeFile = yield* makeStoreFile
-	const { build, fromFiles, copyIn, stage, capabilitiesOf } = yield* artifactWrites
+	const { build, loadFiles, copyIn, stage, capabilitiesOf } = yield* artifactWrites
 	const { loadManifest, requireActive } = yield* artifactReads
 	const resourcesOf = yield* SessionResources
 
@@ -369,21 +368,17 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						path: entry.path,
 						file_id: FileId.make(entry.file_id),
 					}))
-					const owned = yield* Effect.forEach(
-						wanted,
-						({ path, file_id }) =>
-							Effect.map(
-								files.get(file_id),
-								(file) => file.origin_session_id === sessionId && file.origin_path === path,
-							),
-						{ concurrency: 8 },
-					)
-					const foreign = wanted.find((_, index) => !owned[index])
+					// This owner read establishes provenance and liveness together. The copy still checks the bytes.
+					const states = yield* loadFiles(wanted.map(({ file_id }) => file_id))
+					const foreign = wanted.find(({ path, file_id }) => {
+						const file = states.get(file_id)
+						return file?.origin_session_id !== sessionId || file.origin_path !== path
+					})
 					if (foreign !== undefined) {
 						return refused(`${foreign.path} is not a file this session saved.`)
 					}
 					const id = yield* sessionArtifactId(digest, sessionId, name)
-					const own = yield* fromFiles(wanted)
+					const own = yield* resolveFiles(wanted, states)
 					let resolved: ResolvedFiles = own
 					let made_from = ""
 					if (madeFrom !== "") {

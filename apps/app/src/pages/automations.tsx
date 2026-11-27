@@ -405,9 +405,13 @@ export function AutomationView({
 }): React.JSX.Element {
 	const [editBase, setEditBase] = useState<JsonAutomation | null>(null)
 	const [queuedRun, setQueuedRun] = useState<number | null>(null)
-	const runNow = useAction(() => checkfu.automations.run(automation.id), {
+	const runKey = useSubmissionKey()
+	const runNow = useAction((key: string) => checkfu.automations.run(automation.id, key), {
 		invalidates,
-		then: (started) => setQueuedRun(started.listed === null ? started.run : null),
+		then: (started) => {
+			runKey.settle()
+			setQueuedRun(started.listed === null ? started.run : null)
+		},
 	})
 	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
 	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
@@ -446,7 +450,11 @@ export function AutomationView({
 				actions={
 					archived || editBase !== null ? undefined : (
 						<>
-							<Button size="sm" disabled={busy} onClick={() => runNow.run()}>
+							<Button
+								size="sm"
+								disabled={busy}
+								onClick={() => runNow.run(runKey.keyFor(automation.id))}
+							>
 								Run now
 							</Button>
 							{automation.status === "paused" ? (

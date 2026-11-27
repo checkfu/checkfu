@@ -23,12 +23,17 @@ afterEach(async () => {
 
 const registry = (
 	options: {
-		readonly corrupt?: boolean
+		readonly corrupt?: "short" | "same-length"
+		readonly chunked?: boolean
+		readonly emptyLayer?: boolean
 		readonly unsafe?: boolean
 		readonly unavailable?: boolean
 	} = {},
 ) => {
-	const blobs = [bytes('{"os":"linux","architecture":"amd64"}'), bytes("sandbox tools layer")]
+	const blobs = [
+		bytes('{"os":"linux","architecture":"amd64"}'),
+		options.emptyLayer ? new Uint8Array() : bytes("sandbox tools layer"),
+	]
 	const manifest = bytes(
 		JSON.stringify({
 			mediaType: "application/vnd.oci.image.manifest.v1+json",
@@ -72,7 +77,24 @@ const registry = (
 			}
 			const found = blobs.find((blob) => url.pathname.endsWith(`/blobs/${digest(blob)}`))
 			if (found) {
-				return new Response(options.corrupt ? bytes("corrupted") : found)
+				if (options.corrupt === "short") {
+					return new Response(found.slice(0, -1))
+				}
+				if (options.corrupt === "same-length") {
+					return new Response(new Uint8Array(found.byteLength))
+				}
+				if (options.chunked && found.byteLength > 0) {
+					return new Response(
+						new ReadableStream<Uint8Array>({
+							start(controller) {
+								controller.enqueue(found.subarray(0, 5))
+								controller.enqueue(found.subarray(5))
+								controller.close()
+							},
+						}),
+					)
+				}
+				return new Response(found.byteLength === 0 ? null : found)
 			}
 			throw new Error(`Unexpected source request ${url}`)
 		}
@@ -109,7 +131,7 @@ const registry = (
 }
 
 it("copies a verified Linux image over the registry protocol and reuses it without re-uploading", async () => {
-	const r = registry()
+	const r = registry({ chunked: true, emptyLayer: true })
 	const image = await copySandboxImage(tag, target, r.request)
 	expect(image).toBe(`registry.cloudflare.com/${target.repository}@${digest(r.manifest)}`)
 	expect(r.stored.size).toBe(3)
@@ -120,7 +142,8 @@ it("copies a verified Linux image over the registry protocol and reuses it witho
 
 it("rejects corrupted blobs and unsafe upload locations before sending credentials or publishing a manifest", async () => {
 	for (const [options, failure] of [
-		[{ corrupt: true }, "integrity check"],
+		[{ corrupt: "short" }, "integrity check"],
+		[{ corrupt: "same-length" }, "integrity check"],
 		[{ unsafe: true }, "unsafe upload location"],
 		[{ unavailable: true }, "unavailable"],
 	] as const) {
@@ -129,6 +152,86 @@ it("rejects corrupted blobs and unsafe upload locations before sending credentia
 		expect(r.calls.some(({ method }) => method === "PUT")).toBe(false)
 		expect(r.stored.size).toBe(0)
 	}
+})
+
+it.each([
+	{ part: "layer", limit: 0, error: "layer failed its integrity check" },
+	{ part: "index", limit: 4 * 1024 * 1024, error: "manifest exceeds the supported size" },
+	{ part: "manifest", limit: 4 * 1024 * 1024, error: "manifest exceeds the supported size" },
+	{ part: "token", limit: 64 * 1024, error: "token exceeds the supported size" },
+] as const)(
+	"cancels an oversized $part without consuming its tail",
+	async ({ part, limit, error }) => {
+		const r = registry()
+		const [config] = r.blobs
+		if (config === undefined) {
+			throw new Error("Expected an image config")
+		}
+		const suffix = {
+			layer: `/blobs/${digest(config)}`,
+			index: `/manifests/${tag}`,
+			manifest: `/manifests/${digest(r.manifest)}`,
+			token: "/token",
+		}[part]
+		const expected = part === "layer" ? config.byteLength : limit
+		let pulls = 0
+		let cancelled = false
+		const body = new ReadableStream<Uint8Array>(
+			{
+				pull(controller) {
+					pulls += 1
+					controller.enqueue(new Uint8Array(pulls === 1 ? expected : 1))
+					if (pulls === 3) {
+						controller.close()
+					}
+				},
+				cancel() {
+					cancelled = true
+				},
+			},
+			{ highWaterMark: 0 },
+		)
+		const request: typeof fetch = (input, init) => {
+			const url = new URL(String(input))
+			if (url.host === "ghcr.io" && url.pathname.endsWith(suffix)) {
+				return Promise.resolve(new Response(body, { headers: { "content-length": "1" } }))
+			}
+			return r.request(input, init)
+		}
+		await expect(copySandboxImage(tag, target, request)).rejects.toThrow(error)
+		expect(pulls).toBe(2)
+		expect(cancelled).toBe(true)
+		expect(body.locked).toBe(false)
+		expect(r.calls.some(({ method }) => method === "POST" || method === "PUT")).toBe(false)
+	},
+)
+
+it("propagates an interrupted blob transfer without starting an upload", async () => {
+	const r = registry()
+	const aborted = new AbortController()
+	const reason = new Error("Transfer interrupted")
+	const request: typeof fetch = (input, init) => {
+		if (new URL(String(input)).pathname.includes("/blobs/sha256:") && init?.method !== "HEAD") {
+			const signal = init?.signal
+			return Promise.resolve(
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							signal?.addEventListener("abort", () => controller.error(signal.reason), {
+								once: true,
+							})
+						},
+						pull() {
+							aborted.abort(reason)
+						},
+					}),
+				),
+			)
+		}
+		return r.request(input, init)
+	}
+	await expect(copySandboxImage(tag, target, request, aborted.signal)).rejects.toBe(reason)
+	expect(r.calls.some(({ method }) => method === "POST" || method === "PUT")).toBe(false)
 })
 
 it("changes the image version when any build-context file changes, independently of the CLI version", async () => {

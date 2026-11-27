@@ -11,7 +11,7 @@ import {
 	AgentVersionNotFound,
 	BoundedAgentId,
 	BoundedEnvironmentId,
-	repositoryAndMemoryResources,
+	repositoryResources,
 } from "../Session/AdmitSession.command.ts"
 import { SessionAlreadyExists, SessionCreated } from "../Session/CreateSession.command.ts"
 import { SessionStatusRunning, UserMessage } from "../Session/SendUserMessage.command.ts"
@@ -28,7 +28,7 @@ export class OpenAutomationSession extends Domain.Command("OpenAutomationSession
 		title: Schema.NullOr(SessionTitle),
 		text: MessageText,
 		mcp_server_credentials: Schema.optionalKey(McpServerCredentialsText),
-		resources: repositoryAndMemoryResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+		resources: repositoryResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 	},
 	events: [SessionCreated, UserMessage, SessionStatusRunning],
 	rejects: [

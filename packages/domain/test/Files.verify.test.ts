@@ -42,7 +42,7 @@ const PROVED = Object.entries(STANDING)
 describe("Files Z3 formal verification", () => {
 	it.live(
 		"proves every File invariant and transition in Z3",
-		() =>
+		({ task }) =>
 			Effect.gen(function* () {
 				const report = yield* Verify.model(Files, {
 					apis: [FilesApi],
@@ -68,7 +68,14 @@ describe("Files Z3 formal verification", () => {
 				expect(report.explored.aside).toEqual([])
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
+				Object.assign(task.meta, {
+					standings: Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing])),
+					replay: {
+						compared: report.explored.agreement.compared,
+						disagreements: report.explored.disagreements,
+					},
+				})
 			}).pipe(Effect.provide(NodeServices.layer)),
-		120_000,
+		{ timeout: 120_000, tags: ["acceptance", "file-domain-proof"] },
 	)
 })

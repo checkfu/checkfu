@@ -20,7 +20,7 @@ import { buildSurfaceCatalog } from "../src/SurfaceCatalog.ts"
 describe("Cloudflare Forge pipeline", () => {
 	it("exports a deterministic OpenAPI document that Forge resolves cleanly with no beta prefix", () => {
 		const openApiJson = exportDeterministicOpenApiJson()
-		using forge = parse(openApiJson)
+		const forge = parse(openApiJson)
 
 		const resolved = forge.groups.flatMap((group) =>
 			group.methods.map((method) => ({
@@ -601,7 +601,7 @@ describe("Cloudflare Forge pipeline", () => {
 			},
 		}
 
-		using forge = parse(JSON.stringify(spec))
+		const forge = parse(JSON.stringify(spec))
 		const cliFiles = generateCliFiles(forge)
 		const commandsFile = cliFiles.find((f) => f.path === "Commands.ts")
 		expect(commandsFile).toBeDefined()
@@ -647,7 +647,7 @@ describe("Cloudflare Forge pipeline", () => {
 			},
 		}
 
-		using forge = parse(JSON.stringify(spec))
+		const forge = parse(JSON.stringify(spec))
 		const commands = generateCliFiles(forge).find((f) => f.path === "Commands.ts")?.content ?? ""
 		const start = commands.indexOf("const agentsLookupCommandSpec")
 		const lookup = commands.slice(
@@ -745,7 +745,7 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(expectedEndpoints.length).toBe(openApiEndpoints.length)
 		expect(expectedOperationIds.length).toBe(openApiOperationIds.length)
 
-		using forge = parse(openApiJson)
+		const forge = parse(openApiJson)
 		const catalog = buildSurfaceCatalog(forge)
 		const cliCommands = generateCliFiles(forge).find((f) => f.path === "Commands.ts")?.content ?? ""
 		const sdkFiles = generateSdkFiles(forge)
@@ -817,7 +817,7 @@ describe("Cloudflare Forge pipeline", () => {
 				},
 			},
 		}
-		using reservedForge = parse(JSON.stringify(reservedSpec))
+		const reservedForge = parse(JSON.stringify(reservedSpec))
 		expect(() => buildSurfaceCatalog(reservedForge)).toThrow(/Reserved generated member name/)
 
 		const collisionSpec = JSON.parse(exportDeterministicOpenApiJson()) as {
@@ -837,7 +837,7 @@ describe("Cloudflare Forge pipeline", () => {
 				},
 			},
 		}
-		using collisionForge = parse(JSON.stringify(collisionSpec))
+		const collisionForge = parse(JSON.stringify(collisionSpec))
 		expect(() => buildSurfaceCatalog(collisionForge)).toThrow(/Collision between subgroup/)
 	})
 

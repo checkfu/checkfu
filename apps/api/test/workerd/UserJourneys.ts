@@ -180,6 +180,19 @@ export const authoredProjectJourney = async (options: {
 				{ timeout: 30_000 },
 			)
 			.toEqual({ status: "idle", turn: 1 })
+		// Session state and event listings project independently. Wait for the
+		// canonical history rather than treating an idle session as its read barrier.
+		await expect
+			.poll(
+				async () => {
+					const events = await sdk.sessions.events.list(sessionId)
+					return ["agent.tool_use", "agent.tool_result", "agent.message"].map(
+						(type) => events.data.filter((event) => event.type === type).length,
+					)
+				},
+				{ timeout: 10_000 },
+			)
+			.toEqual([1, 1, 1])
 		const history = await sdk.sessions.events.list(sessionId)
 		expect(history.data.filter((event) => event.type === "agent.tool_use")).toEqual([
 			expect.objectContaining({
@@ -301,7 +314,10 @@ export const authoredProjectJourney = async (options: {
 			path: "report.csv",
 		})
 	} finally {
-		await mcp.close()
-		await rm(scratch, { recursive: true, force: true })
+		try {
+			await Promise.all([mcp.close(), sdk.close()])
+		} finally {
+			await rm(scratch, { recursive: true, force: true })
+		}
 	}
 }

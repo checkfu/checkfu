@@ -32,13 +32,10 @@ export class AgentVersionNotFound extends Domain.Rejection(
 	{ httpApiStatus: 404, description: "Agent version not found." },
 ) {}
 
-export const repositoryAndMemoryResources = SessionResources.check(
+export const repositoryResources = SessionResources.check(
 	Schema.makeFilter(
-		(resources) =>
-			resources.every(
-				(resource) => resource.type === "github_repository" || resource.type === "memory_store",
-			),
-		{ expected: "files, skills and artifacts must use mounted session admission" },
+		(resources) => resources.every((resource) => resource.type === "github_repository"),
+		{ expected: "resources other than repositories must use mounted session admission" },
 	),
 )
 
@@ -49,7 +46,7 @@ export const admissionFields = {
 	environment_id: BoundedEnvironmentId,
 	title: Schema.NullOr(SessionTitle),
 	mcp_server_credentials: McpServerCredentialsText,
-	resources: repositoryAndMemoryResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+	resources: repositoryResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }
 export const admissionRejections = [
 	AgentNotFound,

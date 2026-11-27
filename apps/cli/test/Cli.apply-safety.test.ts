@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import { ProjectLockfile } from "@checkfu/authoring/lockfile"
+import { formatProjectLockfile, ProjectLockfile } from "@checkfu/authoring/lockfile"
 import type { Automation } from "@checkfu/sdk/Api"
 import { hashOf } from "../src/Project/Plan.ts"
 import { makeTestServer } from "./helpers/CliHarness.ts"
@@ -532,6 +532,20 @@ it("reports default networking drift and patches an agent without resending a re
 		),
 	))
 
+const atAutomationCapacity = () =>
+	Response.json(
+		{
+			type: "error",
+			error: {
+				type: "rate_limit_error",
+				code: "automation_capacity_reached",
+				message: "At capacity.",
+			},
+			request_id: "req_test",
+		},
+		{ status: 429 },
+	)
+
 it("releases capacity from an approved archive and retries creation with the same key", () =>
 	Effect.runPromise(
 		testProject((project) =>
@@ -552,18 +566,7 @@ it("releases capacity from an approved archive and retries creation with the sam
 							if (endpoint === "/v1/automations") {
 								keys.push(request.headers.get("Idempotency-Key"))
 								if (keys.length < 3) {
-									return Response.json(
-										{
-											type: "error",
-											error: {
-												type: "rate_limit_error",
-												code: "automation_capacity_reached",
-												message: "At capacity.",
-											},
-											request_id: "req_test",
-										},
-										{ status: 429 },
-									)
+									return atAutomationCapacity()
 								}
 							}
 						}
@@ -582,6 +585,61 @@ it("releases capacity from an approved archive and retries creation with the sam
 				])
 				expect(keys).toHaveLength(3)
 				expect(new Set(keys).size).toBe(1)
+			}),
+		),
+	))
+
+it("keeps an automation active when capacity is full and another create receipt is pending", () =>
+	Effect.runPromise(
+		testProject((project) =>
+			Effect.gen(function* () {
+				const { apply, write, fs, file, readLock, run } = project
+				const copied = "automations/z-copy.yaml"
+				yield* standardProject(project)
+				rows(yield* apply([reporter, cloud]))
+				const lost = yield* apply([report], ["--yes"], {
+					interceptFetch: async (next, request) => {
+						const response = await next(request)
+						if (request.method === "POST" && new URL(request.url).pathname === "/v1/automations") {
+							expect(response.status).toBe(201)
+							throw new Error("Lost create response")
+						}
+						return response
+					},
+				})
+				expect(lost.exitCode).toBe(1)
+				const pending = (yield* readLock).pending_creates?.[`./${report}`]
+				if (pending?.kind !== "automation") {
+					throw new Error("The lock did not retain the pending automation create")
+				}
+				const id = idOf(rows(yield* apply([report])), report)
+				const settled = yield* readLock
+				yield* fs.rename(file(report), file(copied))
+				yield* write("automations/a-new.yaml", reportSource("New report"))
+				const lock = formatProjectLockfile({
+					...settled,
+					pending_creates: { [`./${copied}`]: pending },
+				})
+				yield* fs.writeFileString(file("checkfu-lock.json"), lock)
+				const posts: Array<string> = []
+				const applied = yield* apply(["automations"], ["--yes", "--prune"], {
+					interceptFetch: (next, request) => {
+						if (request.method !== "POST") {
+							return next(request)
+						}
+						const endpoint = new URL(request.url).pathname
+						posts.push(endpoint)
+						return endpoint === "/v1/automations"
+							? Promise.resolve(atAutomationCapacity())
+							: next(request)
+					},
+				})
+				expect(applied.exitCode).toBe(1)
+				expect(applied.stderr).toContain(`Confirm the pending create for ./${copied}`)
+				expect(posts).toEqual(["/v1/automations"])
+				expect(yield* fs.readFileString(file("checkfu-lock.json"))).toBe(lock)
+				const live = yield* run(["automations", "retrieve", "--automation-id", id])
+				expect(JSON.parse(live.stdout)).toMatchObject({ id, archived_at: null })
 			}),
 		),
 	))

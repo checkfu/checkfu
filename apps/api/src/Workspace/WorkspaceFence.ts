@@ -12,8 +12,14 @@ export interface FenceStore {
 	readonly put: (turn: FencedTurn) => void
 }
 
-export const makeTurnFence = (store: FenceStore) => {
+const taskKey = (token: TurnToken, taskId: number): string => `${token.turn}:${taskId}`
+
+export const makeTurnFence = <TaskResult = never>(store: FenceStore) => {
 	const running = new Set<Promise<unknown>>()
+	const tasks = new Map<
+		string,
+		{ readonly controller: AbortController; readonly ended: Promise<TaskResult | undefined> }
+	>()
 	let scope = new AbortController()
 	const isNewer = (token: TurnToken): boolean => {
 		const newest = store.get()
@@ -37,6 +43,22 @@ export const makeTurnFence = (store: FenceStore) => {
 	const drain = async (): Promise<void> => {
 		await Promise.allSettled(running)
 	}
+	const run = async <A>(
+		token: TurnToken,
+		work: (signal: AbortSignal) => Promise<A>,
+	): Promise<A | undefined> => {
+		if (!admits(token)) {
+			return undefined
+		}
+		advance(token)
+		const done = work(scope.signal)
+		running.add(done)
+		try {
+			return await done
+		} finally {
+			running.delete(done)
+		}
+	}
 	return {
 		enter: async (token: TurnToken): Promise<boolean> => {
 			if (!admits(token)) {
@@ -52,21 +74,39 @@ export const makeTurnFence = (store: FenceStore) => {
 				scope.abort()
 			}
 		},
-		run: async <A>(
+		run,
+		runTask: (
 			token: TurnToken,
-			work: (signal: AbortSignal) => Promise<A>,
-		): Promise<A | undefined> => {
-			if (!admits(token)) {
-				return undefined
+			taskId: number,
+			caller: AbortSignal,
+			work: (signal: AbortSignal) => Promise<TaskResult>,
+		): Promise<TaskResult | undefined> => {
+			if (caller.aborted || !admits(token)) {
+				return Promise.resolve(undefined)
 			}
-			advance(token)
-			const done = work(scope.signal)
-			running.add(done)
-			try {
-				return await done
-			} finally {
-				running.delete(done)
+			const key = taskKey(token, taskId)
+			const existing = tasks.get(key)
+			if (existing !== undefined) {
+				return existing.ended
 			}
+			const controller = new AbortController()
+			const ended = run(token, (turn) =>
+				Promise.resolve().then(() => {
+					const signal = AbortSignal.any([caller, controller.signal, turn])
+					return signal.aborted ? undefined : work(signal)
+				}),
+			).finally(() => {
+				if (tasks.get(key)?.ended === ended) {
+					tasks.delete(key)
+				}
+			})
+			tasks.set(key, { controller, ended })
+			return ended
+		},
+		stopTask: async (token: TurnToken, taskId: number): Promise<void> => {
+			const task = tasks.get(taskKey(token, taskId))
+			task?.controller.abort()
+			await task?.ended.catch(() => undefined)
 		},
 		stop: (): void => {
 			scope.abort()

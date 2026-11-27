@@ -173,6 +173,68 @@ afterEach(() => {
 	document.body.innerHTML = ""
 })
 
+it("reuses the manual run key after a lost reply and gives each later run its own key", async () => {
+	const page = await editor({ openEditor: false })
+	const firstReply = Promise.withResolvers<void>()
+	const originalFetch = globalThis.fetch
+	const posts: Array<{ path: string; key: string }> = []
+	const receipts = new Map<string, Map<string, number>>()
+	vi.stubGlobal("fetch", async (path: string, init: RequestInit = {}) => {
+		if (path.includes("/runs/")) {
+			return Response.json({ error: { message: "History unavailable." } }, { status: 500 })
+		}
+		if (!path.endsWith("/run") || init.method !== "POST") {
+			return originalFetch(path, init)
+		}
+		const key = new Headers(init.headers).get("idempotency-key")
+		if (key === null || key.length === 0) {
+			throw new Error("The manual run request needs a key")
+		}
+		posts.push({ path, key })
+		const byKey = receipts.get(path) ?? new Map<string, number>()
+		const run = byKey.get(key) ?? byKey.size + 1
+		byKey.set(key, run)
+		receipts.set(path, byKey)
+		if (posts.length === 1) {
+			await firstReply.promise
+			throw new TypeError("The reply was lost.")
+		}
+		return Response.json({ run }, { status: 202 })
+	})
+	const runNow = () => button(page.container, "Run now")
+	try {
+		await click(runNow())
+		await waitFor(() => expect(runNow().disabled).toBe(true))
+		await click(runNow())
+		expect(posts).toHaveLength(1)
+		firstReply.resolve()
+		await waitFor(() => expect(runNow().disabled).toBe(false))
+		await click(runNow())
+		await waitFor(() => expect(page.container.textContent).toContain("Run #1 is queued"))
+		expect(posts).toEqual([posts[0], posts[0]])
+		expect(receipts.get(`${endpoint}/run`)?.size).toBe(1)
+
+		await click(runNow())
+		await waitFor(() => expect(page.container.textContent).toContain("Run #2 is queued"))
+		expect(posts[2]?.key).not.toBe(posts[0]?.key)
+		expect(receipts.get(`${endpoint}/run`)?.size).toBe(2)
+	} finally {
+		firstReply.resolve()
+		page.unmount()
+	}
+
+	const another = { ...automation, id: "auto_2" }
+	const opened = await mount(<AutomationView key={another.id} automation={another} />)
+	try {
+		await click(button(opened.container, "Run now"))
+		await waitFor(() => expect(opened.container.textContent).toContain("Run #1 is queued"))
+		expect(posts.at(-1)?.path).toBe("/v1/automations/auto_2/run")
+		expect(new Set(posts.map(({ key }) => key)).size).toBe(3)
+	} finally {
+		opened.unmount()
+	}
+})
+
 it("moves the automation to the displayed agent version after a pending update settles", async () => {
 	const page = await editor({ openEditor: false, latestAgentVersion: 3, pending: true })
 	try {

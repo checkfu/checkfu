@@ -7,6 +7,7 @@ import {
 	DATA_CALLS_PER_MINUTE_PER_CALLER,
 	DATA_THROTTLE_PERIOD_SECONDS,
 	DataThrottle,
+	artifactKey,
 	callerKey,
 } from "./DataThrottle.ts"
 
@@ -31,9 +32,9 @@ export const DataThrottleLive = Layer.effect(
 				Effect.provideService(RuntimeContext, runtime),
 			)
 		return {
-			admit: (artifactId, caller) =>
+			admit: (artifactId, caller, kind) =>
 				Effect.flatMap(within(perCaller, callerKey(artifactId, caller)), (admitted) =>
-					admitted ? within(perArtifact, artifactId) : Effect.succeed(false),
+					admitted ? within(perArtifact, artifactKey(artifactId, kind)) : Effect.succeed(false),
 				),
 		}
 	}),

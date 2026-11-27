@@ -13,9 +13,11 @@ import * as Layer from "effect/Layer"
 import {
 	DATA_CALLS_PER_MINUTE_PER_ARTIFACT,
 	DATA_CALLS_PER_MINUTE_PER_CALLER,
+	DataThrottle,
 	callerKey,
 	callerNetwork,
 } from "../src/ArtifactData/DataThrottle.ts"
+import type { DataThrottleService } from "../src/ArtifactData/DataThrottle.ts"
 import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "../src/Artifacts/ResolvePublication.ts"
@@ -114,6 +116,7 @@ const withPages = <A>(
 		readonly link: (id: string, access: string, version?: number) => Effect.Effect<string>
 		readonly publish: (id: string, body: unknown) => Effect.Effect<string>
 		readonly setNow: (millis: number) => void
+		readonly throttle: DataThrottleService
 	}) => Effect.Effect<A>,
 ) => {
 	const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
@@ -165,6 +168,7 @@ const withPages = <A>(
 				})
 			return yield* run({
 				api,
+				throttle: yield* DataThrottle,
 				page: (url, sent) => Effect.map(serve(request(url, sent)), HttpServerResponse.toWeb),
 				onDomain: (url, sent) =>
 					Effect.map(serveOnDomain(request(url, sent)), HttpServerResponse.toWeb),
@@ -540,13 +544,20 @@ describe("A page reaching its artifact's data", () => {
 				const root = yield* link(id, "write")
 				const from = (caller: string, collection = "board") =>
 					page(`${root}_/data/${collection}`, { headers: { "cf-connecting-ip": caller } })
+				const write = (caller: string) =>
+					page(`${root}_/data/board`, {
+						method: "POST",
+						body: { data: "still served" },
+						headers: { "cf-connecting-ip": caller },
+					})
 				const statuses = (caller: string, calls: number, collection?: string) =>
 					Effect.map(
 						Effect.forEach(Array.from({ length: calls }), () => from(caller, collection)),
 						(responses) => [...new Set(responses.map((response) => response.status))],
 					)
 
-				expect(yield* statuses("203.0.113.1", DATA_CALLS_PER_MINUTE_PER_CALLER)).toEqual([200])
+				expect((yield* write("203.0.113.1")).status).toBe(201)
+				expect(yield* statuses("203.0.113.1", DATA_CALLS_PER_MINUTE_PER_CALLER - 1)).toEqual([200])
 				const slowed = yield* from("203.0.113.1")
 				expect(slowed.status).toBe(429)
 				expect(slowed.headers.get("retry-after")).toBe("60")
@@ -567,7 +578,7 @@ describe("A page reaching its artifact's data", () => {
 					})).status,
 				).toBe(404)
 
-				const used = DATA_CALLS_PER_MINUTE_PER_CALLER + 2
+				const used = DATA_CALLS_PER_MINUTE_PER_CALLER - 1 + 2
 				const callers = Math.ceil(
 					(DATA_CALLS_PER_MINUTE_PER_ARTIFACT - used) / DATA_CALLS_PER_MINUTE_PER_CALLER,
 				)
@@ -578,6 +589,8 @@ describe("A page reaching its artifact's data", () => {
 					left -= calls
 				}
 				expect((yield* from("192.0.2.1")).status).toBe(429)
+				expect((yield* write("192.0.2.2")).status).toBe(201)
+				expect((yield* from("192.0.2.2")).status).toBe(429)
 
 				const other = yield* artifact(COLLECTIONS)
 				const elsewhere = yield* link(other, "write")
@@ -599,6 +612,27 @@ describe("A page reaching its artifact's data", () => {
 						headers: { "cf-connecting-ip": "203.0.113.1" },
 					})).status,
 				).toBe(200)
+			}),
+		))
+
+	it("keeps reads available when the artifact's write budget is full", () =>
+		withPages(({ api, page, artifact, link, throttle }) =>
+			Effect.gen(function* () {
+				const id = yield* artifact(COLLECTIONS)
+				const root = yield* link(id, "write")
+				const managerPath = `/v1/artifacts/${id}/data/board/pinned`
+				expect((yield* api("PUT", managerPath, { data: "kept" })).status).toBe(200)
+				for (let call = 0; call < DATA_CALLS_PER_MINUTE_PER_ARTIFACT; call++) {
+					const bucket = Math.floor(call / DATA_CALLS_PER_MINUTE_PER_CALLER)
+					const caller = bucket === 0 ? "write" : `198.51.100.${bucket}`
+					expect(yield* throttle.admit(id, caller, "write")).toBe(true)
+				}
+				const url = `${root}_/data/board/pinned`
+				const headers = { "cf-connecting-ip": "192.0.2.1" }
+				expect((yield* page(url, { method: "DELETE", headers })).status).toBe(429)
+				const kept = yield* page(url, { headers })
+				expect(kept.status).toBe(200)
+				expect(yield* json<DocumentBody>(kept)).toMatchObject({ data: "kept" })
 			}),
 		))
 

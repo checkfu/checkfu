@@ -38,6 +38,7 @@ import {
 } from "../src/Artifact/ExpireArtifactReservation.command.ts"
 import {
 	ArtifactPublished,
+	ArtifactPublicationConflict,
 	ArtifactVersionNotFound,
 	PublishArtifact,
 } from "../src/Artifact/PublishArtifact.command.ts"
@@ -621,9 +622,11 @@ describe("Artifacts", () => {
 			}),
 			Story.when(publish("unused", 3)),
 			Story.rejected(new ArtifactVersionNotFound({ artifact_id: artifact.id, version: 3 })),
-			Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),
+			Story.when(new UnpublishArtifact({ artifact_id: artifact.id, if_current: "first" })),
 			Story.then(artifact, new ArtifactUnpublished()),
 			Story.state(artifact, { publication_token: "", pinned_version: 0, published_at: 0 }),
+			Story.when(new UnpublishArtifact({ artifact_id: artifact.id, if_current: "first" })),
+			Story.rejected(new ArtifactPublicationConflict({ artifact_id: artifact.id })),
 			Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact),
 			Story.clock(t2),
@@ -637,6 +640,9 @@ describe("Artifacts", () => {
 				pinned_version: 1,
 				published_at: millis(t2),
 			}),
+			Story.when(new UnpublishArtifact({ artifact_id: artifact.id, if_current: "first" })),
+			Story.rejected(new ArtifactPublicationConflict({ artifact_id: artifact.id })),
+			Story.state(artifact, { publication_token: "second" }),
 			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact, new ArtifactDeleted()),
 			Story.call(ArtifactBytes.purge, { artifact_id: artifact.id }),

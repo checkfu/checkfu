@@ -382,31 +382,43 @@ afterEach(() => {
 })
 
 describe("dashboard journeys through the production HTTP boundary and domain", () => {
-	it("rejects an invalid skill without partial admission and preserves the form to create a corrected session", async () => {
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const server = yield* makeTestServer
-				yield* Effect.promise(() => sessionJourney(server.apiFetch))
-			}).pipe(Effect.scoped),
-		)
-		expect(consoleErrors).toEqual([])
-	}, 20_000)
-	it("authors YAML in the UI and explicitly rebases a stale edit without losing tools or historical versions", async () => {
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const server = yield* makeTestServer
-				yield* Effect.promise(() => agentJourney(server.apiFetch))
-			}).pipe(Effect.scoped),
-		)
-		expect(consoleErrors).toEqual([])
-	}, 20_000)
-	it("creates a memory, preserves a conflicting draft, and saves only after loading the newer version", async () => {
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const server = yield* makeTestServer
-				yield* Effect.promise(() => memoryJourney(server.apiFetch))
-			}).pipe(Effect.scoped),
-		)
-		expect(consoleErrors).toEqual([])
-	}, 20_000)
+	it(
+		"rejects an invalid skill without partial admission and preserves the form to create a corrected session",
+		{ timeout: 20_000, tags: ["acceptance", "ui-session-admission"] },
+		async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const server = yield* makeTestServer
+					yield* Effect.promise(() => sessionJourney(server.apiFetch))
+				}).pipe(Effect.scoped),
+			)
+			expect(consoleErrors).toEqual([])
+		},
+	)
+	it(
+		"authors YAML in the UI and explicitly rebases a stale edit without losing tools or historical versions",
+		{ timeout: 20_000, tags: ["acceptance", "ui-agent-conflict"] },
+		async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const server = yield* makeTestServer
+					yield* Effect.promise(() => agentJourney(server.apiFetch))
+				}).pipe(Effect.scoped),
+			)
+			expect(consoleErrors).toEqual([])
+		},
+	)
+	it(
+		"creates a memory, preserves a conflicting draft, and saves only after loading the newer version",
+		{ timeout: 20_000, tags: ["acceptance", "ui-memory-conflict"] },
+		async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const server = yield* makeTestServer
+					yield* Effect.promise(() => memoryJourney(server.apiFetch))
+				}).pipe(Effect.scoped),
+			)
+			expect(consoleErrors).toEqual([])
+		},
+	)
 })

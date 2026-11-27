@@ -19,7 +19,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 
-it("checks resolved file, skill and artifact mounts at commit in each initial-message mode", async () => {
+it("checks resolved mounts against their owners at commit in each initial-message mode", async () => {
 	const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 		makeAssistantReply(model, null, "ok", 1, 1),
 	)
@@ -31,6 +31,7 @@ it("checks resolved file, skill and artifact mounts at commit in each initial-me
 				const sessions = yield* Session
 				let beforeCommit: Effect.Effect<unknown> = Effect.void
 				let captured: AdmitMountedSession | undefined
+				const capturedCommand = () => captured
 				const { fetch: intercepted } = yield* makeApiHandler.pipe(
 					Effect.provideService(AdmitMountedSessionDecision, {
 						...admission,
@@ -74,6 +75,10 @@ it("checks resolved file, skill and artifact mounts at commit in each initial-me
 						content: [{ type: "text", text: "Read." }],
 					})),
 				)
+				const store = (name: string) => create("/v1/memory_stores", { name })
+				const memoryMount = (id: string) => ({ type: "memory_store", memory_store_id: id })
+				const admit = (fetch: typeof api, body: unknown, headers = AUTH_HEADERS) =>
+					sendRequest(fetch, { method: "POST", path: "/v1/sessions", body, headers })
 				for (const type of ["file", "artifact", "skill"] as const) {
 					for (const initial_events of messages) {
 						const target = yield* type === "file" ? file() : artifact()
@@ -110,6 +115,70 @@ it("checks resolved file, skill and artifact mounts at commit in each initial-me
 						expect((yield* sessions.get(captured.session_id))._tag).toBe("Uninitialized")
 					}
 				}
+				const shared = yield* file()
+				for (const initial_events of messages) {
+					for (const archive of [false, true]) {
+						const target = yield* store("Context")
+						const resources = archive
+							? [{ type: "file", file_id: shared.id }, memoryMount(target.id)]
+							: [memoryMount(target.id)]
+						beforeCommit = sendRequest(api, {
+							method: archive ? "POST" : "DELETE",
+							path: `/v1/memory_stores/${target.id}${archive ? "/archive" : ""}`,
+							headers: AUTH_HEADERS,
+						}).pipe(Effect.tap((response) => Effect.sync(() => expect(response.status).toBe(200))))
+						captured = undefined
+						const refused = yield* admit(intercepted, {
+							agent: agent.id,
+							environment_id: env.id,
+							resources,
+							initial_events,
+						})
+						expect(refused.status).toBe(archive ? 409 : 404)
+						expect(yield* json(refused)).toMatchObject({
+							error: {
+								message: `Memory store ${target.id} ${archive ? "is archived" : "not found"}.`,
+							},
+						})
+						const command = capturedCommand()
+						if (command === undefined) {
+							throw new Error("The mounted admission boundary was not reached")
+						}
+						expect((yield* sessions.get(command.session_id))._tag).toBe("Uninitialized")
+					}
+				}
+				const activeStore = yield* store("Context")
+				const memoryBody = {
+					agent: agent.id,
+					environment_id: env.id,
+					resources: [memoryMount(activeStore.id)],
+				}
+				const memoryHeaders = { ...AUTH_HEADERS, "idempotency-key": "memory-mount-replay" }
+				beforeCommit = Effect.void
+				captured = undefined
+				const acceptedMemory = yield* admit(intercepted, memoryBody, memoryHeaders)
+				expect(acceptedMemory.status).toBe(201)
+				const memorySession = yield* json<{ id: string; resources: ReadonlyArray<unknown> }>(
+					acceptedMemory,
+				)
+				const memoryCommand = capturedCommand()
+				if (memoryCommand === undefined) {
+					throw new Error("The mounted admission boundary was not reached")
+				}
+				const { _tag: memoryCommandTag, ...memoryInput } = memoryCommand
+				expect(memoryCommandTag).toBe("AdmitMountedSession")
+				expect(() => new AdmitSession(memoryInput)).toThrow()
+				expect(() => new OpenAutomationSession({ ...memoryInput, text: "Run." })).toThrow()
+				const deleted = yield* sendRequest(api, {
+					method: "DELETE",
+					path: `/v1/memory_stores/${activeStore.id}`,
+					headers: AUTH_HEADERS,
+				})
+				expect(deleted.status).toBe(200)
+				const memoryReplay = yield* admit(api, memoryBody, memoryHeaders)
+				expect(memoryReplay.status).toBe(201)
+				expect(yield* json(memoryReplay)).toMatchObject(memorySession)
+
 				const upload = yield* file()
 				const secondFile = yield* file()
 				const firstArtifact = yield* artifact("first")
@@ -146,10 +215,11 @@ it("checks resolved file, skill and artifact mounts at commit in each initial-me
 					"first",
 					"second",
 				])
-				if (captured === undefined) {
+				const mixedCommand = capturedCommand()
+				if (mixedCommand === undefined) {
 					throw new Error("Mounted admission did not receive the mixed request")
 				}
-				const { _tag, ...command } = captured
+				const { _tag, ...command } = mixedCommand
 				expect(_tag).toBe("AdmitMountedSession")
 				expect(() => new AdmitSession(command)).toThrow()
 				expect(

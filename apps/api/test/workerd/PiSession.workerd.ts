@@ -2,7 +2,7 @@ import { MAX_SESSION_INITIAL_MESSAGES_BYTES } from "@checkfu/sdk/Limits"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import {
 	describeEager,
 	describeMeasured,
@@ -84,45 +84,60 @@ describe("PiSession real Durable Object under workerd", () => {
 		await fakeGitHub?.close()
 	}, 30_000)
 
-	it("takes a YAML project through the installed npm CLI and an independent MCP client without losing history or competing edits", async () => {
-		const deadline = Date.now() + 15_000
-		let mcpUrl: string | undefined
-		while (mcpUrl === undefined && Date.now() < deadline) {
-			mcpUrl = stripAnsi(workerLogs.join("")).match(/\[McpWorker\] ready at (http:\/\/[^\s]+)/)?.[1]
-			if (mcpUrl === undefined) {
-				await sleep(100)
-			}
-		}
-		if (mcpUrl === undefined) {
-			throw new Error("The MCP Worker did not become ready")
-		}
-		fakeOpenAI.setHandler((req) =>
-			req.toolOutputs.length === 0
-				? {
-						kind: "tool_call",
-						name: "write",
-						arguments: {
-							path: "/mnt/session/outputs/report.csv",
-							content: "region,total\nEMEA,4217\n",
-						},
-					}
-				: { kind: "reply", text: "The report is ready." },
-		)
-		try {
-			await authoredProjectJourney({
-				baseUrl,
-				mcpUrl: `${mcpUrl}/mcp`,
-				apiKey: TEST_API_KEY,
+	afterEach(({ task }) => {
+		if (task.tags?.includes("acceptance")) {
+			Object.assign(task.meta, {
+				workerLogs: workerLogs.join("").slice(-30_000),
+				modelRequests: fakeOpenAI.requests.length,
 			})
-		} finally {
-			fakeOpenAI.setHandler((req) => ({
-				kind: "reply",
-				text: `Echo: ${req.lastUserText}`,
-				inputTokens: 17,
-				outputTokens: 9,
-			}))
 		}
-	}, 120_000)
+	})
+
+	it(
+		"takes a YAML project through the installed npm CLI and an independent MCP client without losing history or competing edits",
+		{ timeout: 120_000, tags: ["acceptance", "authored-project"] },
+		async () => {
+			const deadline = Date.now() + 15_000
+			let mcpUrl: string | undefined
+			while (mcpUrl === undefined && Date.now() < deadline) {
+				mcpUrl = stripAnsi(workerLogs.join("")).match(
+					/\[McpWorker\] ready at (http:\/\/[^\s]+)/,
+				)?.[1]
+				if (mcpUrl === undefined) {
+					await sleep(100)
+				}
+			}
+			if (mcpUrl === undefined) {
+				throw new Error("The MCP Worker did not become ready")
+			}
+			fakeOpenAI.setHandler((req) =>
+				req.toolOutputs.length === 0
+					? {
+							kind: "tool_call",
+							name: "write",
+							arguments: {
+								path: "/mnt/session/outputs/report.csv",
+								content: "region,total\nEMEA,4217\n",
+							},
+						}
+					: { kind: "reply", text: "The report is ready." },
+			)
+			try {
+				await authoredProjectJourney({
+					baseUrl,
+					mcpUrl: `${mcpUrl}/mcp`,
+					apiKey: TEST_API_KEY,
+				})
+			} finally {
+				fakeOpenAI.setHandler((req) => ({
+					kind: "reply",
+					text: `Echo: ${req.lastUserText}`,
+					inputTokens: 17,
+					outputTokens: 9,
+				}))
+			}
+		},
+	)
 
 	it.each(["rate limit", "provider unavailable", "truncated stream"] as const)(
 		"preserves a queued follow-up after a %s and recovers without duplicate replies",
