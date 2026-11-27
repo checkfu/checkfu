@@ -2166,6 +2166,106 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "files_deleteFile",
+		title: "Delete a file",
+		description: "Delete a file and its bytes. This cannot be undone.",
+		method: "DELETE",
+		path: "/v1/files/{file_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						file_id: {
+							type: "string",
+							minLength: 1,
+							description: "File ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["file_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "files_getFile",
+		title: "Retrieve a file",
+		description: "Retrieve a file's name, type, size and sha256",
+		method: "GET",
+		path: "/v1/files/{file_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						file_id: {
+							type: "string",
+							minLength: 1,
+							description: "File ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["file_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "files_listFiles",
+		title: "List files",
+		description:
+			"List files in creation order, oldest first by default. Deleted files never appear.",
+		method: "GET",
+		path: "/v1/files",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						page: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description: "Opaque page token from the previous response's next_page.",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "memoryStores_archiveMemoryStore",
 		title: "Archive a memory store",
 		description: "Make a memory store read-only and stop new sessions from attaching it",

@@ -11,6 +11,7 @@ import { ApiCalls } from "../../src/Api.ts"
 import { CUSTODY_TABLES } from "../../src/Connection/SecretCustody.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
 import { ArtifactMarks } from "../../src/Artifacts/ArtifactOwnership.ts"
+import { OwnerMarks } from "../../src/Files/ByteOwner.ts"
 import { ArtifactLinkClaims } from "../../src/Content/ArtifactLink.ts"
 import { Vaults } from "@checkfu/domain/Vaults.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
@@ -77,7 +78,7 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 	"artifact-object":
 		"Artifact manifests stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
 	"artifact-marks":
-		"Every artifact owner object keeps its marks in storage across deploys, and a later build reads them back. Add a field only with a decoding default; for any other change, store it under a new key and keep reading the old one.",
+		"Every artifact owner object and file owner object keeps its marks in storage across deploys, and a later build reads them back. Add a field only with a decoding default; for any other change, store it under a new key and keep reading the old one.",
 	"signed-link":
 		"A viewing link keeps working across deploys until it expires, up to seven days after it was made. Keep the claims of links the last build signed readable until every one of them has expired.",
 	"api-call":
@@ -507,6 +508,7 @@ const ARTIFACT_OBJECTS: ReadonlyArray<PersistedShape> = [
 
 const ARTIFACT_MARKS: ReadonlyArray<PersistedShape> = [
 	{ id: "artifact-marks:ArtifactObjects/marks", kind: "artifact-marks", schema: ArtifactMarks },
+	{ id: "artifact-marks:FileObjects/marks", kind: "artifact-marks", schema: OwnerMarks },
 ]
 
 const SIGNED_LINKS: ReadonlyArray<PersistedShape> = [

@@ -5,7 +5,7 @@ import {
 } from "@checkfu/domain/Agent/AgentTypes"
 import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
-import { MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
+import { MAX_FILE_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
 	MAX_MCP_SERVERS_TEXT_LENGTH,
@@ -33,6 +33,7 @@ import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "../Artifacts/A
 import {
 	AgentBodyLimit,
 	ArtifactBlobLimit,
+	FileBodyLimit,
 	ArtifactBodyLimit,
 	Authentication,
 	ERROR_CODES,
@@ -461,6 +462,17 @@ export const ArtifactBlobLimitLive = Layer.succeed(ArtifactBlobLimit, (httpEffec
 				: Effect.die(defect),
 		),
 		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_FILE_BYTES)),
+	),
+)
+
+export const FileBodyLimitLive = Layer.succeed(FileBodyLimit, (httpEffect) =>
+	httpEffect.pipe(
+		Effect.catchDefect((defect) =>
+			isBodyTooLarge(defect)
+				? reject(413, `A file may be at most ${MAX_FILE_BYTES} bytes.`)
+				: Effect.die(defect),
+		),
+		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_FILE_BYTES)),
 	),
 )
 

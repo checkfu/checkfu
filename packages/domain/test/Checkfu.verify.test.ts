@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { FileBytesKept } from "../src/File/FileBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
 import {
 	NO_AGENT_TOOLS,
@@ -183,6 +184,15 @@ const STANDING = {
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.OpeningTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
+	"File.StatusIsKnown": "proved",
+	"File.DescribedExactlyWhenCreated": "proved",
+	"File.AReservationIsOpenOnlyBeforeCreation": "proved",
+	"File.OnlyTheLatestReservationIsOpen": "proved",
+	"File.CreatedFileNeverReturnsToUninitialized": "proved",
+	"File.DeletedStaysDeleted": "proved",
+	"File.ContentNeverChanges": "proved",
+	"File.ReservationsAreNumberedInOrder": "proved",
+	"File.CreatingTakesTheOpenReservation": "proved",
 	"Session.APausedTurnHoldsNoModelRequest": "proved",
 	"Session.APausedTurnWaitsOnACall": "proved",
 	"Session.APausedTurnAskedWhatItWaitsOn": "proved",
@@ -378,6 +388,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"PublishArtifact",
 			"UnpublishArtifact",
 			"ClaimArtifactIdempotencyKey",
+			"ReserveFile",
+			"CreateFile",
+			"DeleteFile",
 			"CreateMemoryStore",
 			"UpdateMemoryStore",
 			"ArchiveMemoryStore",
@@ -443,6 +456,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"FreeAutomationSlot",
 			"ExpireArtifactReservations",
 			"ReleaseArtifactBytes",
+			"ExpireFileReservations",
+			"ReleaseFileBytes",
 		])
 		expect(report.explored.sagas).toEqual(["RunTurn"])
 		expect(report.explored.unstarted).toEqual([])
@@ -481,7 +496,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const observedViewKeys = new Map<string, Set<string>>()
 		const layer = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
-				Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
+				Layer.provide([
+					ArtifactBytesKept,
+					FileBytesKept,
+					SessionOutputsUnpublished,
+					WebhookEventsNoop,
+				]),
 				Layer.provide([HarnessStubLayer, ListingStore.memory]),
 			),
 		).pipe(

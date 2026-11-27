@@ -14,6 +14,9 @@ import { Artifact } from "../Artifact/Artifact.aggregate.ts"
 import { ArtifactCreated } from "../Artifact/CreateArtifact.command.ts"
 import { ArtifactDeleted } from "../Artifact/DeleteArtifact.command.ts"
 import { ArtifactOpened } from "../Artifact/OpenArtifact.command.ts"
+import { FileCreated } from "../File/CreateFile.command.ts"
+import { FileDeleted } from "../File/DeleteFile.command.ts"
+import { File } from "../File/File.aggregate.ts"
 import { EnvironmentArchived } from "../Environment/ArchiveEnvironment.command.ts"
 import { EnvironmentCreated } from "../Environment/CreateEnvironment.command.ts"
 import { EnvironmentDeleted } from "../Environment/DeleteEnvironment.command.ts"
@@ -31,7 +34,7 @@ import type { ListingChange } from "./ListingStore.ts"
 export class Listing extends Domain.Projection(
 	"Listing",
 	{
-		from: [Agent, Environment, Session, Automation, Artifact, MemoryStore],
+		from: [Agent, Environment, Session, Automation, Artifact, MemoryStore, File],
 		key: Schema.String,
 		keyOf: {
 			Agent: ({ source }) => source.id,
@@ -39,6 +42,7 @@ export class Listing extends Domain.Projection(
 			Session: ({ source }) => source.id,
 			Automation: ({ source }) => source.id,
 			Artifact: ({ source }) => source.id,
+			File: ({ source }) => source.id,
 			MemoryStore: ({ source }) => source.id,
 		},
 		on: [
@@ -55,6 +59,8 @@ export class Listing extends Domain.Projection(
 			ArtifactCreated,
 			ArtifactOpened,
 			ArtifactDeleted,
+			FileCreated,
+			FileDeleted,
 			MemoryStoreCreated,
 			MemoryStoreArchived,
 			MemoryStoreDeleted,
@@ -98,6 +104,10 @@ const changeOf = ({
 			return { kind: "artifact", id, created_at, agent_id: null, status: LISTED }
 		case "artifact.deleted":
 			return { kind: "artifact", id, created_at, agent_id: null, status: DELETED }
+		case "file.created":
+			return { kind: "file", id, created_at, agent_id: null, status: LISTED }
+		case "file.deleted":
+			return { kind: "file", id, created_at, agent_id: null, status: DELETED }
 		case "memory_store.created":
 			return { kind: "memory_store", id, created_at, agent_id: null, status: LISTED }
 		case "memory_store.archived":
@@ -107,7 +117,7 @@ const changeOf = ({
 	}
 }
 
-export const LISTING_VERSION = 3
+export const LISTING_VERSION = 4
 
 export const ListingLive = Listing.toLayer(
 	Effect.gen(function* () {

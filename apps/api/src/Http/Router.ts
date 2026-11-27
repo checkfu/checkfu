@@ -23,10 +23,12 @@ import { AgentsLive } from "./AgentsHandlers.ts"
 import { AutomationsLive } from "./AutomationsHandlers.ts"
 import { CheckfuApi, REQUEST_ID_HEADER, RequestId, apiError } from "./Api.ts"
 import { ArtifactsLive } from "./ArtifactsHandlers.ts"
+import { FilesLive } from "./FilesHandlers.ts"
 import { EnvironmentsLive } from "./EnvironmentsHandlers.ts"
 import {
 	AgentBodyLimitLive,
 	ArtifactBlobLimitLive,
+	FileBodyLimitLive,
 	ArtifactBodyLimitLive,
 	AuthenticationLive,
 	EventBatchBodyLimitLive,
@@ -95,6 +97,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		SessionsLive,
 		AutomationsLive,
 		ArtifactsLive,
+		FilesLive,
 		VaultsLive,
 		WebhooksLive,
 		MemoryStoresLive,
@@ -104,6 +107,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		RequestValidationLive,
 		AgentBodyLimitLive,
 		ArtifactBlobLimitLive,
+		FileBodyLimitLive,
 		ArtifactBodyLimitLive,
 		EventBatchBodyLimitLive,
 		MemoryBodyLimitLive,

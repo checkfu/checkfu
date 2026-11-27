@@ -1693,7 +1693,12 @@ describe("@checkfu/sdk", () => {
 
 		it("exports complete Forge-generated SDK_OPERATION_BINDINGS and Op type helpers", () => {
 			const ungenerated = new Set(["health", "auth"])
-			const internalEndpoints = new Set(["artifacts.getFileContent", "artifacts.uploadBlob"])
+			const internalEndpoints = new Set([
+				"artifacts.getFileContent",
+				"artifacts.uploadBlob",
+				"files.content",
+				"files.upload",
+			])
 			const expectedEndpoints = Object.entries(CheckfuApi.groups)
 				.filter(([group]) => !ungenerated.has(group))
 				.flatMap(([group, apiGroup]) =>

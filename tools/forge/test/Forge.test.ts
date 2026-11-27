@@ -179,6 +179,9 @@ describe("Cloudflare Forge pipeline", () => {
 				httpMethod: "POST",
 				path: "/v1/environments/{environment_id}",
 			},
+			{ group: "files", name: "delete", httpMethod: "DELETE", path: "/v1/files/{file_id}" },
+			{ group: "files", name: "list", httpMethod: "GET", path: "/v1/files" },
+			{ group: "files", name: "retrieve", httpMethod: "GET", path: "/v1/files/{file_id}" },
 			{
 				group: "memory-stores",
 				name: "archive",
@@ -780,7 +783,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(79)
+		expect(inspectedMethods.length).toBe(82)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

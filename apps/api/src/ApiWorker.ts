@@ -25,6 +25,8 @@ import { customDomains } from "./CustomDomain.ts"
 import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
+import { FileBytesLive } from "./Files/FileBytesLive.ts"
+import { FileObjectsLive, FileStoreR2 } from "./Files/FileObjects.do.ts"
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "./Artifacts/ResolvePublication.ts"
 import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
@@ -103,6 +105,11 @@ const PiHarnessExecutorLive = Layer.effect(
 
 const ArtifactStoreLive = ArtifactStoreR2.pipe(
 	Layer.provide(ArtifactObjectsLive),
+	Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
+)
+
+const FileStoreLive = FileStoreR2.pipe(
+	Layer.provide(FileObjectsLive),
 	Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
 )
 
@@ -198,6 +205,7 @@ const CheckfuLive = Checkfu.layer(
 		Layer.provide(PiDurableHarnessLive),
 		Layer.provide(SessionOutputsLive),
 		Layer.provide(ArtifactBytesLive),
+		Layer.provide(FileBytesLive),
 		Layer.provide(ListingLive),
 		Layer.provide(WebhookEventsRuntimeLive),
 	),
@@ -206,6 +214,7 @@ const CheckfuLive = Checkfu.layer(
 	Layer.provide(PiHarnessExecutorLive),
 	Layer.provide(PlacedDurableObjects),
 	Layer.provide(ArtifactStoreLive),
+	Layer.provide(FileStoreLive),
 )
 
 const VaultsLive = Vaults.layer(
@@ -256,6 +265,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	vaultListingQueriesFrom(VaultsLive),
 	CheckfuLive,
 	ArtifactStoreLive,
+	FileStoreLive,
 	CustomToolFaultsLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),

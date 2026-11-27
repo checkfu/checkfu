@@ -753,6 +753,42 @@
 			"Checkfu.ASessionGetsAReply": {
 				"kind": "sometimes",
 				"source": "(m) => m.TurnInput.some((view) => view.state.last_reply_turn >= 1)"
+			},
+			"File.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"ready\", s.status === \"deleted\"].some((ok) => ok)"
+			},
+			"File.DescribedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\ts.status === \"\",\n\t\t\t\t\ts.filename === \"\",\n\t\t\t\t\ts.content_type === \"\",\n\t\t\t\t\ts.sha256 === \"\",\n\t\t\t\t\ts.size === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.filename !== \"\", s.content_type !== \"\", s.sha256 !== \"\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"File.AReservationIsOpenOnlyBeforeCreation": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.open_reservation === 0, s.status === \"\"].some((ok) => ok)"
+			},
+			"File.OnlyTheLatestReservationIsOpen": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.open_reservation === 0, s.open_reservation === s.reservations].some((ok) => ok)"
+			},
+			"File.CreatedFileNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"File.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"deleted\", after.status === \"deleted\"].some((ok) => ok)"
+			},
+			"File.ContentNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.filename === before.filename,\n\t\t\t\t\tafter.content_type === before.content_type,\n\t\t\t\t\tafter.size === before.size,\n\t\t\t\t\tafter.sha256 === before.sha256,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"File.ReservationsAreNumberedInOrder": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.reservations === before.reservations,\n\t\t\t\t[command._tag === \"ReserveFile\", after.reservations === before.reservations + 1].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"File.CreatingTakesTheOpenReservation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"CreateFile\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.open_reservation !== 0, before.open_reservation === command.reservation].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)\n\t\t}"
 			}
 		}
 	}

@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream"
 import { agentCommand } from "./Commands/Agent.ts"
 import { applyCommand } from "./Commands/Apply.ts"
 import { deployCommand, destroyCommand } from "./Commands/Deploy.ts"
+import { filesCommands } from "./Commands/Files.ts"
 import { loginCommand, logoutCommand } from "./Commands/Login.ts"
 import { sessionsConnectCommand } from "./Commands/SessionsConnect.ts"
 import { CliFailure } from "./Errors.ts"
@@ -29,6 +30,7 @@ export const CheckfuCli = RootCommand.pipe(
 		logoutCommand,
 		destroyCommand,
 		...buildGeneratedResourceCommands({
+			files: filesCommands,
 			sessions: [sessionsConnectCommand],
 		}),
 	]),
