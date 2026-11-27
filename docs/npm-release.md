@@ -7,6 +7,7 @@ Build and qualify the two npm tarballs from a clean release commit. The CLI tarb
 ```sh
 bun install --frozen-lockfile
 bun run check
+bun run typecheck
 bun run --cwd apps/cli test
 bun run --cwd apps/api test:workerd
 candidate_dir="$(mktemp -d)"
