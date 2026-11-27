@@ -1,12 +1,12 @@
 # Artifact capabilities
 
-Status: a design note. Nothing here is built. It follows `docs/files-and-artifacts.md` and settles the shape of the next three steps: the per-artifact database, the page's access to it, and artifact types.
+This proposal covers the per-artifact database, access from artifact pages, and artifact types. [Files and artifacts](files-and-artifacts.md) describes the current model.
 
 ## Where artifacts are today
 
-An artifact is a named set of files with versions. A version is opened by a signed viewing link, or at a public address once the artifact is published. Both are served by the content Worker, which only answers `GET` and `HEAD`.
+An artifact is a named set of files with versions. A version is opened by a signed viewing link, or at a public address once the artifact is published. The content Worker serves files over `GET` and `HEAD` and responds to CORS preflight requests.
 
-A page runs in a sandbox with no origin of its own. It has no cookies, no storage and no identity, and it cannot call the API: it holds no key. So a page today can only show what its files contain. A dashboard is frozen at the moment it was saved, and a form has nowhere to send what is typed into it.
+An artifact page runs in a sandbox with an opaque origin and holds no Checkfu API credentials. Checkfu serves the version’s files. This proposal adds a way for a page to read or submit data to the artifact’s own database.
 
 ## What a capability is
 
@@ -50,7 +50,15 @@ Capability endpoints live under one reserved path, `_/`, beside the page's files
 <address>/_/data/responses    a capability call
 ```
 
-A version may not hold files under `_/`. The page calls a relative URL, so the same page works from a viewing link and from a public address without knowing which it is on.
+A version may not hold files under the reserved top-level `_/` path. A page resolves capability calls against the artifact address root, including when the page is in a subdirectory. The page helper derives that root from the current URL using the content Worker’s address rules.
+
+| Address | Root path |
+|---|---|
+| Signed viewing link | `/a/{token}/` |
+| Path-based publication | `/p/{address}/` |
+| Publication hostname | `/` |
+
+The page stays in its opaque-origin sandbox and sends credentialless requests. The content Worker identifies capability routes before handling `OPTIONS`, advertises only the methods and request headers supported by that route, and authorizes the actual request against the address. Capability responses, including errors, use `Cache-Control: private, no-store`. [Fetch Standard](https://fetch.spec.whatwg.org/)
 
 The content Worker stays read-only for files. Other methods are accepted only under `_/`, and only for capabilities the version declares.
 
@@ -59,9 +67,9 @@ The content Worker stays read-only for files. Other methods are accepted only un
 A capability call is allowed only if the address it arrived at grants it.
 
 - **Viewing link.** The link's signed claims gain a level: `view` (the default, files only), `read` or `write`. Creating a link names the level.
-- **Publication.** Publishing names the level for the public: `view`, `read` or `write`. The default is `view`.
+- **Publication.** An explicit grant sets the public level (`view`, `read` or `write`) and records the collection operations the version being published permits at that level. If the grant is omitted, a new publication starts at `view` and an existing publication keeps its saved grant.
 
-The page's declaration is the ceiling. A `write` link on a collection the version marks `"visitors": "read"` can still only read. The lower of the two always applies.
+Each call uses the grant and the declaration for the version resolved by that address. A `write` link on a collection the version marks `"visitors": "read"` can only read. A signed link keeps its version and grant until it expires or its artifact is deleted. A public address grants only the operations allowed by both the saved publication grant and the version it currently serves. Following the latest version or moving an existing publication to a different version cannot exceed the saved grant. Access beyond those saved operations requires an explicit new grant from the owner. Unpublishing revokes the public address.
 
 There are no visitor accounts. A call is made by "whoever holds this address". Knowing who a visitor is would be a capability of its own, and is not designed here.
 
@@ -92,16 +100,16 @@ A page is untrusted and may be public, so it is not given a query language. Docu
 
 `add` is what a form or a poll needs: anyone can submit, nobody can read or change what others submitted.
 
-**The owner always has full access** through the API, with the API key:
+An authenticated client uses the artifact management API to manage its data.
 
 ```
 GET | PUT | DELETE  /v1/artifacts/{artifact_id}/data/{collection}/{id}
 GET | POST          /v1/artifacts/{artifact_id}/data/{collection}
 ```
 
-This is how an agent fills a dashboard's numbers, and how a client reads a form's responses. A tool for the agent to write data follows the same path as `save_artifact`.
+This lets a client fill a dashboard or read a form’s responses. A separate agent tool uses a private Worker binding scoped to the running turn and artifacts created by that session. Access to other artifacts would require an explicit write grant.
 
-**Limits.** At most 16 collections, 10,000 documents in a collection, 64 KiB in a document and 64 MiB in a database. A call that would pass one is refused. Calls from one address are rate limited.
+The database allows up to 16 collections, 10,000 documents per collection, 64 KiB of encoded JSON per document, and 64 MiB of document data. Each mutation checks quotas and updates the counters in the same SQLite transaction. Calls are rate limited per address and per artifact. [SQLite-backed Durable Object storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)
 
 ### Data is kept apart from versions
 
@@ -109,20 +117,20 @@ The database belongs to the artifact, not to a version.
 
 - Adding a version leaves the data as it is.
 - Pointing a publication at an older version changes the page and never the data.
-- A collection a new version stops declaring keeps its documents. The owner can still read and delete them. Visitors cannot reach it.
-- Deleting the artifact deletes its data.
+- A collection keeps its documents when a new version drops the declaration. The management API can still read and delete them. A visitor can reach the collection only through an address that resolves to a version still declaring it and grants the operation.
+- Deleting the artifact revokes data access and schedules erasure. The database owner records a deletion marker and clears the documents in one transaction. Delayed calls that arrive after the marker are refused.
 
-One storage object per artifact holds the database. It is the only writer, so two calls at once are applied one after the other.
+One SQLite-backed Durable Object owns each artifact’s database. It applies each mutation and its quota checks in one transaction. Access checks and a deletion marker keep delayed retries from recreating erased data.
 
 ## Types
 
 A document, a slide deck and a dashboard are all artifacts. What differs is the page that shows the content. A type is that page, made once and reused.
 
 - **A type is an artifact** marked as one. Its files are a page and its `artifact.json`.
-- **An artifact made from a type** names the type and one of its versions, and supplies only content: a data file, or documents in its database.
-- **Opening it** serves the type's page over the artifact's own content and data.
+- **An artifact made from a type** names an accessible type version and supplies its own content as a data file or documents in its database.
+- **Opening it** serves the pinned template over the artifact’s content and database. The page’s capability declarations come from that template. Instance content cannot replace template paths, including the entry page and `artifact.json`. Grants come from the derived artifact’s own viewing link or publication.
 
-The type's version is pinned when the artifact's version is made. A new version of a type changes nothing that already exists. Moving an artifact to a newer type version is adding a version to that artifact.
+The derived version keeps the template files and effective declaration it was built with. Publishing a new type version or deleting the source type does not remove those files. Adopting a newer template creates a new version of the derived artifact.
 
 "Document", "slides" and "dashboard" are the first three types. Adding a kind of artifact then means publishing a type, not changing the platform.
 
@@ -132,10 +140,11 @@ These are to be proved or checked when each part is built, in the same way as th
 
 - A version's capabilities are recorded when it is created and never change.
 - A capability call is refused unless the version declares it and the address grants it.
-- A visitor's access to a collection never exceeds the version's `visitors` value.
+- A visitor's access to a collection never exceeds the version's `visitors` value. Moving a publication to a different version never grants an operation the owner has not approved.
 - Data belongs to exactly one artifact. No call reaches another artifact's data.
 - Adding a version or changing a publication changes no data.
-- No data remains for a deleted artifact.
+- Deletion revokes access, eventually erases the data, and prevents delayed writes from recreating it.
+- The same page can call its capability route from a signed link, a public path, or a public hostname, including when the page is in a subdirectory. Preflight does not grant access.
 - An artifact made from a type records the type and the version, and they never change for that version.
 
 ## Order of work
@@ -149,7 +158,6 @@ These are to be proved or checked when each part is built, in the same way as th
 | E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C |
 | F | The document, slides and dashboard types | E |
 
-Each step is one pull request that states what it leaves out.
 
 ## Open questions
 

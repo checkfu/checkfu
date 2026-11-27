@@ -145,7 +145,7 @@ An artifact is sometimes a document, sometimes a slide deck, sometimes a dashboa
 
 **Rules to add when these are built:** a version's capabilities never change; an artifact made from a type records the type and version it was made from; deleting an artifact deletes its data.
 
-`docs/artifact-capabilities.md` works these three out: how a version declares a capability, how a page calls one, who is granted access, the per-artifact database, and types.
+The [artifact capabilities proposal](artifact-capabilities.md) describes version declarations, sharing grants, the per-artifact database, and types.
 
 ## Skill
 
