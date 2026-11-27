@@ -282,6 +282,16 @@ export const reusedKey = reject(409, "Idempotency-Key was already used for a dif
 	code: ERROR_CODES.idempotencyKeyReused,
 })
 
+export const verifyIdempotencyClaim = (
+	events: ReadonlyArray<{ readonly _tag: string; readonly fingerprint?: string }>,
+	tag: string,
+	fingerprint: string,
+	conflict = reusedKey,
+) =>
+	events.some((event) => event._tag === tag && event.fingerprint === fingerprint)
+		? Effect.void
+		: conflict
+
 export const createCommandId = (
 	digest: Digest.Digest["Service"],
 	resource: PendingResourceType,

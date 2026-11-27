@@ -134,6 +134,7 @@ import type {
 } from "./Api.ts"
 import {
 	reusedKey,
+	verifyIdempotencyClaim,
 	archiveAndRead,
 	commitForStream,
 	createIdentity,
@@ -178,8 +179,7 @@ export const SessionReadWaitTimeout = Context.Reference<Duration.Input>(
 )
 
 const SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
-const IDEMPOTENCY_CONFLICT_MESSAGE =
-	"Event id or Idempotency-Key was already used for a different event."
+const reusedEventId = reject(409, "Event id was already used for a different event.")
 
 const sessionEventCommandId = (
 	digest: Digest.Digest["Service"],
@@ -1286,20 +1286,15 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							new ClaimIdempotencyKey({ session_id: id, fingerprint }),
 							{ commandId: yield* idempotentCommandId(digest, "batch", [id, idempotencyKey]) },
 						)
-						if (
-							!claim.events.some(
-								(event) =>
-									event._tag === "idempotency_key.claimed" && event.fingerprint === fingerprint,
-							)
-						) {
-							return yield* reusedKey
-						}
+						yield* verifyIdempotencyClaim(claim.events, "idempotency_key.claimed", fingerprint)
 					}
 
 					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
 						const sendOptions = { commandId: item.commandId }
 						const eventId = submittedSessionEventId(id, item.commandId)
+						const eventConflict =
+							item.eventId === undefined && idempotencyKey !== undefined ? reusedKey : reusedEventId
 						const claimed =
 							item.eventId === undefined && idempotencyKey === undefined
 								? Effect.void
@@ -1309,15 +1304,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 											new ClaimIdempotencyKey({ session_id: id, fingerprint }),
 											sendOptions,
 										)
-										if (
-											!claim.events.some(
-												(event) =>
-													event._tag === "idempotency_key.claimed" &&
-													event.fingerprint === fingerprint,
-											)
-										) {
-											return yield* reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-										}
+										yield* verifyIdempotencyClaim(
+											claim.events,
+											"idempotency_key.claimed",
+											fingerprint,
+											eventConflict,
+										)
 									})
 						const outcome =
 							item.type === "system.message"
@@ -1337,7 +1329,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 													(event) => event._tag === "system.message",
 												)
 												return recorded === undefined
-													? reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+													? eventConflict
 													: Effect.succeed({
 															type: "system.message" as const,
 															id: eventId,
@@ -1414,7 +1406,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 																			id: eventId,
 																			processed_at: null,
 																		})
-																	: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+																	: eventConflict,
 															),
 														),
 												)
@@ -1433,7 +1425,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 																	committed?._tag !== "user.message" ||
 																	committed.content[0]?.text !== item.text
 																) {
-																	return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+																	return eventConflict
 																}
 																if (receipt.reply === undefined) {
 																	return Effect.die(

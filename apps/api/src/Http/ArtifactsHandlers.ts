@@ -72,6 +72,7 @@ import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
 	reusedKey,
+	verifyIdempotencyClaim,
 	canonicalJsonDigest,
 	handled,
 	idempotentCommandId,
@@ -544,15 +545,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					new ClaimArtifactIdempotencyKey({ artifact_id: id, fingerprint }),
 					{ commandId: yield* idempotentCommandId(digest, "publication", [id, idempotencyKey]) },
 				)
-				if (
-					!claim.events.some(
-						(event) =>
-							event._tag === "artifact.idempotency_key_claimed" &&
-							event.fingerprint === fingerprint,
-					)
-				) {
-					return yield* reusedKey
-				}
+				yield* verifyIdempotencyClaim(claim.events, "artifact.idempotency_key_claimed", fingerprint)
 				const commandId = yield* idempotentCommandId(digest, `${request.operation}-artifact`, [
 					request.operation,
 					"artifact",

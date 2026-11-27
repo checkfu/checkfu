@@ -43,6 +43,7 @@ import {
 import { CheckfuApi } from "./Api.ts"
 import {
 	reusedKey,
+	verifyIdempotencyClaim,
 	handled,
 	idempotentCommandId,
 	idempotentId,
@@ -347,15 +348,11 @@ export const WebhooksLive = HttpApiBuilder.group(CheckfuApi, "webhooks", (handle
 									]),
 								},
 							)
-							if (
-								!claim.events.some(
-									(event) =>
-										event._tag === "webhook.idempotency_key_claimed" &&
-										event.fingerprint === fingerprint,
-								)
-							) {
-								return yield* reusedKey
-							}
+							yield* verifyIdempotencyClaim(
+								claim.events,
+								"webhook.idempotency_key_claimed",
+								fingerprint,
+							)
 							const commandId = yield* idempotentCommandId(digest, "rotate-webhook-secret", [
 								params.webhook_id,
 								idempotencyKey,

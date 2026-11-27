@@ -3919,7 +3919,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						.pipe(Effect.flip)
 					expect(keyedBatchConflict).toMatchObject({
 						type: "error",
-						error: { type: "conflict_error" },
+						error: { type: "conflict_error", code: "idempotency_key_reused" },
 					})
 
 					const explicitBatch = yield* generatedClient.sessions.sendEvents({

@@ -835,11 +835,20 @@ describe("tool calls that wait on an answer", () => {
 				expect((yield* send(call, id, [{ ...message("deploy"), id: "evt-1" }])).status).toBe(200)
 				const paused = yield* until(call, id, waiting(1), "no pause")
 				const use = find(paused, "agent.mcp_tool_use")
-				const reused = yield* send(call, id, [
-					{ ...confirm(use.tool_use_id, "allow"), id: "evt-1" },
-				])
-				expect(reused.status).toBe(409)
-				expect(JSON.stringify(reused.body)).toContain("already used for a different event")
+				const conflictingEvent = { ...confirm(use.tool_use_id, "allow"), id: "evt-1" }
+				for (const headers of [{}, { "idempotency-key": "fresh-key" }]) {
+					const reused = yield* call(
+						"POST",
+						`/v1/sessions/${id}/events`,
+						{
+							events: [conflictingEvent],
+						},
+						headers,
+					)
+					expect(reused.status).toBe(409)
+					expect(reused.body.error.message).toBe("Event id was already used for a different event.")
+					expect(reused.body.error.code).toBeUndefined()
+				}
 				expect((yield* events(call, id)).some((e) => e.type === "user.tool_confirmation")).toBe(
 					false,
 				)
