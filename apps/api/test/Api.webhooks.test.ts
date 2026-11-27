@@ -351,7 +351,7 @@ describe("Webhooks HTTP API", () => {
 		}
 	})
 
-	it("publishes one creation for a keyed empty artifact and a distinct event for version one", async () => {
+	it("publishes one creation for a keyed artifact and a distinct event for its next version", async () => {
 		const creationFanout = Promise.withResolvers<void>()
 		const versionFanout = Promise.withResolvers<void>()
 		const harness = makePiDurableTestLayer(
@@ -401,8 +401,8 @@ describe("Webhooks HTTP API", () => {
 					const create = sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/artifacts",
-						headers: { ...AUTH_HEADERS, "idempotency-key": "empty-upload" },
-						body: { name: "Report" },
+						headers: { ...AUTH_HEADERS, "idempotency-key": "keyed-upload" },
+						body: { name: "Report", files: [{ path: "report.txt", content: "Draft" }] },
 					})
 					const response = yield* create
 					expect(response.status).toBe(201)
@@ -410,7 +410,7 @@ describe("Webhooks HTTP API", () => {
 						readonly id: string
 						readonly version: number
 					}
-					expect(artifact.version).toBe(0)
+					expect(artifact.version).toBe(1)
 					const opened = {
 						event_id: `evt_artifact_${artifact.id}_2`,
 						event_type: "artifact.created",
@@ -426,12 +426,12 @@ describe("Webhooks HTTP API", () => {
 						method: "POST",
 						path: `/v1/artifacts/${artifact.id}/versions`,
 						headers: AUTH_HEADERS,
-						body: { version: 0, files: [{ path: "report.txt", content: "Ready" }] },
+						body: { version: 1, files: [{ path: "report.txt", content: "Ready" }] },
 					})
 					expect(version.status).toBe(201)
 					expect(yield* Effect.promise(() => version.json())).toMatchObject({
 						artifact_id: artifact.id,
-						version: 1,
+						version: 2,
 					})
 					const added = {
 						event_id: `evt_artifact_${artifact.id}_3`,

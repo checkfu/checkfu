@@ -7,7 +7,7 @@ import {
 	MAX_INLINE_FILE_BYTES,
 	MAX_INLINE_TOTAL_BYTES,
 } from "@checkfu/sdk/Schemas"
-import type { ArtifactFileInput, ArtifactVersionFileInput } from "@checkfu/sdk/Schemas"
+import type { ArtifactFileInput, ArtifactKeptFileInput } from "@checkfu/sdk/Schemas"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
@@ -179,9 +179,13 @@ export const sealArtifactFiles = (
 		}
 	})
 
+export type ArtifactVersionEntry =
+	| ArtifactFileInput
+	| (ArtifactKeptFileInput & { readonly size?: number })
+
 export const buildArtifactVersion = (
 	digest: Digest.Digest["Service"],
-	files: ReadonlyArray<ArtifactVersionFileInput>,
+	files: ReadonlyArray<ArtifactVersionEntry>,
 	kept: ReadonlyMap<string, number> = new Map(),
 ): Effect.Effect<BuiltArtifactVersion, InvalidArtifactFiles> =>
 	Effect.gen(function* () {
@@ -191,10 +195,10 @@ export const buildArtifactVersion = (
 		let inlineBytes = 0
 		for (const file of files) {
 			if ("sha256" in file) {
-				const size = kept.get(file.sha256)
+				const size = file.size ?? kept.get(file.sha256)
 				if (size === undefined) {
 					return yield* new InvalidArtifactFiles({
-						message: `File "${file.path}" names sha256 ${file.sha256}, which this artifact does not hold; upload those bytes first, or send the file's content.`,
+						message: `File "${file.path}" names sha256 ${file.sha256}, which is not a file of the current version; name a file by its id, or send its content.`,
 					})
 				}
 				totalBytes += size
@@ -213,13 +217,13 @@ export const buildArtifactVersion = (
 			const bytes = yield* decodeContent(file)
 			if (bytes.byteLength > MAX_INLINE_FILE_BYTES) {
 				return yield* new InvalidArtifactFiles({
-					message: `File "${file.path}" is ${bytes.byteLength} bytes, over the ${MAX_INLINE_FILE_BYTES} a file sent inline may hold; upload it to the artifact and name it by sha256.`,
+					message: `File "${file.path}" is ${bytes.byteLength} bytes, over the ${MAX_INLINE_FILE_BYTES} a file sent inline may hold; upload it with POST /v1/files and name it by its id.`,
 				})
 			}
 			inlineBytes += bytes.byteLength
 			if (inlineBytes > MAX_INLINE_TOTAL_BYTES) {
 				return yield* new InvalidArtifactFiles({
-					message: `Files sent inline total more than ${MAX_INLINE_TOTAL_BYTES} bytes; upload the larger ones to the artifact and name them by sha256.`,
+					message: `Files sent inline total more than ${MAX_INLINE_TOTAL_BYTES} bytes; upload the larger ones with POST /v1/files and name them by id.`,
 				})
 			}
 			totalBytes += bytes.byteLength

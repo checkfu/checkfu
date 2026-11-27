@@ -96,7 +96,6 @@ describe("PublishWebhookEvents policy", () => {
 				const envId = EnvironmentId.make("env_pub_1")
 				const sessionId = SessionId.make("sess_pub_1")
 				const artifactId = ArtifactId.make("art_pub_1")
-				const emptyId = ArtifactId.make("art_pub_empty")
 				const uploadedId = ArtifactId.make("art_pub_uploaded")
 				const automationId = AutomationId.make("auto_pub_1")
 				const automations = yield* Automation
@@ -140,13 +139,18 @@ describe("PublishWebhookEvents policy", () => {
 					pinned_version: 1,
 					token: "pub_secret_token_never_leak",
 				})
-				for (const id of [emptyId, uploadedId]) {
-					yield* domain.ReserveArtifact({ artifact_id: id })
-					yield* domain.OpenArtifact({ artifact_id: id, name: "Upload", reservation: 1 })
-				}
+				yield* domain.ReserveArtifact({ artifact_id: uploadedId })
+				yield* domain.CreateArtifact({
+					artifact_id: uploadedId,
+					name: "Upload",
+					manifest: "a".repeat(64),
+					file_count: 1,
+					total_bytes: 12,
+					reservation: 1,
+				})
 				yield* domain.AddArtifactVersion({
 					artifact_id: uploadedId,
-					expected_version: 0,
+					expected_version: 1,
 					manifest: "b".repeat(64),
 					file_count: 1,
 					total_bytes: 5,
@@ -200,9 +204,6 @@ describe("PublishWebhookEvents policy", () => {
 				expect(artifactEvents(artifactId)).toEqual([
 					{ event_type: "artifact.created", event_id: `evt_artifact_${artifactId}_2` },
 					{ event_type: "artifact.published", event_id: `evt_artifact_${artifactId}_3` },
-				])
-				expect(artifactEvents(emptyId)).toEqual([
-					{ event_type: "artifact.created", event_id: `evt_artifact_${emptyId}_2` },
 				])
 				expect(artifactEvents(uploadedId)).toEqual([
 					{ event_type: "artifact.created", event_id: `evt_artifact_${uploadedId}_2` },

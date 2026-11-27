@@ -141,16 +141,24 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 		sha256: string,
 		body: ReadableStream<Uint8Array>,
 		size: number,
+		reservation: number | null,
 	) =>
 		uploads.withPermits(1)(
 			Effect.gen(function* () {
-				if ((yield* ports.marks).purged) {
-					return yield* new ArtifactPurged({ artifact_id: artifactId })
-				}
 				const key = artifactBlobKey(scope, artifactId, sha256)
 				return yield* perBlob(
 					key,
 					Effect.gen(function* () {
+						const marks = yield* ports.marks
+						if (marks.purged) {
+							return yield* new ArtifactPurged({ artifact_id: artifactId })
+						}
+						if (
+							reservation !== null &&
+							(reservation <= marks.released || reservation < marks.staged)
+						) {
+							return yield* new ArtifactReservationStale({ artifact_id: artifactId, reservation })
+						}
 						if (yield* bucket.has(key)) {
 							return yield* bucket.verifyStream(body, size, sha256)
 						}

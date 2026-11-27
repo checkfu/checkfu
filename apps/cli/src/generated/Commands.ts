@@ -489,7 +489,7 @@ const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "files",
 			location: "body",
 			kind: "repeat-structured",
-			required: false,
+			required: true,
 			min: 0,
 			max: 1000,
 		},
@@ -514,7 +514,7 @@ const artifactsCreateCommand = CommandMake(
 		files: FlagString("file").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+				"File as JSON, YAML, or @file: path with content (and optional encoding), or path with file_id; content_type is optional (repeatable)",
 			),
 			FlagBetween(0, 1000),
 		),
@@ -527,7 +527,7 @@ const artifactsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. (accepts flags and/or JSON/YAML on stdin)",
+		"Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{
@@ -809,15 +809,13 @@ const artifactsVersionsCreateCommand = CommandMake(
 		),
 		version: FlagInt("current-version").pipe(
 			FlagWithMetavar("INT"),
-			FlagWithDescription(
-				"Current artifact version for optimistic concurrency (0 for an empty artifact)",
-			),
+			FlagWithDescription("Current artifact version for optimistic concurrency"),
 			FlagOptional,
 		),
 		files: FlagString("file").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"File as JSON, YAML, or @file with path and content (optional encoding and content_type), or path and the sha256 of a file to keep from the version being replaced (repeatable)",
+				"File as JSON, YAML, or @file: path with content (and optional encoding), path with file_id, or path with the sha256 of a file to keep from the version being replaced; content_type is optional (repeatable)",
 			),
 			FlagBetween(0, 1000),
 		),
@@ -825,7 +823,7 @@ const artifactsVersionsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsVersionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. (accepts flags and/or JSON/YAML on stdin)",
+		"Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id. (accepts flags and/or JSON/YAML on stdin)",
 	),
 )
 

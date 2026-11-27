@@ -54,7 +54,11 @@ export interface ArtifactStoreService {
 		sha256: string,
 		body: Stream.Stream<Uint8Array, ArtifactStoreError>,
 		size: number,
-	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError | ArtifactPurged>
+		reservation: number | null,
+	) => Effect.Effect<
+		"stored" | "mismatch",
+		ArtifactStoreError | ArtifactPurged | ArtifactReservationStale
+	>
 	readonly purge: (artifactId: string) => Effect.Effect<void, ArtifactStoreError>
 	readonly release: (
 		artifactId: string,

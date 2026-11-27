@@ -379,21 +379,6 @@ describe("Artifacts in a session", () => {
 				}),
 		))
 
-	it("refuses to mount an artifact that has no published version yet", () =>
-		withSessions((apiFetch, { createSession }) =>
-			Effect.gen(function* () {
-				const opened = yield* json<{ readonly id: string; readonly version: number }>(
-					yield* request(apiFetch, "POST", "/v1/artifacts", { name: "Empty" }),
-				)
-				expect(opened.version).toBe(0)
-				const refused = yield* createSession([{ type: "artifact", artifact_id: opened.id }])
-				expect(refused.status).toBe(400)
-				expect((yield* json<{ error: { message: string } }>(refused)).error.message).toContain(
-					"no published version",
-				)
-			}),
-		))
-
 	it("stops serving an artifact once it is deleted, without failing the session's turns", () =>
 		withSessions(
 			(apiFetch, { artifactFiles, artifactStore, onTurn, createSession, createArtifact }) =>

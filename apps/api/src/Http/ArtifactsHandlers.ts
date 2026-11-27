@@ -9,7 +9,8 @@ import {
 } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
-import { OpenArtifact } from "@checkfu/domain/Artifact/OpenArtifact.command"
+import { File } from "@checkfu/domain/File/File.aggregate"
+import type { FileId } from "@checkfu/domain/File/File.id"
 import { PublishArtifact } from "@checkfu/domain/Artifact/PublishArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
 import { UnpublishArtifact } from "@checkfu/domain/Artifact/UnpublishArtifact.command"
@@ -26,13 +27,10 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { PublicationAddress } from "@checkfu/sdk/Schemas"
-import {
-	MAX_ARTIFACT_FILE_BYTES,
-	MAX_INLINE_FILE_BYTES,
-	buildArtifactVersion,
-} from "../Artifacts/ArtifactFiles.ts"
+import { MAX_INLINE_FILE_BYTES, buildArtifactVersion } from "../Artifacts/ArtifactFiles.ts"
 import type {
 	ArtifactManifest,
+	ArtifactVersionEntry,
 	ArtifactVersionFileInput,
 	BuiltArtifactVersion,
 } from "../Artifacts/ArtifactFiles.ts"
@@ -43,13 +41,12 @@ import {
 	publicationAddress,
 } from "../Content/ArtifactLink.ts"
 import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
-import { CheckfuApi, apiError } from "./Api.ts"
+import { FileStore } from "../Files/FileStore.ts"
+import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
 	reusedKey,
 	createCommandId,
-	currentRequestId,
-	errorResponse,
 	handled,
 	idempotentCommandId,
 	idempotentId,
@@ -196,9 +193,12 @@ export const artifactReads = Effect.gen(function* () {
 
 	const readArtifact = (id: ArtifactId, state: ArtifactState) =>
 		Effect.gen(function* () {
-			const manifest: ArtifactManifest =
-				state.manifest === "" ? { files: [] } : yield* loadManifest(id, state.manifest)
-			return artifactResource(id, state, manifest, yield* publicationOf(id, state))
+			return artifactResource(
+				id,
+				state,
+				yield* loadManifest(id, state.manifest),
+				yield* publicationOf(id, state),
+			)
 		})
 
 	const retrieve = (id: ArtifactId) =>
@@ -207,11 +207,18 @@ export const artifactReads = Effect.gen(function* () {
 	return { requireActive, missingBytes, loadManifest, publicationOf, readArtifact, retrieve }
 })
 
+interface FileSource {
+	readonly file_id: FileId
+	readonly size: number
+}
+
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
 	Effect.gen(function* () {
 		const artifacts = yield* Artifact
 		const versionViews = yield* ArtifactVersionView
 		const store = yield* ArtifactStore
+		const files = yield* File
+		const fileStore = yield* FileStore
 		const links = yield* ArtifactLinks
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
@@ -220,12 +227,108 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 			yield* artifactReads
 
 		const build = (
-			files: ReadonlyArray<ArtifactVersionFileInput>,
+			files: ReadonlyArray<ArtifactVersionEntry>,
 			kept?: ReadonlyMap<string, number>,
 		) =>
 			buildArtifactVersion(digest, files, kept).pipe(
 				Effect.catchTag("InvalidArtifactFiles", (error) => reject(400, error.message)),
 			)
+
+		const fromFiles = (entries: ReadonlyArray<ArtifactVersionFileInput>) =>
+			Effect.gen(function* () {
+				const named = [
+					...new Set(entries.flatMap((entry) => ("file_id" in entry ? [entry.file_id] : []))),
+				]
+				const states = new Map(
+					yield* Effect.forEach(
+						named,
+						(file_id) => Effect.map(files.get(file_id), (state) => [file_id, state] as const),
+						{ concurrency: 8 },
+					),
+				)
+				const resolved: Array<ArtifactVersionEntry> = []
+				const unavailable = named.find((file_id) => states.get(file_id)?.status === "deleted")
+				const sources = new Map<string, FileSource>()
+				for (const entry of entries) {
+					if (!("file_id" in entry)) {
+						resolved.push(entry)
+						continue
+					}
+					const file = states.get(entry.file_id)
+					if (file === undefined || file.status === "") {
+						return yield* reject(404, `File ${entry.file_id} not found.`)
+					}
+					sources.set(file.sha256, {
+						file_id: entry.file_id,
+						size: file.size,
+					})
+					resolved.push({
+						path: entry.path,
+						sha256: file.sha256,
+						size: file.size,
+						content_type: entry.content_type ?? file.content_type,
+					})
+				}
+				return { files: resolved, sources, unavailable }
+			})
+
+		const copyIn = (
+			id: ArtifactId,
+			{
+				sources,
+				unavailable,
+			}: {
+				readonly sources: ReadonlyMap<string, FileSource>
+				readonly unavailable: FileId | undefined
+			},
+			reservation: number | null,
+		) =>
+			Effect.gen(function* () {
+				if (unavailable !== undefined) {
+					return yield* reject(404, `File ${unavailable} not found.`)
+				}
+				yield* Effect.forEach(
+					sources,
+					([sha256, { file_id, size }]) =>
+						Effect.gen(function* () {
+							if ((yield* stored(store.blobSize(id, sha256))) !== null) {
+								return
+							}
+							const body = yield* fileStore
+								.content(file_id)
+								.pipe(
+									Effect.catchTag("FileStoreError", (error) =>
+										Effect.andThen(
+											Effect.logError("File storage failed", error),
+											reject(503, "File storage is unavailable. Retry the request."),
+										),
+									),
+								)
+							if (body === null) {
+								return yield* reject(404, `File ${file_id} not found.`)
+							}
+							const copied = yield* stored(
+								store.putBlob(
+									id,
+									sha256,
+									body.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
+									size,
+									reservation,
+								),
+							).pipe(
+								Effect.catchTags({
+									ArtifactPurged: () => reject(404, `Artifact ${id} not found.`),
+									ArtifactReservationStale: () => interrupted,
+								}),
+							)
+							if (copied === "mismatch") {
+								yield* Effect.logError("A file's bytes do not match its sha256", { file_id })
+								return yield* reject(500, `File ${file_id} could not be read.`)
+							}
+						}),
+					{ concurrency: 4, discard: true },
+				)
+			})
 
 		const stage = (
 			id: ArtifactId,
@@ -246,29 +349,12 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		) =>
 			Effect.gen(function* () {
 				const kept = new Map<string, number>()
-				const named = [...new Set(files.flatMap((file) => ("sha256" in file ? [file.sha256] : [])))]
-				if (named.length === 0) {
+				if (!files.some((file) => "sha256" in file)) {
 					return kept
 				}
-				if (manifestHash !== "") {
-					for (const file of (yield* loadManifest(id, manifestHash)).files) {
-						kept.set(file.sha256, file.size)
-					}
+				for (const file of (yield* loadManifest(id, manifestHash)).files) {
+					kept.set(file.sha256, file.size)
 				}
-				const unknown = named.filter((sha256) => !kept.has(sha256))
-				const sizes = yield* Effect.forEach(
-					unknown,
-					(sha256) => stored(store.blobSize(id, sha256)),
-					{
-						concurrency: 8,
-					},
-				)
-				unknown.forEach((sha256, index) => {
-					const size = sizes[index]
-					if (size !== null && size !== undefined) {
-						kept.set(sha256, size)
-					}
-				})
 				return kept
 			})
 
@@ -346,7 +432,8 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
-					const built = payload.files === undefined ? undefined : yield* build(payload.files)
+					const resolved = yield* fromFiles(payload.files)
+					const built = yield* build(resolved.files)
 					let id: ArtifactId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
@@ -354,7 +441,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						sendOptions = {
 							commandId: yield* createCommandId(digest, "artifact", idempotencyKey, {
 								name: payload.name,
-								manifest: built?.manifest_hash ?? "",
+								manifest: built.manifest_hash,
 							}),
 						}
 					} else {
@@ -367,33 +454,29 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							Effect.catchTag("ArtifactAlreadyExists", () => Effect.succeed(0)),
 						)
 						if (reservation !== 0) {
-							yield* stage(id, built ?? null, reservation)
+							yield* stage(id, null, reservation)
+							yield* copyIn(id, resolved, reservation)
+							yield* stage(id, built, reservation)
 						}
 					}
-					const commandOptions = sendOptions ?? { commandId: `create-artifact:${id}` }
-					const receipt = yield* (
-						built === undefined
-							? artifacts.send(
-									new OpenArtifact({ artifact_id: id, name: payload.name, reservation }),
-									commandOptions,
-								)
-							: artifacts.send(
-									new CreateArtifact({
-										artifact_id: id,
-										name: payload.name,
-										manifest: built.manifest_hash,
-										file_count: built.file_count,
-										total_bytes: built.total_bytes,
-										reservation,
-									}),
-									commandOptions,
-								)
-					).pipe(
-						Effect.catchTags({
-							ArtifactReservationLapsed: () => interrupted,
-							ArtifactAlreadyExists: () => reusedKey,
-						}),
-					)
+					const receipt = yield* artifacts
+						.send(
+							new CreateArtifact({
+								artifact_id: id,
+								name: payload.name,
+								manifest: built.manifest_hash,
+								file_count: built.file_count,
+								total_bytes: built.total_bytes,
+								reservation,
+							}),
+							sendOptions ?? { commandId: `create-artifact:${id}` },
+						)
+						.pipe(
+							Effect.catchTags({
+								ArtifactReservationLapsed: () => interrupted,
+								ArtifactAlreadyExists: () => reusedKey,
+							}),
+						)
 					const settled = yield* artifacts.get(id).pipe(orPending(id, "artifact"))
 					if (isPending(settled)) {
 						return settled
@@ -404,7 +487,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					return artifactResource(
 						id,
 						{ ...settled, version: receipt.reply.version, updated_at: settled.created_at },
-						built?.manifest ?? { files: [] },
+						built.manifest,
 						null,
 					)
 				}).pipe(handled),
@@ -475,10 +558,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				Effect.gen(function* () {
 					const id = params.artifact_id
 					const state = yield* requireActive(id)
+					const resolved = yield* fromFiles(payload.files)
 					if (state.version !== payload.version) {
 						if (state.version === payload.version + 1) {
 							const replaced = yield* keptIn(id, payload.files, state.replaced_manifest)
-							const resent = yield* buildArtifactVersion(digest, payload.files, replaced).pipe(
+							const resent = yield* buildArtifactVersion(digest, resolved.files, replaced).pipe(
 								Effect.asSome,
 								Effect.catchTag("InvalidArtifactFiles", () => Effect.succeedNone),
 							)
@@ -497,9 +581,10 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						)
 					}
 					const built = yield* build(
-						payload.files,
+						resolved.files,
 						yield* keptIn(id, payload.files, state.manifest),
 					)
+					yield* copyIn(id, resolved, null)
 					yield* stage(id, built, null)
 					const receipt = yield* artifacts.send(
 						new AddArtifactVersion({
@@ -575,43 +660,6 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							"content-security-policy": "sandbox",
 							"x-content-type-options": "nosniff",
 						},
-					})
-				}).pipe(handled),
-			)
-			.handleRaw("uploadBlob", ({ params, request }) =>
-				Effect.gen(function* () {
-					const id = params.artifact_id
-					const { sha256 } = params
-					yield* requireActive(id)
-					const size = Number(request.headers["content-length"] ?? Number.NaN)
-					if (!Number.isSafeInteger(size) || size < 0) {
-						return yield* reject(400, "Send the upload with a Content-Length header.")
-					}
-					if (size > MAX_ARTIFACT_FILE_BYTES) {
-						return yield* errorResponse(
-							apiError(
-								413,
-								`An upload may be at most ${MAX_ARTIFACT_FILE_BYTES} bytes.`,
-								yield* currentRequestId,
-							),
-						)
-					}
-					const outcome = yield* stored(
-						store.putBlob(
-							id,
-							sha256,
-							request.stream.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
-							size,
-						),
-					).pipe(Effect.catchTag("ArtifactPurged", () => reject(404, `Artifact ${id} not found.`)))
-					if (outcome === "mismatch") {
-						return yield* reject(400, `The uploaded bytes do not match sha256 ${sha256}.`)
-					}
-					return HttpServerResponse.jsonUnsafe({
-						type: "artifact_blob",
-						artifact_id: id,
-						sha256,
-						size,
 					})
 				}).pipe(handled),
 			)

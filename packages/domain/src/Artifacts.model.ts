@@ -57,7 +57,6 @@ export class ArtifactsApi extends Domain.Api("ArtifactsApi", {
 		"ReserveArtifact",
 		"ExpireArtifactReservation",
 		"CreateArtifact",
-		"OpenArtifact",
 		"AddArtifactVersion",
 		"DeleteArtifact",
 		"PublishArtifact",

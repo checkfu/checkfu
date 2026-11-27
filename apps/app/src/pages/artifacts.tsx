@@ -241,26 +241,13 @@ function ArtifactView({
 				<Description label="Created">{timeAgo(artifact.created_at)}</Description>
 				<Description label="Updated">{timeAgo(artifact.updated_at)}</Description>
 			</DescriptionList>
-			{artifact.version === 0 ? (
-				<Callout>
-					No versions yet. Upload its files, then add version 1 that names them, and its files,
-					viewing links and publishing appear here.
-				</Callout>
-			) : (
-				<>
-					<FilesSection artifact={artifact} version={version} path={path} />
-					<LinkSection
-						key={`${artifact.id}@${version}`}
-						artifactId={artifact.id}
-						version={version}
-					/>
-					<PublicationSection
-						key={artifact.publication?.address ?? "unpublished"}
-						artifact={artifact}
-						version={version}
-					/>
-				</>
-			)}
+			<FilesSection artifact={artifact} version={version} path={path} />
+			<LinkSection key={`${artifact.id}@${version}`} artifactId={artifact.id} version={version} />
+			<PublicationSection
+				key={artifact.publication?.address ?? "unpublished"}
+				artifact={artifact}
+				version={version}
+			/>
 		</>
 	)
 }

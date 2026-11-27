@@ -12,7 +12,6 @@ import { ArtifactVersionAdded } from "../Artifact/AddArtifactVersion.command.ts"
 import { Artifact } from "../Artifact/Artifact.aggregate.ts"
 import { ArtifactCreated } from "../Artifact/CreateArtifact.command.ts"
 import { ArtifactDeleted } from "../Artifact/DeleteArtifact.command.ts"
-import { ArtifactOpened } from "../Artifact/OpenArtifact.command.ts"
 import { ArtifactPublished } from "../Artifact/PublishArtifact.command.ts"
 import { ArtifactUnpublished } from "../Artifact/UnpublishArtifact.command.ts"
 import { AutomationArchived } from "../Automation/ArchiveAutomation.command.ts"
@@ -65,7 +64,6 @@ export class PublishWebhookEvents extends Domain.Policy(
 			AutomationRunStarted,
 			AutomationRunFailed,
 			ArtifactCreated,
-			ArtifactOpened,
 			ArtifactVersionAdded,
 			ArtifactPublished,
 			ArtifactUnpublished,
@@ -151,8 +149,6 @@ export const notificationOf = ({
 		case "memory_store.archived":
 		case "memory_store.deleted":
 			return { event_type: event._tag, resource_type: "memory_store", resource_id: source.id }
-		case "artifact.opened":
-			return { event_type: "artifact.created", resource_type: "artifact", resource_id: source.id }
 		case "artifact.created":
 		case "artifact.version_added":
 		case "artifact.published":

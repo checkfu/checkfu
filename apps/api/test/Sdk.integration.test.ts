@@ -200,6 +200,7 @@ describe("@checkfu/sdk live API integration", () => {
 								run: 1,
 								status: "queued",
 								trigger: { type: "manual" },
+								session_id: expect.stringMatching(/^sess_/),
 							})
 							yield* client.automations.run(automation.id)
 							yield* client.automations.run(automation.id)
@@ -522,7 +523,7 @@ describe("@checkfu/sdk live API integration", () => {
 	)
 
 	it.live(
-		"uploads raw bytes through the typed SDK client and builds a version from them",
+		"uploads a file through the typed SDK client and builds artifact versions from it",
 		() =>
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -540,29 +541,35 @@ describe("@checkfu/sdk live API integration", () => {
 						})
 						yield* Effect.gen(function* () {
 							const { raw } = yield* CheckfuClient
-							const created = yield* raw.artifacts.create({
-								headers: {},
-								payload: { name: "Bytes" },
-							})
-							expect(created).toMatchObject({ type: "artifact", version: 0 })
-							const artifact = { id: ArtifactId.make(created.id) }
 							const bytes = Uint8Array.from({ length: 4096 }, (_, index) => index % 251)
 							const sha256 = createHash("sha256").update(bytes).digest("hex")
-							const blob = yield* raw.artifacts.uploadBlob({
-								params: { artifact_id: artifact.id, sha256 },
+							const file = yield* raw.files.upload({
+								query: { filename: "data.bin" },
+								headers: {},
 								payload: bytes,
 							})
-							expect(blob).toEqual({
-								type: "artifact_blob",
-								artifact_id: artifact.id,
-								sha256,
-								size: 4096,
+							expect(file).toMatchObject({ type: "file", size: 4096, sha256 })
+							const created = yield* raw.artifacts.create({
+								headers: {},
+								payload: { name: "Bytes", files: [{ path: "data.bin", file_id: file.id }] },
 							})
+							expect(created).toMatchObject({
+								type: "artifact",
+								version: 1,
+								files: [{ path: "data.bin", sha256, size: 4096 }],
+							})
+							const artifact = { id: ArtifactId.make(created.id) }
 							const version = yield* raw.artifacts.createVersion({
 								params: { artifact_id: artifact.id },
-								payload: { version: 0, files: [{ path: "data.bin", sha256 }] },
+								payload: {
+									version: 1,
+									files: [
+										{ path: "kept.bin", sha256 },
+										{ path: "notes.txt", content: "inline" },
+									],
+								},
 							})
-							expect(version).toMatchObject({ version: 1, file_count: 1, total_bytes: 4096 })
+							expect(version).toMatchObject({ version: 2, file_count: 2, total_bytes: 4102 })
 						}).pipe(Effect.provide(sdkLayer))
 					}).pipe(Effect.provide(layer))
 				}),

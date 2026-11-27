@@ -111,7 +111,8 @@ interface ArtifactObjectsShape {
 		sha256: string,
 		body: ReadableStream<Uint8Array>,
 		size: number,
-	) => Effect.Effect<"stored" | "mismatch" | "purged", ArtifactStoreError, RuntimeContext>
+		reservation: number | null,
+	) => Effect.Effect<"stored" | "mismatch" | "purged" | "stale", ArtifactStoreError, RuntimeContext>
 	readonly release: (
 		artifactId: string,
 		reservation: number,
@@ -157,11 +158,14 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 								}),
 							),
 						),
-					putBlob: (artifactId, sha256, body, size) =>
+					putBlob: (artifactId, sha256, body, size, reservation) =>
 						overWire(
-							owner
-								.putBlob(artifactId, sha256, body, size)
-								.pipe(Effect.catchTag("ArtifactPurged", () => Effect.succeed("purged" as const))),
+							owner.putBlob(artifactId, sha256, body, size, reservation).pipe(
+								Effect.catchTags({
+									ArtifactPurged: () => Effect.succeed("purged" as const),
+									ArtifactReservationStale: () => Effect.succeed("stale" as const),
+								}),
+							),
 						),
 					release: (artifactId, reservation) => overWire(owner.release(artifactId, reservation)),
 					purge: (artifactId) => overWire(owner.purge(artifactId)),
@@ -207,13 +211,30 @@ export const ArtifactStoreR2 = Layer.effect(
 					),
 				),
 			...artifactReads(scope, bucket, run),
-			putBlob: (artifactId, sha256, body, size) =>
+			putBlob: (artifactId, sha256, body, size, reservation) =>
 				call(() =>
-					owners(artifactId).putBlob(artifactId, sha256, Stream.toReadableStream(body), size),
+					owners(artifactId).putBlob(
+						artifactId,
+						sha256,
+						Stream.toReadableStream(body),
+						size,
+						reservation,
+					),
 				).pipe(
-					Effect.filterOrFail(
-						(outcome): outcome is "stored" | "mismatch" => outcome !== "purged",
-						() => new ArtifactPurged({ artifact_id: artifactId }),
+					Effect.flatMap(
+						(
+							outcome,
+						): Effect.Effect<"stored" | "mismatch", ArtifactPurged | ArtifactReservationStale> =>
+							outcome === "purged"
+								? Effect.fail(new ArtifactPurged({ artifact_id: artifactId }))
+								: outcome === "stale"
+									? Effect.fail(
+											new ArtifactReservationStale({
+												artifact_id: artifactId,
+												reservation: reservation ?? 0,
+											}),
+										)
+									: Effect.succeed(outcome),
 					),
 				),
 			purge: (artifactId) => call(() => owners(artifactId).purge(artifactId)),
