@@ -8509,6 +8509,10 @@
 																	}
 																]
 															},
+															"access": {
+																"type": "string",
+																"enum": ["read_write", "read_only"]
+															},
 															"created_at": {
 																"type": "string"
 															},
@@ -8522,6 +8526,7 @@
 															"url",
 															"mount_path",
 															"checkout",
+															"access",
 															"created_at",
 															"updated_at"
 														],
@@ -9351,7 +9356,12 @@
 																}
 															],
 															"maxLength": 4096,
-															"description": "GitHub token used to clone and push. Never returned."
+															"description": "GitHub token used to clone and fetch, and to push when access is read_write. Never returned."
+														},
+														"access": {
+															"type": "string",
+															"enum": ["read_write", "read_only"],
+															"description": "read_write (default) lets the session push with the token. read_only allows clone and fetch."
 														},
 														"checkout": {
 															"anyOf": [
@@ -9950,6 +9960,10 @@
 																				}
 																			]
 																		},
+																		"access": {
+																			"type": "string",
+																			"enum": ["read_write", "read_only"]
+																		},
 																		"created_at": {
 																			"type": "string"
 																		},
@@ -9963,6 +9977,7 @@
 																		"url",
 																		"mount_path",
 																		"checkout",
+																		"access",
 																		"created_at",
 																		"updated_at"
 																	],
@@ -10942,6 +10957,10 @@
 																	}
 																]
 															},
+															"access": {
+																"type": "string",
+																"enum": ["read_write", "read_only"]
+															},
 															"created_at": {
 																"type": "string"
 															},
@@ -10955,6 +10974,7 @@
 															"url",
 															"mount_path",
 															"checkout",
+															"access",
 															"created_at",
 															"updated_at"
 														],
@@ -11909,6 +11929,10 @@
 																	}
 																]
 															},
+															"access": {
+																"type": "string",
+																"enum": ["read_write", "read_only"]
+															},
 															"created_at": {
 																"type": "string"
 															},
@@ -11922,6 +11946,7 @@
 															"url",
 															"mount_path",
 															"checkout",
+															"access",
 															"created_at",
 															"updated_at"
 														],
@@ -14888,6 +14913,10 @@
 																	}
 																]
 															},
+															"access": {
+																"type": "string",
+																"enum": ["read_write", "read_only"]
+															},
 															"created_at": {
 																"type": "string"
 															},
@@ -14901,6 +14930,7 @@
 															"url",
 															"mount_path",
 															"checkout",
+															"access",
 															"created_at",
 															"updated_at"
 														],
@@ -15571,6 +15601,10 @@
 														}
 													]
 												},
+												"access": {
+													"type": "string",
+													"enum": ["read_write", "read_only"]
+												},
 												"created_at": {
 													"type": "string"
 												},
@@ -15584,6 +15618,7 @@
 												"url",
 												"mount_path",
 												"checkout",
+												"access",
 												"created_at",
 												"updated_at"
 											],
@@ -16244,6 +16279,10 @@
 														}
 													]
 												},
+												"access": {
+													"type": "string",
+													"enum": ["read_write", "read_only"]
+												},
 												"created_at": {
 													"type": "string"
 												},
@@ -16257,6 +16296,7 @@
 												"url",
 												"mount_path",
 												"checkout",
+												"access",
 												"created_at",
 												"updated_at"
 											],

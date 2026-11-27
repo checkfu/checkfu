@@ -440,6 +440,7 @@ const askedResource = (resource: CreateSessionResource) => {
 				url: resource.url,
 				mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
 				checkout: resource.checkout ?? null,
+				access: resource.access ?? "read_write",
 				...(resource.authorization_token === undefined ? {} : { requires_token: true as const }),
 			}
 		case "memory_store":
@@ -754,6 +755,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					url: resource.url,
 					mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
 					checkout: resource.checkout ?? null,
+					access: resource.access ?? "read_write",
 					...(resource.authorization_token === undefined ? {} : { requires_token: true as const }),
 				}
 			}

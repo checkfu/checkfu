@@ -517,6 +517,7 @@ describe("a session's machine, in a container of its image", () => {
 		const mount = {
 			id: "sesrsc_1",
 			type: "github_repository" as const,
+			access: "read_write" as const,
 			url: "file:///srv/origin",
 			mount_path: "/workspace/repos/api",
 			checkout: { type: "branch" as const, name: "main" },

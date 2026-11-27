@@ -115,6 +115,7 @@ class CheckfuInductiveModel extends CheckfuProofBase {
 const REPOSITORY = {
 	id: SessionResourceId.make("sesrsc_post_1"),
 	type: "github_repository" as const,
+	access: "read_write" as const,
 	url: "https://github.com/acme/api",
 	mount_path: "/workspace/api",
 	checkout: { type: "branch" as const, name: "main" },

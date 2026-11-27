@@ -1,12 +1,16 @@
 import type { CreateSessionBody } from "@checkfu/sdk/Api"
 import type { JsonSession } from "@checkfu/sdk/client"
 
+type CheckoutKind = "default" | "branch" | "commit"
+
 export type ResourceDraft =
 	| {
 			readonly type: "github_repository"
 			readonly url: string
 			readonly token: string
 			readonly checkout: string
+			readonly checkoutKind: CheckoutKind
+			readonly access: "read_write" | "read_only"
 			readonly mountPath: string
 	  }
 	| {
@@ -23,15 +27,39 @@ export type CreateSessionRequest = CreateSessionBody
 
 export type ResourceBody = NonNullable<CreateSessionRequest["resources"]>[number]
 
-const checkoutOf = (
-	text: string,
-): Pick<Extract<ResourceBody, { type: "github_repository" }>, "checkout"> => {
+type CheckoutDraft =
+	| Pick<Extract<ResourceBody, { type: "github_repository" }>, "checkout">
+	| { readonly error: string }
+
+export const checkoutOf = (kind: CheckoutKind, text: string): CheckoutDraft => {
 	const trimmed = text.trim()
-	return trimmed === ""
-		? {}
-		: /^[0-9a-f]{40}$/u.test(trimmed)
-			? { checkout: { type: "commit", sha: trimmed } }
-			: { checkout: { type: "branch", name: trimmed } }
+	switch (kind) {
+		case "default":
+			return {}
+		case "branch":
+			return trimmed === ""
+				? { error: "Enter a branch name." }
+				: { checkout: { type: "branch", name: trimmed } }
+		case "commit": {
+			const sha = trimmed.toLowerCase()
+			const full =
+				sha.length === 40 &&
+				Array.from(sha).every(
+					(char) => (char >= "0" && char <= "9") || (char >= "a" && char <= "f"),
+				)
+			return full
+				? { checkout: { type: "commit", sha } }
+				: { error: "Enter the full 40-character commit ID." }
+		}
+	}
+}
+
+export const checkoutError = (draft: ResourceDraft): string | undefined => {
+	if (draft.type !== "github_repository") {
+		return undefined
+	}
+	const parsed = checkoutOf(draft.checkoutKind, draft.checkout)
+	return "error" in parsed ? parsed.error : undefined
 }
 
 export const RESOURCE_LABELS: Readonly<Record<ResourceType, string>> = {
@@ -43,7 +71,15 @@ export const RESOURCE_LABELS: Readonly<Record<ResourceType, string>> = {
 
 export const emptyDraft = (type: ResourceType): ResourceDraft =>
 	type === "github_repository"
-		? { type, url: "", token: "", checkout: "", mountPath: "" }
+		? {
+				type,
+				url: "",
+				token: "",
+				checkout: "",
+				checkoutKind: "default",
+				mountPath: "",
+				access: "read_write",
+			}
 		: type === "memory_store"
 			? { type, memoryStoreId: "", access: "read_write", instructions: "" }
 			: { type, artifactId: "", version: "" }
@@ -68,14 +104,20 @@ const versionOf = (version: string): { readonly version?: number } => {
 
 export const resourceBody = (draft: ResourceDraft): ResourceBody => {
 	switch (draft.type) {
-		case "github_repository":
+		case "github_repository": {
+			const checkout = checkoutOf(draft.checkoutKind, draft.checkout)
+			if ("error" in checkout) {
+				throw new Error(checkout.error)
+			}
 			return {
 				type: draft.type,
 				url: draft.url.trim(),
 				...(draft.token === "" ? {} : { authorization_token: draft.token }),
-				...checkoutOf(draft.checkout),
+				...checkout,
+				...(draft.access === "read_only" ? { access: draft.access } : {}),
 				...(filled(draft.mountPath) === undefined ? {} : { mount_path: draft.mountPath.trim() }),
 			}
+		}
 		case "memory_store":
 			return {
 				type: draft.type,
@@ -104,17 +146,21 @@ export interface ResourceSummary {
 
 export const describeResource = (resource: SessionResourceItem): ResourceSummary => {
 	switch (resource.type) {
-		case "github_repository":
+		case "github_repository": {
+			const checkout = resource.checkout
+			const ref =
+				checkout === null
+					? "default branch"
+					: checkout.type === "branch"
+						? checkout.name
+						: checkout.sha.slice(0, 12)
+			const access = resource.access === "read_only" ? "read-only" : "read-write"
 			return {
 				label: RESOURCE_LABELS.github_repository,
 				name: resource.url,
-				detail:
-					resource.checkout === null
-						? "default branch"
-						: resource.checkout.type === "branch"
-							? resource.checkout.name
-							: resource.checkout.sha.slice(0, 12),
+				detail: `${ref} · ${access}`,
 			}
+		}
 		case "memory_store":
 			return {
 				label: RESOURCE_LABELS.memory_store,

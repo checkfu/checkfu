@@ -1,4 +1,5 @@
 import { RepositoryCheckout } from "@checkfu/domain/Session/SessionResource"
+import { RepositoryAccess } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 
 export const TurnToken = Schema.Struct({ turn: Schema.Finite })
@@ -9,6 +10,7 @@ export const RepositoryMount = Schema.Struct({
 	url: Schema.String,
 	mount_path: Schema.String,
 	checkout: Schema.NullOr(RepositoryCheckout),
+	access: RepositoryAccess,
 	requires_token: Schema.optionalKey(Schema.Literal(true)),
 })
 export type RepositoryMount = typeof RepositoryMount.Type

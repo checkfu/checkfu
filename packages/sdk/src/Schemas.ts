@@ -505,12 +505,15 @@ export const RepositoryCheckout = Schema.Union([
 ])
 export type RepositoryCheckout = typeof RepositoryCheckout.Type
 
+export const RepositoryAccess = Schema.Literals(["read_write", "read_only"])
+
 export const GitHubRepositoryResource = Schema.Struct({
 	id: SessionResourceId,
 	type: Schema.Literal("github_repository"),
 	url: RepositoryUrl,
 	mount_path: RepositoryMountPath,
 	checkout: Schema.NullOr(RepositoryCheckout),
+	access: RepositoryAccess,
 })
 export type GitHubRepositoryResource = typeof GitHubRepositoryResource.Type
 

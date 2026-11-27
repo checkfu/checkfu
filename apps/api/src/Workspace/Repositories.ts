@@ -24,7 +24,7 @@ export const repositoryTokenGate = (hasToken: (id: string) => boolean) =>
 		stored: (id: string) => PubSub.publish(tokens, id),
 	}))
 
-type Mounted = Pick<RepositoryMount, "id" | "url">
+type Mounted = Pick<RepositoryMount, "id" | "url" | "access">
 
 const GIT_SUFFIX = ".git"
 
@@ -33,12 +33,25 @@ export const repositoryOf = (href: string): string | undefined => {
 	if (url === null || url.origin !== GITHUB_ORIGIN) {
 		return undefined
 	}
-	const [owner, name] = url.pathname.split("/").slice(1)
-	if (owner === undefined || owner === "" || name === undefined || name === "") {
+	const [, owner, name] = url.pathname.split("/")
+	if (!owner || !name) {
 		return undefined
 	}
 	const repository = name.endsWith(GIT_SUFFIX) ? name.slice(0, -GIT_SUFFIX.length) : name
 	return `${owner}/${repository}`.toLowerCase()
+}
+
+const isGitRead = (request: Request): boolean => {
+	const url = new URL(request.url)
+	const endpoint = url.pathname.split("/").slice(3).join("/")
+	if (request.method === "POST") {
+		return endpoint === "git-upload-pack" && !request.url.includes("?")
+	}
+	return (
+		request.method === "GET" &&
+		endpoint === "info/refs" &&
+		url.search === "?service=git-upload-pack"
+	)
 }
 
 export interface RepositoryCredentials {
@@ -59,10 +72,16 @@ export const withRepositoryCredentials =
 		if (repository === undefined) {
 			return options.fetch(request)
 		}
+		if (repository.access === "read_only" && !isGitRead(request)) {
+			return Promise.resolve(
+				new Response("This repository is mounted read-only.\n", { status: 403 }),
+			)
+		}
 		const headers = new Headers(request.headers)
-		headers.delete("authorization")
 		const token = options.token(repository.id)
-		if (token !== undefined) {
+		if (token === undefined) {
+			headers.delete("authorization")
+		} else {
 			headers.set("authorization", `Basic ${btoa(`x-access-token:${token}`)}`)
 		}
 		const target =
@@ -84,17 +103,20 @@ trap 'rm -rf -- "$next"' EXIT
 trap 'exit 143' TERM INT HUP
 chmod 755 -- "$next"
 if [ "$kind" = default ]; then
-	git clone --quiet --depth 1 -- "$url" "$next"
+	git clone -q --depth 1 -- "$url" "$next"
 else
-	git init --quiet -- "$next"
-	git -C "$next" remote add origin "$url"
-	if [ "$kind" = branch ]; then
-		git -C "$next" fetch --quiet --depth 1 origin "+refs/heads/$ref:refs/remotes/origin/$ref"
-		git -C "$next" checkout --quiet -b "$ref" --track "origin/$ref"
-	else
-		git -C "$next" fetch --quiet --depth 1 origin "$ref"
-		git -C "$next" checkout --quiet --detach FETCH_HEAD
-	fi
+	(
+		cd "$next"
+		git init -q
+		git remote add origin "$url"
+		if [ "$kind" = branch ]; then
+			git fetch -q --depth 1 origin "+refs/heads/$ref:refs/remotes/origin/$ref"
+			git checkout -q -b "$ref" --track "origin/$ref"
+		else
+			git fetch -q --depth 1 origin "$ref"
+			git checkout -q --detach FETCH_HEAD
+		fi
+	)
 fi
 mv -- "$next" "$dir"`
 

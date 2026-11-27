@@ -2939,6 +2939,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												pattern:
 													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
 											},
+											access: {
+												type: "string",
+												enum: ["read_write", "read_only"],
+												description:
+													"read_write (default) lets the session push with the token. read_only allows clone and fetch.",
+											},
 											checkout: {
 												anyOf: [
 													{

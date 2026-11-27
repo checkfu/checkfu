@@ -247,7 +247,7 @@ export const describeMounts = (
 						"Repositories mounted in your workspace:",
 						...repositories.map(
 							(repository) =>
-								`- ${repository.mount_path}: ${repository.url} (${checkoutLabel(repository)})`,
+								`- ${repository.mount_path}: ${repository.url} (${checkoutLabel(repository)}${repository.access === "read_only" ? ", read-only: pushing is refused" : ""})`,
 						),
 					].join("\n"),
 				]),

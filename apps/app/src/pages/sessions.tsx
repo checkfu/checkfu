@@ -32,6 +32,7 @@ import {
 import { selection } from "../selection.ts"
 import {
 	RESOURCE_LABELS,
+	checkoutError,
 	describeResource,
 	emptyDraft,
 	namesResource,
@@ -153,7 +154,10 @@ export function NewSessionPage(): React.JSX.Element {
 	const environmentId = environment.id
 	const [title, setTitle] = useState("")
 	const [resources, setResources] = useState<ReadonlyArray<ResourceDraftRow>>([])
-	const ready = agentId !== "" && environmentId !== "" && resources.every(namesResource)
+	const ready =
+		agentId !== "" &&
+		environmentId !== "" &&
+		resources.every((resource) => namesResource(resource) && checkoutError(resource) === undefined)
 	const [picked, setPicked] = useState<{
 		readonly agentId: string
 		readonly vaultIds: ReadonlyArray<string>
@@ -571,7 +575,8 @@ function ResourceFields({
 	readonly onChange: (draft: ResourceDraft) => void
 }): React.JSX.Element {
 	switch (draft.type) {
-		case "github_repository":
+		case "github_repository": {
+			const error = checkoutError(draft)
 			return (
 				<>
 					<Field label="URL">
@@ -582,7 +587,10 @@ function ResourceFields({
 							onChange={(event) => onChange({ ...draft, url: event.target.value })}
 						/>
 					</Field>
-					<Field label="Token" description="Used to clone and push. Never shown again.">
+					<Field
+						label="Token"
+						description="Authenticates clone and fetch, and push on writable mounts. Never shown again."
+					>
 						<Input
 							type="password"
 							autoComplete="off"
@@ -590,12 +598,47 @@ function ResourceFields({
 							onChange={(event) => onChange({ ...draft, token: event.target.value })}
 						/>
 					</Field>
-					<Field label="Branch or commit" description="Defaults to the default branch.">
-						<Input
-							value={draft.checkout}
-							onChange={(event) => onChange({ ...draft, checkout: event.target.value })}
-						/>
+					<Field
+						label="Checkout"
+						description="Use the default branch, a named branch, or a full commit ID. Tags are unsupported."
+					>
+						<Select
+							value={draft.checkoutKind}
+							onChange={(event) => {
+								const kind = event.target.value
+								if (kind === "default" || kind === "branch" || kind === "commit") {
+									onChange({ ...draft, checkoutKind: kind, checkout: "" })
+								}
+							}}
+						>
+							<option value="default">Default branch</option>
+							<option value="branch">Branch</option>
+							<option value="commit">Commit</option>
+						</Select>
 					</Field>
+					{draft.checkoutKind === "default" ? null : (
+						<Field
+							label={draft.checkoutKind === "branch" ? "Branch name" : "Commit ID"}
+							error={error}
+						>
+							<Input
+								required
+								aria-invalid={error !== undefined}
+								value={draft.checkout}
+								onChange={(event) => onChange({ ...draft, checkout: event.target.value })}
+							/>
+						</Field>
+					)}
+					<label className="flex items-center gap-2 text-control">
+						<input
+							type="checkbox"
+							checked={draft.access === "read_only"}
+							onChange={(event) =>
+								onChange({ ...draft, access: event.target.checked ? "read_only" : "read_write" })
+							}
+						/>
+						Read-only
+					</label>
 					<Field label="Mount path" description="Defaults to /workspace/<repository>.">
 						<Input
 							className="font-mono"
@@ -605,6 +648,7 @@ function ResourceFields({
 					</Field>
 				</>
 			)
+		}
 		case "memory_store":
 			return (
 				<>

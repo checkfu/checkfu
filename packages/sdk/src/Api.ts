@@ -92,6 +92,7 @@ import {
 	NonEmptyString,
 	PositiveInt,
 	PublicationAddress,
+	RepositoryAccess,
 	RepositoryCheckout,
 	RepositoryMountPath,
 	RepositoryTokenText,
@@ -695,7 +696,14 @@ export const GitHubRepositoryParams = Schema.Struct({
 	}),
 	authorization_token: Schema.optionalKey(
 		RepositoryTokenText.annotate({
-			description: "GitHub token used to clone and push. Never returned.",
+			description:
+				"GitHub token used to clone and fetch, and to push when access is read_write. Never returned.",
+		}),
+	),
+	access: Schema.optionalKey(
+		RepositoryAccess.annotate({
+			description:
+				"read_write (default) lets the session push with the token. read_only allows clone and fetch.",
 		}),
 	),
 	checkout: Schema.optionalKey(

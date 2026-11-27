@@ -96,6 +96,7 @@ describe("Session resources", () => {
 								url: "https://github.com/acme/docs",
 								mount_path: "/workspace/handbook",
 								checkout: { type: "branch", name: "release" },
+								access: "read_only",
 							},
 						],
 					})
@@ -110,6 +111,7 @@ describe("Session resources", () => {
 							url: "https://github.com/acme/api",
 							mount_path: "/workspace/api",
 							checkout: null,
+							access: "read_write",
 							created_at: session.created_at,
 							updated_at: session.created_at,
 						},
@@ -119,6 +121,7 @@ describe("Session resources", () => {
 							url: "https://github.com/acme/docs",
 							mount_path: "/workspace/handbook",
 							checkout: { type: "branch", name: "release" },
+							access: "read_only",
 							created_at: session.created_at,
 							updated_at: session.created_at,
 						},
@@ -221,7 +224,7 @@ describe("Session resources", () => {
 						}),
 					)
 					const base = yield* createAgentAndEnvironment(apiFetch)
-					const create = (token: string) =>
+					const create = (token: string, access?: "read_only" | "read_write") =>
 						sendRequest(apiFetch, {
 							method: "POST",
 							path: "/v1/sessions",
@@ -233,6 +236,7 @@ describe("Session resources", () => {
 										type: "github_repository",
 										url: "https://github.com/acme/api",
 										authorization_token: token,
+										...(access === undefined ? {} : { access }),
 									},
 								],
 							},
@@ -259,9 +263,13 @@ describe("Session resources", () => {
 					)
 					expect(first.id).toBe(pending.id)
 					const key = `${first.id}/${first.resources[0]?.id}`
-					const second = yield* json<SessionBody>(yield* create("ghp_sent_with_a_retry"))
+					const second = yield* json<SessionBody>(
+						yield* create("ghp_sent_with_a_retry", "read_write"),
+					)
 					expect(second.id).toBe(first.id)
 					expect(second.resources).toEqual(first.resources)
+					expect(repositoryTokens.get(key)).toBe(TOKEN)
+					expect((yield* create("ghp_changed_access", "read_only")).status).toBe(409)
 					expect(repositoryTokens.get(key)).toBe(TOKEN)
 
 					const rotated = yield* sendRequest(apiFetch, {
@@ -439,6 +447,7 @@ describe("Session resources", () => {
 						url: "https://github.com/acme/api",
 						mount_path: "/workspace/api",
 						checkout: { type: "commit", sha: "0123456789abcdef0123456789abcdef01234567" },
+						access: "read_write",
 					}
 
 					preparations.push({
@@ -692,15 +701,19 @@ describe("Session resources", () => {
 
 describe("machine egress", () => {
 	const mounted = [
-		{ id: "sesrsc_api", url: "https://github.com/acme/api" },
-		{ id: "sesrsc_docs", url: "https://github.com/acme/docs" },
-	]
-	const record = (allowed: ReadonlyArray<string> | null = null, baseUrl: string | null = null) => {
+		{ id: "sesrsc_api", url: "https://github.com/acme/api", access: "read_write" },
+		{ id: "sesrsc_docs", url: "https://github.com/acme/docs", access: "read_write" },
+	] as const
+	const record = (
+		allowed: ReadonlyArray<string> | null = null,
+		baseUrl: string | null = null,
+		access: "read_write" | "read_only" = "read_write",
+	) => {
 		const calls: Array<{ url: string; authorization: string | null; redirect: string }> = []
 		const egress = createMachineEgress({
 			allowedHosts: () => allowed,
 			fetch: withRepositoryCredentials({
-				repositories: () => mounted,
+				repositories: () => mounted.map((repo) => ({ ...repo, access })),
 				token: (resourceId) => (resourceId === "sesrsc_api" ? TOKEN : undefined),
 				baseUrl,
 				fetch: (request) => {
@@ -796,11 +809,45 @@ describe("machine egress", () => {
 		])
 	})
 
+	it("lends a read-only repository token only to Git clone and fetch requests", async () => {
+		const { calls, egress } = record(null, null, "read_only")
+		const root = "https://github.com/Acme/API.git"
+		for (const request of [
+			new Request(`${root}/info/refs?service=git-receive-pack`),
+			new Request(`${root}/git-receive-pack`, { method: "POST", body: "pack" }),
+			new Request(`${root}/info/refs?service=git-upload-pack&service=git-receive-pack`),
+			new Request(`${root}/info/refs?service=git-upload-pack&operation=write`),
+			new Request(`${root}/info/refs?service=git-upload-pack&`),
+			new Request(`${root}/git-upload-pack?`, { method: "POST", body: "want" }),
+			new Request(`${root}/git-upload-pack?service=git-receive-pack`, {
+				method: "POST",
+				body: "pack",
+			}),
+			new Request(`${root}/settings`, { method: "POST" }),
+		]) {
+			const reply = await egress(request)
+			expect(reply.status).toBe(403)
+			expect(await reply.text()).toBe("This repository is mounted read-only.\n")
+		}
+		expect(calls).toEqual([])
+		await egress(new Request(`${root}/info/refs?service=git-upload-pack`))
+		await egress(new Request(`${root}/git-upload-pack`, { method: "POST", body: "want" }))
+		expect(calls).toEqual([
+			{
+				url: `${root}/info/refs?service=git-upload-pack`,
+				authorization: basic,
+				redirect: "manual",
+			},
+			{ url: `${root}/git-upload-pack`, authorization: basic, redirect: "manual" },
+		])
+	})
+
 	it("clones by the kind of checkout a resource asks for", () => {
 		const mount = {
 			id: "sesrsc_api",
 			url: "https://github.com/acme/api",
 			mount_path: "/workspace/api",
+			access: "read_write" as const,
 		}
 		const sha = "0123456789abcdef0123456789abcdef01234567"
 		expect(cloneCommand({ ...mount, checkout: null }).slice(4)).toEqual([

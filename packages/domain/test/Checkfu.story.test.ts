@@ -131,6 +131,7 @@ describe("Checkfu unified hosted model stories", () => {
 				{
 					id: SessionResourceId.make("sesrsc_verify_api"),
 					type: "github_repository" as const,
+					access: "read_write" as const,
 					url: "https://github.com/acme/api",
 					mount_path: "/workspace/api",
 					checkout: null,
@@ -138,6 +139,7 @@ describe("Checkfu unified hosted model stories", () => {
 				{
 					id: SessionResourceId.make("sesrsc_verify_docs"),
 					type: "github_repository" as const,
+					access: "read_write" as const,
 					url: "https://github.com/acme/docs",
 					mount_path: "/workspace/handbook",
 					checkout: {

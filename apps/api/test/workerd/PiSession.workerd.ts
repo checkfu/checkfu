@@ -1305,6 +1305,56 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
 	}, 60_000)
+	it("clones and fetches a read-only repository and refuses its push in the machine", async () => {
+		const repo = "acme/api"
+		const originalHead = fakeGitHub.git(repo, "rev-parse", "main")
+		const before = fakeGitHub.requests.length
+		fakeOpenAI.setHandler((request) =>
+			request.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							cwd: "/workspace/api",
+							command:
+								'git fetch -q origin main && echo fetched && git commit -q --allow-empty -m "Read-only test" && git push origin main 2>&1',
+						},
+					}
+				: { kind: "reply", text: request.toolOutputs.at(-1) ?? "" },
+		)
+		const session = await createResource<
+			SessionResource & {
+				readonly resources: ReadonlyArray<{ readonly access: string }>
+			}
+		>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			initial_events: [userMessage("Fetch and try to push the repository.")],
+			resources: [
+				{
+					type: "github_repository",
+					url: `https://github.com/${repo}`,
+					access: "read_only",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		expect(session.resources[0]?.access).toBe("read_only")
+		await waitForSession(
+			session.id,
+			(state) => state.status === "idle" && state.turn === 1,
+			120_000,
+		)
+		const reply = (await listAllEvents(session.id)).find((event) => event.type === "agent.message")
+		const text = reply?.content?.[0]?.text ?? ""
+		expect(text).toContain("fetched")
+		expect(text).toContain("403")
+		const requests = fakeGitHub.requests.slice(before)
+		expect(requests.some((request) => request.path.endsWith("/git-upload-pack"))).toBe(true)
+		expect(requests.some((request) => request.path.includes("git-receive-pack"))).toBe(false)
+		expect(fakeGitHub.git(repo, "rev-parse", "main")).toBe(originalHead)
+	}, 150_000)
+
 	it("clones a private repository in the machine with its token kept outside it, lets the agent commit and push, and lends the token to no other repository", async () => {
 		const repo = "/workspace/api"
 		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
