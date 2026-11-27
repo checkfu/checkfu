@@ -971,6 +971,49 @@ export const ArtifactFile = Schema.Struct({
 })
 export type ArtifactFile = typeof ArtifactFile.Type
 
+export const ARTIFACT_DECLARATION_FILE = "artifact.json"
+export const ARTIFACT_RESERVED_DIRECTORY = "_"
+export const MAX_ARTIFACT_DECLARATION_BYTES = 64 * 1024
+export const MAX_ARTIFACT_COLLECTIONS = 16
+export const MAX_ARTIFACT_CAPABILITIES_TEXT_LENGTH = 4096
+
+export const ArtifactCollectionName = Schema.String.check(
+	Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/u, {
+		expected: "a lowercase name of up to 32 letters, digits, - and _, starting with a letter",
+	}),
+)
+
+export const ArtifactVisitorAccess = Schema.Literals(["none", "read", "add", "write"]).annotate({
+	description:
+		"What someone opening the page may do with a collection: nothing, list and get, add only, or everything",
+})
+
+export const ArtifactDatabaseCapability = Schema.Struct({
+	collections: Schema.Record(
+		ArtifactCollectionName,
+		Schema.Struct({ visitors: ArtifactVisitorAccess }),
+	).check(
+		Schema.makeFilter(
+			(collections) =>
+				Object.keys(collections).length <= MAX_ARTIFACT_COLLECTIONS ||
+				`at most ${MAX_ARTIFACT_COLLECTIONS} collections`,
+		),
+	),
+})
+
+export const ArtifactCapabilities = Schema.Struct({
+	database: Schema.optionalKey(ArtifactDatabaseCapability),
+}).annotate({
+	description:
+		"What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing",
+})
+export type ArtifactCapabilities = typeof ArtifactCapabilities.Type
+
+export const ArtifactDeclaration = Schema.Struct({
+	capabilities: Schema.optionalKey(ArtifactCapabilities),
+})
+export type ArtifactDeclaration = typeof ArtifactDeclaration.Type
+
 export const MAX_WEBHOOK_ID_LENGTH = 128
 export const MAX_WEBHOOK_EVENT_ID_LENGTH = 320
 export const MAX_WEBHOOK_URL_LENGTH = 2048

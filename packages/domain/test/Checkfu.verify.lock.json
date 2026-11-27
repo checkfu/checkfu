@@ -825,6 +825,14 @@
 			"SessionOutputs.NothingChangesWithoutARecord": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\t[\n\t\t\t\tevents.length !== 0,\n\t\t\t\t[\n\t\t\t\t\tafter.turn === before.turn,\n\t\t\t\t\tafter.outcome === before.outcome,\n\t\t\t\t\tafter.reason === before.reason,\n\t\t\t\t\tafter.files === before.files,\n\t\t\t\t\tafter.skipped === before.skipped,\n\t\t\t\t\tafter.recorded_at === before.recorded_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.ANewVersionRecordsTheCapabilitiesItWasGiven": {
+				"kind": "transition",
+				"source": "({ after, command, events }) => {\n\t\t\tif (command._tag !== \"CreateArtifact\" && command._tag !== \"AddArtifactVersion\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [events.length === 0, after.capabilities === command.capabilities].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.OnlyANewVersionChangesTheCapabilities": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag === \"CreateArtifact\",\n\t\t\t\tcommand._tag === \"AddArtifactVersion\",\n\t\t\t\tafter.capabilities === before.capabilities,\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

@@ -1,6 +1,10 @@
+import { encodeCapabilities } from "@checkfu/domain/Artifact/ArtifactCapabilities"
 import {
+	ARTIFACT_RESERVED_DIRECTORY,
+	ArtifactDeclaration,
 	ArtifactFile,
 	ArtifactPath,
+	MAX_ARTIFACT_DECLARATION_BYTES,
 	MAX_ARTIFACT_FILES,
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_TOTAL_BYTES,
@@ -194,6 +198,14 @@ export const buildArtifactVersion = (
 		let totalBytes = 0
 		let inlineBytes = 0
 		for (const file of files) {
+			if (
+				file.path === ARTIFACT_RESERVED_DIRECTORY ||
+				file.path.startsWith(`${ARTIFACT_RESERVED_DIRECTORY}/`)
+			) {
+				return yield* new InvalidArtifactFiles({
+					message: `File "${file.path}" is under ${ARTIFACT_RESERVED_DIRECTORY}/, which is reserved for what the platform serves beside an artifact's files.`,
+				})
+			}
 			if ("sha256" in file) {
 				const size = file.size ?? kept.get(file.sha256)
 				if (size === undefined) {
@@ -244,3 +256,27 @@ export const buildArtifactVersion = (
 		}
 		return { ...(yield* sealArtifactFiles(digest, entries)), blobs: [...blobs.values()] }
 	})
+
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true })
+const decodeDeclaration = Schema.decodeUnknownOption(ArtifactDeclaration, {
+	onExcessProperty: "error",
+})
+
+/** The capabilities an artifact.json declares, as the text a version records, or why it cannot be read. */
+export const readDeclaration = (bytes: Uint8Array): Result.Result<string, string> => {
+	if (bytes.byteLength > MAX_ARTIFACT_DECLARATION_BYTES) {
+		return Result.fail(`it is larger than ${MAX_ARTIFACT_DECLARATION_BYTES} bytes`)
+	}
+	const parsed = Result.try(() => JSON.parse(utf8Decoder.decode(bytes)) as unknown)
+	if (Result.isFailure(parsed)) {
+		return Result.fail("it is not JSON")
+	}
+	const declaration = decodeDeclaration(parsed.success)
+	if (Option.isNone(declaration)) {
+		return Result.fail(
+			"it may hold only capabilities.database.collections, each a lowercase name with visitors set to none, read, add or write",
+		)
+	}
+	const text = encodeCapabilities(declaration.value.capabilities ?? {})
+	return text === undefined ? Result.fail("it declares too much") : Result.succeed(text)
+}

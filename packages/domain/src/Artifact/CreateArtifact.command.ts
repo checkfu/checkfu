@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactId } from "./Artifact.id.ts"
+import { CapabilitiesText } from "./ArtifactCapabilities.ts"
 import { ArtifactReservationLapsed } from "./ArtifactReservationLapsed.rejection.ts"
 import {
 	ArtifactName,
@@ -15,6 +16,7 @@ export class ArtifactCreated extends Domain.Event("artifact.created", {
 	manifest: ManifestHash,
 	file_count: PositiveInt,
 	total_bytes: NonNegativeInt,
+	capabilities: CapabilitiesText,
 }) {}
 
 export class ArtifactAlreadyExists extends Domain.Rejection(
@@ -30,6 +32,7 @@ export class CreateArtifact extends Domain.Command("CreateArtifact", {
 		manifest: ManifestHash,
 		file_count: PositiveInt,
 		total_bytes: NonNegativeInt,
+		capabilities: CapabilitiesText,
 		reservation: NonNegativeInt,
 	},
 	events: [ArtifactCreated],

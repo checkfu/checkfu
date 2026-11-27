@@ -79,7 +79,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 	const files = yield* File
 	const digest = yield* Digest.Digest
 	const storeFile = yield* makeStoreFile
-	const { build, fromFiles, copyIn, stage } = yield* artifactWrites
+	const { build, fromFiles, copyIn, stage, capabilitiesOf } = yield* artifactWrites
 
 	const stopped = (sessionId: string, turn: number) =>
 		Effect.map(sessions.get(SessionId.make(sessionId)), (state) => {
@@ -209,6 +209,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 					) {
 						return refused("The files exceed the artifact size limits.")
 					}
+					const capabilities = yield* capabilitiesOf(id, built, resolved.sources)
 					const saved = (version: number, changed: boolean) => ({
 						ok: true as const,
 						artifact_id: id,
@@ -243,6 +244,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 									manifest: built.manifest_hash,
 									file_count: built.file_count,
 									total_bytes: built.total_bytes,
+									capabilities,
 								}),
 							)
 							return saved(added.reply.version, true)
@@ -266,6 +268,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 								manifest: built.manifest_hash,
 								file_count: built.file_count,
 								total_bytes: built.total_bytes,
+								capabilities,
 								reservation,
 							}),
 						)

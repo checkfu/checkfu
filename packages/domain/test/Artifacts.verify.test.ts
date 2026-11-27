@@ -26,6 +26,8 @@ const STANDING = {
 	"Artifact.UnpublishDropsTheToken": "proved",
 	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
 	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
+	"Artifact.ANewVersionRecordsTheCapabilitiesItWasGiven": "proved",
+	"Artifact.OnlyANewVersionChangesTheCapabilities": "proved",
 	"Artifact.ReservationsAreNumberedInOrder": "proved",
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",

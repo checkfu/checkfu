@@ -181,6 +181,8 @@ const STANDING = {
 	"Artifact.UnpublishDropsTheToken": "proved",
 	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
 	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
+	"Artifact.ANewVersionRecordsTheCapabilitiesItWasGiven": "proved",
+	"Artifact.OnlyANewVersionChangesTheCapabilities": "proved",
 	"Artifact.ReservationsAreNumberedInOrder": "proved",
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
@@ -842,6 +844,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							manifest: "m1",
 							file_count: 1,
 							total_bytes: 1,
+							capabilities: "",
 							reservation: 1,
 						}),
 					)
@@ -852,6 +855,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							manifest: "m2",
 							file_count: 1,
 							total_bytes: 2,
+							capabilities: "",
 						}),
 					)
 					const artifactWorld = yield* recordStep("artifact-created-and-versioned")

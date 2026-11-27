@@ -132,6 +132,7 @@ describe("PublishWebhookEvents policy", () => {
 					manifest: "a".repeat(64),
 					file_count: 1,
 					total_bytes: 12,
+					capabilities: "",
 					reservation: 1,
 				})
 				yield* domain.PublishArtifact({
@@ -146,6 +147,7 @@ describe("PublishWebhookEvents policy", () => {
 					manifest: "a".repeat(64),
 					file_count: 1,
 					total_bytes: 12,
+					capabilities: "",
 					reservation: 1,
 				})
 				yield* domain.AddArtifactVersion({
@@ -154,6 +156,7 @@ describe("PublishWebhookEvents policy", () => {
 					manifest: "b".repeat(64),
 					file_count: 1,
 					total_bytes: 5,
+					capabilities: "",
 				})
 				yield* domain.AdmitAutomation({
 					automation_id: automationId,

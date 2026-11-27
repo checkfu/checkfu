@@ -376,6 +376,33 @@ describe("An artifact the agent saves", () => {
 			}),
 		))
 
+	it("records the capabilities a saved directory declares in its artifact.json", () =>
+		withSessions((apiFetch, { workspaceFiles, createSession, save }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const files = workspaceFiles(session.id)
+				files.set("/workspace/form/index.html", "<form></form>")
+				files.set(
+					"/workspace/form/artifact.json",
+					JSON.stringify({
+						capabilities: { database: { collections: { responses: { visitors: "add" } } } },
+					}),
+				)
+				const id = idIn(yield* save(session.id, "Form", "/workspace/form"))
+				const artifact = yield* json<{ capabilities: unknown }>(
+					yield* request(apiFetch, "GET", `/v1/artifacts/${id}`),
+				)
+				expect(artifact.capabilities).toEqual({
+					database: { collections: { responses: { visitors: "add" } } },
+				})
+
+				files.set("/workspace/form/artifact.json", "{ not json")
+				expect(yield* save(session.id, "Form", "/workspace/form")).toBe(
+					"artifact.json cannot be used: it is not JSON.",
+				)
+			}),
+		))
+
 	it("refuses to save once the artifact was deleted or the session has ended", () =>
 		withSessions(
 			(apiFetch, { workspaceFiles, sessionArtifactSaves, runInWorld, createSession, save }) =>

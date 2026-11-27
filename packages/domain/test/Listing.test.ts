@@ -127,6 +127,7 @@ describe("ListResources", () => {
 					manifest: "m".repeat(64),
 					file_count: 1,
 					total_bytes: 1,
+					capabilities: "",
 					reservation: 1,
 				})
 			}

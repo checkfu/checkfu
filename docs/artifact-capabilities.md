@@ -151,7 +151,7 @@ These are to be proved or checked when each part is built, in the same way as th
 
 | Step | Change | Depends on |
 |---|---|---|
-| A | Read and check `artifact.json`; record capabilities on the version; reserve `_/` | |
+| A (built) | Read and check `artifact.json`; record capabilities on the version; reserve `_/` | |
 | B | The artifact's database object and the owner's data API | A |
 | C | Levels on viewing links and publications; the page's `_/data` calls; rate limits | B |
 | D | A tool for the agent to write an artifact's data | B |

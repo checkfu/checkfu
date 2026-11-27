@@ -28,6 +28,7 @@ const SOURCES = [
 	{ name: "AutomationView", version: 5, from: ["Automation"] },
 	{ name: "AutomationRunView", version: 1, from: ["Automation"] },
 	{ name: "ArtifactVersionView", version: 1, from: ["Artifact"] },
+	{ name: "ArtifactVersionView", version: 2, from: ["Artifact"] },
 	{
 		name: "Listing",
 		version: 3,

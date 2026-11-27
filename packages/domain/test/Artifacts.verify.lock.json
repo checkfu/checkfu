@@ -105,6 +105,14 @@
 			"Artifacts.NoReservationStaysOpen": {
 				"kind": "eventually",
 				"source": "(m) => m.Artifact.every((a) => a.state.open_reservation === 0)"
+			},
+			"Artifact.ANewVersionRecordsTheCapabilitiesItWasGiven": {
+				"kind": "transition",
+				"source": "({ after, command, events }) => {\n\t\t\tif (command._tag !== \"CreateArtifact\" && command._tag !== \"AddArtifactVersion\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [events.length === 0, after.capabilities === command.capabilities].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.OnlyANewVersionChangesTheCapabilities": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag === \"CreateArtifact\",\n\t\t\t\tcommand._tag === \"AddArtifactVersion\",\n\t\t\t\tafter.capabilities === before.capabilities,\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

@@ -24101,6 +24101,38 @@
 											"maximum": 9007199254740991,
 											"description": "Current version"
 										},
+										"capabilities": {
+											"type": "object",
+											"properties": {
+												"database": {
+													"type": "object",
+													"properties": {
+														"collections": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "object",
+																	"properties": {
+																		"visitors": {
+																			"type": "string",
+																			"enum": ["none", "read", "add", "write"],
+																			"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																		}
+																	},
+																	"required": ["visitors"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"required": ["collections"],
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false,
+											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -24189,6 +24221,7 @@
 										"type",
 										"name",
 										"version",
+										"capabilities",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -24845,6 +24878,38 @@
 														"maximum": 9007199254740991,
 														"description": "Current version"
 													},
+													"capabilities": {
+														"type": "object",
+														"properties": {
+															"database": {
+																"type": "object",
+																"properties": {
+																	"collections": {
+																		"type": "object",
+																		"patternProperties": {
+																			"^[a-z][a-z0-9_-]{0,31}$": {
+																				"type": "object",
+																				"properties": {
+																					"visitors": {
+																						"type": "string",
+																						"enum": ["none", "read", "add", "write"],
+																						"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																					}
+																				},
+																				"required": ["visitors"],
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"required": ["collections"],
+																"additionalProperties": false
+															}
+														},
+														"additionalProperties": false,
+														"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+													},
 													"file_count": {
 														"type": "integer",
 														"minimum": 0,
@@ -24905,6 +24970,7 @@
 													"type",
 													"name",
 													"version",
+													"capabilities",
 													"file_count",
 													"total_bytes",
 													"publication",
@@ -25340,6 +25406,38 @@
 											"maximum": 9007199254740991,
 											"description": "Current version"
 										},
+										"capabilities": {
+											"type": "object",
+											"properties": {
+												"database": {
+													"type": "object",
+													"properties": {
+														"collections": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "object",
+																	"properties": {
+																		"visitors": {
+																			"type": "string",
+																			"enum": ["none", "read", "add", "write"],
+																			"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																		}
+																	},
+																	"required": ["visitors"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"required": ["collections"],
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false,
+											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -25428,6 +25526,7 @@
 										"type",
 										"name",
 										"version",
+										"capabilities",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -26228,6 +26327,38 @@
 											"minimum": 1,
 											"maximum": 9007199254740991
 										},
+										"capabilities": {
+											"type": "object",
+											"properties": {
+												"database": {
+													"type": "object",
+													"properties": {
+														"collections": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "object",
+																	"properties": {
+																		"visitors": {
+																			"type": "string",
+																			"enum": ["none", "read", "add", "write"],
+																			"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																		}
+																	},
+																	"required": ["visitors"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"required": ["collections"],
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false,
+											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -26274,6 +26405,7 @@
 										"type",
 										"artifact_id",
 										"version",
+										"capabilities",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -26936,6 +27068,38 @@
 											"minimum": 1,
 											"maximum": 9007199254740991
 										},
+										"capabilities": {
+											"type": "object",
+											"properties": {
+												"database": {
+													"type": "object",
+													"properties": {
+														"collections": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "object",
+																	"properties": {
+																		"visitors": {
+																			"type": "string",
+																			"enum": ["none", "read", "add", "write"],
+																			"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																		}
+																	},
+																	"required": ["visitors"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"required": ["collections"],
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false,
+											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -26982,6 +27146,7 @@
 										"type",
 										"artifact_id",
 										"version",
+										"capabilities",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -28799,6 +28964,38 @@
 											"maximum": 9007199254740991,
 											"description": "Current version"
 										},
+										"capabilities": {
+											"type": "object",
+											"properties": {
+												"database": {
+													"type": "object",
+													"properties": {
+														"collections": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "object",
+																	"properties": {
+																		"visitors": {
+																			"type": "string",
+																			"enum": ["none", "read", "add", "write"],
+																			"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																		}
+																	},
+																	"required": ["visitors"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"required": ["collections"],
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false,
+											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -28887,6 +29084,7 @@
 										"type",
 										"name",
 										"version",
+										"capabilities",
 										"file_count",
 										"total_bytes",
 										"files",
@@ -29439,6 +29637,38 @@
 											"maximum": 9007199254740991,
 											"description": "Current version"
 										},
+										"capabilities": {
+											"type": "object",
+											"properties": {
+												"database": {
+													"type": "object",
+													"properties": {
+														"collections": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "object",
+																	"properties": {
+																		"visitors": {
+																			"type": "string",
+																			"enum": ["none", "read", "add", "write"],
+																			"description": "What someone opening the page may do with a collection: nothing, list and get, add only, or everything"
+																		}
+																	},
+																	"required": ["visitors"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"required": ["collections"],
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false,
+											"description": "What the version's page may ask of the platform at run time, as declared in its artifact.json. Empty when it declares nothing"
+										},
 										"file_count": {
 											"type": "integer",
 											"minimum": 0,
@@ -29527,6 +29757,7 @@
 										"type",
 										"name",
 										"version",
+										"capabilities",
 										"file_count",
 										"total_bytes",
 										"files",
