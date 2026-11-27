@@ -2,12 +2,16 @@ import { createHash } from "node:crypto"
 import {
 	chmod,
 	link,
+	lstat,
 	mkdir,
 	mkdtemp,
 	readFile,
+	readdir,
+	rename,
 	rm,
 	stat,
 	symlink,
+	unlink,
 	writeFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -19,7 +23,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as ConfigProvider from "effect/ConfigProvider"
-import { extract, installRuntime, makeGithubDistribution } from "../src/Deployment/Distribution.ts"
+import {
+	REVISION,
+	extract,
+	installRuntime,
+	makeGithubDistribution,
+} from "../src/Deployment/Distribution.ts"
 import type { Distribution } from "../src/Deployment/Distribution.ts"
 import {
 	acquireOperation,
@@ -93,8 +102,8 @@ const fixture = async () => {
 		source,
 		runtimeSpec,
 		distribution,
-		next: () => {
-			revision = second
+		next: (next = second) => {
+			revision = next
 		},
 		options: {
 			distribution,
@@ -282,6 +291,136 @@ describe("managed deployment lifecycle", () => {
 		await expect(
 			prepareManaged(directory, { operation: "deploy", stage: "../live" }, f.options, signal()),
 		).rejects.toThrow("Invalid deployment stage")
+	})
+
+	it("keeps shared and partially deployed revisions visible to a source-cache inventory", async () => {
+		const directory = await temporary()
+		const f = await fixture()
+		const third = "c".repeat(40)
+		const base = join(directory, "deploy")
+		const stages = join(base, "stages")
+		const sources = join(base, "sources")
+		const lock = await acquireOperation(base)
+		const stageFile = (stage: string) => join(stages, stage, ".checkfu", "revision.json")
+		const deploy = (stage: string, options = f.options) =>
+			prepareManaged(directory, { operation: "deploy", stage }, options, signal())
+		const candidates = async (preparing?: string): Promise<ReadonlyArray<string>> => {
+			const isDirectory = (path: string) =>
+				lstat(path).then(
+					(info) => info.isDirectory(),
+					() => false,
+				)
+			if (!(await isDirectory(stages)) || !(await isDirectory(sources))) {
+				return []
+			}
+			const pins = new Set(preparing === undefined ? [] : [preparing])
+			for (const entry of await readdir(stages, { withFileTypes: true })) {
+				if (!entry.isDirectory()) {
+					return []
+				}
+				try {
+					const path = stageFile(entry.name)
+					if (
+						!(await lstat(join(stages, entry.name, ".checkfu"))).isDirectory() ||
+						!(await lstat(path)).isFile()
+					) {
+						return []
+					}
+					const record: unknown = JSON.parse(await readFile(path, "utf8"))
+					if (
+						record === null ||
+						typeof record !== "object" ||
+						!("revision" in record) ||
+						typeof record.revision !== "string" ||
+						!REVISION.test(record.revision)
+					) {
+						return []
+					}
+					pins.add(record.revision)
+				} catch {
+					return []
+				}
+			}
+			return (await readdir(sources, { withFileTypes: true }))
+				.filter(
+					(entry) => entry.isDirectory() && REVISION.test(entry.name) && !pins.has(entry.name),
+				)
+				.map((entry) => entry.name)
+				.sort()
+		}
+		try {
+			const live = await deploy("live")
+			await live.record()
+			const staging = await deploy("staging")
+			await staging.record()
+			expect(live.root).toBe(staging.root)
+
+			f.next()
+			await expect(
+				deploy("staging", {
+					...f.options,
+					install: async () => {
+						throw new Error("installation failed before recording")
+					},
+				}),
+			).rejects.toThrow("installation failed before recording")
+			expect(await candidates(second)).toEqual([])
+			expect(await candidates()).toEqual([second])
+			expect(await readFile(stageFile("staging"), "utf8")).toContain(first)
+			await (await deploy("staging")).record()
+			expect(await candidates()).toEqual([])
+
+			f.next(third)
+			const interrupted = async () => {
+				await (await deploy("live")).record()
+				throw new Error("deployment failed after recording")
+			}
+			await expect(interrupted()).rejects.toThrow("deployment failed after recording")
+			expect(await candidates()).toEqual([first])
+			await symlink(join(sources, first), join(sources, "d".repeat(40)))
+			expect(await candidates()).toEqual([first])
+
+			const checkOfflineDestroy = async () => {
+				const networkCalls = f.calls.slice()
+				for (const [stage, revision] of [
+					["live", third],
+					["staging", second],
+				] as const) {
+					const destroy = await prepareManaged(
+						directory,
+						{ operation: "destroy", stage },
+						f.options,
+						signal(),
+					)
+					expect(destroy.revision).toBe(revision)
+					expect(destroy.root).toBe(join(sources, revision))
+				}
+				expect(f.calls).toEqual(networkCalls)
+			}
+			await checkOfflineDestroy()
+			const retired = join(directory, "retired")
+			await rename(join(sources, first), retired)
+			await checkOfflineDestroy()
+			await rename(retired, join(sources, first))
+			for (const root of [sources, stages]) {
+				await rename(root, retired)
+				expect(await candidates()).toEqual([])
+				await symlink(retired, root)
+				expect(await candidates()).toEqual([])
+				await unlink(root)
+				await rename(retired, root)
+			}
+			expect(await candidates()).toEqual([first])
+			await mkdir(join(stages, "recovery", ".checkfu"), { recursive: true })
+			expect(await candidates()).toEqual([])
+			await writeFile(stageFile("recovery"), "{")
+			expect(await candidates()).toEqual([])
+			expect(await readFile(join(sources, first, "alchemy.run.ts"), "utf8")).toContain(
+				"production stack",
+			)
+		} finally {
+			await lock()
+		}
 	})
 
 	it("repairs missing dependencies without fetching recorded source or disturbing stage data", async () => {
