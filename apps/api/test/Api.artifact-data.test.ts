@@ -232,14 +232,25 @@ describe("An artifact's data API", () => {
 				const id = yield* artifact("Form")
 				const path = `/v1/artifacts/${id}/data/responses`
 				const key = { "idempotency-key": "response-1" }
-				const first = yield* json<DocumentBody>(
-					yield* call("POST", path, { data: { answer: 1 } }, key),
-				)
-				const again = yield* call("POST", path, { data: { answer: 1 } }, key)
+				const original = {
+					answer: [null, { "10": false, notes: "α", "2": [], count: 1 }],
+					confirmed: true,
+				}
+				const reordered = {
+					confirmed: true,
+					answer: [null, { count: 1, "2": [], notes: "α", "10": false }],
+				}
+				const first = yield* json<DocumentBody>(yield* call("POST", path, { data: original }, key))
+				const again = yield* call("POST", path, { data: reordered }, key)
 				expect(again.status).toBe(201)
 				expect(yield* json(again)).toEqual(first)
 
-				const other = yield* call("POST", path, { data: { answer: 2 } }, key)
+				const other = yield* call(
+					"POST",
+					path,
+					{ data: { ...original, answer: [...original.answer].reverse() } },
+					key,
+				)
 				expect(other.status).toBe(409)
 				expect((yield* json<ErrorBody>(other)).error.message).toContain("Idempotency-Key")
 

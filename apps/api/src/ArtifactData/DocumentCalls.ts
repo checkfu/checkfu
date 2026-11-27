@@ -16,6 +16,7 @@ import * as Hex from "effect/encoding/Hex"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import { canonicalJsonDigest } from "../Http/HttpHelpers.ts"
 import { ArtifactDatabase } from "./ArtifactDatabase.ts"
 import type { ArtifactDatabaseError } from "./ArtifactDatabase.ts"
 import type { StoredDocument, WriteRefusal } from "./ArtifactDocuments.ts"
@@ -175,10 +176,7 @@ export const DocumentCalls = Effect.gen(function* () {
 						? `doc_${Hex.encode(yield* random.randomBytes(12))}`
 						: yield* keyedId(artifactId, collection, by, key)
 				const body = JSON.stringify(data)
-				const createHash =
-					key === undefined
-						? undefined
-						: yield* digest.digestHex(Digest.sha256, utf8Encoder.encode(body))
+				const createHash = key === undefined ? undefined : yield* canonicalJsonDigest(digest, data)
 				yield* beforeMutation
 				const outcome = yield* held(
 					database.write(artifactId, collection, id, body, "create", createHash),

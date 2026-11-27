@@ -271,7 +271,8 @@ describe("A page reaching its artifact's data", () => {
 							if (allowed && operation === "add") {
 								const added = yield* json<DocumentBody>(response)
 								if (visitors === "add") {
-									expect(added).toEqual({ id: expect.any(String), type: "artifact_document_added" })
+									expect(typeof added.id).toBe("string")
+									expect(added).toEqual({ id: added.id, type: "artifact_document_added" })
 								} else {
 									expect(added).toMatchObject({ type: "artifact_document", data: "added" })
 								}
@@ -350,9 +351,17 @@ describe("A page reaching its artifact's data", () => {
 
 				const key = { "idempotency-key": "submit-1" }
 				const once = yield* json<DocumentBody>(
-					yield* page(board, { method: "POST", body: { data: "form" }, headers: key }),
+					yield* page(board, {
+						method: "POST",
+						body: { data: { form: { a: 1, b: 2 }, done: false } },
+						headers: key,
+					}),
 				)
-				const again = yield* page(board, { method: "POST", body: { data: "form" }, headers: key })
+				const again = yield* page(board, {
+					method: "POST",
+					body: { data: { done: false, form: { b: 2, a: 1 } } },
+					headers: key,
+				})
 				expect(again.status).toBe(201)
 				expect(yield* json(again)).toEqual(once)
 				const reused = yield* page(board, {

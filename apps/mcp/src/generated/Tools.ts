@@ -614,7 +614,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_addDocument",
 		title: "Add a document",
 		description:
-			"Add a document to a collection under a new id. A collection holds up to 10000 documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Reusing the key with different input answers 409.",
+			"Add a document to a collection under a new id. A collection holds up to 10000 documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Retries compare JSON values with object member order ignored and array order preserved. Reusing the key with a different JSON value answers 409.",
 		method: "POST",
 		path: "/v1/artifacts/{artifact_id}/data/{collection}",
 		readOnly: false,
