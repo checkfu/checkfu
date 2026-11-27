@@ -23,7 +23,10 @@ runs:
       with:
         node-version: 24
 
-    - uses: actions/cache@v4
+    # Only main saves the Bun cache: a pull request's cache can be read by that pull request alone,
+    # and each copy is about 460 MB of the repository's 10 GB. A pull request restores main's.
+    - id: bun-cache
+      uses: actions/cache/restore@v4
       with:
         path: ~/.bun/install/cache
         key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -31,6 +34,12 @@ runs:
 
     - run: bun install --frozen-lockfile
       shell: bash
+
+    - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ steps.bun-cache.outputs.cache-primary-key }}
 
     - if: ${{ inputs.turbo-cache != '' }}
       uses: actions/cache@v4

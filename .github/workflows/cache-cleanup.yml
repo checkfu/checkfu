@@ -1,0 +1,24 @@
+name: Delete a closed pull request's caches
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+
+concurrency:
+  group: ci-refs/pull/${{ github.event.pull_request.number }}/merge
+  cancel-in-progress: true
+
+jobs:
+  delete:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: gh cache delete --all --ref "$REF" --succeed-on-no-caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
