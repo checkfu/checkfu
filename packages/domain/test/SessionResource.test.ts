@@ -26,6 +26,7 @@ const repository = (id: string, url: string, mount_path: string) => ({
 	url,
 	mount_path,
 	checkout: null,
+	access: "read_write" as const,
 })
 
 describe("session resources", () => {
