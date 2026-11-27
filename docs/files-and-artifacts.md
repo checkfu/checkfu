@@ -145,6 +145,8 @@ An artifact is sometimes a document, sometimes a slide deck, sometimes a dashboa
 
 **Rules to add when these are built:** a version's capabilities never change; an artifact made from a type records the type and version it was made from; deleting an artifact deletes its data.
 
+`docs/artifact-capabilities.md` works these three out: how a version declares a capability, how a page calls one, who is granted access, the per-artifact database, and types.
+
 ## Skill
 
 A skill becomes its own resource: `POST /v1/skills` with files, versions as full snapshots, checked for a valid `SKILL.md` when uploaded, listed with `GET /v1/skills`, and attached to an agent version (sessions can still add one). It shares the versioned-file storage with artifacts and none of the publication rules. Until this is built, the current convention stays.
