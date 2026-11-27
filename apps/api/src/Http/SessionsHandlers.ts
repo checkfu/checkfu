@@ -967,10 +967,22 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						SessionAlreadyExists: () => reusedKey,
 						FileNotFound: ({ file_id }: { file_id: string }) =>
 							reject(404, `File ${file_id} not found.`),
+						ArtifactNotFound: ({ artifact_id }: { artifact_id: string }) =>
+							reject(404, `Artifact ${artifact_id} not found.`),
+						ArtifactVersionNotFound: ({
+							artifact_id,
+							version,
+						}: {
+							artifact_id: string
+							version: number
+						}) => reject(404, `Artifact ${artifact_id} has no version ${version}.`),
 						...missing,
 					}
 					// The host looks up the original command receipt before deciding against the current state.
-					const send = asked.some((resource) => resource.type === "file")
+					const send = asked.some(
+						(resource) =>
+							resource.type === "file" || resource.type === "artifact" || resource.type === "skill",
+					)
 						? admitMounted.send(
 								new AdmitMountedSession({
 									...admission,

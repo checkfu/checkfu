@@ -1,12 +1,14 @@
 import * as Domain from "@alchemy.run/domain"
-import * as Boolean from "effect/Boolean"
 import * as Schema from "effect/Schema"
 import { Agent } from "../Agent/Agent.aggregate.ts"
+import { Artifact } from "../Artifact/Artifact.aggregate.ts"
+import { ArtifactNotFound } from "../Artifact/ArtifactNotFound.rejection.ts"
+import { ArtifactVersionNotFound } from "../Artifact/PublishArtifact.command.ts"
 import { Environment } from "../Environment/Environment.aggregate.ts"
 import { File } from "../File/File.aggregate.ts"
-import { FileId } from "../File/File.id.ts"
 import { FileNotFound } from "../File/FileNotFound.rejection.ts"
 import { admissionFields, admissionRejections } from "./AdmitSession.command.ts"
+import { artifactMounts, mountedKeys, mountedRefusal } from "./AdmissionMounts.ts"
 import { admissionRefusal } from "./AdmissionRefusal.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { InitialMessages } from "./InitialMessages.ts"
@@ -26,7 +28,7 @@ export class AdmitMountedSession extends Domain.Command("AdmitMountedSession", {
 		]),
 	},
 	events: [SessionCreated, UserMessage, SessionStatusRunning],
-	rejects: [...admissionRejections, FileNotFound],
+	rejects: [...admissionRejections, FileNotFound, ArtifactNotFound, ArtifactVersionNotFound],
 }) {}
 
 export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSession, {
@@ -35,14 +37,15 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 		agent: Agent,
 		environment: Environment,
 		files: File,
+		artifacts: Artifact,
 	},
 	keyOf: (cmd) => ({
 		session: cmd.session_id,
 		agent: cmd.agent_id,
 		environment: cmd.environment_id,
-		files: filesOf(cmd.resources).map((file) => FileId.make(file.file_id)),
+		...mountedKeys(cmd.resources),
 	}),
-	decide: ({ session, agent, environment, files }, cmd) => {
+	decide: ({ session, agent, environment, files, artifacts }, cmd) => {
 		if (session.state._tag !== "Uninitialized") {
 			return new SessionAlreadyExists({ session_id: session.id })
 		}
@@ -51,19 +54,9 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 		if (refused !== undefined) {
 			return refused
 		}
-		const invalidFile = filesOf(cmd.resources).find(
-			(mount) =>
-				!files.some((file) =>
-					Boolean.every([
-						file.id === mount.file_id,
-						file.state.status === "ready",
-						file.state.sha256 === mount.sha256,
-						file.state.size === mount.size,
-					]),
-				),
-		)
-		if (invalidFile !== undefined) {
-			return new FileNotFound({ file_id: FileId.make(invalidFile.file_id) })
+		const mountError = mountedRefusal(cmd.resources, files, artifacts)
+		if (mountError !== undefined) {
+			return mountError
 		}
 		const created = session.record(
 			new SessionCreated({
@@ -96,6 +89,21 @@ export class AdmitMountedSessionDecision extends Domain.Decision(AdmitMountedSes
 						file.status === "ready" &&
 						file.size === mount.size &&
 						file.sha256 === mount.sha256
+					)
+				})
+			)
+		},
+		EveryMountedArtifactIsActiveAtThePinnedVersion: ({ before, command }) => {
+			const mounts = artifactMounts(command.resources)
+			return (
+				before.artifacts.length === mounts.length &&
+				before.artifacts.every((artifact, index) => {
+					const mount = mounts[index]
+					return (
+						mount !== undefined &&
+						artifact.status === "active" &&
+						mount.version >= 1 &&
+						mount.version <= artifact.version
 					)
 				})
 			)
