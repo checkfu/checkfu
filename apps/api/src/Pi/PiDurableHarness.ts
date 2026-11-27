@@ -278,7 +278,7 @@ export const describeMounts = (
 			? []
 			: [
 					[
-						"Files the user gave you, read-only. Read them with the read tool:",
+						"Files the user gave you, read-only. Read them with the read tool; commands run in the shell cannot see them:",
 						...files.map((file) => `- ${file.mount_path} (${file.size} bytes)`),
 					].join("\n"),
 				]),

@@ -9579,7 +9579,7 @@
 											]
 										},
 										"maxItems": 72,
-										"description": "Repositories, memory stores, artifacts and skills to mount in the session's workspace"
+										"description": "Repositories, memory stores, artifacts, skills and files to mount in the session's workspace"
 									}
 								},
 								"required": ["agent", "environment_id"],

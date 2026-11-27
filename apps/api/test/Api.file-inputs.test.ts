@@ -129,9 +129,11 @@ describe("Files in a session", () => {
 				const sales = "region,total\nEMEA,10\n"
 				const csv = yield* upload("sales.csv", sales)
 				const notes = yield* upload("notes.md", "Totals are in thousands.")
+				const empty = yield* upload("empty.txt", "")
 				const created = yield* createSession([
 					{ type: "file", file_id: csv.id, mount_path: "data/q3.csv" },
 					{ type: "file", file_id: notes.id },
+					{ type: "file", file_id: empty.id },
 				])
 				expect(created.status).toBe(201)
 				const session = yield* json<SessionBody>(created)
@@ -145,6 +147,7 @@ describe("Files in a session", () => {
 						mount_path: `${UPLOADS}/data/q3.csv`,
 					},
 					{ type: "file", file_id: notes.id, mount_path: `${UPLOADS}/notes.md` },
+					{ type: "file", file_id: empty.id, size: 0, mount_path: `${UPLOADS}/empty.txt` },
 				])
 
 				const seen: Array<{
@@ -152,6 +155,7 @@ describe("Files in a session", () => {
 					readonly sales: string | null
 					readonly pages: ReadonlyArray<string | null>
 					readonly notes: string | null
+					readonly empty: string | null
 					readonly absent: string | null
 				}> = []
 				onTurn(async () => {
@@ -164,21 +168,23 @@ describe("Files in a session", () => {
 							await files.read(`${UPLOADS}/data/q3.csv`, { offset: 100, length: 4 }),
 						],
 						notes: await files.read(`${UPLOADS}/notes.md`),
+						empty: await files.read(`${UPLOADS}/empty.txt`),
 						absent: await files.read(`${UPLOADS}/other.txt`),
 					})
 				})
 				yield* sendAndSettle(apiFetch, session.id, ["Sum the sales."], 1)
 				expect(seen).toEqual([
 					{
-						files: [`${UPLOADS}/data/q3.csv`, `${UPLOADS}/notes.md`],
+						files: [`${UPLOADS}/data/q3.csv`, `${UPLOADS}/empty.txt`, `${UPLOADS}/notes.md`],
 						sales,
 						pages: ["EMEA", ""],
 						notes: "Totals are in thousands.",
+						empty: "",
 						absent: null,
 					},
 				])
 				expect(systems[0]).toContain(
-					`Files the user gave you, read-only. Read them with the read tool:\n- ${UPLOADS}/data/q3.csv (${sales.length} bytes)\n- ${UPLOADS}/notes.md (24 bytes)`,
+					`Files the user gave you, read-only. Read them with the read tool; commands run in the shell cannot see them:\n- ${UPLOADS}/data/q3.csv (${sales.length} bytes)\n- ${UPLOADS}/notes.md (24 bytes)\n- ${UPLOADS}/empty.txt (0 bytes)`,
 				)
 
 				const listed = yield* json<{ data: ReadonlyArray<ResourceBody> }>(
@@ -187,6 +193,7 @@ describe("Files in a session", () => {
 				expect(listed.data.map((resource) => resource.mount_path)).toEqual([
 					`${UPLOADS}/data/q3.csv`,
 					`${UPLOADS}/notes.md`,
+					`${UPLOADS}/empty.txt`,
 				])
 			}),
 		))
@@ -235,6 +242,9 @@ describe("Files in a session", () => {
 				).toBe(400)
 				expect((yield* createSession([{ ...mount, mount_path: "../escape.txt" }])).status).toBe(400)
 				expect((yield* createSession([{ ...mount, mount_path: "/absolute.txt" }])).status).toBe(400)
+				expect(
+					(yield* createSession([{ ...mount, mount_path: "\u{1F600}".repeat(512) }])).status,
+				).toBe(400)
 				expect(
 					(yield* createSession(
 						Array.from({ length: MAX_SESSION_FILES + 1 }, (_, index) => ({

@@ -3184,7 +3184,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							maxItems: 72,
 							description:
-								"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
+								"Repositories, memory stores, artifacts, skills and files to mount in the session's workspace",
 						},
 					},
 					required: ["agent", "environment_id"],

@@ -779,10 +779,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				}
 				const mount_path = fileMountPath(resource.mount_path ?? file.filename)
 				if (!isFileMountPath(mount_path)) {
-					return yield* reject(
-						400,
-						`File ${resource.file_id} cannot be placed at ${mount_path}; give it a mount_path.`,
-					)
+					return yield* reject(400, `File ${resource.file_id} cannot be placed at ${mount_path}.`)
 				}
 				return {
 					type: resource.type,

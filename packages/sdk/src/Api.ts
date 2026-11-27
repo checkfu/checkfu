@@ -31,6 +31,7 @@ import {
 	SkillMount,
 	FileMount,
 	FILE_MOUNT_ROOT,
+	MAX_MOUNT_PATH_LENGTH,
 	ArtifactName,
 	ArtifactPath,
 	ArtifactContentType,
@@ -753,7 +754,9 @@ export const FileMountParams = Schema.Struct({
 		description: "File to place in the session's uploads directory, read-only",
 	}),
 	mount_path: Schema.optionalKey(
-		ArtifactPath.annotate({
+		ArtifactPath.check(
+			Schema.isMaxLength(MAX_MOUNT_PATH_LENGTH - FILE_MOUNT_ROOT.length - 1),
+		).annotate({
 			description: `Where to place it, relative to ${FILE_MOUNT_ROOT} (default: the file's name)`,
 		}),
 	),
@@ -817,7 +820,7 @@ export const CreateSessionBody = Schema.Struct({
 	resources: Schema.optionalKey(
 		CreateSessionResources.annotate({
 			description:
-				"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
+				"Repositories, memory stores, artifacts, skills and files to mount in the session's workspace",
 		}),
 	),
 })
