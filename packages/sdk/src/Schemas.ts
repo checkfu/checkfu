@@ -983,6 +983,12 @@ export const ArtifactCollectionName = Schema.String.check(
 	}),
 )
 
+export const ArtifactDocumentId = Schema.String.check(
+	Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u, {
+		expected: "an id of up to 64 letters, digits, - and _, starting with a letter or digit",
+	}),
+)
+
 export const ArtifactVisitorAccess = Schema.Literals(["none", "read", "add", "write"]).annotate({
 	description:
 		"What someone opening the page may do with a collection: nothing, list and get, add only, or everything",

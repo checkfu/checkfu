@@ -112,6 +112,8 @@ describe("MCP tool projection", () => {
 		).toEqual([
 			"agents_archiveAgent",
 			"artifacts_deleteArtifact",
+			"artifacts_deleteDocument",
+			"artifacts_putDocument",
 			"automations_archiveAutomation",
 			"automations_createAutomation",
 			"environments_archiveEnvironment",
@@ -134,6 +136,7 @@ describe("MCP tool projection", () => {
 			tools.filter((tool) => !tool.readOnly && !tool.destructive).map((tool) => tool.name),
 		).toEqual([
 			"agents_createAgent",
+			"artifacts_addDocument",
 			"artifacts_createArtifact",
 			"artifacts_createArtifactLink",
 			"artifacts_createArtifactVersion",

@@ -9,6 +9,7 @@ import {
 	isIntegerScalar,
 	isJsonArray,
 	isJsonRecord,
+	isAnyJson,
 	isObjectOrComplexUnion,
 	isSseMethod,
 	readEndpointRef,
@@ -438,7 +439,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				description: field.description || `Body field ${field.wireName}`,
 				literals,
 			})
-		} else if (isObjectOrComplexUnion(field.type)) {
+		} else if (isObjectOrComplexUnion(field.type) || isAnyJson(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
 				flagName,

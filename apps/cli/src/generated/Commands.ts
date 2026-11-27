@@ -764,6 +764,352 @@ const artifactsUnpublishCommand = CommandMake(
 	),
 )
 
+const artifactsDataAddCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:data add",
+	apiGroup: "artifact_data",
+	apiEndpoint: "addDocument",
+	hasBody: true,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "collection",
+			flagName: "collection",
+			wireName: "collection",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "data",
+			flagName: "data",
+			wireName: "data",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const artifactsDataAddCommand = CommandMake(
+	"add",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		collection: FlagString("collection").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Collection name"),
+		),
+		data: FlagString("data").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("Body field data (JSON, YAML, or @file)"),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDataAddCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Add a document to a collection under a new id. A collection holds up to 10000 documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409 (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const artifactsDataDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:data delete",
+	apiGroup: "artifact_data",
+	apiEndpoint: "deleteDocument",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "collection",
+			flagName: "collection",
+			wireName: "collection",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "documentId",
+			flagName: "document-id",
+			wireName: "document_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsDataDeleteCommand = CommandMake(
+	"delete",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		collection: FlagString("collection").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Collection name"),
+		),
+		documentId: FlagString("document-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Document ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDataDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Remove one document from a collection"))
+
+const artifactsDataDescribeCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:data describe",
+	apiGroup: "artifact_data",
+	apiEndpoint: "getDatabase",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsDataDescribeCommand = CommandMake(
+	"describe",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDataDescribeCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List the collections an artifact's database holds, with how many documents and bytes are in each. A database holds up to 16 collections and 67108864 bytes of documents",
+	),
+)
+
+const artifactsDataListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:data list",
+	apiGroup: "artifact_data",
+	apiEndpoint: "listDocuments",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "collection",
+			flagName: "collection",
+			wireName: "collection",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+	],
+}
+
+const artifactsDataListCommand = CommandMake(
+	"list",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		collection: FlagString("collection").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Collection name"),
+		),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque pagination cursor from the previous response's next_page."),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDataListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List the documents in a collection, oldest first. Use next_page to continue",
+	),
+)
+
+const artifactsDataPutCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:data put",
+	apiGroup: "artifact_data",
+	apiEndpoint: "putDocument",
+	hasBody: true,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "collection",
+			flagName: "collection",
+			wireName: "collection",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "documentId",
+			flagName: "document-id",
+			wireName: "document_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "data",
+			flagName: "data",
+			wireName: "data",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+	],
+}
+
+const artifactsDataPutCommand = CommandMake(
+	"put",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		collection: FlagString("collection").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Collection name"),
+		),
+		documentId: FlagString("document-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Document ID"),
+		),
+		data: FlagString("data").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("Body field data (JSON, YAML, or @file)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDataPutCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Store a document under an id you choose, replacing the document already there (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const artifactsDataRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:data retrieve",
+	apiGroup: "artifact_data",
+	apiEndpoint: "getDocument",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "collection",
+			flagName: "collection",
+			wireName: "collection",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "documentId",
+			flagName: "document-id",
+			wireName: "document_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsDataRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		collection: FlagString("collection").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Collection name"),
+		),
+		documentId: FlagString("document-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Document ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDataRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve one document from a collection"))
+
 const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts:versions create",
 	apiGroup: "artifacts",
@@ -4371,6 +4717,7 @@ export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AgentsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const ArtifactsDataExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -4391,6 +4738,7 @@ export const buildGeneratedResourceCommands = <
 	readonly agents?: AgentsExtras
 	readonly "agents:versions"?: AgentsVersionsExtras
 	readonly artifacts?: ArtifactsExtras
+	readonly "artifacts:data"?: ArtifactsDataExtras
 	readonly "artifacts:versions"?: ArtifactsVersionsExtras
 	readonly "automation-runs"?: AutomationRunsExtras
 	readonly automations?: AutomationsExtras
@@ -4437,6 +4785,18 @@ export const buildGeneratedResourceCommands = <
 				artifactsRetrieveCommand,
 				artifactsUnpublishCommand,
 				...(extras?.["artifacts"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("artifacts:data").pipe(
+			CommandWithDescription("Read and write the documents in an artifact's database"),
+			CommandWithSubcommands([
+				artifactsDataAddCommand,
+				artifactsDataDeleteCommand,
+				artifactsDataDescribeCommand,
+				artifactsDataListCommand,
+				artifactsDataPutCommand,
+				artifactsDataRetrieveCommand,
+				...(extras?.["artifacts:data"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("artifacts:versions").pipe(

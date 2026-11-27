@@ -4,6 +4,7 @@ import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
+import { makeArtifactDatabaseMemory } from "@checkfu/api/ArtifactData/ArtifactDatabaseMemory"
 import { makeFileStoreMemory } from "@checkfu/api/Files/FileStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import {
@@ -261,6 +262,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			HarnessLive.pipe(Layer.provideMerge(CheckfuLive)),
 			makeArtifactStoreMemory().layer,
 			makeFileStoreMemory().layer,
+			makeArtifactDatabaseMemory().layer,
 			ArtifactLinksTest,
 		).pipe(
 			Layer.provide(Domain.InMemory),

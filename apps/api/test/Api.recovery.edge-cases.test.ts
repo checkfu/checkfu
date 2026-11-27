@@ -43,6 +43,7 @@ import {
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { makeArtifactDatabaseMemory } from "../src/ArtifactData/ArtifactDatabaseMemory.ts"
 import { makeFileStoreMemory } from "../src/Files/FileStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
@@ -227,6 +228,7 @@ describe("interrupted turns and turn recovery", () => {
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(makeFileStoreMemory().layer),
+			Layer.provideMerge(makeArtifactDatabaseMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -383,6 +385,7 @@ describe("interrupted turns and turn recovery", () => {
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(makeFileStoreMemory().layer),
+			Layer.provideMerge(makeArtifactDatabaseMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
 			Layer.provideMerge(
@@ -588,6 +591,7 @@ describe("interrupted turns and turn recovery", () => {
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(makeFileStoreMemory().layer),
+			Layer.provideMerge(makeArtifactDatabaseMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -699,6 +703,7 @@ describe("interrupted turns and turn recovery", () => {
 		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(makeFileStoreMemory().layer),
+			Layer.provideMerge(makeArtifactDatabaseMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {

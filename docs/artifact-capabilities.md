@@ -103,9 +103,20 @@ A page is untrusted and may be public, so it is not given a query language. Docu
 An authenticated client uses the artifact management API to manage its data.
 
 ```
-GET | PUT | DELETE  /v1/artifacts/{artifact_id}/data/{collection}/{id}
+GET                 /v1/artifacts/{artifact_id}/data
 GET | POST          /v1/artifacts/{artifact_id}/data/{collection}
+GET | PUT | DELETE  /v1/artifacts/{artifact_id}/data/{collection}/{id}
 ```
+
+| Call | Meaning |
+|---|---|
+| `GET data` | The collections that hold a document, with how many documents and bytes are in each |
+| `GET data/{collection}` | List documents, oldest first, with `limit` and `page` |
+| `POST data/{collection}` | Add `{"data": …}` under a new id. A retry with the same `Idempotency-Key` answers with the first document; the same key with a different document answers 409 |
+| `PUT data/{collection}/{id}` | Store `{"data": …}` under an id the client chooses, replacing what is there |
+| `DELETE data/{collection}/{id}` | Remove one document |
+
+A document is any JSON value, with arrays and objects nested at most 32 deep. Numbers are JSON numbers, so an integer beyond 2^53 loses precision. An `Idempotency-Key` protects a retry only while the document it added still exists. The owner may use any collection name, declared by a version or not, so a dashboard can be filled before its page exists and a dropped collection can still be read and emptied. A document over the size limit answers 400; a full collection or database answers 409.
 
 This lets a client fill a dashboard or read a form’s responses. A separate agent tool uses a private Worker binding scoped to the running turn and artifacts created by that session. Access to other artifacts would require an explicit write grant.
 
@@ -152,7 +163,7 @@ These are to be proved or checked when each part is built, in the same way as th
 | Step | Change | Depends on |
 |---|---|---|
 | A (built) | Read and check `artifact.json`; record capabilities on the version; reserve `_/` | |
-| B | The artifact's database object and the owner's data API | A |
+| B (built) | The artifact's database object and the owner's data API | A |
 | C | Levels on viewing links and publications; the page's `_/data` calls; rate limits | B |
 | D | A tool for the agent to write an artifact's data | B |
 | E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C |

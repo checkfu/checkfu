@@ -112,6 +112,7 @@ import {
 	TestRuntimeContext,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { makeArtifactDatabaseMemory } from "../src/ArtifactData/ArtifactDatabaseMemory.ts"
 import { makeFileStoreMemory } from "../src/Files/FileStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
@@ -1759,6 +1760,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(makeFileStoreMemory().layer),
+			Layer.provideMerge(makeArtifactDatabaseMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(TestRuntimeContext),
@@ -1904,6 +1906,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(makeFileStoreMemory().layer),
+				Layer.provideMerge(makeArtifactDatabaseMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),
 				Layer.provideMerge(
 					Layer.succeed(HarnessLimits, {
