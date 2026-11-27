@@ -185,6 +185,37 @@ it("uses tracked kinds on pathless and directory applies and validates authored 
 		),
 	))
 
+it("accepts a project-root alias while preserving the physical project's lock and resource identities", () =>
+	Effect.runPromise(
+		testProject(({ fs, file, write, run }) =>
+			Effect.gen(function* () {
+				const path = yield* Path.Path
+				yield* write(reporter, agentSource("Aliased root"))
+				const physical = yield* fs.realPath(file("."))
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const alias = path.join(directory, "project")
+				yield* fs.symlink(physical, alias)
+				const lock = path.join(physical, "checkfu-lock.json")
+				const result = yield* run([
+					"apply",
+					"--lock-file",
+					lock,
+					"--yes",
+					path.join(alias, reporter),
+				])
+				expect(rows(result)).toMatchObject([{ file: `./${reporter}`, action: "create" }])
+				const repeated = yield* run([
+					"apply",
+					"--lock-file",
+					lock,
+					"--dry-run",
+					path.join(physical, reporter),
+				])
+				expect(rows(repeated)).toMatchObject([{ file: `./${reporter}`, action: "unchanged" }])
+			}),
+		),
+	))
+
 it("rejects explicit inputs and references beneath a symlinked directory", () =>
 	Effect.runPromise(
 		testProject(({ fs, file, write, apply }) =>

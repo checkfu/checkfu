@@ -308,6 +308,27 @@ export const loadProject = (
 			return relative === undefined ? undefined : `./${relative}`
 		}
 
+		// A macOS /var path and process.cwd()'s /private/var path can name the same
+		// project root. Normalize only that root prefix; interior symlinks still fail checkPath.
+		const resolveInput = Effect.fnUntraced(function* (input: string) {
+			const file = path.resolve(input)
+			if (projectRelative(path, root, file) !== undefined) {
+				return file
+			}
+			let ancestor = file
+			for (;;) {
+				const resolved = yield* fs.realPath(ancestor).pipe(Effect.orElseSucceed(() => undefined))
+				if (resolved === rootPath) {
+					return path.resolve(root, path.relative(ancestor, file))
+				}
+				const parent = path.dirname(ancestor)
+				if (parent === ancestor) {
+					return file
+				}
+				ancestor = parent
+			}
+		})
+
 		const checkPath = Effect.fnUntraced(function* (file: string) {
 			let ancestor = file
 			for (;;) {
@@ -418,7 +439,7 @@ export const loadProject = (
 		const selected = new Map<string, boolean>()
 		const scopes: Array<string> = []
 		for (const input of paths) {
-			const file = path.resolve(input)
+			const file = yield* resolveInput(input)
 			const key = keyOf(file)
 			yield* checkPath(file)
 			const type = yield* fileType(file)
