@@ -8,7 +8,7 @@ export class AutomationUnpaused extends Domain.Event("automation.unpaused", {
 	activation: PositiveInt,
 }) {}
 
-export class UnpauseAutomation extends Domain.Command("UnpauseAutomation", {
+export class ResumeAutomation extends Domain.Command("ResumeAutomation", {
 	input: {
 		automation_id: AutomationId,
 	},

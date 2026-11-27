@@ -37,10 +37,7 @@ import {
 	RecordAutomationRunStarted,
 } from "../src/Automation/RecordAutomationRunStarted.command.ts"
 import { AutomationFired, RunAutomation } from "../src/Automation/RunAutomation.command.ts"
-import {
-	AutomationUnpaused,
-	UnpauseAutomation,
-} from "../src/Automation/UnpauseAutomation.command.ts"
+import { AutomationUnpaused, ResumeAutomation } from "../src/Automation/ResumeAutomation.command.ts"
 import { Automations } from "../src/Automations.model.ts"
 import { AutomationUpdated } from "../src/Automation/UpdateAutomation.command.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
@@ -195,10 +192,10 @@ describe("Automations", () => {
 			Story.then(automation),
 			Story.clock(at("2026-01-03T12:00:00.000Z")),
 			Story.then(automation),
-			Story.when(new UnpauseAutomation({ automation_id: automation.id })),
+			Story.when(new ResumeAutomation({ automation_id: automation.id })),
 			Story.then(automation, new AutomationUnpaused({ activation: 1 })),
 			Story.view(AutomationView, automation, { status: "active", pause_reason: null }),
-			Story.when(new UnpauseAutomation({ automation_id: automation.id })),
+			Story.when(new ResumeAutomation({ automation_id: automation.id })),
 			Story.then(automation),
 			Story.clock(at("2026-01-04T08:59:00.000Z")),
 			Story.then(automation),
@@ -251,7 +248,7 @@ describe("Automations", () => {
 			Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
 			Story.when(new PauseAutomation({ automation_id: automation.id })),
 			Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
-			Story.when(new UnpauseAutomation({ automation_id: automation.id })),
+			Story.when(new ResumeAutomation({ automation_id: automation.id })),
 			Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
 		),
 	)
@@ -289,7 +286,7 @@ describe("Automations", () => {
 			Story.when(new PauseAutomation({ automation_id: automation.id })),
 			Story.then(automation, new AutomationPaused({ reason: "manual" })),
 			Story.clock(at("2026-01-01T09:00:01.000Z")),
-			Story.when(new UnpauseAutomation({ automation_id: automation.id })),
+			Story.when(new ResumeAutomation({ automation_id: automation.id })),
 			Story.then(automation, new AutomationUnpaused({ activation: 1 })),
 			Story.when(
 				new FireAutomation({
@@ -302,7 +299,7 @@ describe("Automations", () => {
 			Story.state(automation, { runs: 0, activation: 1 }),
 			Story.when(new PauseAutomation({ automation_id: automation.id })),
 			Story.then(automation, new AutomationPaused({ reason: "manual" })),
-			Story.when(new UnpauseAutomation({ automation_id: automation.id })),
+			Story.when(new ResumeAutomation({ automation_id: automation.id })),
 			Story.then(automation, new AutomationUnpaused({ activation: 2 })),
 			Story.when(
 				new FireAutomation({
@@ -636,7 +633,7 @@ describe("Automations", () => {
 			Story.rejected(new AutomationAlreadyExists({ automation_id: automation.id })),
 			Story.when(new PauseAutomation({ automation_id: Automation.ref("auto_missing").id })),
 			Story.rejected(new AutomationNotFound({ automation_id: Automation.ref("auto_missing").id })),
-			Story.when(new UnpauseAutomation({ automation_id: Automation.ref("auto_missing").id })),
+			Story.when(new ResumeAutomation({ automation_id: Automation.ref("auto_missing").id })),
 			Story.rejected(new AutomationNotFound({ automation_id: Automation.ref("auto_missing").id })),
 			Story.when(new ArchiveAutomation({ automation_id: Automation.ref("auto_missing").id })),
 			Story.rejected(new AutomationNotFound({ automation_id: Automation.ref("auto_missing").id })),

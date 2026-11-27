@@ -26,7 +26,7 @@ import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutom
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
 import { firingsAhead, isUsableSchedule, sameSchedule } from "@checkfu/domain/Automation/Schedule"
-import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
+import { ResumeAutomation } from "@checkfu/domain/Automation/ResumeAutomation.command"
 import {
 	AutomationRevisionConflict,
 	UpdateAutomation,
@@ -431,7 +431,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const id = params.automation_id
 					return yield* after(
 						id,
-						yield* automations.send(new UnpauseAutomation({ automation_id: id })),
+						yield* automations.send(new ResumeAutomation({ automation_id: id })),
 					)
 				}).pipe(handled),
 			)

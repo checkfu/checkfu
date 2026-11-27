@@ -8,7 +8,7 @@ import { AutomationCreated } from "./CreateAutomation.command.ts"
 import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
 import { UPCOMING_FIRINGS, upcomingOccurrences } from "./Schedule.ts"
-import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
+import { AutomationUnpaused } from "./ResumeAutomation.command.ts"
 import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export { AutomationSnapshot }

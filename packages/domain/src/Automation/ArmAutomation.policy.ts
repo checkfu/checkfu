@@ -10,7 +10,7 @@ import { FireAutomation } from "./FireAutomation.command.ts"
 import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
-import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
+import { AutomationUnpaused } from "./ResumeAutomation.command.ts"
 import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const NEXT_FIRING = "next-firing"

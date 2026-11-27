@@ -19,7 +19,7 @@ class AutomationsLifecycleApi extends Domain.Api("AutomationsLifecycleApi", {
 	commands: [
 		"CreateAutomation",
 		"PauseAutomation",
-		"UnpauseAutomation",
+		"ResumeAutomation",
 		"ArchiveAutomation",
 		"RunAutomation",
 		"FireAutomation",

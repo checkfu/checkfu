@@ -23,7 +23,7 @@ import { Automation } from "../src/Automation/Automation.aggregate.ts"
 import { AutomationId } from "../src/Automation/Automation.id.ts"
 import { CreateAutomation } from "../src/Automation/CreateAutomation.command.ts"
 import { PauseAutomation } from "../src/Automation/PauseAutomation.command.ts"
-import { UnpauseAutomation } from "../src/Automation/UnpauseAutomation.command.ts"
+import { ResumeAutomation } from "../src/Automation/ResumeAutomation.command.ts"
 import { Automations } from "../src/Automations.model.ts"
 
 describe("Automation alarms", () => {
@@ -56,7 +56,7 @@ describe("Automation alarms", () => {
 			yield* settle
 			expect(yield* cancelAgain).toBe("AlreadyCancelled")
 
-			yield* automations.send(new UnpauseAutomation({ automation_id: id }))
+			yield* automations.send(new ResumeAutomation({ automation_id: id }))
 			yield* settle
 			yield* automations.send(new ArchiveAutomation({ automation_id: id }))
 			yield* settle

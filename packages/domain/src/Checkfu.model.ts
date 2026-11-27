@@ -543,7 +543,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"ClaimIdempotencyKey",
 		"AdmitAutomation",
 		"PauseAutomation",
-		"UnpauseAutomation",
+		"ResumeAutomation",
 		"ArchiveAutomation",
 		"RunAutomation",
 		"ReserveArtifact",

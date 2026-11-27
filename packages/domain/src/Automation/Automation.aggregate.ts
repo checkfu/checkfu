@@ -23,7 +23,7 @@ import {
 } from "./RecordAutomationRunStarted.command.ts"
 import { AutomationFired, RunAutomation } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
-import { AutomationUnpaused, UnpauseAutomation } from "./UnpauseAutomation.command.ts"
+import { AutomationUnpaused, ResumeAutomation } from "./ResumeAutomation.command.ts"
 import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
@@ -80,7 +80,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 	commands: [
 		CreateAutomation,
 		PauseAutomation,
-		UnpauseAutomation,
+		ResumeAutomation,
 		ArchiveAutomation,
 		RunAutomation,
 		FireAutomation,
@@ -120,7 +120,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 			[
 				before.status !== "paused",
 				after.status !== "active",
-				command._tag === "UnpauseAutomation",
+				command._tag === "ResumeAutomation",
 			].some((ok) => ok),
 		RunsGrowByOneOrNotAtAll: ({ before, after }) =>
 			[after.runs === before.runs, after.runs === before.runs + 1].some((ok) => ok),
@@ -146,7 +146,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 			[
 				after.activation === before.activation,
 				[
-					command._tag === "UnpauseAutomation",
+					command._tag === "ResumeAutomation",
 					before.status === "paused",
 					after.activation === before.activation + 1,
 				].every((ok) => ok),
@@ -228,7 +228,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 			}
 			return [new AutomationPaused({ reason: PAUSED_MANUALLY })]
 		},
-		UnpauseAutomation: (state, _cmd, ctx) => {
+		ResumeAutomation: (state, _cmd, ctx) => {
 			if (state.status === "") {
 				return new AutomationNotFound({ automation_id: ctx.id })
 			}

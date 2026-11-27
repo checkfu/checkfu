@@ -407,7 +407,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"ClaimIdempotencyKey",
 			"AdmitAutomation",
 			"PauseAutomation",
-			"UnpauseAutomation",
+			"ResumeAutomation",
 			"ArchiveAutomation",
 			"RunAutomation",
 			"ReserveArtifact",

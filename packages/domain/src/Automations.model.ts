@@ -58,7 +58,7 @@ export class AutomationsApi extends Domain.Api("AutomationsApi", {
 	commands: [
 		"CreateAutomation",
 		"PauseAutomation",
-		"UnpauseAutomation",
+		"ResumeAutomation",
 		"ArchiveAutomation",
 		"RunAutomation",
 	],

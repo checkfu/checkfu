@@ -248,7 +248,7 @@
 			},
 			"Automation.OnlyUnpauseResumesAPausedAutomation": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"paused\",\n\t\t\t\tafter.status !== \"active\",\n\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"paused\",\n\t\t\t\tafter.status !== \"active\",\n\t\t\t\tcommand._tag === \"ResumeAutomation\",\n\t\t\t].some((ok) => ok)"
 			},
 			"Automation.RunsGrowByOneOrNotAtAll": {
 				"kind": "transition",
@@ -264,7 +264,7 @@
 			},
 			"Automation.OnlyAResumeOrAnUpdateStartsANewActivation": {
 				"kind": "transition",
-				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"ResumeAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
 			"Automation.EveryResumeStartsANewActivation": {
 				"kind": "transition",
