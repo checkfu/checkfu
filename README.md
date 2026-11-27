@@ -15,30 +15,29 @@ Built on Cloudflare Workers, Durable Objects, [Pi Durable](https://github.com/ea
 
 ```sh
 npm install -g checkfu
-checkfu --base-url https://your-api.workers.dev login
+checkfu deploy
 ```
 
-The npm CLI requires Node.js 22 or later. Install `@checkfu/sdk` for the JavaScript/TypeScript client. See the [CLI guide](apps/cli/README.md) and [SDK guide](packages/sdk/README.md). Server deployment still uses a source checkout and Bun, as described below.
+The npm CLI requires Node.js 22 or later. Install `@checkfu/sdk` for the JavaScript/TypeScript client. See the [CLI guide](apps/cli/README.md) and [SDK guide](packages/sdk/README.md).
 
 ## Quickstart
 
-Requires [Bun](https://bun.sh) 1.4+, Node.js 22.18+, a Cloudflare account (Workers Paid, R2 enabled), and a model provider API key.
+Requires Node.js 22+, a Cloudflare account (Workers Paid, R2 enabled), and a model provider API key.
 
 ### Deploy
 
 ```sh
-git clone https://github.com/checkfu/checkfu && cd checkfu
-bun install
-bun checkfu deploy
+npm install -g checkfu
+checkfu deploy
 ```
 
-Signs in to Cloudflare, prompts for a provider key, deploys the stack, and writes `CHECKFU_API_KEY` to `.env` and `~/.config/checkfu/config.json`.
+Signs in to Cloudflare, prompts for a provider key, deploys the CI-approved server and sandbox from `origin/main`, and saves the connection under `~/.config/checkfu`. Run `checkfu deploy` again to update the same deployment and keep its data. No source checkout or local Docker is required.
 
 ```sh
-bun checkfu agents create --name Assistant --model your-model-id
-bun checkfu environments create --name default
-bun checkfu sessions create --agent <agent-id> --environment-id <environment-id>
-bun checkfu sessions connect <session-id>
+checkfu agents create --name Assistant --model your-model-id
+checkfu environments create --name default
+checkfu sessions create --agent <agent-id> --environment-id <environment-id>
+checkfu sessions connect <session-id>
 ```
 
 ### Configuration as code

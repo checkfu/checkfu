@@ -1,38 +1,35 @@
-# Preparing the npm clients
+# Preparing the npm CLI
 
-The first CLI (`checkfu`) and SDK (`@checkfu/sdk`) release is **0.0.1**.
+The CLI patch is **checkfu 0.0.2**. The SDK remains **@checkfu/sdk 0.0.1** and is not republished for this CLI change. npm versions cannot be replaced after publication.
 
-The source workspace stays private. `release:build` produces the two public packages in `dist/npm/checkfu` and `dist/npm/sdk`, with explicit file allowlists and npm-compatible dependency versions. No publish command runs during build or verification.
+The private workspace builds the public packages into `dist/npm/checkfu` and `dist/npm/sdk`. Build and verification never publish.
 
 ```sh
 bun install --frozen-lockfile
 bun run check
 bun run --cwd apps/cli test
-bun run --cwd packages/sdk test
 bun run --cwd tools/release test
-bun run --cwd apps/api test:workerd -t 'takes a YAML project'
-bun run release:build
+bun run --cwd apps/api test:workerd
+bun run release:build --cli-only
 npm pack ./dist/npm/checkfu --ignore-scripts
-npm pack ./dist/npm/sdk --ignore-scripts
 ```
 
-The package contract builds and packs both packages, installs their tarballs outside the checkout with install scripts disabled, checks TypeScript consumption, and drives the installed clients over HTTP against production API handlers and the domain backend. It checks login failure without saved credentials, private successful login, CLI writes read back by the SDK, two piped conversation turns including EOF without a final newline, idempotent retries, conflict refusal, historical versions and pagination, typed errors, Promise and Effect clients, SSE, logout, and resistance to a project's `.env` and Bun preloads. Consumer processes have no Bun in their PATH and run with TypeScript stripping disabled. The Workers project journey installs the actual npm CLI tarball offline before exercising apply/run/output/history/drift/concurrency/prune contracts. Native standalone binaries retain their separate tests.
+The package contract packs and installs outside the checkout with install scripts disabled. Consumer processes have no global Bun and disable TypeScript stripping. They drive login, every generated CLI command, resource lifecycles, version conflicts, memory preconditions, binary artifact bytes, credential redaction, session resources and token replacement, webhook lifecycle and deliveries, automation runs, streaming, two piped turns including EOF without a newline, local authoring, apply and unchanged plans. Backend reads independently verify writes. The command inventory makes an added generated command require a journey. Promise/Effect SDK consumers and strict external TypeScript compilation remain cross-checks; the SDK tarball built by the test is not a publication instruction.
 
-The ordinary CI test job covers Node 24 on Linux. The npm package workflow also tests Node 22 on Linux and macOS. Windows has not been qualified by this release workflow.
+A second deployment contract extracts only version-controlled source into a clean external directory, downloads and verifies the actual Bun runtime, installs frozen dependencies with lifecycle scripts disabled, builds the dashboard with managed tooling, and checks the shipped persisted-data baseline without system Bun or Git. A changed baseline must fail. macOS and Linux Node 22 run in the npm workflow; ordinary CI covers Node 24. Windows deployment is not qualified.
 
-The CLI is a bundled JavaScript executable requiring Node 22 or later, with no runtime npm dependencies or install script. Bun is used to build it, not to run it. Server deployment still requires a source checkout and Bun; `checkfu deploy` from the npm distribution gives those instructions. The SDK ships ESM JavaScript and declarations and depends on the exact Effect version used for qualification.
+Managed deploy tests cover immutable source, a CI-passing main revision, stage isolation, preserved secrets/data, corrupt runtime/source caches, interrupted installation, and cancellation that finishes cleanup before releasing the deployment lock. The deployment engine test uses real Alchemy plans and state: a normal update keeps stored data, replacement/deletion is refused even with `--yes`, a declined plan does not apply, and explicit destroy followed by a new deployment works. Filesystem tests retain project boundary protections while accepting aliases of the project root, including macOS `/var` and `/private/var`.
 
-The CLI build includes third-party license notices from Bun's actual module graph. Its package metadata version is also the CLI's displayed version. The SDK error constructor types must remain declaration-emittable; source-only typechecks do not establish that.
+Server deployment is independent of the npm CLI version. `checkfu.deployment.json` defines the supported deployment protocol and runtime downloads. `checkfu deploy` resolves one main SHA, requires that SHA's complete CI workflow to have succeeded, then downloads its immutable source archive. The source cache and runtime are separate from private per-stage settings and connection credentials. Destroy uses the recorded revision instead of current main.
 
-The runtime checks also require a fresh machine to write directly to `/mnt/session/outputs` without preparing that directory itself. The terminal session checks require failed tool results to remain visible when the agent recovers, with bounded output and escaped terminal controls. Both checks reproduced failures during the first npm qualification before the corresponding fixes.
+CI publishes the sandbox image from main's build context when it changes, after the other checks pass. `ghcr.io/checkfu/sandbox` must remain publicly readable, with the `checkfu/checkfu` workflow granted Write access. The server-side deployment helper verifies image digests and copies missing layers into the customer's Cloudflare registry over HTTP. Users need no GitHub login, source checkout, global Bun, or Docker. Changing server or sandbox code does not require another CLI release.
 
-Before publishing, rerun the gates on the chosen commit, inspect both `npm pack --json` file lists, confirm the candidate tarballs contain no credentials, and perform a short staging turn using the installed CLI. Archive the session, prune the test project, destroy the disposable deployment, and remove its owned registry image tag.
+Before publishing, rebase onto main and require every gate on the exact release commit. Inspect the npm file list and scan the candidate for actual credential values without printing them. Install the candidate into an isolated prefix and perform one cost-bounded staging lifecycle: deploy, use the CLI and a real model, repeat deploy, update from a later CI-passing main revision with data intact, refuse the wrong stage/account, explicitly destroy, deploy again, and destroy again. Independently verify that disposable resources and their owned image tags are gone. Keep release evidence under `.checkfu/cli-qualification.md`.
 
-Once the artifacts have been reviewed, the maintainer publishes the built directories:
+Only after qualification, publish the CLI directory:
 
 ```sh
-npm publish ./dist/npm/sdk --access public
 npm publish ./dist/npm/checkfu --access public
 ```
 
-Publishing requires the maintainer's npm authentication and any required OTP. Those credentials are not required to build, install or verify the release candidates. Do not publish the private workspace directories.
+Publication uses the maintainer's npm authentication and any required web/OTP approval. Then verify a fresh anonymous install of `checkfu@latest`, its version, and the public tarball's integrity against the tested candidate. A GitHub Release is not required.

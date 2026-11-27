@@ -11,9 +11,13 @@ import * as Schema from "effect/Schema"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { makeTestServer, TEST_API_KEY } from "../../apps/mcp/test/helpers/McpHarness.ts"
 import { buildCliPackage, buildSdkPackage, repoRoot } from "./Build.ts"
+import { version as cliVersion } from "../../apps/cli/package.json"
 
 const decodeResourceId = Schema.decodeSync(
 	Schema.fromJsonString(Schema.Struct({ id: Schema.String })),
+)
+const decodeCoverage = Schema.decodeSync(
+	Schema.fromJsonString(Schema.Struct({ commands: Schema.Array(Schema.String) })),
 )
 const buildCredentialSentinel = "ck_packaging_must_never_embed_credentials"
 const execute = promisify(execFile)
@@ -91,6 +95,10 @@ beforeAll(async () => {
 		fileURLToPath(new URL("fixtures/Consumer.mjs", import.meta.url)),
 		join(consumer, "Consumer.mjs"),
 	)
+	await copyFile(
+		fileURLToPath(new URL("fixtures/Cli.mjs", import.meta.url)),
+		join(consumer, "Cli.mjs"),
+	)
 	await writeFile(
 		join(consumer, "tsconfig.json"),
 		JSON.stringify({
@@ -138,7 +146,7 @@ it("installs independently of the checkout and exposes working JavaScript and Ty
 		env: env(),
 		timeout: 10_000,
 	})
-	expect(stdout.trim()).toBe("checkfu v0.0.1")
+	expect(stdout.trim()).toBe(`checkfu v${cliVersion}`)
 }, 45_000)
 
 it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry, history, errors and event streams against the domain backend", async () => {
@@ -300,6 +308,32 @@ it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry,
 					{ cwd: consumer, env: env(), timeout: 30_000 },
 				)
 				expect(JSON.parse(sdk.stdout)).toMatchObject({ versions: [2, 1] })
+				const journey = await execute(
+					consumerNode,
+					[
+						"--no-experimental-strip-types",
+						join(consumer, "Cli.mjs"),
+						cli,
+						url,
+						TEST_API_KEY,
+						hostile,
+					],
+					{
+						cwd: hostile,
+						env: env({ CHECKFU_CONFIG_DIR: config }),
+						timeout: 90_000,
+						maxBuffer: 4 * 1024 * 1024,
+					},
+				)
+				const coverage = decodeCoverage(journey.stdout)
+				const generated = [
+					...(
+						await readFile(join(repoRoot, "apps/cli/src/generated/Commands.ts"), "utf8")
+					).matchAll(/cliLabel: "([^"]+)"/g),
+				].map((match) => match[1])
+				expect(generated.filter((command) => !coverage.commands.includes(command ?? ""))).toEqual(
+					[],
+				)
 				await expect(readFile(join(hostile, "PRELOAD_RAN"))).rejects.toMatchObject({
 					code: "ENOENT",
 				})
@@ -308,4 +342,4 @@ it("drives installed CLI login and CRUD, and installed Promise/Effect SDK retry,
 			})
 		}).pipe(Effect.scoped),
 	)
-}, 60_000)
+}, 120_000)

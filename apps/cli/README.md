@@ -29,13 +29,27 @@ The npm CLI runs without Bun and ignores `.env` and Bun configuration files in t
 
 ## Deploying a Checkfu server
 
-Deployment currently requires a source checkout and Bun:
+Deploy from any directory:
 
 ```sh
-git clone https://github.com/checkfu/checkfu
-cd checkfu
-bun install
-bun checkfu deploy --stage staging
+checkfu deploy
 ```
 
-See the [project documentation](https://github.com/checkfu/checkfu#readme) for provider configuration and project examples. The npm client connects to an existing deployment; it does not contain the deployment stack.
+The CLI signs in to your Cloudflare account, prompts privately for a model provider key, deploys Checkfu, and saves the connection. Your account needs Workers Paid and R2 enabled. Bun and deployment dependencies are downloaded into a private Checkfu cache automatically. You do not need a source checkout or Docker.
+
+The server and sandbox definition come from the exact `origin/main` commit whose CI has passed. A pending or failed CI run stops deployment with a clear message. Server changes do not require an npm CLI update.
+
+Run `checkfu deploy` again to update the same deployment, preserving its key, stage, account, and stored data. Use `--stage staging` to create or select a separate deployment; subsequent deploys remember the last selected stage. Settings and credentials live under `~/.config/checkfu` (or `CHECKFU_CONFIG_DIR`), separately from the source cache and globally installed npm package.
+
+To permanently delete a deployment and its data, explicitly name the stage:
+
+```sh
+checkfu destroy --stage live
+checkfu deploy
+```
+
+Destroy asks for confirmation; `--yes` skips it for scripts. Deploying afterwards creates the selected stage again. Destroy uses the recorded source revision, so it does not depend on main's current CI status. A failed deploy keeps enough information to retry or destroy it. Updates use `deploy`; destruction is for deleting data.
+
+For unattended initial deployment, export a model provider key (for example `OPENAI_API_KEY`), `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_ACCOUNT_ID`, then run `checkfu deploy --yes`. The CLI generates and saves a stable Checkfu API key. Export `CHECKFU_API_KEY` as well if you need to supply your own. Deployment on macOS and Linux arm64/x64 is supported; Windows deployment is not yet qualified.
+
+Update the CLI itself with `npm install -g checkfu@latest`. See the [project documentation](https://github.com/checkfu/checkfu#readme) for provider configuration and project examples.
