@@ -179,9 +179,13 @@ export const sealArtifactFiles = (
 		}
 	})
 
+export type ArtifactVersionEntry =
+	| ArtifactFileInput
+	| (ArtifactKeptFileInput & { readonly size?: number })
+
 export const buildArtifactVersion = (
 	digest: Digest.Digest["Service"],
-	files: ReadonlyArray<ArtifactFileInput | ArtifactKeptFileInput>,
+	files: ReadonlyArray<ArtifactVersionEntry>,
 	kept: ReadonlyMap<string, number> = new Map(),
 ): Effect.Effect<BuiltArtifactVersion, InvalidArtifactFiles> =>
 	Effect.gen(function* () {
@@ -191,7 +195,7 @@ export const buildArtifactVersion = (
 		let inlineBytes = 0
 		for (const file of files) {
 			if ("sha256" in file) {
-				const size = kept.get(file.sha256)
+				const size = file.size ?? kept.get(file.sha256)
 				if (size === undefined) {
 					return yield* new InvalidArtifactFiles({
 						message: `File "${file.path}" names sha256 ${file.sha256}, which is not a file of the current version; name a file by its id, or send its content.`,

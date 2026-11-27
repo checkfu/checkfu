@@ -27,10 +27,10 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { PublicationAddress } from "@checkfu/sdk/Schemas"
-import type { ArtifactFileInput, ArtifactKeptFileInput } from "@checkfu/sdk/Schemas"
 import { MAX_INLINE_FILE_BYTES, buildArtifactVersion } from "../Artifacts/ArtifactFiles.ts"
 import type {
 	ArtifactManifest,
+	ArtifactVersionEntry,
 	ArtifactVersionFileInput,
 	BuiltArtifactVersion,
 } from "../Artifacts/ArtifactFiles.ts"
@@ -210,13 +210,7 @@ export const artifactReads = Effect.gen(function* () {
 interface FileSource {
 	readonly file_id: FileId
 	readonly size: number
-	readonly ready: boolean
 }
-
-const holding = (
-	kept: ReadonlyMap<string, number>,
-	sources: ReadonlyMap<string, { readonly size: number }>,
-) => new Map([...kept, ...[...sources].map(([sha256, { size }]) => [sha256, size] as const)])
 
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
 	Effect.gen(function* () {
@@ -233,7 +227,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 			yield* artifactReads
 
 		const build = (
-			files: ReadonlyArray<ArtifactFileInput | ArtifactKeptFileInput>,
+			files: ReadonlyArray<ArtifactVersionEntry>,
 			kept?: ReadonlyMap<string, number>,
 		) =>
 			buildArtifactVersion(digest, files, kept).pipe(
@@ -252,7 +246,8 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						{ concurrency: 8 },
 					),
 				)
-				const resolved: Array<ArtifactFileInput | ArtifactKeptFileInput> = []
+				const resolved: Array<ArtifactVersionEntry> = []
+				const unavailable = named.find((file_id) => states.get(file_id)?.status === "deleted")
 				const sources = new Map<string, FileSource>()
 				for (const entry of entries) {
 					if (!("file_id" in entry)) {
@@ -266,26 +261,31 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					sources.set(file.sha256, {
 						file_id: entry.file_id,
 						size: file.size,
-						ready: file.status === "ready",
 					})
 					resolved.push({
 						path: entry.path,
 						sha256: file.sha256,
+						size: file.size,
 						content_type: entry.content_type ?? file.content_type,
 					})
 				}
-				return { files: resolved, sources }
+				return { files: resolved, sources, unavailable }
 			})
 
 		const copyIn = (
 			id: ArtifactId,
-			sources: ReadonlyMap<string, FileSource>,
+			{
+				sources,
+				unavailable,
+			}: {
+				readonly sources: ReadonlyMap<string, FileSource>
+				readonly unavailable: FileId | undefined
+			},
 			reservation: number | null,
 		) =>
 			Effect.gen(function* () {
-				const gone = [...sources.values()].find((source) => !source.ready)
-				if (gone !== undefined) {
-					return yield* reject(404, `File ${gone.file_id} not found.`)
+				if (unavailable !== undefined) {
+					return yield* reject(404, `File ${unavailable} not found.`)
 				}
 				yield* Effect.forEach(
 					sources,
@@ -349,8 +349,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		) =>
 			Effect.gen(function* () {
 				const kept = new Map<string, number>()
-				const named = [...new Set(files.flatMap((file) => ("sha256" in file ? [file.sha256] : [])))]
-				if (named.length === 0) {
+				if (!files.some((file) => "sha256" in file)) {
 					return kept
 				}
 				for (const file of (yield* loadManifest(id, manifestHash)).files) {
@@ -434,7 +433,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
 					const resolved = yield* fromFiles(payload.files)
-					const built = yield* build(resolved.files, holding(new Map(), resolved.sources))
+					const built = yield* build(resolved.files)
 					let id: ArtifactId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
@@ -456,7 +455,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						)
 						if (reservation !== 0) {
 							yield* stage(id, null, reservation)
-							yield* copyIn(id, resolved.sources, reservation)
+							yield* copyIn(id, resolved, reservation)
 							yield* stage(id, built, reservation)
 						}
 					}
@@ -562,12 +561,8 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const resolved = yield* fromFiles(payload.files)
 					if (state.version !== payload.version) {
 						if (state.version === payload.version + 1) {
-							const replaced = yield* keptIn(id, resolved.files, state.replaced_manifest)
-							const resent = yield* buildArtifactVersion(
-								digest,
-								resolved.files,
-								holding(replaced, resolved.sources),
-							).pipe(
+							const replaced = yield* keptIn(id, payload.files, state.replaced_manifest)
+							const resent = yield* buildArtifactVersion(digest, resolved.files, replaced).pipe(
 								Effect.asSome,
 								Effect.catchTag("InvalidArtifactFiles", () => Effect.succeedNone),
 							)
@@ -587,9 +582,9 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					}
 					const built = yield* build(
 						resolved.files,
-						holding(yield* keptIn(id, resolved.files, state.manifest), resolved.sources),
+						yield* keptIn(id, payload.files, state.manifest),
 					)
-					yield* copyIn(id, resolved.sources, null)
+					yield* copyIn(id, resolved, null)
 					yield* stage(id, built, null)
 					const receipt = yield* artifacts.send(
 						new AddArtifactVersion({

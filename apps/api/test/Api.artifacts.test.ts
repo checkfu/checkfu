@@ -1964,6 +1964,53 @@ describe("Artifact bytes", () => {
 			}),
 		))
 
+	it("keeps existing-version digests separate from imported file IDs", () =>
+		withApi(({ call, uploadFile }) =>
+			Effect.gen(function* () {
+				const data = bytesOf(32)
+				const digest = hexOf(data)
+				const first = yield* json<{ id: string }>(yield* uploadFile("first.bin", data))
+				const second = yield* json<{ id: string }>(yield* uploadFile("second.bin", data))
+				const created = yield* call("POST", "/v1/artifacts", {
+					name: "Version membership",
+					files: [{ path: "original.txt", content: "original version" }],
+				})
+				expect(created.status).toBe(201)
+				const { id } = yield* json<ArtifactBody>(created)
+				const versions = `/v1/artifacts/${id}/versions`
+				const mismatched = yield* call("POST", versions, {
+					version: 1,
+					files: [
+						{ path: "new.bin", file_id: first.id },
+						{ path: "alias.bin", sha256: digest },
+					],
+				})
+				expect(mismatched.status).toBe(400)
+				expect((yield* json<ErrorBody>(mismatched)).error.message).toContain(
+					"not a file of the current version",
+				)
+
+				expect((yield* call("DELETE", `/v1/files/${first.id}`)).status).toBe(200)
+				const entries = [
+					{ path: "gone.bin", file_id: first.id },
+					{ path: "ready.bin", file_id: second.id },
+				]
+				for (const files of [entries, entries.toReversed()]) {
+					const refused = yield* call("POST", versions, { version: 1, files })
+					expect(refused.status).toBe(404)
+					expect((yield* json<ErrorBody>(refused)).error.message).toBe(
+						`File ${first.id} not found.`,
+					)
+				}
+				const accepted = yield* call("POST", versions, {
+					version: 1,
+					files: [{ path: "ready.bin", file_id: second.id }],
+				})
+				expect(accepted.status).toBe(201)
+				expect((yield* json<VersionBody>(accepted)).version).toBe(2)
+			}),
+		))
+
 	it("refuses an entry that names its bytes two ways", () =>
 		withApi(({ call, uploadFile }) =>
 			Effect.gen(function* () {
