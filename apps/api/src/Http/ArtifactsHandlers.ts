@@ -249,7 +249,7 @@ type FileSource =
 	| { readonly file_id: FileId; readonly size: number }
 	| { readonly artifact_id: ArtifactId; readonly size: number }
 
-interface ResolvedFiles {
+export interface ResolvedFiles {
 	readonly files: ReadonlyArray<ArtifactVersionEntry>
 	readonly sources: ReadonlyMap<string, FileSource>
 	readonly unavailable: FileId | undefined

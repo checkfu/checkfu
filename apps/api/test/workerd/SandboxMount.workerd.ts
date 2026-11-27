@@ -382,6 +382,7 @@ describe("a session's machine, in a container of its image", () => {
 					ok: true,
 					artifact_id: "art_example",
 					version: 1,
+					file_count: 1,
 					changed: true,
 				}),
 			})

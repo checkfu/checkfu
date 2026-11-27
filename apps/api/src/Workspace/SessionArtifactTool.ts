@@ -25,6 +25,7 @@ export const SavedSessionArtifact = Schema.Union([
 		ok: Schema.Literal(true),
 		artifact_id: Schema.String,
 		version: Schema.Int,
+		file_count: Schema.Int,
 		changed: Schema.Boolean,
 	}),
 	Refused,
