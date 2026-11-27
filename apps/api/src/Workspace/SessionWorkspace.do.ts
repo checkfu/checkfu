@@ -52,6 +52,7 @@ import {
 	decodeBashToolArguments,
 } from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
+import { ARTIFACT_DATA_RESULTS_PATH } from "./SessionArtifactTool.ts"
 import { withCallSignal } from "./CallSignal.ts"
 
 const DISCARDED = "discarded"
@@ -417,11 +418,37 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					if (call.name === BASH_TOOL.name) {
 						return runBash(call.arguments, signal)
 					}
+					const args = call.arguments
+					if (
+						call.name === "read" &&
+						Predicate.hasProperty(args, "path") &&
+						typeof args.path === "string" &&
+						args.path.startsWith(`${ARTIFACT_DATA_RESULTS_PATH}/`) &&
+						!args.path.slice(ARTIFACT_DATA_RESULTS_PATH.length + 1).includes("/")
+					) {
+						const { path } = args
+						const offset = Predicate.hasProperty(args, "byteOffset") ? args.byteOffset : undefined
+						const { readArtifactDataResult } = await import("./ArtifactDataTool.ts")
+						return onActive((on) =>
+							readArtifactDataResult(offset, (byteOffset, byteLength) =>
+								on.fs.readFile(path, { byteOffset, byteLength }),
+							),
+						)
+					}
 					if (call.name === ARTIFACT_DATA_TOOL.name) {
 						const { artifactData } = await import("./ArtifactDataTool.ts")
-						return artifactData(call.arguments, (name, request) =>
-							askApi(api.sessionArtifactData(sessionId, turn, name, request), { signal }),
-						)
+						return artifactData(call.arguments, {
+							ask: (name, request) =>
+								askApi(api.sessionArtifactData(sessionId, turn, name, request), { signal }),
+							defaultKey: call.id,
+							writeResult: (text) =>
+								onActive(async (on) => {
+									signal.throwIfAborted()
+									const path = `${ARTIFACT_DATA_RESULTS_PATH}/${crypto.randomUUID()}.json`
+									await writeFileIn(on.fs, path, text)
+									return path
+								}),
+						})
 					}
 					if (call.name === ARTIFACT_TOOL.name) {
 						const { saveArtifact } = await import("./ArtifactTool.ts")

@@ -101,8 +101,8 @@ The content Worker only routes the call: it checks the link's signature or the a
 
 ```html
 <script src="_/data.js"></script>
-<script>
-  const responses = artifactData.collection("responses")
+<script type="module">
+  const responses = globalThis.artifactData.collection("responses")
   await responses.add({ answer: 42 })
 </script>
 ```
@@ -134,7 +134,7 @@ GET | PUT | DELETE  /v1/artifacts/{artifact_id}/data/{collection}/{id}
 |---|---|
 | `GET data` | The collections that hold a document, with how many documents and bytes are in each |
 | `GET data/{collection}` | List documents, oldest first, with `limit` and `page` |
-| `POST data/{collection}` | Add `{"data": …}` under a new id. A retry with the same `Idempotency-Key` answers with the first document; the same key with a different document answers 409 |
+| `POST data/{collection}` | Add `{"data": …}` under a new id. A retry with the same `Idempotency-Key` returns the same document ID and its current contents. Reusing the key with different input answers 409 |
 | `PUT data/{collection}/{id}` | Store `{"data": …}` under an id the client chooses, replacing what is there |
 | `DELETE data/{collection}/{id}` | Remove one document |
 

@@ -1145,7 +1145,7 @@ export class EffectArtifactsDataResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a document to a collection under a new id. A collection holds up to 10000 documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409 */
+	/** Add a document to a collection under a new id. A collection holds up to 10000 documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Reusing the key with different input answers 409. */
 	add(
 		artifactId: PathParam<"artifact_data", "addDocument", "artifact_id">,
 		collection: PathParam<"artifact_data", "addDocument", "collection">,
@@ -5568,7 +5568,7 @@ export class ArtifactsDataResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a document to a collection under a new id. A collection holds up to 10000 documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409 */
+	/** Add a document to a collection under a new id. A collection holds up to 10000 documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Reusing the key with different input answers 409. */
 	add(
 		artifactId: PathParam<"artifact_data", "addDocument", "artifact_id">,
 		collection: PathParam<"artifact_data", "addDocument", "collection">,

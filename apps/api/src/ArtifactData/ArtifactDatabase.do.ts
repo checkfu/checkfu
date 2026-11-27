@@ -25,6 +25,7 @@ interface ArtifactDataShape {
 		body: string,
 		mode: WriteMode,
 		now: number,
+		createHash: string | null,
 	) => Effect.Effect<WriteOutcome>
 	readonly remove: (collection: string, id: string) => Effect.Effect<boolean>
 	readonly usage: () => Effect.Effect<DatabaseUsage>
@@ -49,8 +50,8 @@ export const ArtifactDataObjectsLive = ArtifactDataObjects.make(
 			get: (collection, id) => Effect.sync(() => documents().get(collection, id)),
 			list: (collection, after, limit) =>
 				Effect.sync(() => documents().list(collection, after, limit)),
-			write: (collection, id, body, mode, now) =>
-				Effect.sync(() => documents().write(collection, id, body, mode, now)),
+			write: (collection, id, body, mode, now, createHash) =>
+				Effect.sync(() => documents().write(collection, id, body, mode, now, createHash)),
 			remove: (collection, id) => Effect.sync(() => documents().remove(collection, id)),
 			usage: () => Effect.sync(() => documents().usage()),
 			erase: () => Effect.sync(() => documents().erase()),
@@ -76,9 +77,11 @@ export const ArtifactDatabaseDurable = Layer.effect(
 			get: (artifactId, collection, id) => call(() => objects(artifactId).get(collection, id)),
 			list: (artifactId, collection, after, limit) =>
 				call(() => objects(artifactId).list(collection, after, limit)),
-			write: (artifactId, collection, id, body, mode) =>
+			write: (artifactId, collection, id, body, mode, createHash) =>
 				Effect.flatMap(Clock.currentTimeMillis, (now) =>
-					call(() => objects(artifactId).write(collection, id, body, mode, now)),
+					call(() =>
+						objects(artifactId).write(collection, id, body, mode, now, createHash ?? null),
+					),
 				),
 			remove: (artifactId, collection, id) =>
 				call(() => objects(artifactId).remove(collection, id)),

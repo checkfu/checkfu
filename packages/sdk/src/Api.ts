@@ -3228,7 +3228,7 @@ const ArtifactData = HttpApiGroup.make("artifact_data")
 			.annotate(OpenApi.Summary, "Add a document")
 			.annotate(
 				OpenApi.Description,
-				`Add a document to a collection under a new id. A collection holds up to ${MAX_ARTIFACT_COLLECTION_DOCUMENTS} documents. A retry with the same Idempotency-Key answers with the document the first request added; the same key with a different document answers 409`,
+				`Add a document to a collection under a new id. A collection holds up to ${MAX_ARTIFACT_COLLECTION_DOCUMENTS} documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Reusing the key with different input answers 409.`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts.data",

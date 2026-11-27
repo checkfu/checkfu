@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { RESERVED_TOOL_NAMES } from "@checkfu/sdk/Api"
 import { allowedHostsOf } from "../src/Pi/PiDurableHarness.ts"
 import { mcpHostAllowed } from "@checkfu/domain/Mcp/McpServers"
+import { readArtifactDataResult } from "../src/Workspace/ArtifactDataTool.ts"
 import { createMachineEgress } from "../src/Workspace/MachineEgress.ts"
 import { makeTurnFence } from "../src/Workspace/WorkspaceFence.ts"
 import type { FencedTurn, TurnToken } from "../src/Workspace/WorkspaceFence.ts"
@@ -32,6 +33,30 @@ const untilAborted = (signal: AbortSignal): Promise<string> =>
 const turn = (number: number): TurnToken => ({ turn: number })
 
 describe("session workspace", () => {
+	it("reads a large artifact data result without clipping a line or splitting UTF-8", async () => {
+		const text = JSON.stringify({ data: "x".repeat(4086) + "🔒".repeat(4000) })
+		const bytes = new TextEncoder().encode(text)
+		const stream = async (offset: number, length: number) =>
+			new Blob([bytes.slice(offset, offset + length)]).stream()
+		let offset: number | null = 0
+		let full = ""
+		while (offset !== null) {
+			const result = await readArtifactDataResult(offset, stream)
+			expect(result.isError).toBe(false)
+			const part = result.content[0]
+			if (part?.type !== "text") {
+				throw new Error("Expected a text result")
+			}
+			const chunk = JSON.parse(part.text) as { text: string; next_byte_offset: number | null }
+			full += chunk.text
+			if (chunk.next_byte_offset !== null) {
+				expect(chunk.next_byte_offset).toBeGreaterThan(offset)
+			}
+			offset = chunk.next_byte_offset
+		}
+		expect(full).toBe(text)
+	})
+
 	it("admits the newest turn and refuses every older one", async () => {
 		const fence = makeTurnFence(store())
 		expect(await fence.enter(turn(1))).toBe(true)

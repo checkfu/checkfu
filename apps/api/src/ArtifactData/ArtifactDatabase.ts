@@ -32,6 +32,7 @@ export interface ArtifactDatabaseService {
 		id: string,
 		body: string,
 		mode: WriteMode,
+		createHash?: string,
 	) => Effect.Effect<WriteOutcome, ArtifactDatabaseError>
 	readonly remove: (
 		artifactId: string,

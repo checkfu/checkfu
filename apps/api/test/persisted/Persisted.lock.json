@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T18:27:53.025Z",
+			"cut_at": "2026-11-27T18:45:25.813Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -311,6 +311,7 @@
 				"vault-table:vault": "c55afb704028078ad013361d49c793753f5f62b81a4e9460d41fd2963ecab18e",
 				"artifact-data-table:documents": "58add860bb6e602a55345104ac6fcd6b255e8fdb514e6802132dbb946505f6e4",
 				"artifact-data-table:order": "2166ff4112b4548d40430050c32639e4412cfd82b57e3f57034e7d18f0a65e32",
+				"artifact-data-table:creates": "bb06fb69307af5022a2a95fa1ae21fb714b6a52c02e0b602a21cb11272363582",
 				"artifact-data-table:totals": "9888a31a136a4a8da91d10543de18990e80e614ad40a03125bc3ece192261eef",
 				"artifact-object:manifest": "96b92e6d7f5776a9f40fdabce0058bc1719854304fbfd0378478e6cd7d4790c8",
 				"artifact-marks:ArtifactObjects/marks": "9a4479672513953d36a3a251b5b8a587a32072053f5b328e271ddb9e0f78e078",
@@ -347,8 +348,8 @@
 				"api-call:Api.sessionFileSave/result": "5202d677d6d59fe97ce65457968dd7b6729c47c2db5e846dc9956cdf74968ea5",
 				"api-call:Api.sessionArtifactSave/args": "409457eef36d9784817a886ee43bf6346d4f5070b69612d8ee5e1996615c7bd3",
 				"api-call:Api.sessionArtifactSave/result": "2ca6647ffdcd0a316b8320cac832fcd24bb9da67620dd674adda4718917724e3",
-				"api-call:Api.sessionArtifactData/args": "05024f41bb405284f3fe966df14fd1a8345a4d097c14d0a518577f4ab5d649e4",
-				"api-call:Api.sessionArtifactData/result": "6e7a78c90d94be8cd1e68578f5bec16522f276f6cdeac92919f9b06bd9d0ef11"
+				"api-call:Api.sessionArtifactData/args": "620a96a3952343d62cd4cd12b0cc3e6efbd11d54a2ce5fedd14c9ba2be27f304",
+				"api-call:Api.sessionArtifactData/result": "157f75be7cddb83282080c39c19b9388e0de2bb03a6927b1a4c321ec11c77b60"
 			},
 			"shapes": {
 				"state:Checkfu.Agent": [
@@ -17145,6 +17146,16 @@
 					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
 					"CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)"
 				],
+				"artifact-data-table:creates": [
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
+					"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))"
+				],
 				"artifact-data-table:totals": [
 					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
 					"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
@@ -19905,7 +19916,8 @@
 							"id": "",
 							"data": "0",
 							"page": " ",
-							"limit": 6
+							"limit": 53,
+							"key": "0"
 						}
 					],
 					[
@@ -19918,7 +19930,8 @@
 							"id": "\ud800",
 							"data": " ",
 							"page": "rt+,\\:rOg&",
-							"limit": -27
+							"limit": 36,
+							"key": "zI4"
 						}
 					],
 					[
@@ -19931,7 +19944,8 @@
 							"id": "",
 							"data": "\udc00",
 							"page": "}a6HY+d[OP",
-							"limit": 99
+							"limit": 99,
+							"key": "-1"
 						}
 					],
 					[
@@ -19944,7 +19958,8 @@
 							"id": "😀",
 							"data": "",
 							"page": "😀",
-							"limit": 96
+							"limit": 96,
+							"key": "\udc00"
 						}
 					],
 					[
@@ -19957,7 +19972,8 @@
 							"id": "'V>F",
 							"data": "",
 							"page": "@IYGu//Hk ",
-							"limit": -99
+							"limit": 95,
+							"key": "h;YAstQg]0"
 						}
 					],
 					[
@@ -19970,7 +19986,8 @@
 							"id": "toString",
 							"data": "eKQAo'pB",
 							"page": "\n",
-							"limit": 89
+							"limit": 95,
+							"key": "\t"
 						}
 					],
 					[
@@ -19983,7 +20000,8 @@
 							"id": "\udc00",
 							"data": "p5H",
 							"page": "ggF\\X",
-							"limit": -53
+							"limit": 23,
+							"key": "\u0000"
 						}
 					],
 					[
@@ -19996,7 +20014,8 @@
 							"id": "4294967295",
 							"data": "",
 							"page": "\udc00",
-							"limit": 96
+							"limit": 96,
+							"key": ""
 						}
 					]
 				],
@@ -20007,11 +20026,15 @@
 					},
 					{
 						"ok": true,
-						"text": "}"
+						"text": "}",
+						"next_page": "L+`3#stUb!",
+						"id": "IC^d\"cuG"
 					},
 					{
 						"ok": true,
-						"text": "\udc00"
+						"text": "\udc00",
+						"next_page": null,
+						"id": null
 					},
 					{
 						"ok": false,
@@ -20023,7 +20046,9 @@
 					},
 					{
 						"ok": true,
-						"text": ""
+						"text": "",
+						"next_page": null,
+						"id": "hDvAghHOw\\"
 					},
 					{
 						"ok": false,

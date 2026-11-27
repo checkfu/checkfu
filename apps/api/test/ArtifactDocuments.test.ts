@@ -52,6 +52,29 @@ describe("An artifact's documents", () => {
 		})
 	})
 
+	it("checks a keyed add against its original request after an edit", () => {
+		const { documents } = database()
+		expect(
+			documents.write("notes", "keyed", body("original"), "create", 1, "original-hash"),
+		).toMatchObject({ refused: null, created: true })
+		documents.write("notes", "keyed", body("edited"), "replace", 2)
+		expect(
+			documents.write("notes", "keyed", body("original"), "create", 3, "original-hash"),
+		).toMatchObject({
+			refused: null,
+			created: false,
+			document: { body: body("edited"), updated_at: 2 },
+		})
+		expect(documents.write("notes", "keyed", body("edited"), "create", 3, "edited-hash")).toEqual({
+			refused: "idempotency_key_reused",
+		})
+		documents.remove("notes", "keyed")
+		expect(documents.write("notes", "keyed", body("new"), "create", 4, "new-hash")).toMatchObject({
+			refused: null,
+			created: true,
+		})
+	})
+
 	it("replaces a document in place, keeping when it was made and where it sorts", () => {
 		const { documents } = database()
 		documents.write("notes", "a", body("first"), "create", 1)

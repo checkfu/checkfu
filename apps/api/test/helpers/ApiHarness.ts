@@ -610,9 +610,16 @@ export const makePiDurableTestLayer = (
 	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") =>
 		filesIn(makeArtifactMount(root, sessionArtifacts(sessionId), 100_000), root)
 	const sessionArtifactData = (sessionId: string, turn: number, args: unknown) =>
-		artifactData(args, (name, request) =>
-			built().run(built().saves.sessionArtifactData(sessionId, turn, name, request)),
-		)
+		artifactData(args, {
+			ask: (name, request) =>
+				built().run(built().saves.sessionArtifactData(sessionId, turn, name, request)),
+			defaultKey: crypto.randomUUID(),
+			writeResult: async (text) => {
+				const path = `/mnt/artifact-data-results/${crypto.randomUUID()}.json`
+				workspaceFiles(sessionId).set(path, text)
+				return path
+			},
+		})
 	const saveSessionArtifact = (
 		sessionId: string,
 		turn: number,

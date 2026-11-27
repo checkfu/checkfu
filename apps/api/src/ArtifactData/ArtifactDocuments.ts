@@ -11,6 +11,8 @@ export const DOCUMENT_TABLES = {
 	documents:
 		"CREATE TABLE IF NOT EXISTS documents (collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (collection, id))",
 	order: "CREATE INDEX IF NOT EXISTS documents_in_order ON documents (collection, seq)",
+	creates:
+		"CREATE TABLE IF NOT EXISTS document_creates (collection TEXT NOT NULL, id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (collection, id))",
 	totals:
 		"CREATE TABLE IF NOT EXISTS totals (id INTEGER PRIMARY KEY CHECK (id = 1), next_seq INTEGER NOT NULL, bytes INTEGER NOT NULL, erased INTEGER NOT NULL)",
 } as const
@@ -41,6 +43,7 @@ export type WriteMode = typeof WriteMode.Type
 export const WriteRefusal = Schema.Literals([
 	"erased",
 	"exists",
+	"idempotency_key_reused",
 	"too_large",
 	"collections",
 	"documents",
@@ -141,6 +144,7 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 			body: string,
 			mode: WriteMode,
 			now: number,
+			createHash: string | null = null,
 		): WriteOutcome =>
 			sql.transaction((): WriteOutcome => {
 				const size = utf8Encoder.encode(body).byteLength
@@ -153,7 +157,18 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 				}
 				const existing = held(collection, id)
 				if (existing !== null && mode === "create") {
-					return { refused: "exists" }
+					if (createHash === null) {
+						return { refused: "exists" }
+					}
+					const same = first(
+						"SELECT 1 FROM document_creates WHERE collection = ? AND id = ? AND hash = ?",
+						collection,
+						id,
+						createHash,
+					)
+					return same === undefined
+						? { refused: "idempotency_key_reused" }
+						: { refused: null, document: existing, created: false }
 				}
 				if (existing === null) {
 					const inCollection = count(
@@ -193,6 +208,14 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 					document.created_at,
 					now,
 				)
+				if (createHash !== null && mode === "create") {
+					sql.exec(
+						"INSERT INTO document_creates (collection, id, hash) VALUES (?, ?, ?)",
+						collection,
+						id,
+						createHash,
+					)
+				}
 				sql.exec(
 					"UPDATE totals SET bytes = ?, next_seq = ? WHERE id = 1",
 					bytes,
@@ -209,6 +232,7 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 					return false
 				}
 				sql.exec("DELETE FROM documents WHERE collection = ? AND id = ?", collection, id)
+				sql.exec("DELETE FROM document_creates WHERE collection = ? AND id = ?", collection, id)
 				sql.exec("UPDATE totals SET bytes = ? WHERE id = 1", current.bytes - existing.size)
 				return true
 			}),
@@ -216,6 +240,7 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 		erase: (): void => {
 			sql.transaction(() => {
 				sql.exec("DELETE FROM documents")
+				sql.exec("DELETE FROM document_creates")
 				sql.exec("UPDATE totals SET bytes = 0, erased = 1 WHERE id = 1")
 			})
 		},

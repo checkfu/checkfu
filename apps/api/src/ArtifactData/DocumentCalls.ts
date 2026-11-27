@@ -22,8 +22,6 @@ import type { StoredDocument, WriteRefusal } from "./ArtifactDocuments.ts"
 
 export const DEFAULT_DOCUMENT_PAGE_SIZE = 50
 
-const DOCUMENT_OVERHEAD_BYTES = 256
-
 export type DocumentAuthor = "owner" | "visitor"
 
 export class DocumentRefused extends Data.TaggedError("DocumentRefused")<{
@@ -61,6 +59,15 @@ const refusal = (artifactId: string, collection: string, refused: WriteRefusal) 
 		}
 		case "exists": {
 			return refuse(409, "A document with this id already exists.")
+		}
+		case "idempotency_key_reused": {
+			return Effect.fail(
+				new DocumentRefused({
+					status: 409,
+					message: "Idempotency-Key was already used for a different request.",
+					code: ERROR_CODES.idempotencyKeyReused,
+				}),
+			)
 		}
 		case "too_large": {
 			return refuse(400, `A document may be at most ${MAX_ARTIFACT_DOCUMENT_BYTES} bytes of JSON.`)
@@ -138,35 +145,14 @@ export const DocumentCalls = Effect.gen(function* () {
 				})),
 			})),
 
-		list: (
-			artifactId: ArtifactId,
-			collection: string,
-			after: number,
-			limit: number,
-			budget = Number.POSITIVE_INFINITY,
-		) =>
+		list: (artifactId: ArtifactId, collection: string, after: number, limit: number) =>
 			Effect.gen(function* () {
 				const page = yield* held(database.list(artifactId, collection, after, limit))
-				const fitting: Array<StoredDocument> = []
-				let used = 0
-				for (const document of page.documents) {
-					used += document.size + DOCUMENT_OVERHEAD_BYTES
-					if (fitting.length > 0 && used > budget) {
-						break
-					}
-					fitting.push(document)
-				}
-				const last = fitting.at(-1)
 				return {
-					next_page:
-						fitting.length < page.documents.length && last !== undefined
-							? String(last.seq)
-							: page.next === null
-								? null
-								: String(page.next),
-					data: yield* Effect.forEach(fitting, (document) =>
+					data: yield* Effect.forEach(page.documents, (document) =>
 						resource(artifactId, collection, document),
 					),
+					next_page: page.next === null ? null : String(page.next),
 				}
 			}),
 
@@ -181,6 +167,7 @@ export const DocumentCalls = Effect.gen(function* () {
 			data: Schema.Json,
 			key: string | undefined,
 			by: DocumentAuthor,
+			beforeMutation: Effect.Effect<void, DocumentRefused> = Effect.void,
 		) =>
 			Effect.gen(function* () {
 				const id =
@@ -188,37 +175,49 @@ export const DocumentCalls = Effect.gen(function* () {
 						? `doc_${Hex.encode(yield* random.randomBytes(12))}`
 						: yield* keyedId(artifactId, collection, by, key)
 				const body = JSON.stringify(data)
-				const outcome = yield* held(database.write(artifactId, collection, id, body, "create"))
-				if (outcome.refused === null) {
-					return yield* resource(artifactId, collection, outcome.document)
-				}
-				if (outcome.refused !== "exists" || key === undefined) {
-					return yield* refusal(artifactId, collection, outcome.refused)
-				}
-				const first = yield* held(database.get(artifactId, collection, id))
-				return first !== null && first.body === body
-					? yield* resource(artifactId, collection, first)
-					: yield* new DocumentRefused({
-							status: 409,
-							message: "Idempotency-Key was already used for a different request.",
-							code: ERROR_CODES.idempotencyKeyReused,
-						})
+				const createHash =
+					key === undefined
+						? undefined
+						: yield* digest.digestHex(Digest.sha256, utf8Encoder.encode(body))
+				yield* beforeMutation
+				const outcome = yield* held(
+					database.write(artifactId, collection, id, body, "create", createHash),
+				)
+				return yield* outcome.refused === null
+					? resource(artifactId, collection, outcome.document)
+					: refusal(artifactId, collection, outcome.refused)
 			}),
 
-		put: (artifactId: ArtifactId, collection: string, id: string, data: Schema.Json) =>
+		put: (
+			artifactId: ArtifactId,
+			collection: string,
+			id: string,
+			data: Schema.Json,
+			beforeMutation: Effect.Effect<void, DocumentRefused> = Effect.void,
+		) =>
 			Effect.flatMap(
-				held(database.write(artifactId, collection, id, JSON.stringify(data), "replace")),
+				Effect.andThen(
+					beforeMutation,
+					held(database.write(artifactId, collection, id, JSON.stringify(data), "replace")),
+				),
 				(outcome) =>
 					outcome.refused === null
 						? resource(artifactId, collection, outcome.document)
 						: refusal(artifactId, collection, outcome.refused),
 			),
 
-		remove: (artifactId: ArtifactId, collection: string, id: string) =>
-			Effect.flatMap(held(database.remove(artifactId, collection, id)), (removed) =>
-				removed
-					? Effect.succeed({ id, type: "artifact_document_deleted" as const })
-					: missing(collection, id),
+		remove: (
+			artifactId: ArtifactId,
+			collection: string,
+			id: string,
+			beforeMutation: Effect.Effect<void, DocumentRefused> = Effect.void,
+		) =>
+			Effect.flatMap(
+				Effect.andThen(beforeMutation, held(database.remove(artifactId, collection, id))),
+				(removed) =>
+					removed
+						? Effect.succeed({ id, type: "artifact_document_deleted" as const })
+						: missing(collection, id),
 			),
 	}
 })

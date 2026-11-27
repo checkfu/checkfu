@@ -64,9 +64,9 @@ export const makeArtifactDatabaseMemory = () => {
 			get: (artifactId, collection, id) => run(() => of(artifactId).get(collection, id)),
 			list: (artifactId, collection, after, limit) =>
 				run(() => of(artifactId).list(collection, after, limit)),
-			write: (artifactId, collection, id, body, mode) =>
+			write: (artifactId, collection, id, body, mode, createHash) =>
 				Effect.flatMap(Clock.currentTimeMillis, (now) =>
-					run(() => of(artifactId).write(collection, id, body, mode, now)),
+					run(() => of(artifactId).write(collection, id, body, mode, now, createHash)),
 				),
 			remove: (artifactId, collection, id) => run(() => of(artifactId).remove(collection, id)),
 			usage: (artifactId) => run(() => of(artifactId).usage()),

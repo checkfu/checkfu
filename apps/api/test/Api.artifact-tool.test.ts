@@ -111,7 +111,7 @@ const withSessions = async (
 interface ToolReply {
 	readonly id: string
 	readonly data?: unknown
-	readonly data_omitted?: string
+	readonly path?: string
 	readonly next_page?: string | null
 }
 
@@ -120,6 +120,7 @@ interface DataArguments {
 	readonly operation: string
 	readonly id?: string
 	readonly data?: unknown
+	readonly key?: string
 	readonly limit?: number
 	readonly page?: string | null
 }
@@ -569,30 +570,47 @@ describe("An artifact the agent saves", () => {
 						data: "x".repeat(bytes),
 					})
 				}
-				const pages: Array<ReadonlyArray<string>> = []
-				let page: string | null = null
-				do {
-					const listed: ToolReply = yield* done({ collection: "large", operation: "list", page })
-					const documents = listed.data as ReadonlyArray<{
-						id: string
-						data?: string
-						data_omitted?: string
-					}>
-					pages.push(
-						documents.map((document) =>
-							document.data_omitted === undefined ? document.id : `${document.id} (omitted)`,
-						),
-					)
-					expect(JSON.stringify(listed).length).toBeLessThan(50 * 1024)
-					page = listed.next_page ?? null
-				} while (typeof page === "string")
-				expect(pages).toEqual([["first", "second"], ["third"], ["huge (omitted)"], ["last"]])
+				const firstLarge = yield* done({ collection: "large", operation: "list", limit: 4 })
+				expect(firstLarge.path).toMatch(/^\/mnt\/artifact-data-results\/.*\.json$/u)
+				expect(firstLarge.next_page).toBeTypeOf("string")
+				const full = JSON.parse(files.get(firstLarge.path ?? "") ?? "null") as {
+					readonly data: ReadonlyArray<{ readonly id: string; readonly data: string }>
+					readonly next_page: string | null
+				}
+				expect(full.next_page).toBe(firstLarge.next_page)
+				expect(full.data.map(({ id, data }) => [id, data.length])).toEqual([
+					["first", 15_000],
+					["second", 15_000],
+					["third", 15_000],
+					["huge", 50_000],
+				])
 				const huge = yield* done({ collection: "large", operation: "get", id: "huge" })
-				expect(huge).toMatchObject({
+				expect(huge).toMatchObject({ id: "huge" })
+				expect(JSON.parse(files.get(huge.path ?? "") ?? "null")).toMatchObject({
 					id: "huge",
-					data_omitted: "50002 bytes of JSON, more than this tool can return",
+					data: "x".repeat(50_000),
 				})
-				expect("data" in huge).toBe(false)
+				expect(
+					(yield* done({
+						collection: "large",
+						operation: "list",
+						page: firstLarge.next_page ?? null,
+					})).data,
+				).toMatchObject([{ id: "last" }])
+
+				const original = {
+					collection: "notes",
+					operation: "add",
+					data: "original",
+					key: "submission",
+				}
+				const submitted = yield* done(original)
+				yield* done({ collection: "notes", operation: "put", id: submitted.id, data: "edited" })
+				expect(yield* done(original)).toMatchObject({ id: submitted.id, data: "edited" })
+				expect(yield* refusal({ ...original, name: "Dashboard", data: "edited" })).toEqual([
+					true,
+					"Idempotency-Key was already used for a different request.",
+				])
 
 				const other = yield* createSession
 				expect(
@@ -610,6 +628,49 @@ describe("An artifact the agent saves", () => {
 					"No artifact named",
 				)
 			}),
+		))
+
+	it("rejects invalid page sizes at the API binding and refuses writes from an interrupted turn", () =>
+		withSessions(
+			(apiFetch, { createSession, workspaceFiles, save, runInWorld, sessionArtifactSaves }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession
+					workspaceFiles(session.id).set("/workspace/site/index.html", "<main>Report</main>")
+					const artifactId = idIn(yield* save(session.id, "Report", "/workspace/site"))
+					const operations = sessionArtifactSaves()
+					const requestData = {
+						operation: "list" as const,
+						collection: "notes",
+						id: "",
+						data: "",
+						page: "",
+						limit: -2,
+						key: "",
+					}
+					const ask = (
+						args:
+							| typeof requestData
+							| (Omit<typeof requestData, "operation"> & { operation: "put" }),
+					) =>
+						Effect.promise(() =>
+							runInWorld(operations.sessionArtifactData(session.id, 1, "Report", args)),
+						)
+					expect(yield* ask(requestData)).toEqual({
+						ok: false,
+						message: "Invalid session artifact data call.",
+					})
+					expect(
+						(yield* request(apiFetch, "POST", `/v1/sessions/${session.id}/events`, {
+							events: [{ type: "user.interrupt" }],
+						})).status,
+					).toBe(200)
+					expect(
+						yield* ask({ ...requestData, operation: "put", limit: 0, id: "late", data: "null" }),
+					).toEqual({ ok: false, message: "The turn is no longer running." })
+					expect(
+						(yield* request(apiFetch, "GET", `/v1/artifacts/${artifactId}/data/notes/late`)).status,
+					).toBe(404)
+				}),
 		))
 
 	it("refuses to save once the artifact was deleted or the session has ended", () =>

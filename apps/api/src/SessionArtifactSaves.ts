@@ -7,6 +7,8 @@ import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { isClientEventId } from "@checkfu/sdk/IdempotencyKey"
+import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
 import { isApiErrorEnvelope } from "@checkfu/sdk/Errors"
 import {
 	ArtifactDocumentData,
@@ -27,14 +29,12 @@ import * as Mime from "effect/http/Mime"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { DocumentCalls, isDocumentRefused } from "./ArtifactData/DocumentCalls.ts"
+import { DocumentCalls, DocumentRefused, isDocumentRefused } from "./ArtifactData/DocumentCalls.ts"
 import { outputFileId } from "./Files/OutputsSaverLive.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
 import { RESERVATION_LOST, artifactWrites } from "./Http/ArtifactsHandlers.ts"
 import {
-	ARTIFACT_DATA_RESULT_BYTES,
 	DEFAULT_ARTIFACT_DATA_LIMIT,
-	MAX_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
@@ -66,7 +66,12 @@ const isArtifactSave = Schema.is(SessionArtifactToolCalls.sessionArtifactSave.ar
 
 const refused = (message: string) => ({ ok: false as const, message })
 
-const told = (value: unknown) => ({ ok: true as const, text: JSON.stringify(value) })
+const told = (value: unknown, id: string | null = null, next_page: string | null = null) => ({
+	ok: true as const,
+	text: JSON.stringify(value),
+	id,
+	next_page,
+})
 
 const DATA_HELP = `data must be a JSON value with arrays and objects nested at most ${MAX_ARTIFACT_DOCUMENT_DEPTH} deep.`
 
@@ -76,16 +81,12 @@ const isDataCall = Schema.is(SessionArtifactToolCalls.sessionArtifactData.args)
 const decodeData = Schema.decodeUnknownOption(Schema.fromJsonString(ArtifactDocumentData))
 const encodeDocument = Schema.encodeSync(ArtifactDocumentResource)
 const encodeDeleted = Schema.encodeSync(ArtifactDocumentDeleted)
-
-const ID_HELP = "id must be up to 64 letters, digits, - and _, starting with a letter or digit."
-
-const shown = (document: typeof ArtifactDocumentResource.Type) => {
-	const { data, ...rest } = encodeDocument(document)
-	const bytes = utf8Encoder.encode(JSON.stringify(data)).byteLength
-	return bytes <= ARTIFACT_DATA_RESULT_BYTES
-		? { ...rest, data }
-		: { ...rest, data_omitted: `${bytes} bytes of JSON, more than this tool can return` }
-}
+const encodeList = Schema.encodeSync(
+	Schema.Struct({
+		data: Schema.Array(ArtifactDocumentResource),
+		next_page: Schema.NullOr(Schema.String),
+	}),
+)
 
 export const sessionArtifactId = (
 	digest: Digest.Digest["Service"],
@@ -138,7 +139,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 	const dataOf = (
 		id: ArtifactId,
 		request: SessionDataRequest,
-		stillRunning: Effect.Effect<SessionDataResult | undefined>,
+		beforeMutation: Effect.Effect<void, DocumentRefused>,
 	) =>
 		Effect.gen(function* () {
 			const { operation, collection } = request
@@ -149,44 +150,79 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 			}
 			if (operation === "list") {
 				const after = request.page === "" ? 0 : Number(request.page)
-				if (String(after) !== (request.page === "" ? "0" : request.page) || after < 0) {
+				if (
+					!Number.isSafeInteger(after) ||
+					after < 0 ||
+					(request.page !== "" && String(after) !== request.page)
+				) {
 					return refused("page must be the next_page of an earlier list.")
 				}
-				if (request.limit < 0 || request.limit > MAX_ARTIFACT_DATA_LIMIT) {
-					return refused(`limit must be 1 to ${MAX_ARTIFACT_DATA_LIMIT}.`)
-				}
-				const listed = yield* documents.list(
+				const result = yield* documents.list(
 					id,
 					collection,
 					after,
 					request.limit === 0 ? DEFAULT_ARTIFACT_DATA_LIMIT : request.limit,
-					ARTIFACT_DATA_RESULT_BYTES,
 				)
-				return told({ next_page: listed.next_page, data: listed.data.map(shown) })
+				return told(encodeList(result), null, result.next_page)
+			}
+			if (
+				(operation === "add" || operation === "put") &&
+				utf8Encoder.encode(request.data).byteLength > MAX_ARTIFACT_DOCUMENT_BYTES
+			) {
+				return refused(`A document may be at most ${MAX_ARTIFACT_DOCUMENT_BYTES} bytes of JSON.`)
+			}
+			if (operation === "add") {
+				if (!isClientEventId(request.key)) {
+					return refused(
+						"add needs an idempotency key of 1 to 128 characters without surrounding whitespace.",
+					)
+				}
+				const data = decodeData(request.data)
+				if (Option.isNone(data)) {
+					return refused(DATA_HELP)
+				}
+				const document = yield* documents.add(
+					id,
+					collection,
+					data.value,
+					request.key,
+					"owner",
+					beforeMutation,
+				)
+				return told(encodeDocument(document), document.id)
+			}
+			if (!isDocumentId(request.id)) {
+				return refused(
+					"id must be up to 64 letters, digits, - and _, starting with a letter or digit.",
+				)
 			}
 			if (operation === "get") {
-				return isDocumentId(request.id)
-					? told(shown(yield* documents.get(id, collection, request.id)))
-					: refused(ID_HELP)
+				const document = yield* documents.get(id, collection, request.id)
+				return told(encodeDocument(document), document.id)
 			}
-			if (operation !== "add" && !isDocumentId(request.id)) {
-				return refused(ID_HELP)
+			if (operation === "delete") {
+				return told(
+					encodeDeleted(yield* documents.remove(id, collection, request.id, beforeMutation)),
+					request.id,
+				)
 			}
-			const data = operation === "delete" ? Option.some(null) : decodeData(request.data)
+			const data = decodeData(request.data)
 			if (Option.isNone(data)) {
 				return refused(DATA_HELP)
 			}
-			const ended = yield* stillRunning
-			if (ended !== undefined) {
-				return ended
-			}
-			if (operation === "add") {
-				return told(shown(yield* documents.add(id, collection, data.value, undefined, "owner")))
-			}
-			return operation === "delete"
-				? told(encodeDeleted(yield* documents.remove(id, collection, request.id)))
-				: told(shown(yield* documents.put(id, collection, request.id, data.value)))
-		}).pipe(Effect.catchIf(isDocumentRefused, ({ message }) => Effect.succeed(refused(message))))
+			const document = yield* documents.put(id, collection, request.id, data.value, beforeMutation)
+			return told(encodeDocument(document), document.id)
+		}).pipe(
+			Effect.catchIf(isDocumentRefused, ({ message, status }) =>
+				Effect.succeed(
+					refused(
+						request.operation === "add" && status === 503
+							? `The add could have succeeded. Repeat it with key ${JSON.stringify(request.key)} to avoid another document.`
+							: message,
+					),
+				),
+			),
+		)
 
 	return {
 		sessionArtifactData: (
@@ -213,7 +249,14 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 							`No artifact named ${JSON.stringify(name)} has been saved in this session. Save it with save_artifact first.`,
 						)
 					}
-					return yield* dataOf(id, request, stopped(sessionId, turn))
+					const beforeMutation = stopped(sessionId, turn).pipe(
+						Effect.flatMap((state) =>
+							state === undefined
+								? Effect.void
+								: Effect.fail(new DocumentRefused({ status: 409, message: state.message })),
+						),
+					)
+					return yield* dataOf(id, request, beforeMutation)
 				}),
 			),
 

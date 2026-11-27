@@ -1950,6 +1950,13 @@ describe("PiSession real Durable Object under workerd", () => {
 						arguments: { name: "Q3 report", collection: "numbers", operation: "list" },
 					},
 				],
+				"Read the report's large note.": [
+					{
+						kind: "tool_call",
+						name: "artifact_data",
+						arguments: { name: "Q3 report", collection: "notes", operation: "get", id: "private" },
+					},
+				],
 				"Read another report's numbers.": [
 					{
 						kind: "tool_call",
@@ -1959,13 +1966,19 @@ describe("PiSession real Durable Object under workerd", () => {
 				],
 			}),
 		)
-		fakeOpenAI.setHandler(
-			(req) =>
+		fakeOpenAI.setHandler((req) => {
+			const latest = req.toolOutputs.at(-1) ?? ""
+			const path = /"path":"(\/mnt\/artifact-data-results\/[^"]+)"/u.exec(latest)?.[1]
+			if (req.lastUserText === "Read the report's large note." && path !== undefined) {
+				return { kind: "tool_call", name: "read", arguments: { path, byteOffset: 0 } }
+			}
+			return (
 				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
 					kind: "reply",
-					text: `Done: ${req.toolOutputs.at(-1) ?? ""}`,
-				},
-		)
+					text: `Done: ${latest}`,
+				}
+			)
+		})
 		const session = await createSession()
 		const saved = await replyAfterTurn(session.id, "Build the report.", 1)
 		const artifactId = /art_[0-9a-f]{32}/u.exec(saved)?.[0] ?? ""
@@ -2007,6 +2020,14 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(numbers.body.data.map((document) => document.data)).toEqual([{ q3: 1200 }])
 		expect(await replyAfterTurn(session.id, "Read another report's numbers.", 6)).toContain(
 			'No artifact named "Not saved here" has been saved in this session.',
+		)
+		const note = await apiJson(`/v1/artifacts/${artifactId}/data/notes/private`, {
+			method: "PUT",
+			body: { data: "a".repeat(25_000) },
+		})
+		expect(note.status).toBe(200)
+		expect(await replyAfterTurn(session.id, "Read the report's large note.", 7)).toMatch(
+			/"next_byte_offset":4096/u,
 		)
 	}, 180_000)
 
