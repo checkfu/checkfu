@@ -23,6 +23,7 @@ import * as Schema from "effect/Schema"
 import type { ArtifactVersionNotReady, DataAddress, DataCall, DataReply } from "../Api.ts"
 import { ArtifactVersionAt } from "../Artifacts/ResolveArtifactVersion.ts"
 import { PublishedAt } from "../Artifacts/ResolvePublication.ts"
+import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
 import { DEFAULT_DOCUMENT_PAGE_SIZE, DocumentCalls, isDocumentRefused } from "./DocumentCalls.ts"
 
 const MAX_PAGE_SIZE = 100
@@ -47,14 +48,18 @@ const reply = (status: number, value: unknown): DataReply => ({
 	body: JSON.stringify(value),
 })
 
-const refused = (status: number, message: string): DataReply =>
-	reply(status, { error: { message } })
+const refused = (status: number, message: string, code?: string): DataReply =>
+	reply(status, { error: code === undefined ? { message } : { message, code } })
 
 const NOT_FOUND = refused(404, "Not found.")
 
 const wholeNumber = (text: string, maximum: number): number | undefined => {
 	const value = Number(text)
-	return text !== "" && String(value) === text && Number.isSafeInteger(value) && value <= maximum
+	return text !== "" &&
+		String(value) === text &&
+		Number.isSafeInteger(value) &&
+		value >= 0 &&
+		value <= maximum
 		? value
 		: undefined
 }
@@ -64,6 +69,7 @@ export const VisitorData = Effect.gen(function* () {
 	const versionAt = yield* ArtifactVersionAt
 	const publishedAt = yield* PublishedAt
 	const documents = yield* DocumentCalls
+	const links = yield* ArtifactLinks
 
 	const resolve = (
 		address: DataAddress,
@@ -73,18 +79,19 @@ export const VisitorData = Effect.gen(function* () {
 	> =>
 		Effect.gen(function* () {
 			if (address.kind === "link") {
-				if (!isArtifactId(address.artifact_id)) {
+				const claims = yield* links.verify(address.token)
+				if (claims === null || !isArtifactId(claims.artifactId)) {
 					return null
 				}
-				const id = address.artifact_id
-				const found = yield* versionAt(id, yield* Effect.orDie(artifacts.get(id)), address.version)
+				const id = claims.artifactId
+				const found = yield* versionAt(id, yield* Effect.orDie(artifacts.get(id)), claims.version)
 				if (found === null) {
 					return null
 				}
 				const declared = decodeCapabilities(found.capabilities)
 				return {
 					id,
-					allowed: (collection) => accessAt(address.access, declaredFor(declared, collection)),
+					allowed: (collection) => accessAt(claims.access, declaredFor(declared, collection)),
 				}
 			}
 			const published = yield* publishedAt(address.address)
@@ -143,6 +150,7 @@ export const VisitorData = Effect.gen(function* () {
 							collection,
 							body.value.data,
 							call.idempotency_key === "" ? undefined : call.idempotency_key,
+							"visitor",
 						),
 					),
 				)
@@ -165,8 +173,8 @@ export const VisitorData = Effect.gen(function* () {
 				encodeDocument(yield* documents.put(target.id, collection, call.id, body.value.data)),
 			)
 		}).pipe(
-			Effect.catchIf(isDocumentRefused, ({ status, message }) =>
-				Effect.succeed(refused(status, message)),
+			Effect.catchIf(isDocumentRefused, ({ status, message, code }) =>
+				Effect.succeed(refused(status, message, code)),
 			),
 		)
 })

@@ -254,12 +254,7 @@ export const serveContent = (options: {
 			return claims === null || claims.scope !== scope
 				? null
 				: {
-						address: {
-							kind: "link" as const,
-							artifact_id: claims.artifactId,
-							version: claims.version,
-							access: claims.access,
-						},
+						address: { kind: "link" as const, token: name },
 						access: {
 							kind: "artifact_link" as const,
 							artifactId: claims.artifactId,

@@ -73,7 +73,12 @@ const declaring = (collections: Record<string, string>, content = "page") => [
 
 const withPages = <A>(
 	run: (world: {
-		readonly api: (method: string, path: string, body?: unknown) => Effect.Effect<Response>
+		readonly api: (
+			method: string,
+			path: string,
+			body?: unknown,
+			headers?: Record<string, string>,
+		) => Effect.Effect<Response>
 		readonly page: (url: string, sent?: Sent) => Effect.Effect<Response>
 		readonly onDomain: (url: string, sent?: Sent) => Effect.Effect<Response>
 		readonly artifact: (collections: Record<string, string>) => Effect.Effect<string>
@@ -117,11 +122,16 @@ const withPages = <A>(
 					),
 				)
 			}
-			const api = (method: string, path: string, body?: unknown) =>
+			const api = (
+				method: string,
+				path: string,
+				body?: unknown,
+				headers?: Record<string, string>,
+			) =>
 				sendRequest(apiFetch, {
 					method,
 					path,
-					headers: AUTH_HEADERS,
+					headers: { ...AUTH_HEADERS, ...headers },
 					...(body === undefined ? {} : { body }),
 				})
 			return yield* run({
@@ -288,9 +298,21 @@ describe("A page reaching its artifact's data", () => {
 				const again = yield* page(board, { method: "POST", body: { data: "form" }, headers: key })
 				expect(again.status).toBe(201)
 				expect(yield* json(again)).toEqual(once)
-				expect(
-					(yield* page(board, { method: "POST", body: { data: "other" }, headers: key })).status,
-				).toBe(409)
+				const reused = yield* page(board, {
+					method: "POST",
+					body: { data: "other" },
+					headers: key,
+				})
+				expect(reused.status).toBe(409)
+				expect(yield* json(reused)).toMatchObject({
+					error: { code: "idempotency_key_reused" },
+				})
+
+				const owned = yield* json<DocumentBody>(
+					yield* api("POST", `/v1/artifacts/${id}/data/board`, { data: "the owner's" }, key),
+				)
+				expect(owned.id).not.toBe(once.id)
+				expect(owned.data).toBe("the owner's")
 			}),
 		))
 
@@ -316,6 +338,12 @@ describe("A page reaching its artifact's data", () => {
 				expect(yield* status(`${board}?limit=0`)).toBe(400)
 				expect(yield* status(`${board}?limit=101`)).toBe(400)
 				expect(yield* status(`${board}?page=abc`)).toBe(400)
+				expect(yield* status(`${board}?page=-5`)).toBe(400)
+				expect(yield* status(`${board}/`, { method: "POST", body: { data: 1 } })).toBe(405)
+				expect(yield* status(`${root}_%2Fdata%2Fboard`)).toBe(200)
+				expect(yield* status(`${root}%5F/data/board`)).toBe(200)
+				expect(yield* status(`${root}_/data/../data/board`)).toBe(200)
+				expect(yield* status(`${root}_/data/board`, { method: "HEAD" })).toBe(405)
 				expect(yield* status(`${board}/has.dot`)).toBe(404)
 				expect(yield* status(`${board}/a/b`)).toBe(404)
 				expect(yield* status(`${root}_/data`)).toBe(404)
@@ -435,6 +463,10 @@ describe("A page reaching its artifact's data", () => {
 				const address = new URL(root).pathname.split("/")[2] ?? ""
 				expect(yield* add(`https://${address}.${PUBLISH_DOMAIN}/`, "inbox", onDomain)).toBe(201)
 				expect(yield* add("http://content.test/p/a0-0000000000000000000000000/", "inbox")).toBe(404)
+				const wrongToken = `${address.slice(0, -1)}${address.endsWith("0") ? "1" : "0"}`
+				expect(wrongToken).not.toBe(address)
+				expect(yield* add(`http://content.test/p/${wrongToken}/`, "inbox")).toBe(404)
+				expect(yield* list(`http://content.test/p/${wrongToken}/`, "board")).toBe(404)
 
 				expect(
 					(yield* api("POST", `/v1/artifacts/${id}/versions`, {

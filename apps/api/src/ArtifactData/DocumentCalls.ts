@@ -22,6 +22,8 @@ import type { StoredDocument, WriteRefusal } from "./ArtifactDocuments.ts"
 
 export const DEFAULT_DOCUMENT_PAGE_SIZE = 50
 
+export type DocumentAuthor = "owner" | "visitor"
+
 export class DocumentRefused extends Data.TaggedError("DocumentRefused")<{
 	readonly status: 400 | 404 | 409 | 503
 	readonly message: string
@@ -110,12 +112,12 @@ export const DocumentCalls = Effect.gen(function* () {
 	const digest = yield* Digest.Digest
 	const random = yield* SecureRandom.SecureRandom
 
-	const keyedId = (artifactId: string, collection: string, key: string) =>
+	const keyedId = (artifactId: string, collection: string, by: DocumentAuthor, key: string) =>
 		Effect.map(
 			digest.digestHex(
 				Digest.sha256,
 				utf8Encoder.encode(
-					JSON.stringify(["artifact", "document", "id", artifactId, collection, key]),
+					JSON.stringify(["artifact", "document", "id", artifactId, collection, by, key]),
 				),
 			),
 			(hash) => `doc_${hash.slice(0, 32)}`,
@@ -150,12 +152,18 @@ export const DocumentCalls = Effect.gen(function* () {
 				document === null ? missing(collection, id) : resource(artifactId, collection, document),
 			),
 
-		add: (artifactId: ArtifactId, collection: string, data: Schema.Json, key: string | undefined) =>
+		add: (
+			artifactId: ArtifactId,
+			collection: string,
+			data: Schema.Json,
+			key: string | undefined,
+			by: DocumentAuthor,
+		) =>
 			Effect.gen(function* () {
 				const id =
 					key === undefined
 						? `doc_${Hex.encode(yield* random.randomBytes(12))}`
-						: yield* keyedId(artifactId, collection, key)
+						: yield* keyedId(artifactId, collection, by, key)
 				const body = JSON.stringify(data)
 				const outcome = yield* held(database.write(artifactId, collection, id, body, "create"))
 				if (outcome.refused === null) {

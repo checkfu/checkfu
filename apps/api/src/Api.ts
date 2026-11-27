@@ -1,6 +1,5 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type * as Effect from "effect/Effect"
-import { ArtifactAccessLevel } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 import { SessionArtifactCalls } from "./Workspace/SessionArtifacts.ts"
 import { SessionArtifactToolCalls } from "./Workspace/SessionArtifactTool.ts"
@@ -18,12 +17,7 @@ export const ResolvedPublication = Schema.Struct({
 export type ResolvedPublication = typeof ResolvedPublication.Type
 
 export const DataAddress = Schema.Union([
-	Schema.Struct({
-		kind: Schema.Literal("link"),
-		artifact_id: Schema.String,
-		version: Schema.Int,
-		access: ArtifactAccessLevel,
-	}),
+	Schema.Struct({ kind: Schema.Literal("link"), token: Schema.String }),
 	Schema.Struct({ kind: Schema.Literal("publication"), address: Schema.String }),
 ])
 export type DataAddress = typeof DataAddress.Type

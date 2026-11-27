@@ -49,6 +49,7 @@ export const ArtifactDataLive = HttpApiBuilder.group(CheckfuApi, "artifact_data"
 						params.collection,
 						payload.data,
 						headers["idempotency-key"],
+						"owner",
 					),
 				).pipe(answered),
 			)

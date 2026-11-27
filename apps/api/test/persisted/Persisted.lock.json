@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T17:42:51.430Z",
+			"cut_at": "2026-11-27T17:53:24.262Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -322,7 +322,7 @@
 				"api-call:Api.resolvePublication/args": "b004d702513d177168fe50e40e987659d68efb65c89735f7cf7edf7abcdcc380",
 				"api-call:Api.resolvePublication/result": "b406a369a991555517908a86802fc9dffa03736e6284f2819cd1d7fe9e40eadf",
 				"api-call:Api.resolvePublication/error": "dea19cb7c26cdf15f483e9ac4a9021a7b30c42dadc6a6ac12edb9ca2592b99fd",
-				"api-call:Api.artifactData/args": "80761268267795a24842f1e53253608f8fad5888e9ee336e18ff2f2703070b85",
+				"api-call:Api.artifactData/args": "f126c8cc19c5a74f5b9bc2a405e4a0f2a3535c4982e9809daf3f1f5703a04283",
 				"api-call:Api.artifactData/result": "7868bbbfb9cd6887c39d38c84d52302d8959b7c51d8bf2b15dd6b499ea328bb0",
 				"api-call:Api.artifactData/error": "dea19cb7c26cdf15f483e9ac4a9021a7b30c42dadc6a6ac12edb9ca2592b99fd",
 				"api-call:Api.memoryMounts/args": "b004d702513d177168fe50e40e987659d68efb65c89735f7cf7edf7abcdcc380",
@@ -17784,16 +17784,14 @@
 					[
 						{
 							"kind": "link",
-							"artifact_id": "😀",
-							"version": 100,
-							"access": "write"
+							"token": "😀"
 						},
 						{
-							"operation": "get",
-							"collection": "\ud800",
-							"id": "\n",
-							"body": "",
-							"page": "Z4Cy-qO.-",
+							"operation": "list",
+							"collection": "?3p):zT",
+							"id": "\ud800",
+							"body": "4Cy-qO",
+							"page": " ",
 							"limit": "",
 							"idempotency_key": ""
 						}
@@ -17801,35 +17799,31 @@
 					[
 						{
 							"kind": "link",
-							"artifact_id": "",
-							"version": -6,
-							"access": "view"
+							"token": ""
 						},
 						{
-							"operation": "put",
-							"collection": "G",
-							"id": "2KT/.^}f8!",
-							"body": " ",
-							"page": "-1",
-							"limit": "'Z/ip-7*7`",
-							"idempotency_key": "s7aca\\};#G"
+							"operation": "list",
+							"collection": "",
+							"id": "prototype",
+							"body": "G",
+							"page": "2KT/.^}f8!",
+							"limit": " ",
+							"idempotency_key": "-1"
 						}
 					],
 					[
 						{
 							"kind": "link",
-							"artifact_id": "aO%W:",
-							"version": -99,
-							"access": "read"
+							"token": "aO%W:"
 						},
 						{
-							"operation": "put",
+							"operation": "list",
 							"collection": "",
-							"id": "\t",
-							"body": "]Hwy",
-							"page": "\udc00",
-							"limit": "0",
-							"idempotency_key": "-9<bj[~Dy0"
+							"id": "",
+							"body": "",
+							"page": "]Hwy",
+							"limit": "\udc00",
+							"idempotency_key": "0"
 						}
 					],
 					[
@@ -17865,35 +17859,31 @@
 					[
 						{
 							"kind": "link",
-							"artifact_id": "prototype",
-							"version": -11,
-							"access": "view"
+							"token": "prototype"
 						},
 						{
-							"operation": "delete",
-							"collection": "",
-							"id": "0",
-							"body": "\"EKR U",
-							"page": "4294967295",
-							"limit": "~0",
-							"idempotency_key": ""
+							"operation": "add",
+							"collection": " ",
+							"id": "5",
+							"body": "0",
+							"page": "\"EKR U",
+							"limit": "4294967295",
+							"idempotency_key": "~0"
 						}
 					],
 					[
 						{
 							"kind": "link",
-							"artifact_id": "4294967295",
-							"version": -51,
-							"access": "write"
+							"token": "4294967295"
 						},
 						{
-							"operation": "get",
-							"collection": "__proto__",
-							"id": "hx2sBG'c0",
-							"body": "h",
-							"page": "",
-							"limit": "😀",
-							"idempotency_key": "\udc00"
+							"operation": "put",
+							"collection": "toString",
+							"id": "",
+							"body": "qhx2sBG",
+							"page": "prototype",
+							"limit": "\ud800",
+							"idempotency_key": "4$:}Oq2<!R"
 						}
 					]
 				],
