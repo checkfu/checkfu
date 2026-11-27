@@ -19,9 +19,13 @@ import {
 	McpCallOutcome,
 	McpListOutcome,
 	mcpCallScope,
+	withMcpListDeadline,
 } from "./PiMcpTypes.ts"
 import type { McpFailure, McpToolDescriptor } from "./PiMcpTypes.ts"
 import { MCP_TURN_KEY, McpTurn } from "./PiTurn.ts"
+
+const MCP_DISCOVERY_RETRY_MS = 300_000
+const MCP_SLOW_FAILURE_MS = 5000
 
 const Brought = Schema.Struct({ turn: Schema.Finite, ...McpTurn.fields })
 const broughtJson = Schema.fromJsonString(Brought)
@@ -141,9 +145,11 @@ export const makeSessionMcp = (options: {
 	readonly admittedTurn: () => number
 	readonly agentTools: () => ReadonlyArray<AgentTool>
 	readonly fetch?: typeof fetch
+	readonly now?: () => number
+	readonly listTimeoutMs?: number
 }) => {
-	const { kv } = options
-	const unreachable = new Map<string, string>()
+	const { kv, now = Date.now } = options
+	const unreachable = new Map<string, { readonly reason: string; readonly retryAt: number }>()
 
 	const brought = (): typeof Brought.Type | undefined =>
 		Option.getOrUndefined(Option.flatMap(Option.fromNullishOr(kv.get(MCP_TURN_KEY)), decodeBrought))
@@ -197,22 +203,18 @@ export const makeSessionMcp = (options: {
 		turn: number,
 		signal: AbortSignal | undefined,
 	): Promise<McpListOutcome> => {
-		const refused = refusal(binding, turn, signal)
-		if (refused !== undefined) {
-			return { ok: false, message: refused }
-		}
 		if (binding.credential_id === null) {
 			const scope = mcpCallScope(turn, MAX_TOOL_LIST_BYTES, signal)
 			return (await loaded()).list(binding.name, peerOf(binding), scope)
 		}
-		return binding.vault_id === null
+		const { vault_id, credential_id, url } = binding
+		return vault_id === null
 			? { ok: false, message: MCP_CREDENTIAL_ENDED }
-			: options.vaults.list(
-					binding.vault_id,
-					binding.credential_id,
-					binding.url,
-					MAX_TOOL_LIST_BYTES,
+			: withMcpListDeadline(
+					(deadline) =>
+						options.vaults.list(vault_id, credential_id, url, MAX_TOOL_LIST_BYTES, deadline),
 					signal,
+					options.listTimeoutMs,
 				)
 	}
 
@@ -221,20 +223,32 @@ export const makeSessionMcp = (options: {
 		turn: number,
 		signal: AbortSignal | undefined,
 	): Promise<void> => {
-		const outcome = await listed(binding, turn, signal)
-		if (signal?.aborted === true) {
+		const refused = refusal(binding, turn, signal)
+		const started = now()
+		const outcome: McpListOutcome =
+			refused === undefined ? await listed(binding, turn, signal) : { ok: false, message: refused }
+		if (signal?.aborted === true || options.admittedTurn() !== turn || brought()?.turn !== turn) {
 			return
 		}
 		const kept = cacheableTools(outcome)
 		if ("text" in kept) {
 			unreachable.delete(binding.name)
 			kv.put(toolsKey(binding.name), kept.text)
-		} else if (kept.retry) {
-			unreachable.set(binding.name, kept.unavailable)
-		} else {
+		} else if (!kept.retry) {
+			unreachable.delete(binding.name)
 			kv.put(unavailableKey(binding.name), kept.unavailable)
+		} else if (toolsOf(binding.name) === undefined) {
+			const finished = now()
+			const slow = refused === undefined && finished - started >= MCP_SLOW_FAILURE_MS
+			const retryAt = finished + (slow ? MCP_DISCOVERY_RETRY_MS : 0)
+			if (retryAt >= (unreachable.get(binding.name)?.retryAt ?? finished)) {
+				unreachable.set(binding.name, { reason: kept.unavailable, retryAt })
+			}
 		}
 	}
+
+	const needsListing = (name: string, at: number): boolean =>
+		toolsOf(name) === undefined && (unreachable.get(name)?.retryAt ?? at) <= at
 
 	const servers = () =>
 		withinCatalog(
@@ -242,7 +256,7 @@ export const makeSessionMcp = (options: {
 				binding,
 				tools: toolsOf(binding.name) ?? {
 					status: "unavailable" as const,
-					reason: unreachable.get(binding.name) ?? "it has not been reached yet",
+					reason: unreachable.get(binding.name)?.reason ?? "it has not been reached yet",
 				},
 			})),
 		)
@@ -289,14 +303,17 @@ export const makeSessionMcp = (options: {
 			}
 			return true
 		},
-		undiscovered: (): boolean =>
-			current().servers.some((binding) => toolsOf(binding.name) === undefined),
+		undiscovered: (): boolean => {
+			const at = now()
+			return current().servers.some((binding) => needsListing(binding.name, at))
+		},
 		discover: async (turn: number, signal?: AbortSignal): Promise<void> => {
 			const kept = brought()
 			if (kept === undefined || kept.turn !== turn) {
 				return
 			}
-			const missing = kept.servers.filter((binding) => toolsOf(binding.name) === undefined)
+			const at = now()
+			const missing = kept.servers.filter((binding) => needsListing(binding.name, at))
 			await Promise.all(missing.map((binding) => list(binding, turn, signal)))
 		},
 	}

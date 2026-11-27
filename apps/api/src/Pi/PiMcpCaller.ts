@@ -21,7 +21,7 @@ import {
 	listMcpTools,
 	mcpClientEnded,
 } from "./PiMcpClient.ts"
-import { MCP_CALL_TIMEOUT_MS, McpCall } from "./PiMcpTypes.ts"
+import { MCP_CALL_TIMEOUT_MS, McpCall, mcpTimedOut, withMcpListDeadline } from "./PiMcpTypes.ts"
 import type {
 	McpCallOutcome,
 	McpCallScope,
@@ -77,6 +77,7 @@ class McpClients extends Context.Service<
 export const makeMcpCaller = (options: {
 	readonly capacity: number
 	readonly idleMs?: number
+	readonly listTimeoutMs?: number
 	readonly fetch?: typeof fetch
 }) => {
 	let lookups = 0
@@ -161,6 +162,7 @@ export const makeMcpCaller = (options: {
 		key: string,
 		peer: McpPeer,
 		scope: McpCallScope,
+		timeoutMs: number | undefined,
 		use: (client: McpClient.McpClient) => Effect.Effect<A, McpClientError>,
 	): Promise<A | McpFailure> => {
 		const name = new ClientKey(key, peer)
@@ -168,7 +170,7 @@ export const makeMcpCaller = (options: {
 			Effect.gen(function* () {
 				const clients = yield* McpClients
 				yield* closing(clients, (kept) => kept.key === key && kept.peer.url !== peer.url)
-				return yield* acquire(clients, name).pipe(
+				const request = acquire(clients, name).pipe(
 					Effect.flatMap((client) =>
 						use(client).pipe(
 							Effect.tapError((error) =>
@@ -177,13 +179,15 @@ export const makeMcpCaller = (options: {
 						),
 					),
 					Effect.scoped,
-					Effect.timeoutOption(MCP_CALL_TIMEOUT_MS),
-					Effect.map(
-						Option.getOrElse((): A | McpFailure => ({
-							ok: false,
-							message: `The MCP server did not answer within ${MCP_CALL_TIMEOUT_MS / 1000} seconds.`,
-						})),
-					),
+				)
+				const bounded =
+					timeoutMs === undefined
+						? request
+						: request.pipe(
+								Effect.timeoutOption(timeoutMs),
+								Effect.map(Option.getOrElse((): A | McpFailure => mcpTimedOut(timeoutMs))),
+							)
+				return yield* bounded.pipe(
 					Effect.catch((error) =>
 						Effect.succeed<A | McpFailure>(
 							Cause.isExceededCapacityError(error)
@@ -215,13 +219,18 @@ export const makeMcpCaller = (options: {
 	}
 
 	return {
-		list: async (key: string, peer: McpPeer, scope: McpCallScope): Promise<McpListOutcome> => {
-			const listed = await run(key, peer, scope, listMcpTools)
-			if (!Option.isOption(listed)) {
-				return listed
-			}
-			return Option.isSome(listed) ? { ok: true, tools: listed.value } : { ok: true }
-		},
+		list: (key: string, peer: McpPeer, scope: McpCallScope): Promise<McpListOutcome> =>
+			withMcpListDeadline(
+				async (signal) => {
+					const listed = await run(key, peer, { ...scope, signal }, undefined, listMcpTools)
+					if (!Option.isOption(listed)) {
+						return listed
+					}
+					return Option.isSome(listed) ? { ok: true, tools: listed.value } : { ok: true }
+				},
+				scope.signal,
+				options.listTimeoutMs,
+			),
 		call: (
 			key: string,
 			peer: McpPeer,
@@ -229,7 +238,7 @@ export const makeMcpCaller = (options: {
 			tool: McpToolDescriptor,
 			args: Schema.JsonObject,
 		): Promise<McpCallOutcome> =>
-			run(key, peer, scope, (client) => callMcpTool(client, tool, args)),
+			run(key, peer, scope, MCP_CALL_TIMEOUT_MS, (client) => callMcpTool(client, tool, args)),
 		drop: (matches: (key: string) => boolean): Promise<void> =>
 			runtime.runPromise(
 				Effect.gen(function* () {

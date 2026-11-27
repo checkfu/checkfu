@@ -1,4 +1,6 @@
 import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
 export const McpToolDescriptor = Schema.Struct({
@@ -53,6 +55,23 @@ export const MCP_CREDENTIAL_EMPTY =
 	"The credential for this MCP server holds no secret. Send its token again with an update to the credential."
 
 export const MCP_CALL_TIMEOUT_MS = 60_000
+export const MCP_LIST_TIMEOUT_MS = 10_000
+
+export const mcpTimedOut = (ms: number): McpFailure => ({
+	ok: false,
+	message: `The MCP server did not answer within ${ms / 1000} seconds.`,
+})
+
+export const withMcpListDeadline = (
+	list: (signal: AbortSignal) => Promise<McpListOutcome>,
+	signal: AbortSignal | undefined,
+	ms = MCP_LIST_TIMEOUT_MS,
+): Promise<McpListOutcome> =>
+	Effect.runPromise(
+		Effect.promise((deadline) =>
+			list(signal === undefined ? deadline : AbortSignal.any([signal, deadline])),
+		).pipe(Effect.timeoutOption(ms), Effect.map(Option.getOrElse(() => mcpTimedOut(ms)))),
+	)
 
 export const MAX_MCP_RESPONSE_BYTES = 4 * 1024 * 1024
 

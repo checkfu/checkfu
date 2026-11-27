@@ -134,6 +134,47 @@ describe("The MCP clients a host keeps", () => {
 		expect(handshakes(a)).toBe(2)
 	})
 
+	it("times out tool listing sooner than a tool call", async () => {
+		const upstream = await server()
+		const caller = makeMcpCaller({ capacity: 1, listTimeoutMs: 350 })
+		const letThrough = upstream.holdHandshakes()
+		try {
+			expect(await caller.list("docs", peerOf(upstream), scope())).toEqual({
+				ok: false,
+				message: "The MCP server did not answer within 0.35 seconds.",
+			})
+			expect(handshakes(upstream)).toBe(1)
+		} finally {
+			letThrough()
+		}
+		expect(
+			await caller.call("docs", peerOf(upstream), scope(), echo, {
+				text: "still running",
+				delay_ms: 500,
+			}),
+		).toMatchObject({ ok: true, isError: false })
+	})
+
+	it("returns at the listing deadline when the server also holds its cancellation response", async () => {
+		const upstream = await server()
+		const caller = makeMcpCaller({ capacity: 1, listTimeoutMs: 500 })
+		expect(await caller.list("docs", peerOf(upstream), scope())).toMatchObject({ ok: true })
+		const releaseList = upstream.holdMethod("tools/list")
+		const releaseCancel = upstream.holdMethod("notifications/cancelled")
+		const started = performance.now()
+		try {
+			expect(await caller.list("docs", peerOf(upstream), scope())).toEqual({
+				ok: false,
+				message: "The MCP server did not answer within 0.5 seconds.",
+			})
+			expect(performance.now() - started).toBeLessThan(2500)
+			await expect.poll(() => upstream.methods.includes("notifications/cancelled")).toBe(true)
+		} finally {
+			releaseList()
+			releaseCancel()
+		}
+	}, 10_000)
+
 	it("connects again after a handshake that failed once its caller had gone, instead of keeping the failure", async () => {
 		const a = await server()
 		const caller = makeMcpCaller({ capacity: 1, idleMs: VAULT_MCP_IDLE_MS })

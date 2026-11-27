@@ -10,6 +10,7 @@ export interface ScriptedMcpServer {
 	readonly closedStreams: ReadonlyArray<string | number>
 	readonly cancellations: ReadonlyArray<string | number>
 	readonly holdHandshakes: () => () => void
+	readonly holdMethod: (method: string) => () => void
 	readonly expireSessions: () => void
 	readonly close: () => Promise<void>
 }
@@ -58,7 +59,15 @@ export const startScriptedMcpServer = async (
 	const sockets = new Set<Socket>()
 	const sessions = new Set<string>()
 	let opened = 0
-	let held: Promise<void> | undefined
+	const held = new Map<string, Promise<void>>()
+	const holdMethod = (method: string) => {
+		const { promise, resolve } = Promise.withResolvers<void>()
+		held.set(method, promise)
+		return () => {
+			held.delete(method)
+			resolve()
+		}
+	}
 	const pages = options.pages ?? 1
 
 	const answer = async (
@@ -84,7 +93,6 @@ export const startScriptedMcpServer = async (
 						}
 					: { error: { code: -32_601, message: "Method not found" } }
 			case "initialize": {
-				await held
 				const id = `scripted-${(opened += 1)}`
 				sessions.add(id)
 				return {
@@ -189,6 +197,10 @@ export const startScriptedMcpServer = async (
 				response.writeHead(404).end()
 				return
 			}
+			const paused = held.get(message.method)
+			if (paused !== undefined) {
+				await paused
+			}
 			if (message.id === undefined) {
 				if (
 					message.method === "notifications/cancelled" &&
@@ -266,14 +278,8 @@ export const startScriptedMcpServer = async (
 		streamedRequests,
 		closedStreams,
 		cancellations,
-		holdHandshakes: () => {
-			const { promise, resolve } = Promise.withResolvers<void>()
-			held = promise
-			return () => {
-				held = undefined
-				resolve()
-			}
-		},
+		holdHandshakes: () => holdMethod("initialize"),
+		holdMethod,
 		expireSessions: () => sessions.clear(),
 		close: () =>
 			new Promise<void>((resolve) => {

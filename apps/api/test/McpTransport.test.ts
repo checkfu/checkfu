@@ -475,6 +475,128 @@ describe("A session's MCP servers", () => {
 		await mcp.discover(number)
 	}
 
+	const failedDiscovery = (
+		durationMs: number,
+		message: string,
+		list?: (attempt: number, signal: AbortSignal | undefined) => Promise<McpListOutcome>,
+		listTimeoutMs?: number,
+	) => {
+		const kv = new Map<string, string>()
+		const time = { now: 0, attempts: 0 }
+		let turnNumber = 1
+		const mcp = makeSessionMcp({
+			kv: { get: (key) => kv.get(key), put: (key, value) => kv.set(key, value) },
+			vaults: {
+				list: async (_vault, _credential, _url, _limit, signal) => {
+					time.attempts += 1
+					time.now += durationMs
+					return list === undefined ? { ok: false, message } : list(time.attempts, signal)
+				},
+				call: async () => {
+					throw new Error("unexpected tool call")
+				},
+			},
+			admittedTurn: () => turnNumber,
+			agentTools: () => [],
+			now: () => time.now,
+			...(listTimeoutMs === undefined ? {} : { listTimeoutMs }),
+		})
+		const brought = turn([{ name: "docs", url: URL_, credential_id: "cred_1", vault_id: "vlt_1" }])
+		return {
+			mcp,
+			time,
+			discover: (number: number) => {
+				turnNumber = number
+				return prepare(mcp, brought, number)
+			},
+		}
+	}
+
+	it("bounds the listing failure shown in a tool namespace", async () => {
+		const { mcp, discover } = failedDiscovery(0, "Credential was refused: " + "x".repeat(5000))
+		await discover(1)
+		const description = mcp.extensions().at(0)?.namespace?.description ?? ""
+		expect(description).toContain("its tools could not be listed (Credential was refused:")
+		expect(description.length).toBeLessThan(600)
+	})
+
+	it("waits five minutes after a slow listing fails before asking again", async () => {
+		const { mcp, time, discover } = failedDiscovery(6000, "The server could not be reached.")
+		await discover(1)
+		time.now += 10_000
+		expect(mcp.undiscovered()).toBe(false)
+		await discover(2)
+		expect(time.attempts).toBe(1)
+		time.now += 289_999
+		expect(mcp.undiscovered()).toBe(false)
+		time.now += 1
+		expect(mcp.undiscovered()).toBe(true)
+		await discover(3)
+		expect(time.attempts).toBe(2)
+	})
+
+	it("retries a fast listing failure on the next turn", async () => {
+		const { mcp, time, discover } = failedDiscovery(0, "The server could not be reached.")
+		await discover(1)
+		expect(mcp.undiscovered()).toBe(true)
+		await discover(2)
+		expect(time.attempts).toBe(2)
+	})
+
+	it("stops waiting and signals cancellation when a vault listing does not settle", async () => {
+		const held = Promise.withResolvers<McpListOutcome>()
+		let deadline: AbortSignal | undefined
+		const { mcp, discover } = failedDiscovery(
+			0,
+			"",
+			async (_attempt, signal) => {
+				deadline = signal
+				return held.promise
+			},
+			100,
+		)
+		try {
+			await discover(1)
+			expect(deadline?.aborted).toBe(true)
+			expect(mcp.extensions().at(0)?.namespace?.description).toContain("within 0.1 seconds")
+		} finally {
+			held.resolve({ ok: false, message: "Too late" })
+		}
+	})
+
+	it("ignores a slow listing failure from a superseded turn", async () => {
+		const old = Promise.withResolvers<McpListOutcome>()
+		const { mcp, time, discover } = failedDiscovery(0, "", async (attempt) =>
+			attempt === 1 ? old.promise : { ok: false, message: "Failed quickly" },
+		)
+		const first = discover(1)
+		time.now += 6000
+		await discover(2)
+		old.resolve({ ok: false, message: "Failed slowly" })
+		await first
+		expect(time.attempts).toBe(2)
+		expect(mcp.undiscovered()).toBe(true)
+		expect(mcp.extensions().at(0)?.namespace?.description).toContain("Failed quickly")
+	})
+
+	it("keeps a slow failure's cooldown when an overlapping listing fails quickly", async () => {
+		const first = Promise.withResolvers<McpListOutcome>()
+		const second = Promise.withResolvers<McpListOutcome>()
+		const { mcp, time, discover } = failedDiscovery(0, "", async (attempt) =>
+			attempt === 1 ? first.promise : second.promise,
+		)
+		const slow = discover(1)
+		time.now += 6000
+		const fast = discover(1)
+		first.resolve({ ok: false, message: "Failed slowly" })
+		await slow
+		second.resolve({ ok: false, message: "Failed quickly" })
+		await fast
+		expect(time.attempts).toBe(2)
+		expect(mcp.undiscovered()).toBe(false)
+		expect(mcp.extensions().at(0)?.namespace?.description).toContain("Failed slowly")
+	})
+
 	it("gives each session its own upstream MCP session in the vault they share, and one handshake within a session", async () => {
 		const server = await real({ stateful: true })
 		const servers = [{ name: "docs", url: server.url, credential_id: "cred_1", vault_id: "vlt_1" }]

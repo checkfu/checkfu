@@ -1,4 +1,5 @@
 import type { AgentTool, McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
+import { truncateText } from "@checkfu/domain/Session/TextBounds"
 import type { McpToolOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { isJsonValue } from "@earendil-works/chord/json"
 import { renderToolSample } from "@earendil-works/pi-codemode/declarations"
@@ -20,6 +21,8 @@ export const MAX_TOOL_LIST_BYTES = 256 * 1024
 
 export const MAX_TOOL_CATALOG_BYTES = 1024 * 1024
 
+const MAX_UNAVAILABLE_REASON_LENGTH = 300
+
 export const mcpToolPrefix = (server: string): string => `mcp__${server}__`
 
 export type McpServerTools =
@@ -39,7 +42,10 @@ export const cacheableTools = (
 					unavailable: `its tool list is more than the ${MAX_TOOL_LIST_BYTES} bytes or the pages a session reads`,
 					retry: false,
 				}
-			: { unavailable: `it could not be reached (${listed.message})`, retry: true }
+			: {
+					unavailable: `its tools could not be listed (${truncateText(listed.message, MAX_UNAVAILABLE_REASON_LENGTH)})`,
+					retry: true,
+				}
 	}
 	if (listed.tools === undefined) {
 		return { unavailable: "its tool list could not be read", retry: false }
