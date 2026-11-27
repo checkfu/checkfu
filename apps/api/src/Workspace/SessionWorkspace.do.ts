@@ -161,7 +161,12 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 				const context = yield* Effect.context<never>()
 				const fork = Effect.runForkWith(context)
 				const runPromise = Effect.runPromiseWith(context)
-				const sessionId = state.raw.id.name ?? ""
+				const sessionId = state.raw.id.name
+				if (sessionId === undefined) {
+					return yield* Effect.die(
+						new Error("SessionWorkspace must be addressed by its session id."),
+					)
+				}
 				const call = Effect.runPromiseWith(services)
 				const memory = makeSessionMemory(
 					{
