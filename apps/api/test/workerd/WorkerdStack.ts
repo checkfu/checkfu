@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import { createHash, createHmac } from "node:crypto"
 import type { ChildProcess } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -230,6 +230,19 @@ export const startAlchemyDev = async (
 	options?: WorkerdDevOptions,
 ) => {
 	const fixture = options?.fixture
+	if (fixture === undefined) {
+		try {
+			execFileSync("docker", ["info", "--format", "{{.ServerVersion}}"], {
+				timeout: 10_000,
+				stdio: "pipe",
+			})
+		} catch (error) {
+			throw new Error(
+				"The local sandbox tests need a running Docker daemon. Start Docker and rerun; no Cloudflare resources have been created.",
+				{ cause: error },
+			)
+		}
+	}
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
 	const customProvidersJson = JSON.stringify({
@@ -330,6 +343,8 @@ export const startAlchemyDev = async (
 	const logs: Array<string> = []
 	let readyUrl: string | null = null
 	let apiUrl: string | null = null
+	let harnessUrl: string | null = null
+	let startupError: Error | null = null
 	let harnessReady = fixture !== undefined
 	let resolveReady!: (url: string) => void
 	let rejectReady!: (err: Error) => void
@@ -339,16 +354,25 @@ export const startAlchemyDev = async (
 	})
 
 	const inspectLine = (line: string) => {
+		const clean = stripAnsi(line)
+		if (clean.includes("ERROR:") && clean.includes("[PiHarnessWorker]")) {
+			startupError = new Error(`PiHarnessWorker failed during startup: ${clean}`)
+			rejectReady(startupError)
+			return
+		}
 		if (readyUrl !== null) {
 			return
 		}
-		const clean = stripAnsi(line)
 		const readyMessage = `[${fixture?.worker ?? "ApiWorker"}] ready at `
 		const url = clean.split(readyMessage)[1]?.match(/^http:\/\/[^\s]+/)?.[0]
 		if (url !== undefined) {
 			apiUrl = url.replace(/\/+$/, "")
 		}
-		harnessReady ||= clean.includes("[PiHarnessWorker] ready at ")
+		const harness = clean.split("[PiHarnessWorker] ready at ")[1]?.match(/^http:\/\/[^\s]+/)?.[0]
+		if (harness !== undefined) {
+			harnessUrl = harness
+			harnessReady = true
+		}
 		if (apiUrl !== null && harnessReady && readyUrl === null) {
 			readyUrl = apiUrl
 			resolveReady(readyUrl)
@@ -421,6 +445,9 @@ export const startAlchemyDev = async (
 		clearTimeout(startupTimer)
 		const healthDeadline = Date.now() + 10_000
 		while (Date.now() < healthDeadline) {
+			if (startupError !== null) {
+				throw new Error("PiHarnessWorker failed during startup", { cause: startupError })
+			}
 			if (childState.spawnError !== null) {
 				throw new Error(`alchemy dev errored during health probe: ${childState.spawnError.message}`)
 			}
@@ -439,6 +466,23 @@ export const startAlchemyDev = async (
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
+					if (fixture === undefined) {
+						const auth = await fetch(`${baseUrl}/v1/agents`, {
+							headers: AUTH_HEADERS,
+							signal: AbortSignal.timeout(2000),
+						})
+						void auth.body?.cancel().catch(() => undefined)
+						if (auth.status !== 200 || harnessUrl === null) {
+							continue
+						}
+						// The production harness returns 404 without a sandbox egress
+						// context. This reaches its fetch handler, unlike a ready log.
+						const harness = await fetch(harnessUrl, { signal: AbortSignal.timeout(2000) })
+						void harness.body?.cancel().catch(() => undefined)
+						if (harness.status !== 404) {
+							continue
+						}
+					}
 					return { baseUrl, logs, stage, stop, halt }
 				}
 			} catch {
