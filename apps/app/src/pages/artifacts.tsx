@@ -16,6 +16,7 @@ import { useIsMutating, useQuery, useQueryClient, useSuspenseQuery } from "@tans
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ExternalLinkIcon } from "lucide-react"
 import { useRef, useState } from "react"
+import { Confirm } from "../confirm.tsx"
 import type * as React from "react"
 import {
 	byteSize,
@@ -140,34 +141,6 @@ export function ArtifactPage(): React.JSX.Element {
 			version={search.version ?? artifact.version}
 			path={search.path}
 		/>
-	)
-}
-
-function Confirm({
-	label,
-	pending,
-	onConfirm,
-	onCancel,
-	children,
-}: {
-	readonly label: string
-	readonly pending: boolean
-	readonly onConfirm: () => void
-	readonly onCancel: () => void
-	readonly children: React.ReactNode
-}): React.JSX.Element {
-	return (
-		<Callout className="max-w-2xl space-y-2">
-			<p>{children}</p>
-			<div className="flex gap-2">
-				<Button variant="destructive" size="sm" disabled={pending} onClick={onConfirm}>
-					{label}
-				</Button>
-				<Button variant="ghost" size="sm" disabled={pending} onClick={onCancel}>
-					Cancel
-				</Button>
-			</div>
-		</Callout>
 	)
 }
 

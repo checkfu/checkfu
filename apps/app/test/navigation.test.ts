@@ -1,13 +1,55 @@
-import { describe, expect, it } from "vitest"
+// @vitest-environment happy-dom
+import { createMemoryHistory } from "@tanstack/react-router"
+import { waitFor } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
 import { ApiError } from "../src/api.ts"
 import { lookup, present } from "../src/queries.ts"
 import { returnTo } from "../src/return-to.ts"
+import { queryClient, router } from "../src/router.tsx"
 import { selection } from "../src/selection.ts"
 import { sessionTitle } from "../src/session-title.ts"
+import { stubApi } from "./dom.tsx"
 
 describe("returning after sign-in", () => {
 	it("keeps a same-origin path with its search and hash", () => {
 		expect(returnTo("/sessions/sess_1?x=1#end")).toBe("/sessions/sess_1?x=1#end")
+	})
+
+	it("preserves the return URL when another unauthorized query fails on sign-in", async () => {
+		const target = "/sessions/sess_1?view=details#end"
+		router.update({
+			context: { queryClient },
+			history: createMemoryHistory({ initialEntries: [target] }),
+		})
+		stubApi(({ path }) =>
+			path.includes("/events")
+				? { body: { data: [], next_page: null } }
+				: { body: { id: "sess_1" } },
+		)
+		const unauthorized = new ApiError(401, "authentication_error", "Sign in again.")
+		const fail = (key: string) =>
+			queryClient.fetchQuery({
+				queryKey: [key],
+				queryFn: async () => {
+					throw unauthorized
+				},
+			})
+		try {
+			await router.load()
+			expect(router.state.location.href).toBe(target)
+			await expect(fail("first")).rejects.toBe(unauthorized)
+			await waitFor(() => expect(router.state.location.pathname).toBe("/sign-in"))
+			expect(new URLSearchParams(router.state.location.searchStr).get("redirect")).toBe(target)
+			const href = router.state.location.href
+			await expect(fail("second")).rejects.toBe(unauthorized)
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 0)
+			})
+			expect(router.state.location.href).toBe(href)
+		} finally {
+			queryClient.clear()
+			vi.unstubAllGlobals()
+		}
 	})
 
 	it("refuses anything that could leave the dashboard or loop back to sign-in", () => {

@@ -589,6 +589,27 @@ describe("vault pages", () => {
 		page.unmount()
 	})
 
+	it.each(["vault", "credential"] as const)(
+		"can cancel %s deletion before any request is sent",
+		async (kind) => {
+			const sent = stubApi(() => ({ body: pageOf([credential]) }))
+			const page = await mount(<VaultView vault={vault} />, withCredentials([credential]))
+			try {
+				const controls = page.container.querySelector<HTMLElement>(
+					kind === "vault" ? "header" : "tbody tr",
+				)
+				await click(button(controls ?? page.container, "Delete"))
+				expect(sent.filter(({ method }) => method === "DELETE")).toEqual([])
+				expect(button(page.container, `Delete ${kind}`)).toBeDefined()
+				await click(button(page.container, "Cancel"))
+				expect(sent.filter(({ method }) => method === "DELETE")).toEqual([])
+				expect(button(controls ?? page.container, "Delete")).toBeDefined()
+			} finally {
+				page.unmount()
+			}
+		},
+	)
+
 	it("deletes a credential and lists the vault's credentials again", async () => {
 		const sent = stubApi((request) =>
 			request.method === "DELETE"
@@ -600,6 +621,7 @@ describe("vault pages", () => {
 		const page = await mount(<VaultView vault={vault} />, withCredentials([credential]))
 		const row = page.container.querySelector<HTMLElement>("tbody tr")
 		await click(button(row ?? page.container, "Delete"))
+		await click(button(row ?? page.container, "Delete credential"))
 		expect(sent.find((request) => request.method === "DELETE")?.path).toBe(
 			"/v1/vaults/vlt_1/credentials/vcrd_1",
 		)
@@ -634,6 +656,7 @@ describe("vault pages", () => {
 		const page = await mount(<VaultView vault={vault} />, queryClient)
 		const row = page.container.querySelector<HTMLElement>("tbody tr")
 		await click(button(row ?? page.container, "Delete"))
+		await click(button(row ?? page.container, "Delete credential"))
 		await settle()
 		expect(page.container.textContent).toContain("No credentials in this vault.")
 		expect(page.container.textContent).toContain("1 secret is still being erased.")
@@ -681,6 +704,7 @@ describe("vault pages", () => {
 		)
 		const header = page.container.querySelector<HTMLElement>("header") ?? page.container
 		await click(button(header, "Delete"))
+		await click(button(page.container, "Delete vault"))
 		expect(sent.find((request) => request.method === "DELETE")?.path).toBe("/v1/vaults/vlt_1")
 		expect(page.router.state.location.pathname).toBe("/vaults")
 		expect(sent.filter((request) => request.method === "GET")).toEqual([])
@@ -747,6 +771,7 @@ describe("vault pages", () => {
 		await click(button(page.container, "Cancel"))
 		const row = page.container.querySelector<HTMLElement>("tbody tr")
 		await click(button(row ?? page.container, "Delete"))
+		await click(button(row ?? page.container, "Delete credential"))
 		expect(page.container.textContent).toContain("delete failed")
 		expect(page.container.textContent).not.toContain("replace failed")
 		page.unmount()
@@ -775,6 +800,7 @@ describe("vault pages", () => {
 		)
 		const header = page.container.querySelector<HTMLElement>("header") ?? page.container
 		await click(button(header, "Delete"))
+		await click(button(page.container, "Delete vault"))
 		expect(page.router.state.location.pathname).toBe("/")
 		expect(page.container.textContent).toContain("still being erased")
 		expect(page.container.textContent).toContain("using these credentials are refused")

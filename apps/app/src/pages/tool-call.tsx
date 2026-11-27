@@ -3,7 +3,7 @@ import { Callout } from "@checkfu/ui/callout"
 import { Chip } from "@checkfu/ui/chip"
 import type { Tone } from "@checkfu/ui/chip"
 import { Input, Textarea } from "@checkfu/ui/input"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import type * as React from "react"
 import { ERROR_CODES } from "@checkfu/sdk/ErrorCodes"
 import { ApiError, errorMessage } from "../api.ts"
@@ -72,6 +72,37 @@ function Block({
 	)
 }
 
+function useToolAnswer(send: SendAnswer) {
+	const [answered, setAnswered] = useState(false)
+	const submitted = useRef(false)
+	const key = useSubmissionKey()
+	const answer = useAction(async (event: AnswerEvent) => {
+		try {
+			await send(event, key.keyFor(event))
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 409) {
+				setAnswered(true)
+			} else {
+				submitted.current = false
+			}
+			throw answerFailure(error)
+		}
+		key.settle()
+		setAnswered(true)
+	})
+	return {
+		disabled: answer.pending || answered,
+		error: answer.error,
+		run: (event: AnswerEvent) => {
+			if (submitted.current) {
+				return
+			}
+			submitted.current = true
+			answer.run(event)
+		},
+	}
+}
+
 function Approval({
 	call,
 	send,
@@ -80,13 +111,7 @@ function Approval({
 	readonly send: SendAnswer
 }): React.JSX.Element {
 	const [reason, setReason] = useState("")
-	const key = useSubmissionKey()
-	const answer = useAction(async (event: AnswerEvent) => {
-		await send(event, key.keyFor(event)).catch((error: unknown) => {
-			throw answerFailure(error)
-		})
-		key.settle()
-	})
+	const answer = useToolAnswer(send)
 	return (
 		<div className="space-y-2">
 			<p className="text-sm">The agent wants to run this call. It waits until you answer.</p>
@@ -97,13 +122,17 @@ function Approval({
 				onChange={(event) => setReason(event.target.value)}
 			/>
 			<div className="flex gap-2">
-				<Button size="sm" disabled={answer.pending} onClick={() => answer.run(allowEvent(call.id))}>
+				<Button
+					size="sm"
+					disabled={answer.disabled}
+					onClick={() => answer.run(allowEvent(call.id))}
+				>
 					Allow
 				</Button>
 				<Button
 					size="sm"
 					variant="destructive"
-					disabled={answer.pending}
+					disabled={answer.disabled}
 					onClick={() => answer.run(denyEvent(call.id, reason))}
 				>
 					Deny
@@ -123,20 +152,14 @@ function ClientResult({
 }): React.JSX.Element {
 	const [result, setResult] = useState("")
 	const [failed, setFailed] = useState(false)
-	const key = useSubmissionKey()
-	const answer = useAction(async (event: AnswerEvent) => {
-		await send(event, key.keyFor(event)).catch((error: unknown) => {
-			throw answerFailure(error)
-		})
-		key.settle()
-	})
+	const answer = useToolAnswer(send)
 	const tooLong = result.length > MAX_RESULT_LENGTH
 	return (
 		<form
 			className="space-y-2"
 			onSubmit={(event) => {
 				event.preventDefault()
-				if (!answer.pending && !tooLong) {
+				if (!answer.disabled && !tooLong) {
 					answer.run(customResultEvent(call.id, result, failed))
 				}
 			}}
@@ -163,7 +186,7 @@ function ClientResult({
 					At most {MAX_RESULT_LENGTH.toLocaleString("en-US")} characters.
 				</p>
 			) : null}
-			<Button type="submit" size="sm" disabled={answer.pending || tooLong}>
+			<Button type="submit" size="sm" disabled={answer.disabled || tooLong}>
 				Send result
 			</Button>
 			{answer.error === undefined ? null : <Callout tone="error">{answer.error}</Callout>}
@@ -250,9 +273,9 @@ export function ToolCallRow({
 				)}
 				{waiting && send !== undefined ? (
 					call.kind === "custom" ? (
-						<ClientResult call={call} send={send} />
+						<ClientResult key={call.id} call={call} send={send} />
 					) : (
-						<Approval call={call} send={send} />
+						<Approval key={call.id} call={call} send={send} />
 					)
 				) : (
 					<Answered call={call} />

@@ -6,7 +6,7 @@ import { signInSearch } from "./return-to.ts"
 import { routeTree } from "./routeTree.gen.ts"
 
 const toSignIn = (error: unknown) => {
-	if (isSignedOut(error)) {
+	if (isSignedOut(error) && !router.state.location.pathname.startsWith("/sign-in")) {
 		void router.navigate({
 			to: "/sign-in",
 			search: signInSearch(router.state.location.href),

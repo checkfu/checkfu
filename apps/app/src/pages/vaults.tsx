@@ -16,6 +16,7 @@ import {
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useRef, useState } from "react"
+import { Confirm } from "../confirm.tsx"
 import type * as React from "react"
 import { ApiError, checkfu, errorMessage } from "../api.ts"
 import { Pager } from "../pager.tsx"
@@ -196,6 +197,7 @@ export function VaultView({ vault: given }: { readonly vault: JsonVault }): Reac
 		})
 	}
 	const [deletedErasing, setDeletedErasing] = useState(false)
+	const [confirmingDeletion, setConfirmingDeletion] = useState(false)
 	const remove = useAction(async () => checkfu.vaults.delete(vault.id), {
 		then: (result) => {
 			if (result.secrets === "erasing") {
@@ -239,12 +241,29 @@ export function VaultView({ vault: given }: { readonly vault: JsonVault }): Reac
 								Archive
 							</Button>
 						)}
-						<Button variant="destructive" size="sm" disabled={busy} onClick={() => remove.run()}>
-							Delete
-						</Button>
+						{confirmingDeletion ? null : (
+							<Button
+								variant="destructive"
+								size="sm"
+								disabled={busy}
+								onClick={() => setConfirmingDeletion(true)}
+							>
+								Delete
+							</Button>
+						)}
 					</>
 				}
 			/>
+			{confirmingDeletion ? (
+				<Confirm
+					label="Delete vault"
+					pending={busy}
+					onConfirm={() => remove.run()}
+					onCancel={() => setConfirmingDeletion(false)}
+				>
+					Delete this vault? Every credential in it is erased. This cannot be undone.
+				</Confirm>
+			) : null}
 			{[archive.error, remove.error].map((message) =>
 				message === undefined ? null : (
 					<Callout key={message} tone="error">
@@ -487,6 +506,7 @@ function CredentialActions({
 	const [rotating, setRotating] = useState(false)
 	const { ref: tokenRef, ...secret } = useSecretField()
 	const [last, setLast] = useState<"rotate" | "archive" | "remove">()
+	const [confirmingDeletion, setConfirmingDeletion] = useState(false)
 	const rotate = useAction(
 		async () =>
 			checkfu.vaults.credentials.update(
@@ -552,18 +572,30 @@ function CredentialActions({
 						</Button>
 					</>
 				) : null}
-				<Button
-					variant="destructive"
-					size="sm"
-					disabled={busy}
-					onClick={() => {
+				{confirmingDeletion ? null : (
+					<Button
+						variant="destructive"
+						size="sm"
+						disabled={busy}
+						onClick={() => setConfirmingDeletion(true)}
+					>
+						Delete
+					</Button>
+				)}
+			</div>
+			{confirmingDeletion ? (
+				<Confirm
+					label="Delete credential"
+					pending={busy}
+					onConfirm={() => {
 						setLast("remove")
 						remove.run()
 					}}
+					onCancel={() => setConfirmingDeletion(false)}
 				>
-					Delete
-				</Button>
-			</div>
+					Delete this credential? Its secret is erased. This cannot be undone.
+				</Confirm>
+			) : null}
 			{replacing ? (
 				<form
 					className="space-y-2"

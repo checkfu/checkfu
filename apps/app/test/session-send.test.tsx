@@ -5,7 +5,7 @@ import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { routeTree } from "../src/routeTree.gen.ts"
-import { button, newQueryClient, settle, stubApi, submit, type } from "./dom.tsx"
+import { button, click, newQueryClient, settle, stubApi, submit, type } from "./dom.tsx"
 
 const AT = "2026-11-24T00:00:00.000Z"
 
@@ -60,6 +60,18 @@ const waitingOnACall = [
 	},
 ]
 
+const waitingOnCustomCall = [
+	waitingOnACall[0],
+	{
+		...envelope(2),
+		type: "agent.custom_tool_use",
+		tool_use_id: "tu_1",
+		name: "lookup",
+		input: {},
+	},
+	waitingOnACall[2],
+]
+
 const settled = [
 	{ ...envelope(2), type: "session.status_idle", turn: 1, stop_reason: { type: "end_turn" } },
 	{ ...envelope(1), type: "user.message", content: [{ type: "text", text: "Hello." }] },
@@ -71,15 +83,24 @@ class QuietEventSource {
 	close(): void {}
 }
 
-const open = async (events: ReadonlyArray<unknown>) => {
+const open = async (events: ReadonlyArray<unknown>, firstPostFailure?: number) => {
 	vi.stubGlobal("EventSource", QuietEventSource)
-	const sent = stubApi(({ method, path }) =>
-		method === "POST"
-			? { body: {} }
-			: path.includes("/events")
-				? { body: { data: events, next_page: null } }
-				: { body: session },
-	)
+	let status = firstPostFailure
+	const sent = stubApi(({ method, path }) => {
+		if (method === "POST") {
+			const failure = status
+			status = undefined
+			return failure === undefined
+				? { body: {} }
+				: {
+						status: failure,
+						body: { error: { type: "conflict_error", message: "Answer refused." } },
+					}
+		}
+		return path.includes("/events")
+			? { body: { data: events, next_page: null } }
+			: { body: session }
+	})
 	const queryClient = newQueryClient()
 	const router = createRouter({
 		routeTree,
@@ -143,6 +164,72 @@ describe("sending a message from a session's page", () => {
 		expect(page.messages()).toEqual([])
 		expect(message(page.container).value).toBe("Never mind, do something else.")
 		page.unmount()
+	})
+
+	it("keeps approval locked after acceptance until the stream catches up", async () => {
+		const page = await open(waitingOnACall)
+		try {
+			await click(button(page.container, "Allow"))
+			expect(button(page.container, "Allow").disabled).toBe(true)
+			expect(button(page.container, "Deny").disabled).toBe(true)
+			await click(button(page.container, "Deny"))
+			await click(button(page.container, "Allow"))
+			expect(page.messages()).toHaveLength(1)
+			expect(page.messages()[0]?.body).toMatchObject({
+				events: [{ type: "user.tool_confirmation", tool_use_id: "tu_1", result: "allow" }],
+			})
+		} finally {
+			page.unmount()
+		}
+	})
+
+	it("keeps a terminal refusal locked while the stream still shows approval", async () => {
+		const page = await open(waitingOnACall, 409)
+		try {
+			await click(button(page.container, "Allow"))
+			expect(page.container.textContent).toContain("This call is no longer waiting")
+			expect(button(page.container, "Allow").disabled).toBe(true)
+			expect(button(page.container, "Deny").disabled).toBe(true)
+			await click(button(page.container, "Deny"))
+			expect(page.messages()).toHaveLength(1)
+		} finally {
+			page.unmount()
+		}
+	})
+
+	it("retries a transient approval failure with the same request key", async () => {
+		const page = await open(waitingOnACall, 503)
+		try {
+			await click(button(page.container, "Allow"))
+			expect(button(page.container, "Allow").disabled).toBe(false)
+			await click(button(page.container, "Allow"))
+			expect(button(page.container, "Allow").disabled).toBe(true)
+			const keys = page.messages().map(({ headers }) => headers.get("idempotency-key"))
+			expect(keys).toHaveLength(2)
+			expect(keys[0]).toBeTruthy()
+			expect(keys[1]).toBe(keys[0])
+		} finally {
+			page.unmount()
+		}
+	})
+
+	it("keeps a submitted custom result locked for both button and form", async () => {
+		const page = await open(waitingOnCustomCall)
+		try {
+			const result = page.container.querySelector<HTMLTextAreaElement>(
+				'textarea[aria-label="Result"]',
+			)
+			await type(result, "Complete.")
+			await submit(result?.form)
+			expect(button(page.container, "Send result").disabled).toBe(true)
+			await submit(result?.form)
+			expect(page.messages()).toHaveLength(1)
+			expect(page.messages()[0]?.body).toMatchObject({
+				events: [{ type: "user.custom_tool_result", custom_tool_use_id: "tu_1" }],
+			})
+		} finally {
+			page.unmount()
+		}
 	})
 
 	it("sends by the keyboard once nothing waits", async () => {
