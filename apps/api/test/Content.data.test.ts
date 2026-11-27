@@ -268,6 +268,14 @@ describe("A page reaching its artifact's data", () => {
 								operation,
 								allowed ? (operation === "add" ? 201 : 200) : 403,
 							])
+							if (allowed && operation === "add") {
+								const added = yield* json<DocumentBody>(response)
+								if (visitors === "add") {
+									expect(added).toEqual({ id: expect.any(String), type: "artifact_document_added" })
+								} else {
+									expect(added).toMatchObject({ type: "artifact_document", data: "added" })
+								}
+							}
 							const held = yield* json<ListBody>(
 								yield* api("GET", `/v1/artifacts/${id}/data/${collection}`),
 							)

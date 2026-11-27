@@ -124,7 +124,8 @@ export const VisitorData = Effect.gen(function* () {
 				return NOT_FOUND
 			}
 			const { collection, operation } = call
-			if (!isCollection(collection) || !permits(target.allowed(collection), operation)) {
+			const access = target.allowed(collection)
+			if (!isCollection(collection) || !permits(access, operation)) {
 				return refused(403, `This address does not allow ${operation} on ${collection}.`)
 			}
 			if (!(yield* throttle.admit(target.id, call.caller))) {
@@ -147,17 +148,18 @@ export const VisitorData = Effect.gen(function* () {
 				if (call.idempotency_key !== "" && !isClientEventId(call.idempotency_key)) {
 					return refused(400, "Idempotency-Key is not valid.")
 				}
+				const document = yield* documents.add(
+					target.id,
+					collection,
+					body.value.data,
+					call.idempotency_key === "" ? undefined : call.idempotency_key,
+					"visitor",
+				)
 				return reply(
 					201,
-					encodeDocument(
-						yield* documents.add(
-							target.id,
-							collection,
-							body.value.data,
-							call.idempotency_key === "" ? undefined : call.idempotency_key,
-							"visitor",
-						),
-					),
+					permits(access, "get")
+						? encodeDocument(document)
+						: { id: document.id, type: "artifact_document_added" },
 				)
 			}
 			if (!isDocumentId(call.id)) {

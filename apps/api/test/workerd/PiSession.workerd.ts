@@ -50,12 +50,18 @@ import {
 	apiAt,
 } from "./WorkerdStack.ts"
 
-const sendData = (root: string, path: string, method = "GET", data?: unknown) =>
+const sendData = (root: string, path: string, method = "GET", data?: unknown, key?: string) =>
 	fetch(new URL(`_/data/${path}`, root), {
 		method,
 		...(data === undefined
 			? {}
-			: { headers: { "content-type": "application/json" }, body: JSON.stringify({ data }) }),
+			: {
+					headers: {
+						"content-type": "application/json",
+						...(key === undefined ? {} : { "idempotency-key": key }),
+					},
+					body: JSON.stringify({ data }),
+				}),
 	})
 
 describe("PiSession real Durable Object under workerd", () => {
@@ -3591,26 +3597,39 @@ describe("PiSession real Durable Object under workerd", () => {
 		const preflight = await sendData(writer, "votes", "OPTIONS")
 		expect(preflight.status).toBe(204)
 		expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS")
-		const vote = await sendData(writer, "votes", "POST", "yes")
+		const submit = () => sendData(writer, "votes", "POST", "yes", "test-submission")
+		const vote = await submit()
 		expect(vote.status).toBe(201)
-		expect((await vote.json()) as { data: unknown }).toMatchObject({
-			collection: "votes",
-			data: "yes",
+		const receipt = (await vote.json()) as { id: string }
+		expect(typeof receipt.id).toBe("string")
+		expect(receipt).toEqual({ id: receipt.id, type: "artifact_document_added" })
+		const edit = await apiJson(`/v1/artifacts/${id}/data/votes/${receipt.id}`, {
+			method: "PUT",
+			body: { data: "reviewed" },
 		})
+		expect(edit.status).toBe(200)
+		expect(await (await submit()).json()).toEqual(receipt)
 		expect((await sendData(writer, "votes")).status).toBe(403)
 		expect((await sendData(writer, "tally/current", "PUT", { yes: 99 })).status).toBe(403)
 		expect((await sendData(writer, "unknown", "POST", 1)).status).toBe(403)
 		const held = await apiJson<{ readonly data: ReadonlyArray<{ readonly data: unknown }> }>(
 			`/v1/artifacts/${id}/data/votes`,
 		)
-		expect(held.body.data.map((document) => document.data)).toEqual(["yes"])
+		expect(held.body.data.map((document) => document.data)).toEqual(["reviewed"])
 
 		const published = await apiJson<{
 			readonly publication: { readonly url: string; readonly grants: unknown } | null
 		}>(`/v1/artifacts/${id}/publication`, { method: "POST", body: { access: "write" } })
 		expect(published.body.publication?.grants).toEqual({ tally: "read", votes: "add" })
 		const address = published.body.publication?.url ?? ""
-		expect((await sendData(address, "votes", "POST", "no")).status).toBe(201)
+		const publicVote = await sendData(address, "votes", "POST", "no")
+		expect(publicVote.status).toBe(201)
+		const publicReceipt = (await publicVote.json()) as { readonly id: string }
+		expect(typeof publicReceipt.id).toBe("string")
+		expect(publicReceipt).toEqual({ id: publicReceipt.id, type: "artifact_document_added" })
+		const publicReplay = await sendData(address, "votes", "POST", "yes", "test-submission")
+		expect(publicReplay.status).toBe(201)
+		expect(await publicReplay.json()).toEqual(receipt)
 		expect((await sendData(address, "tally/current")).status).toBe(200)
 		expect((await sendData(address, "votes")).status).toBe(403)
 		const narrowed = await apiFetch(`/v1/artifacts/${id}/publication`, {
