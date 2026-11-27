@@ -46,6 +46,7 @@ Z3 transition proofs, bounded exploration, replay and runtime tests provide diff
 ```sh
 bun install --frozen-lockfile
 bun run check
+bun run typecheck
 bun run persisted:check
 bun x turbo run test --continue --concurrency=1 --filter='!@checkfu/domain'
 bun run test:bun

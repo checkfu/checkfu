@@ -206,7 +206,7 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 See [`docs/verification.md`](docs/verification.md) for the maintained acceptance journeys, Z3 proof gates, and storage compatibility locks.
 
 - `bun run generate`: Regenerate `openapi.json`, CLI, SDK, and MCP from `CheckfuApi`
-- `bun run check`: Check generated files, `oxfmt`, `oxlint`, directives, and `effect-tsgo`
+- `bun run check`: Check generated files, `oxfmt`, directives, and `oxlint` with type errors in one pass. `bun run typecheck` runs each package's own typecheck, as CI does
 - `bun run test`: Run unit tests (`CHECKFU_PROVE=1` includes the Z3 domain proofs run in CI)
 - `bun run test:bun` / `bun run test:workerd`: Bun and `workerd` integration tests
 - `bun run checkfu:build`: Build standalone binary at `apps/cli/dist/checkfu`
