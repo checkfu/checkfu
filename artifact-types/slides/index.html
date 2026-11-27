@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Slides</title>
+	<style>
+		:root {
+			color-scheme: light dark;
+		}
+		body {
+			margin: 0;
+			font:
+				17px/1.6 system-ui,
+				sans-serif;
+		}
+		a {
+			color: inherit;
+		}
+		pre {
+			overflow: auto;
+			padding: 12px;
+			border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+			border-radius: 6px;
+		}
+		code {
+			font:
+				0.9em ui-monospace,
+				monospace;
+		}
+		img {
+			max-width: 100%;
+		}
+		blockquote {
+			margin: 0;
+			padding-left: 16px;
+			border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+		}
+		body {
+			height: 100vh;
+			display: grid;
+			grid-template-rows: 1fr auto;
+		}
+		main {
+			display: grid;
+			place-content: center;
+			padding: 6vmin;
+			font-size: clamp(18px, 3.2vmin, 40px);
+			overflow: auto;
+		}
+		nav {
+			display: flex;
+			gap: 12px;
+			justify-content: center;
+			align-items: center;
+			padding: 10px;
+			font-size: 14px;
+		}
+		button {
+			font: inherit;
+			padding: 4px 12px;
+		}
+	</style>
+	<main id="content">Loading…</main>
+	<nav>
+		<button id="previous" type="button">Previous</button>
+		<span id="position"></span>
+		<button id="next" type="button">Next</button>
+	</nav>
+	<script id="markdown">
+		globalThis.renderMarkdown = (text) => {
+			const escape = (value) =>
+				value
+					.replaceAll("&", "&amp;")
+					.replaceAll("<", "&lt;")
+					.replaceAll(">", "&gt;")
+					.replaceAll('"', "&quot;")
+			const safe = (url) => {
+				const lower = url.trim().toLowerCase()
+				return lower.includes(":") &&
+					!lower.startsWith("http:") &&
+					!lower.startsWith("https:") &&
+					!lower.startsWith("mailto:")
+					? "#"
+					: url.trim()
+			}
+			const inline = (value) =>
+				escape(value)
+					.replace(/`([^`]+)`/g, "<code>$1</code>")
+					.replace(
+						/!\[([^\]]*)\]\(([^)\s]+)\)/g,
+						(_, alt, src) => '<img alt="' + alt + '" src="' + safe(src) + '">',
+					)
+					.replace(
+						/\[([^\]]+)\]\(([^)\s]+)\)/g,
+						(_, label, href) => '<a href="' + safe(href) + '">' + label + "</a>",
+					)
+					.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+					.replace(/\*([^*]+)\*/g, "<em>$1</em>")
+			const out = []
+			let paragraph = []
+			let list = null
+			let code = null
+			const flush = () => {
+				if (paragraph.length > 0) {
+					out.push("<p>" + inline(paragraph.join(" ")) + "</p>")
+					paragraph = []
+				}
+				if (list !== null) {
+					out.push(
+						"<" +
+							list.tag +
+							">" +
+							list.items.map((item) => "<li>" + inline(item) + "</li>").join("") +
+							"</" +
+							list.tag +
+							">",
+					)
+					list = null
+				}
+			}
+			for (const line of text.replaceAll("\r\n", "\n").split("\n")) {
+				if (code !== null) {
+					if (line.startsWith("```")) {
+						out.push("<pre><code>" + escape(code.join("\n")) + "</code></pre>")
+						code = null
+					} else {
+						code.push(line)
+					}
+					continue
+				}
+				if (line.startsWith("```")) {
+					flush()
+					code = []
+					continue
+				}
+				const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+				const bullet = /^\s*[-*]\s+(.*)$/.exec(line)
+				const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line)
+				if (heading !== null) {
+					flush()
+					out.push(
+						"<h" + heading[1].length + ">" + inline(heading[2]) + "</h" + heading[1].length + ">",
+					)
+				} else if (line.trim() === "***") {
+					flush()
+					out.push("<hr>")
+				} else if (line.startsWith(">")) {
+					flush()
+					out.push("<blockquote>" + inline(line.slice(1).trim()) + "</blockquote>")
+				} else if (bullet !== null || numbered !== null) {
+					const tag = bullet !== null ? "ul" : "ol"
+					if (paragraph.length > 0 || (list !== null && list.tag !== tag)) {
+						flush()
+					}
+					list = list ?? { tag, items: [] }
+					list.items.push((bullet ?? numbered)[1])
+				} else if (line.trim() === "") {
+					flush()
+				} else {
+					if (list !== null) {
+						flush()
+					}
+					paragraph.push(line.trim())
+				}
+			}
+			if (code !== null) {
+				out.push("<pre><code>" + escape(code.join("\n")) + "</code></pre>")
+			}
+			flush()
+			return out.join("\n")
+		}
+	</script>
+	<script>
+		globalThis.splitSlides = (text) => {
+			const slides = [[]]
+			let fenced = false
+			for (const line of text.replaceAll("\r\n", "\n").split("\n")) {
+				if (line.startsWith("```")) {
+					fenced = !fenced
+				}
+				if (!fenced && line.trim() === "---") {
+					slides.push([])
+				} else {
+					slides.at(-1).push(line)
+				}
+			}
+			return slides.map((lines) => lines.join("\n")).filter((slide) => slide.trim() !== "")
+		}
+		fetch("content.md")
+			.then((response) =>
+				response.ok ? response.text() : Promise.reject(new Error("content.md is missing")),
+			)
+			.then((text) => {
+				const slides = splitSlides(text)
+				const content = document.getElementById("content")
+				const position = document.getElementById("position")
+				let current =
+					Math.min(Math.max(Number(location.hash.slice(1)) || 1, 1), Math.max(slides.length, 1)) - 1
+				const show = (index) => {
+					current = Math.min(Math.max(index, 0), slides.length - 1)
+					content.innerHTML = renderMarkdown(slides[current] ?? "")
+					position.textContent = current + 1 + " / " + slides.length
+					history.replaceState(null, "", "#" + (current + 1))
+				}
+				document.getElementById("previous").addEventListener("click", () => show(current - 1))
+				document.getElementById("next").addEventListener("click", () => show(current + 1))
+				document.addEventListener("keydown", (event) => {
+					if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") {
+						show(current + 1)
+					} else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+						show(current - 1)
+					}
+				})
+				show(current)
+			})
+			.catch((error) => {
+				document.getElementById("content").textContent = error.message
+			})
+	</script>
+</html>

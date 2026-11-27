@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Dashboard</title>
+	<style>
+		:root {
+			color-scheme: light dark;
+		}
+		body {
+			margin: 0;
+			padding: 32px 20px;
+			font:
+				16px/1.5 system-ui,
+				sans-serif;
+		}
+		h1 {
+			margin: 0 0 24px;
+			font-size: 24px;
+		}
+		#numbers {
+			display: grid;
+			gap: 16px;
+			grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+		}
+		article {
+			padding: 16px;
+			border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+			border-radius: 8px;
+		}
+		.label {
+			font-size: 13px;
+			opacity: 0.7;
+		}
+		.value {
+			font-size: 32px;
+			font-weight: 600;
+		}
+		.note {
+			font-size: 13px;
+			opacity: 0.7;
+		}
+		#status {
+			margin-top: 24px;
+			font-size: 13px;
+			opacity: 0.7;
+		}
+	</style>
+	<h1 id="title">Dashboard</h1>
+	<section id="numbers"></section>
+	<p id="status">Loading…</p>
+	<script src="_/data.js"></script>
+	<script>
+		globalThis.numberCards = (documents) => {
+			const escape = (value) =>
+				String(value ?? "")
+					.replaceAll("&", "&amp;")
+					.replaceAll("<", "&lt;")
+					.replaceAll(">", "&gt;")
+					.replaceAll('"', "&quot;")
+			return documents
+				.filter((document) => document.id !== "title")
+				.map(({ id, data }) => {
+					const number = data !== null && typeof data === "object" ? data : { value: data }
+					return (
+						'<article><div class="label">' +
+						escape(number.label ?? id) +
+						'</div><div class="value">' +
+						escape(number.value) +
+						(number.unit === undefined ? "" : " " + escape(number.unit)) +
+						"</div>" +
+						(number.note === undefined
+							? ""
+							: '<div class="note">' + escape(number.note) + "</div>") +
+						"</article>"
+					)
+				})
+				.join("")
+		}
+		const refresh = async () => {
+			const status = document.getElementById("status")
+			try {
+				const documents = []
+				let page
+				do {
+					const listed = await artifactData.collection("numbers").list({ limit: 100, page })
+					documents.push(...listed.data)
+					page = listed.next_page
+				} while (typeof page === "string")
+				const title = documents.find((document) => document.id === "title")
+				if (title !== undefined && typeof title.data === "string") {
+					document.getElementById("title").textContent = title.data
+					document.title = title.data
+				}
+				document.getElementById("numbers").innerHTML = numberCards(documents)
+				status.textContent =
+					documents.length === 0 ? "No numbers yet." : "Updated " + new Date().toLocaleTimeString()
+			} catch (error) {
+				status.textContent =
+					error.status === 403
+						? "This address was shared without access to the data. Share it with read access."
+						: error.message
+			}
+		}
+		refresh()
+		setInterval(refresh, 30000)
+	</script>
+</html>
