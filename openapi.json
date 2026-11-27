@@ -23682,9 +23682,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 0,
+											"minimum": 1,
 											"maximum": 9007199254740991,
-											"description": "Current version; 0 while an artifact has no versions yet"
+											"description": "Current version"
 										},
 										"file_count": {
 											"type": "integer",
@@ -24244,7 +24244,7 @@
 						}
 					}
 				},
-				"description": "Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
+				"description": "Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
 				"summary": "Create an artifact",
 				"requestBody": {
 					"content": {
@@ -24261,41 +24261,71 @@
 									"files": {
 										"type": "array",
 										"items": {
-											"type": "object",
-											"properties": {
-												"path": {
-													"type": "string",
-													"minLength": 1,
-													"maxLength": 512,
-													"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
-													"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+														},
+														"content": {
+															"type": "string",
+															"description": "File content: text, or base64 when encoding is base64"
+														},
+														"encoding": {
+															"type": "string",
+															"enum": ["utf8", "base64"],
+															"description": "How content is encoded (default utf8)"
+														},
+														"content_type": {
+															"type": "string",
+															"minLength": 3,
+															"maxLength": 128,
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+															"description": "Media type; inferred from the path extension when omitted"
+														}
+													},
+													"required": ["path", "content"],
+													"additionalProperties": false
 												},
-												"content": {
-													"type": "string",
-													"description": "File content: text, or base64 when encoding is base64"
-												},
-												"encoding": {
-													"type": "string",
-													"enum": ["utf8", "base64"],
-													"description": "How content is encoded (default utf8)"
-												},
-												"content_type": {
-													"type": "string",
-													"minLength": 3,
-													"maxLength": 128,
-													"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
-													"description": "Media type; inferred from the path extension when omitted"
+												{
+													"type": "object",
+													"properties": {
+														"path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+														},
+														"file_id": {
+															"type": "string",
+															"minLength": 1,
+															"description": "A file uploaded with POST /v1/files, or saved from a session's outputs. The artifact keeps its own copy of the bytes, so deleting the file later does not change the version"
+														},
+														"content_type": {
+															"type": "string",
+															"minLength": 3,
+															"maxLength": 128,
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+															"description": "Media type; the file's own when omitted"
+														}
+													},
+													"required": ["path", "file_id"],
+													"additionalProperties": false
 												}
-											},
-											"required": ["path", "content"],
-											"additionalProperties": false
+											]
 										},
 										"minItems": 1,
 										"maxItems": 1000,
-										"description": "Every file of version 1. Leave it out to create an empty artifact at version 0, upload large files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}, then add version 1"
+										"description": "Every file of version 1. Send a small file's content inline, or name a file by its id"
 									}
 								},
-								"required": ["name"],
+								"required": ["name", "files"],
 								"additionalProperties": false
 							}
 						}
@@ -24396,9 +24426,9 @@
 													},
 													"version": {
 														"type": "integer",
-														"minimum": 0,
+														"minimum": 1,
 														"maximum": 9007199254740991,
-														"description": "Current version; 0 while an artifact has no versions yet"
+														"description": "Current version"
 													},
 													"file_count": {
 														"type": "integer",
@@ -24891,9 +24921,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 0,
+											"minimum": 1,
 											"maximum": 9007199254740991,
-											"description": "Current version; 0 while an artifact has no versions yet"
+											"description": "Current version"
 										},
 										"file_count": {
 											"type": "integer",
@@ -26302,7 +26332,7 @@
 						}
 					}
 				},
-				"description": "Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
+				"description": "Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload a larger file with POST /v1/files and name it by its id.",
 				"summary": "Create an artifact version",
 				"requestBody": {
 					"content": {
@@ -26312,9 +26342,9 @@
 								"properties": {
 									"version": {
 										"type": "integer",
-										"minimum": 0,
+										"minimum": 1,
 										"maximum": 9007199254740991,
-										"description": "Current artifact version for optimistic concurrency (0 for an empty artifact)"
+										"description": "Current artifact version for optimistic concurrency"
 									},
 									"files": {
 										"type": "array",
@@ -26360,10 +26390,36 @@
 															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
 															"description": "Relative path inside the artifact, for example index.html or assets/app.js"
 														},
+														"file_id": {
+															"type": "string",
+															"minLength": 1,
+															"description": "A file uploaded with POST /v1/files, or saved from a session's outputs. The artifact keeps its own copy of the bytes, so deleting the file later does not change the version"
+														},
+														"content_type": {
+															"type": "string",
+															"minLength": 3,
+															"maxLength": 128,
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+															"description": "Media type; the file's own when omitted"
+														}
+													},
+													"required": ["path", "file_id"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+														},
 														"sha256": {
 															"type": "string",
 															"pattern": "^[0-9a-f]{64}$",
-															"description": "sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}"
+															"description": "sha256 of a file in the version being replaced, to keep it without sending it again"
 														},
 														"content_type": {
 															"type": "string",
@@ -26380,7 +26436,7 @@
 										},
 										"minItems": 1,
 										"maxItems": 1000,
-										"description": "Every file of the version; a new version replaces the whole set. Send a small file's content inline, or name bytes the artifact already holds by their sha256"
+										"description": "Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256"
 									}
 								},
 								"required": ["version", "files"],
@@ -27726,525 +27782,6 @@
 				}
 			}
 		},
-		"/v1/artifacts/{artifact_id}/blobs/{sha256}": {
-			"put": {
-				"tags": ["artifacts"],
-				"operationId": "artifacts.uploadBlob",
-				"parameters": [
-					{
-						"name": "artifact_id",
-						"in": "path",
-						"schema": {
-							"type": "string",
-							"minLength": 1,
-							"description": "Artifact ID"
-						},
-						"required": true
-					},
-					{
-						"name": "sha256",
-						"in": "path",
-						"schema": {
-							"type": "string",
-							"pattern": "^[0-9a-f]{64}$",
-							"description": "sha256 of the bytes, as lowercase hex"
-						},
-						"required": true
-					}
-				],
-				"security": [
-					{
-						"bearer": []
-					},
-					{
-						"apiKey": []
-					}
-				],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["artifact_blob"]
-										},
-										"artifact_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"sha256": {
-											"type": "string",
-											"pattern": "^[0-9a-f]{64}$"
-										},
-										"size": {
-											"type": "integer",
-											"minimum": 0,
-											"maximum": 9007199254740991
-										}
-									},
-									"required": ["type", "artifact_id", "sha256", "size"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"400": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["invalid_request_error"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"401": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["authentication_error"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"404": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["not_found_error"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"409": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["conflict_error"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"413": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["payload_too_large"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"415": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["unsupported_media_type"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"429": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["rate_limit_error"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"500": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["internal_error"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					},
-					"503": {
-						"description": "Error",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"type": {
-											"type": "string",
-											"enum": ["error"]
-										},
-										"error": {
-											"type": "object",
-											"properties": {
-												"type": {
-													"type": "string",
-													"enum": ["service_unavailable"]
-												},
-												"message": {
-													"type": "string"
-												},
-												"code": {
-													"$ref": "#/components/schemas/ErrorCode"
-												}
-											},
-											"required": ["type", "message"],
-											"additionalProperties": false
-										},
-										"request_id": {
-											"type": "string",
-											"minLength": 1
-										},
-										"accepted": {
-											"type": "array"
-										},
-										"failed_index": {
-											"type": "number"
-										},
-										"unconfirmed_index": {
-											"type": "number"
-										}
-									},
-									"required": ["type", "error", "request_id"],
-									"additionalProperties": false
-								}
-							}
-						}
-					}
-				},
-				"description": "Store raw bytes in an artifact under their sha256, so a version can name them by sha256 without sending them inline. The request needs a Content-Length header, and the bytes must match the sha256 and be at most 100 MiB. Uploading bytes the artifact already holds checks them and stores nothing new.",
-				"summary": "Upload file bytes to an artifact",
-				"requestBody": {
-					"content": {
-						"application/octet-stream": {
-							"schema": {
-								"type": "string",
-								"format": "binary"
-							}
-						}
-					},
-					"required": true
-				},
-				"x-forge-skip": true,
-				"x-checkfu-endpoint": {
-					"group": "artifacts",
-					"endpoint": "uploadBlob"
-				}
-			}
-		},
 		"/v1/artifacts/{artifact_id}/versions/{version}/links": {
 			"post": {
 				"tags": ["artifacts"],
@@ -28843,9 +28380,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 0,
+											"minimum": 1,
 											"maximum": 9007199254740991,
-											"description": "Current version; 0 while an artifact has no versions yet"
+											"description": "Current version"
 										},
 										"file_count": {
 											"type": "integer",
@@ -29483,9 +29020,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 0,
+											"minimum": 1,
 											"maximum": 9007199254740991,
-											"description": "Current version; 0 while an artifact has no versions yet"
+											"description": "Current version"
 										},
 										"file_count": {
 											"type": "integer",

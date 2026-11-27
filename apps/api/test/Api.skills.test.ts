@@ -267,15 +267,6 @@ describe("Skills in a session", () => {
 				const fits = yield* createArtifact("Fits", [{ path: "SKILL.md", content: longest }])
 				expect((yield* createSession([{ type: "skill", artifact_id: fits.id }])).status).toBe(201)
 
-				const unpublished = yield* json<{ readonly id: string }>(
-					yield* request(apiFetch, "POST", "/v1/artifacts", { name: "Unpublished" }),
-				)
-				const early = yield* createSession([{ type: "skill", artifact_id: unpublished.id }])
-				expect(early.status).toBe(400)
-				expect((yield* json<{ error: { message: string } }>(early)).error.message).toContain(
-					"no published version",
-				)
-
 				const one = yield* createArtifact("One", [{ path: "SKILL.md", content: PDF_SKILL }])
 				const two = yield* createArtifact("Two", [{ path: "SKILL.md", content: PDF_SKILL }])
 				const other = yield* createArtifact("Other", [

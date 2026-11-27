@@ -404,11 +404,6 @@ export class FileBodyLimit extends HttpApiMiddleware.Service<FileBodyLimit>()(
 	{ error: ERRORS[413] },
 ) {}
 
-export class ArtifactBlobLimit extends HttpApiMiddleware.Service<ArtifactBlobLimit>()(
-	"@checkfu/api/ArtifactBlobLimit",
-	{ error: ERRORS[413] },
-) {}
-
 const MCP_SERVER_URL =
 	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
 
@@ -621,22 +616,20 @@ const ArtifactFilesField = ArtifactFilesInput.annotate({
 
 export const CreateArtifactBody = Schema.Struct({
 	name: ArtifactName.annotate({ description: "Human-readable artifact name" }),
-	files: Schema.optionalKey(
-		ArtifactFilesField.annotate({
-			description:
-				"Every file of version 1. Leave it out to create an empty artifact at version 0, upload large files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}, then add version 1",
-		}),
-	),
+	files: ArtifactFilesField.annotate({
+		description:
+			"Every file of version 1. Send a small file's content inline, or name a file by its id",
+	}),
 })
 export type CreateArtifactBody = typeof CreateArtifactBody.Type
 
 export const CreateArtifactVersionBody = Schema.Struct({
-	version: NonNegativeInt.annotate({
-		description: "Current artifact version for optimistic concurrency (0 for an empty artifact)",
+	version: PositiveInt.annotate({
+		description: "Current artifact version for optimistic concurrency",
 	}),
 	files: ArtifactVersionFilesInput.annotate({
 		description:
-			"Every file of the version; a new version replaces the whole set. Send a small file's content inline, or name bytes the artifact already holds by their sha256",
+			"Every file of the version; a new version replaces the whole set. Send a small file's content inline, name a file by its id, or keep a file of the current version by its sha256",
 	}),
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
@@ -1147,9 +1140,7 @@ export const ArtifactResource = Schema.Struct({
 	id: ArtifactId,
 	type: Schema.Literal("artifact"),
 	name: Schema.String,
-	version: NonNegativeInt.annotate({
-		description: "Current version; 0 while an artifact has no versions yet",
-	}),
+	version: PositiveInt.annotate({ description: "Current version" }),
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),
@@ -2803,15 +2794,7 @@ const Files = HttpApiGroup.make("files")
 	.annotate(OpenApi.Description, "Upload files to give to agents, and download files they produce")
 	.middleware(Authentication)
 
-const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. Content sent inline in JSON is at most ${MAX_INLINE_FILE_BYTES / 1024 / 1024} MiB per file and ${MAX_INLINE_TOTAL_BYTES / 1024 / 1024} MiB per request, in a body of at most ${MAX_ARTIFACT_BODY_BYTES} bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.`
-
-export const ArtifactBlobResource = Schema.Struct({
-	type: Schema.Literal("artifact_blob"),
-	artifact_id: ArtifactId,
-	sha256: Sha256Hex,
-	size: NonNegativeInt,
-})
-export type ArtifactBlob = typeof ArtifactBlobResource.Type
+const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. Content sent inline in JSON is at most ${MAX_INLINE_FILE_BYTES / 1024 / 1024} MiB per file and ${MAX_INLINE_TOTAL_BYTES / 1024 / 1024} MiB per request, in a body of at most ${MAX_ARTIFACT_BODY_BYTES} bytes; upload a larger file with POST /v1/files and name it by its id.`
 
 const Artifacts = HttpApiGroup.make("artifacts")
 	.add(
@@ -2987,29 +2970,6 @@ const Artifacts = HttpApiGroup.make("artifacts")
 				"x-forge-skip": true,
 				"x-checkfu-endpoint": { group: "artifacts", endpoint: "getFileContent" },
 			}),
-	)
-	.add(
-		HttpApiEndpoint.put("uploadBlob", "/v1/artifacts/:artifact_id/blobs/:sha256", {
-			params: {
-				...artifactParams,
-				sha256: Sha256Hex.annotate({ description: "sha256 of the bytes, as lowercase hex" }),
-			},
-			payload: Schema.Uint8Array.pipe(
-				HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" }),
-			),
-			success: ArtifactBlobResource,
-			error: BodyErrors,
-		})
-			.annotate(OpenApi.Summary, "Upload file bytes to an artifact")
-			.annotate(
-				OpenApi.Description,
-				`Store raw bytes in an artifact under their sha256, so a version can name them by sha256 without sending them inline. The request needs a Content-Length header, and the bytes must match the sha256 and be at most ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB. Uploading bytes the artifact already holds checks them and stores nothing new.`,
-			)
-			.annotate(OpenApi.Override, {
-				"x-forge-skip": true,
-				"x-checkfu-endpoint": { group: "artifacts", endpoint: "uploadBlob" },
-			})
-			.middleware(ArtifactBlobLimit),
 	)
 	.add(
 		HttpApiEndpoint.post("createLink", "/v1/artifacts/:artifact_id/versions/:version/links", {

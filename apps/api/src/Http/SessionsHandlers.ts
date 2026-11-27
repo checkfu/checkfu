@@ -687,12 +687,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return yield* reject(404, `Artifact ${wanted.artifact_id} not found.`)
 			}
 			const version = wanted.version ?? artifact.version
-			if (version === 0) {
-				return yield* reject(
-					400,
-					`Artifact ${wanted.artifact_id} has no published version yet; publish one before mounting it.`,
-				)
-			}
 			if (version > artifact.version) {
 				return yield* reject(404, `Artifact ${wanted.artifact_id} has no version ${version}.`)
 			}

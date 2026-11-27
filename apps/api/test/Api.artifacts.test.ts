@@ -9,7 +9,6 @@ import * as Fiber from "effect/Fiber"
 import {
 	buildArtifactVersion,
 	MAX_ARTIFACT_BODY_BYTES,
-	MAX_ARTIFACT_FILE_BYTES,
 	MAX_INLINE_FILE_BYTES,
 	MAX_ARTIFACT_FILES,
 	MAX_INLINE_TOTAL_BYTES,
@@ -102,11 +101,7 @@ const withApi = <A>(
 		readonly store: ReturnType<typeof makePiDurableTestLayer>["artifactStore"]
 		readonly statusForKey: (idempotencyKey: string) => Effect.Effect<string>
 		readonly postRaw: (path: string, body: string) => Effect.Effect<Response>
-		readonly putBytes: (
-			path: string,
-			bytes: Uint8Array,
-			headers?: Record<string, string>,
-		) => Effect.Effect<Response>
+		readonly uploadFile: (filename: string, bytes: Uint8Array) => Effect.Effect<Response>
 		readonly callLagging: (path: string) => Effect.Effect<Response>
 		readonly steerReads: (read: (call: number) => "real" | "die" | "stale") => void
 		readonly callSteered: (method: string, path: string, body?: unknown) => Effect.Effect<Response>
@@ -321,19 +316,18 @@ const withApi = <A>(
 				},
 				callLagging: (path) =>
 					sendRequest(lagging.fetch, { method: "GET", path, headers: AUTH_HEADERS }),
-				putBytes: (path, bytes, headers) =>
+				uploadFile: (filename, bytes) =>
 					Effect.map(
 						apiFetch.pipe(
 							Effect.provideService(
 								HttpServerRequest.HttpServerRequest,
 								HttpServerRequest.fromWeb(
-									new Request(`http://localhost${path}`, {
-										method: "PUT",
+									new Request(`http://localhost/v1/files?filename=${filename}`, {
+										method: "POST",
 										headers: {
 											...AUTH_HEADERS,
 											"content-type": "application/octet-stream",
 											"content-length": String(bytes.byteLength),
-											...headers,
 										},
 										body: new Blob([new Uint8Array(bytes)]),
 									}),
@@ -1443,7 +1437,9 @@ describe("Artifacts API", () => {
 					files: [{ path: "gone.txt", sha256: "0".repeat(64) }],
 				})
 				expect(missing.status).toBe(400)
-				expect((yield* json<ErrorBody>(missing)).error.message).toContain("does not hold")
+				expect((yield* json<ErrorBody>(missing)).error.message).toContain(
+					"not a file of the current version",
+				)
 				const onCreate = yield* call("POST", "/v1/artifacts", {
 					name: "New",
 					files: [{ path: "a.txt", sha256: sha("app.js") }],
@@ -1491,8 +1487,7 @@ describe("Artifacts API", () => {
 						{ path: "app.js", sha256: kept },
 					],
 				})
-				expect(sameAsHead.status).toBe(201)
-				expect((yield* json<VersionBody>(sameAsHead)).version).toBe(2)
+				expect(sameAsHead.status).toBe(409)
 				expect(viewReads()).toBe(0)
 			}),
 		))
@@ -1863,118 +1858,102 @@ describe("Artifact bytes", () => {
 		Uint8Array.from({ length }, (_, index) => (index * 37 + 11) % 256)
 	const hexOf = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 
-	it("opens an empty artifact, stores uploaded bytes by sha256, and builds version 1 from them", () =>
-		withApi(({ call, putBytes, store }) =>
+	it("builds versions from uploaded files, and keeps its own copy of their bytes", () =>
+		withApi(({ call, uploadFile, store }) =>
 			Effect.gen(function* () {
-				const opened = yield* call("POST", "/v1/artifacts", { name: "Data" })
-				expect(opened.status).toBe(201)
-				const artifact = yield* json<ArtifactBody>(opened)
-				expect(artifact).toMatchObject({ version: 0, file_count: 0, total_bytes: 0, files: [] })
-				expect((yield* call("POST", `/v1/artifacts/${artifact.id}/publication`, {})).status).toBe(
-					404,
-				)
-
 				const data = bytesOf(300)
 				const sha256 = hexOf(data)
-				const blobs = `/v1/artifacts/${artifact.id}/blobs`
-				const wrong = yield* putBytes(`${blobs}/${"0".repeat(64)}`, data)
-				expect(wrong.status).toBe(400)
-				expect((yield* json<ErrorBody>(wrong)).error.message).toContain("do not match")
-				const uploaded = yield* putBytes(`${blobs}/${sha256}`, data)
-				expect(uploaded.status).toBe(200)
-				expect(yield* json(uploaded)).toEqual({
-					type: "artifact_blob",
-					artifact_id: artifact.id,
-					sha256,
-					size: 300,
-				})
-				const key = `artifacts/${DEFAULT_STORAGE_SCOPE}/${artifact.id}/blobs/${sha256}`
-				expect((yield* putBytes(`${blobs}/${sha256}`, data)).status).toBe(200)
-				expect(store.putCount(key)).toBe(1)
-				const short = yield* putBytes(`${blobs}/${sha256}`, data.slice(1))
-				expect(short.status).toBe(400)
-				expect((yield* json<ErrorBody>(short)).error.message).toContain("do not match")
-				const swapped = yield* putBytes(
-					`${blobs}/${sha256}`,
-					data.map((byte) => 255 - byte),
-				)
-				expect(swapped.status).toBe(400)
-				expect(store.putCount(key)).toBe(1)
-
-				const version = yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
-					version: 0,
+				const file = yield* json<{ id: string }>(yield* uploadFile("data.bin", data))
+				const created = yield* call("POST", "/v1/artifacts", {
+					name: "Data",
 					files: [
-						{ path: "data.bin", sha256 },
+						{ path: "data.bin", file_id: file.id },
 						{ path: "note.txt", content: "hi" },
 					],
 				})
-				expect(version.status).toBe(201)
-				expect(yield* json<VersionBody>(version)).toMatchObject({ version: 1, file_count: 2 })
+				expect(created.status).toBe(201)
+				const artifact = yield* json<ArtifactBody>(created)
+				expect(artifact).toMatchObject({
+					version: 1,
+					file_count: 2,
+					total_bytes: 302,
+					files: [
+						{ path: "data.bin", sha256, size: 300, content_type: "application/octet-stream" },
+						{ path: "note.txt", size: 2 },
+					],
+				})
+				const key = `artifacts/${DEFAULT_STORAGE_SCOPE}/${artifact.id}/blobs/${sha256}`
+				expect(store.putCount(key)).toBe(1)
 
+				const typed = yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
+					version: 1,
+					files: [
+						{ path: "pictures/data.png", file_id: file.id, content_type: "image/png" },
+						{ path: "data.bin", sha256 },
+					],
+				})
+				expect(typed.status).toBe(201)
+				expect((yield* json<VersionBody>(typed)).files).toMatchObject([
+					{ path: "data.bin", sha256, content_type: "application/octet-stream" },
+					{ path: "pictures/data.png", sha256, content_type: "image/png" },
+				])
+				expect(store.putCount(key)).toBe(1)
+
+				expect((yield* call("DELETE", `/v1/files/${file.id}`)).status).toBe(200)
 				const download = yield* call(
 					"GET",
 					`/v1/artifacts/${artifact.id}/versions/1/content?file=data.bin`,
 				)
 				expect(download.status).toBe(200)
-				expect(download.headers.get("content-type")).toBe("application/octet-stream")
-				expect(download.headers.get("content-disposition")).toBe("attachment")
 				expect(new Uint8Array(yield* Effect.promise(() => download.arrayBuffer()))).toEqual(data)
+
+				const gone = yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
+					version: 2,
+					files: [{ path: "data.bin", file_id: file.id }],
+				})
+				expect(gone.status).toBe(404)
+				expect((yield* json<ErrorBody>(gone)).error.message).toBe(`File ${file.id} not found.`)
+				const unknown = yield* call("POST", "/v1/artifacts", {
+					name: "Other",
+					files: [{ path: "a.bin", file_id: "file_missing" }],
+				})
+				expect(unknown.status).toBe(404)
 
 				expect((yield* call("DELETE", `/v1/artifacts/${artifact.id}`)).status).toBe(200)
 				expect([...store.objects.keys()].filter((stored) => stored.includes(artifact.id))).toEqual(
 					[],
 				)
-				expect((yield* putBytes(`${blobs}/${sha256}`, data)).status).toBe(404)
 			}),
 		))
 
-	it("refuses an upload without a usable Content-Length", () =>
-		withApi(({ call, putBytes }) =>
+	it("refuses an artifact with no files", () =>
+		withApi(({ call }) =>
 			Effect.gen(function* () {
-				const artifact = yield* json<ArtifactBody>(
-					yield* call("POST", "/v1/artifacts", { name: "A" }),
+				expect((yield* call("POST", "/v1/artifacts", { name: "Empty" })).status).toBe(400)
+				expect((yield* call("POST", "/v1/artifacts", { name: "Empty", files: [] })).status).toBe(
+					400,
 				)
-				const data = bytesOf(10)
-				const refused = yield* putBytes(`/v1/artifacts/${artifact.id}/blobs/${hexOf(data)}`, data, {
-					"content-length": "ten",
-				})
-				expect(refused.status).toBe(400)
-				const oversized = yield* putBytes(
-					`/v1/artifacts/${artifact.id}/blobs/${hexOf(data)}`,
-					data,
-					{
-						"content-length": String(MAX_ARTIFACT_FILE_BYTES + 1),
-					},
-				)
-				expect(oversized.status).toBe(413)
-				expect((yield* json<ErrorBody>(oversized)).error.message).toContain("at most")
-				const anyType = yield* putBytes(`/v1/artifacts/${artifact.id}/blobs/${hexOf(data)}`, data, {
-					"content-type": "image/png",
-				})
-				expect(anyType.status).toBe(200)
 			}),
 		))
 
-	it("stores a zero-byte file, and sends a file too large for JSON to the raw download", () =>
-		withApi(({ call, putBytes }) =>
+	it("takes a zero-byte file, and sends a file too large for JSON to the raw download", () =>
+		withApi(({ call, uploadFile }) =>
 			Effect.gen(function* () {
-				const artifact = yield* json<ArtifactBody>(
-					yield* call("POST", "/v1/artifacts", { name: "A" }),
-				)
-				const blobs = `/v1/artifacts/${artifact.id}/blobs`
-				const empty = new Uint8Array(0)
-				expect((yield* putBytes(`${blobs}/${hexOf(empty)}`, empty)).status).toBe(200)
 				const large = bytesOf(MAX_INLINE_FILE_BYTES + 1)
-				expect((yield* putBytes(`${blobs}/${hexOf(large)}`, large)).status).toBe(200)
-				expect(
-					(yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
-						version: 0,
+				const emptyFile = yield* json<{ id: string }>(
+					yield* uploadFile("empty.txt", new Uint8Array(0)),
+				)
+				const largeFile = yield* json<{ id: string }>(yield* uploadFile("large.bin", large))
+				const artifact = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "A",
 						files: [
-							{ path: "empty.txt", sha256: hexOf(empty) },
-							{ path: "large.bin", sha256: hexOf(large) },
+							{ path: "empty.txt", file_id: emptyFile.id },
+							{ path: "large.bin", file_id: largeFile.id },
 						],
-					})).status,
-				).toBe(201)
+					}),
+				)
+				expect(artifact).toMatchObject({ version: 1, total_bytes: large.byteLength })
 				const asJson = (path: string) =>
 					call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=${path}`)
 				expect(yield* json(yield* asJson("empty.txt"))).toMatchObject({ size: 0, content: "" })

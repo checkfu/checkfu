@@ -1,6 +1,6 @@
 # Files and artifacts: the domain
 
-Status: steps 1 (Files) and 3 (outputs saved as files) are built; the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
+Status: steps 1 (Files), 3 (outputs saved as files) and 4 (artifact versions from files) are built; the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
 
 ## The problem
 
@@ -69,7 +69,7 @@ client ──upload──▶ File ──mounted read-only──▶ Session works
 - A deleted file stays deleted.
 - Creating takes the open reservation; only the latest reservation is open.
 
-**Bytes:** one object per file at `files/<scope>/<file_id>/content`. One owner object per file is the single writer: it takes one content write at a time, refuses a write from a reservation older than one it has seen, and waits for a write in flight before a purge or a release. The upload streams through it, and the sha256 is computed as the bytes arrive. The rules it keeps live in `apps/api/src/Files/ByteOwner.ts`, which artifacts move onto in step 4.
+**Bytes:** one object per file at `files/<scope>/<file_id>/content`. One owner object per file is the single writer: it takes one content write at a time, refuses a write from a reservation older than one it has seen, and waits for a write in flight before a purge or a release. The upload streams through it, and the sha256 is computed as the bytes arrive. The rules it keeps live in `apps/api/src/Files/ByteOwner.ts`. The artifact owner keeps the same rules in its own module for now; moving it onto this one is a separate change with no visible effect.
 
 **Upload:** the request body is the file's bytes, with `filename` and an optional `content_type` in the query, and a `Content-Length`. The content type defaults to the one the filename's extension implies. With an `Idempotency-Key`, a retry answers with the same file, and the same key with a different name, type or bytes is refused.
 
@@ -119,8 +119,8 @@ Three consequences worth knowing:
 
 An artifact keeps one job: a deliverable with versions that can be viewed and published.
 
-- **A version is built from files.** Each entry is `{path, file_id}`, `{path, content}` for small text, or `{path, sha256}` to keep a file from the version being replaced. The artifact copies the bytes it needs into its own storage.
-- **No empty artifacts.** `OpenArtifact`, version 0 and the blob upload route go away. The rule "an artifact exists exactly when it has a version" returns to its strong form.
+- **A version is built from files.** Each entry is `{path, file_id}`, `{path, content}` for small text, or `{path, sha256}` to keep a file of the version being replaced. For a `file_id`, the artifact copies the bytes into its own storage, checking them against the file's sha256 as they pass, so deleting the file later never changes a version. The reservation is recorded with the owner before any bytes are copied, so the cleanup of an older, lapsed attempt cannot remove them.
+- **No empty artifacts.** `OpenArtifact`, version 0 and the blob upload route are gone. The rule "an artifact exists exactly when it has a version" is back in its strong form, and proved.
 - **Viewing links, publication, pinning a version or following the latest:** unchanged.
 - **Session mount:** `{type: "artifact", artifact_id, version?}` stays, as the way to hand a session an existing deliverable to work on.
 
@@ -157,7 +157,7 @@ A skill becomes its own resource: `POST /v1/skills` with files, versions as full
 | 1 (built) | File aggregate, shared byte owner, `/v1/files`, CLI commands, proofs | |
 | 2 | `file` session resource, admission rule, copy into the machine | 1 |
 | 3 (built) | Outputs saved as Files; the session outputs record; remove the outputs publisher | 1 |
-| 4 | Artifact versions from file ids; remove empty artifacts and blob upload | 1 |
+| 4 (built) | Artifact versions from file ids; remove empty artifacts and blob upload | 1 |
 | 5 | Skill resource, attached to agents | 4 |
 | 6 | File blocks in messages; add and remove resources on a running session | 2 |
 | 7 | A tool for the agent to create or update an artifact | 4 |

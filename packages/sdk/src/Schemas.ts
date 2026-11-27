@@ -881,7 +881,26 @@ export const ArtifactFileInput = Schema.Struct({
 })
 export type ArtifactFileInput = typeof ArtifactFileInput.Type
 
-export const ArtifactFilesInput = Schema.Array(ArtifactFileInput).check(
+export const ArtifactFromFileInput = Schema.Struct({
+	path: ArtifactPath.annotate({
+		description: "Relative path inside the artifact, for example index.html or assets/app.js",
+	}),
+	file_id: FileId.annotate({
+		description:
+			"A file uploaded with POST /v1/files, or saved from a session's outputs. The artifact keeps its own copy of the bytes, so deleting the file later does not change the version",
+	}),
+	content_type: Schema.optionalKey(
+		ArtifactContentType.annotate({
+			description: "Media type; the file's own when omitted",
+		}),
+	),
+})
+export type ArtifactFromFileInput = typeof ArtifactFromFileInput.Type
+
+export const ArtifactNewFileInput = Schema.Union([ArtifactFileInput, ArtifactFromFileInput])
+export type ArtifactNewFileInput = typeof ArtifactNewFileInput.Type
+
+export const ArtifactFilesInput = Schema.Array(ArtifactNewFileInput).check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_ARTIFACT_FILES),
 )
@@ -892,7 +911,7 @@ export const ArtifactKeptFileInput = Schema.Struct({
 	}),
 	sha256: Sha256Hex.annotate({
 		description:
-			"sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}",
+			"sha256 of a file in the version being replaced, to keep it without sending it again",
 	}),
 	content_type: Schema.optionalKey(
 		ArtifactContentType.annotate({
@@ -902,7 +921,11 @@ export const ArtifactKeptFileInput = Schema.Struct({
 })
 export type ArtifactKeptFileInput = typeof ArtifactKeptFileInput.Type
 
-export const ArtifactVersionFileInput = Schema.Union([ArtifactFileInput, ArtifactKeptFileInput])
+export const ArtifactVersionFileInput = Schema.Union([
+	ArtifactFileInput,
+	ArtifactFromFileInput,
+	ArtifactKeptFileInput,
+])
 export type ArtifactVersionFileInput = typeof ArtifactVersionFileInput.Type
 
 export const ArtifactVersionFilesInput = Schema.Array(ArtifactVersionFileInput).check(

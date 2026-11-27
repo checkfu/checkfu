@@ -546,7 +546,6 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"RunAutomation",
 		"ReserveArtifact",
 		"CreateArtifact",
-		"OpenArtifact",
 		"AddArtifactVersion",
 		"DeleteArtifact",
 		"PublishArtifact",

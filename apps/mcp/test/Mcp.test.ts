@@ -874,6 +874,8 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 		)
 		expect(uploads.map(([name]) => name)).toEqual([
 			"artifacts_createArtifact",
+			"artifacts_createArtifact",
+			"artifacts_createArtifactVersion",
 			"artifacts_createArtifactVersion",
 			"artifacts_createArtifactVersion",
 		])

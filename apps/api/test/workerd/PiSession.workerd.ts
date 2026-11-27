@@ -675,18 +675,12 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect([200, 202], JSON.stringify(cleanup.body)).toContain(cleanup.status)
 	}, 30_000)
 
-	it("stores uploaded bytes in R2 only when they match their sha256, and serves them raw", async () => {
-		const opened = await apiJson<{ readonly id: string; readonly version: number }>(
-			"/v1/artifacts",
-			{ method: "POST", body: { name: "Bytes" } },
-		)
-		expect(opened.status).toBe(201)
-		expect(opened.body.version).toBe(0)
+	it("builds an artifact from uploaded files by copying their bytes in R2, and keeps them after the files are deleted", async () => {
 		const data = Uint8Array.from({ length: 70_000 }, (_, index) => (index * 31 + 7) % 256)
 		const sha256 = createHash("sha256").update(data).digest("hex")
-		const upload = (hash: string, bytes: Uint8Array<ArrayBuffer> = data) =>
-			fetch(`${baseUrl}/v1/artifacts/${opened.body.id}/blobs/${hash}`, {
-				method: "PUT",
+		const uploadBytes = async (filename: string, bytes: Uint8Array<ArrayBuffer>) => {
+			const response = await fetch(`${baseUrl}/v1/files?filename=${filename}`, {
+				method: "POST",
 				headers: {
 					...AUTH_HEADERS,
 					"content-type": "application/octet-stream",
@@ -694,40 +688,75 @@ describe("PiSession real Durable Object under workerd", () => {
 				},
 				body: bytes,
 			})
-		expect((await upload("0".repeat(64))).status).toBe(400)
-		const stored = await upload(sha256)
-		expect(stored.status).toBe(200)
-		expect((await upload(sha256)).status).toBe(200)
+			expect(response.status, await response.clone().text()).toBe(201)
+			return (await response.json()) as { readonly id: string }
+		}
+		const file = await uploadBytes("data.bin", data)
+		const empty = await uploadBytes("empty.txt", new Uint8Array(0))
+		const created = await apiJson<{
+			readonly id: string
+			readonly version: number
+			readonly files: ReadonlyArray<{ readonly path: string; readonly sha256: string }>
+		}>("/v1/artifacts", {
+			method: "POST",
+			body: {
+				name: "Bytes",
+				files: [
+					{ path: "data.bin", file_id: file.id },
+					{ path: "empty.txt", file_id: empty.id },
+					{ path: "note.txt", content: "inline" },
+				],
+			},
+		})
+		expect(created.status, JSON.stringify(created.body)).toBe(201)
+		expect(created.body.version).toBe(1)
+		expect(created.body.files.map(({ path }) => path)).toEqual([
+			"data.bin",
+			"empty.txt",
+			"note.txt",
+		])
+		expect(created.body.files[0]?.sha256).toBe(sha256)
+		const bucket = artifactBucketName(workerStage)
 		expect(
 			(
-				await upload(
-					sha256,
-					data.map((byte) => 255 - byte),
+				await localR2(
+					baseUrl,
+					"GET",
+					bucket,
+					`artifacts/default/${created.body.id}/blobs/${sha256}`,
 				)
 			).status,
-		).toBe(400)
-		const empty = new Uint8Array(0)
-		const emptySha256 = createHash("sha256").update(empty).digest("hex")
-		expect((await upload(emptySha256, empty)).status).toBe(200)
+		).toBe(200)
+
+		for (const id of [file.id, empty.id]) {
+			expect((await apiFetch(`/v1/files/${id}`, { method: "DELETE" })).status).toBe(200)
+		}
+		const download = await apiFetch(
+			`/v1/artifacts/${created.body.id}/versions/1/content?file=data.bin`,
+		)
+		expect(download.status).toBe(200)
+		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
+
 		const version = await apiJson<{ readonly version: number }>(
-			`/v1/artifacts/${opened.body.id}/versions`,
+			`/v1/artifacts/${created.body.id}/versions`,
 			{
 				method: "POST",
 				body: {
-					version: 0,
+					version: 1,
 					files: [
-						{ path: "data.bin", sha256 },
-						{ path: "empty.txt", sha256: emptySha256 },
+						{ path: "kept.bin", sha256 },
+						{ path: "note.txt", content: "changed" },
 					],
 				},
 			},
 		)
 		expect(version.status).toBe(201)
-		const download = await apiFetch(
-			`/v1/artifacts/${opened.body.id}/versions/1/content?file=data.bin`,
-		)
-		expect(download.status).toBe(200)
-		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
+		expect(version.body.version).toBe(2)
+		const gone = await apiJson(`/v1/artifacts/${created.body.id}/versions`, {
+			method: "POST",
+			body: { version: 2, files: [{ path: "data.bin", file_id: file.id }] },
+		})
+		expect(gone.status).toBe(404)
 	}, 60_000)
 
 	const uploadFile = (

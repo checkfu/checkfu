@@ -27,7 +27,6 @@ import { FilesLive } from "./FilesHandlers.ts"
 import { EnvironmentsLive } from "./EnvironmentsHandlers.ts"
 import {
 	AgentBodyLimitLive,
-	ArtifactBlobLimitLive,
 	FileBodyLimitLive,
 	ArtifactBodyLimitLive,
 	AuthenticationLive,
@@ -106,7 +105,6 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 		RequestValidationLive,
 		AgentBodyLimitLive,
-		ArtifactBlobLimitLive,
 		FileBodyLimitLive,
 		ArtifactBodyLimitLive,
 		EventBatchBodyLimitLive,
