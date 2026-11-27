@@ -624,6 +624,8 @@ export const makePiDurableTestLayer = (
 					}
 					return inside.map((path) => ({ path, type: "file" }))
 				},
+				size: async (path) => encoder.encode(files.get(path) ?? "").byteLength,
+				stopped: () => false,
 				read: async (path) => encoder.encode(files.get(path) ?? ""),
 				saveFile: (path, bytes) =>
 					built().run(built().saves.sessionFileSave(sessionId, turn, path, bytes)),

@@ -7,6 +7,7 @@ import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { HANDLER_ERROR_TYPES } from "@checkfu/sdk/Api"
 import { isApiErrorEnvelope } from "@checkfu/sdk/Errors"
 import { ArtifactName, ArtifactPath, FileName, MAX_ARTIFACT_FILES } from "@checkfu/sdk/Schemas"
 import * as Digest from "effect/crypto/Digest"
@@ -34,6 +35,9 @@ const isFileName = Schema.is(FileName)
 
 const refused = (message: string) => ({ ok: false as const, message })
 
+const AGAIN = "again" as const
+const SAVE_ATTEMPTS = 4
+
 export const sessionArtifactId = (
 	digest: Digest.Digest["Service"],
 	sessionId: string,
@@ -47,7 +51,7 @@ export const sessionArtifactId = (
 		(hash) => ArtifactId.make(`art_${hash.slice(0, 32)}`),
 	)
 
-const explained = <A, E, R>(what: string, effect: Effect.Effect<A, E, R>) =>
+const explained = <A, E, R>(what: string, sessionId: string, effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
 		Effect.catch((error) =>
 			isApiErrorEnvelope(error)
@@ -57,6 +61,7 @@ const explained = <A, E, R>(what: string, effect: Effect.Effect<A, E, R>) =>
 						Effect.succeed(refused(`${what} failed; try again.`)),
 					),
 		),
+		Effect.annotateLogs({ request_id: `session-tool:${sessionId}` }),
 	)
 
 export const SessionArtifactSaves = Effect.gen(function* () {
@@ -82,6 +87,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 		): Effect.Effect<SavedSessionFile> =>
 			explained(
 				"Saving the file",
+				sessionId,
 				Effect.gen(function* () {
 					const filename = path.slice(path.lastIndexOf("/") + 1)
 					if (!isArtifactPath(path) || !isFileName(filename)) {
@@ -91,23 +97,27 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						return refused("The session has ended.")
 					}
 					const sha256 = yield* digest.digestHex(Digest.sha256, bytes)
+					const save = (id: FileId) =>
+						storeFile({
+							id,
+							filename,
+							content_type: Option.getOrElse(Mime.getType(`./${path}`), () => DEFAULT_CONTENT_TYPE),
+							origin: { session_id: sessionId, turn, path },
+							body: Stream.make(bytes),
+							size: bytes.byteLength,
+						})
 					const id = yield* outputFileId(digest, sessionId, path, sha256)
-					const outcome = yield* storeFile({
-						id,
-						filename,
-						content_type: Option.getOrElse(Mime.getType(`./${path}`), () => DEFAULT_CONTENT_TYPE),
-						origin: { session_id: sessionId, turn, path },
-						body: Stream.make(bytes),
-						size: bytes.byteLength,
-					})
-					if (outcome._tag === "Stored") {
+					const first = yield* save(id)
+					if (first._tag === "Stored") {
 						return { ok: true as const, file_id: id }
 					}
-					return refused(
-						outcome._tag === "Taken"
-							? `${path} was saved before with this content and then deleted.`
-							: `Saving ${path} took too long; try again.`,
-					)
+					if (first._tag === "Taken") {
+						const again = yield* outputFileId(digest, sessionId, path, `${sha256}:turn:${turn}`)
+						if ((yield* save(again))._tag === "Stored") {
+							return { ok: true as const, file_id: again }
+						}
+					}
+					return refused(`Saving ${path} took too long; try again.`)
 				}),
 			),
 
@@ -118,6 +128,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 		): Effect.Effect<SavedSessionArtifact> =>
 			explained(
 				"Saving the artifact",
+				sessionId,
 				Effect.gen(function* () {
 					if (!isArtifactName(name)) {
 						return refused("The artifact needs a name of 1 to 256 characters.")
@@ -132,79 +143,109 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						path: entry.path,
 						file_id: FileId.make(entry.file_id),
 					}))
-					const foreign = yield* Effect.findFirst(wanted, ({ file_id }) =>
-						Effect.map(files.get(file_id), (file) => file.origin_session_id !== sessionId),
+					const origins = yield* Effect.forEach(
+						wanted,
+						({ file_id }) => Effect.map(files.get(file_id), (file) => file.origin_session_id),
+						{ concurrency: 8 },
 					)
-					if (Option.isSome(foreign)) {
-						return refused(`${foreign.value.path} is not a file this session saved.`)
+					const foreign = wanted.find((_, index) => origins[index] !== sessionId)
+					if (foreign !== undefined) {
+						return refused(`${foreign.path} is not a file this session saved.`)
 					}
 					const id = yield* sessionArtifactId(digest, sessionId, name)
 					const resolved = yield* fromFiles(wanted)
 					const built = yield* build(resolved.files)
-					const state = yield* artifacts.get(id)
-					if (state.status === "deleted") {
-						return refused(`The artifact named ${JSON.stringify(name)} was deleted.`)
-					}
-					if (state.status === "active") {
-						if (state.manifest === built.manifest_hash) {
-							return {
-								ok: true as const,
-								artifact_id: id,
-								version: state.version,
-								changed: false,
+					const gone = refused(`The artifact named ${JSON.stringify(name)} was deleted.`)
+					const busy = refused(`Saving ${JSON.stringify(name)} did not finish; try again.`)
+					const saved = (version: number, changed: boolean) => ({
+						ok: true as const,
+						artifact_id: id,
+						version,
+						changed,
+					})
+
+					const attempt = Effect.gen(function* () {
+						const state = yield* artifacts.get(id)
+						if (state.status === "deleted") {
+							return gone
+						}
+						if (state.status === "active") {
+							if (state.manifest === built.manifest_hash) {
+								return saved(state.version, false)
 							}
+							yield* copyIn(id, resolved, null)
+							yield* stage(id, built, null)
+							return yield* artifacts
+								.send(
+									new AddArtifactVersion({
+										artifact_id: id,
+										expected_version: state.version,
+										manifest: built.manifest_hash,
+										file_count: built.file_count,
+										total_bytes: built.total_bytes,
+									}),
+									{
+										commandId: yield* idempotentCommandId(digest, "add-artifact-version", [
+											id,
+											state.version,
+											built.manifest_hash,
+										]),
+									},
+								)
+								.pipe(
+									Effect.map((added) => saved(added.reply.version, true)),
+									Effect.catchTags({
+										ArtifactVersionConflict: () => Effect.succeed(AGAIN),
+										ArtifactNotFound: () => Effect.succeed(gone),
+									}),
+								)
 						}
-						yield* copyIn(id, resolved, null)
-						yield* stage(id, built, null)
-						const added = yield* artifacts.send(
-							new AddArtifactVersion({
-								artifact_id: id,
-								expected_version: state.version,
-								manifest: built.manifest_hash,
-								file_count: built.file_count,
-								total_bytes: built.total_bytes,
-							}),
-							{
-								commandId: yield* idempotentCommandId(digest, "add-artifact-version", [
-									id,
-									state.version,
-									built.manifest_hash,
-								]),
-							},
-						)
-						return {
-							ok: true as const,
-							artifact_id: id,
-							version: added.reply.version,
-							changed: true,
+						const reservation = yield* artifacts
+							.send(new ReserveArtifact({ artifact_id: id }))
+							.pipe(
+								Effect.map((reserved) => reserved.reply.reservation),
+								Effect.catchTag("ArtifactAlreadyExists", () => Effect.succeed(0)),
+							)
+						if (reservation === 0) {
+							return AGAIN
 						}
-					}
-					const reservation = yield* artifacts.send(new ReserveArtifact({ artifact_id: id })).pipe(
-						Effect.map((reserved) => reserved.reply.reservation),
-						Effect.catchTag("ArtifactAlreadyExists", () => Effect.succeed(0)),
-					)
-					if (reservation !== 0) {
 						yield* stage(id, null, reservation)
 						yield* copyIn(id, resolved, reservation)
 						yield* stage(id, built, reservation)
-					}
-					const created = yield* artifacts.send(
-						new CreateArtifact({
-							artifact_id: id,
-							name,
-							manifest: built.manifest_hash,
-							file_count: built.file_count,
-							total_bytes: built.total_bytes,
-							reservation,
-						}),
-						{ commandId: `create-artifact:${id}` },
+						const created = yield* artifacts
+							.send(
+								new CreateArtifact({
+									artifact_id: id,
+									name,
+									manifest: built.manifest_hash,
+									file_count: built.file_count,
+									total_bytes: built.total_bytes,
+									reservation,
+								}),
+								{ commandId: `create-artifact:${id}:${reservation}:${built.manifest_hash}` },
+							)
+							.pipe(
+								Effect.as(true),
+								Effect.catchTags({
+									ArtifactAlreadyExists: () => Effect.succeed(false),
+									ArtifactReservationLapsed: () => Effect.succeed(false),
+								}),
+							)
+						return created ? saved(1, true) : AGAIN
+					}).pipe(
+						Effect.catchIf(
+							(error) => isApiErrorEnvelope(error) && error.error.type === HANDLER_ERROR_TYPES[503],
+							() => Effect.succeed(AGAIN),
+						),
 					)
-					return {
-						ok: true as const,
-						artifact_id: id,
-						version: created.reply.version,
-						changed: true,
+
+					for (let left = SAVE_ATTEMPTS; left > 0; left -= 1) {
+						const outcome = yield* attempt
+						if (outcome !== AGAIN) {
+							return outcome
+						}
 					}
+					return busy
 				}),
 			),
 	}

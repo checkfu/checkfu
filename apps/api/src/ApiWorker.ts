@@ -44,7 +44,7 @@ import { WebhookEventsLive } from "./Webhooks/WebhookEventsLive.ts"
 import { WebhookFanoutContinuationDo, WebhookFanoutLive } from "./Webhooks/WebhookFanout.do.ts"
 import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
 import { SessionArtifactAccess } from "./SessionArtifactAccess.ts"
-import { SessionArtifactSaves } from "./SessionArtifactSaves.ts"
+
 import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 import { SkillReader } from "./Skills/SkillReader.ts"
 
@@ -325,7 +325,12 @@ export default ApiWorker.make(
 		)
 		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
 		const artifacts = yield* SessionArtifactAccess.pipe(Effect.provide(services))
-		const saves = yield* SessionArtifactSaves.pipe(Effect.provide(services))
+		const saves = yield* Effect.cached(
+			Effect.promise(() => import("./SessionArtifactSaves.ts")).pipe(
+				Effect.flatMap(({ SessionArtifactSaves }) => SessionArtifactSaves),
+				Effect.provide(services),
+			),
+		)
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
@@ -344,8 +349,10 @@ export default ApiWorker.make(
 				Effect.orDie(artifacts.artifactFiles(sessionId, mountPath)),
 			artifactRead: (sessionId, mountPath, path, offset, length) =>
 				Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
-			sessionFileSave: saves.sessionFileSave,
-			sessionArtifactSave: saves.sessionArtifactSave,
+			sessionFileSave: (sessionId, turn, path, bytes) =>
+				Effect.flatMap(saves, (loaded) => loaded.sessionFileSave(sessionId, turn, path, bytes)),
+			sessionArtifactSave: (sessionId, name, entries) =>
+				Effect.flatMap(saves, (loaded) => loaded.sessionArtifactSave(sessionId, name, entries)),
 		})
 	}),
 )

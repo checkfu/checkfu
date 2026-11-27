@@ -38,6 +38,14 @@ const workspace = (
 				})),
 			]
 		},
+		size: async (path) => {
+			const size = files.get(path)
+			if (typeof size !== "number") {
+				throw new Error("ENOENT")
+			}
+			return size
+		},
+		stopped: () => false,
 		read: async (path, limit) => {
 			reads.push([path, limit])
 			const size = files.get(path)
@@ -98,7 +106,10 @@ describe("the save_artifact tool", () => {
 		const one = new Map<string, number | "symlink">([["/workspace/site/index.html", 1]])
 		expect(await refusal(one, { name: "Site" })).toContain("needs a name and a directory")
 		expect(await refusal(one, { name: "Site", directory: "site" })).toContain("absolute path")
-		expect(await refusal(new Map())).toBe("/workspace/site is not a directory.")
+		expect(await refusal(one, { name: "Site", directory: "/workspace/x/../site" })).toContain(
+			"no .. in it",
+		)
+		expect(await refusal(new Map())).toBe("/workspace/site is not a directory that can be read.")
 		expect(await refusal(new Map([["/workspace/site/", 0]]))).toBe(
 			"/workspace/site holds no files.",
 		)
@@ -122,7 +133,23 @@ describe("the save_artifact tool", () => {
 		)
 	})
 
-	it("stops at the first file over the size limit or past the total, reading no more than it needs", async () => {
+	it("takes a directory however its path is spelled, and refuses a listing that strays outside it", async () => {
+		for (const directory of ["/workspace/./site", "/workspace//site", "/workspace/site//"]) {
+			const { ports, saved } = workspace(new Map([["/workspace/site/index.html", 1]]))
+			const result = await saveArtifact({ name: "Site", directory }, ports)
+			expect([directory, result.isError, saved]).toEqual([directory, false, ["index.html"]])
+		}
+		const stray = workspace(new Map([["/workspace/site/index.html", 1]]), {
+			find: async () => [{ path: "/workspace/other/secret.txt", type: "file" }],
+		})
+		const result = await saveArtifact({ name: "Site", directory: "/workspace/site" }, stray.ports)
+		expect([textOf(result), stray.saved]).toEqual([
+			"/workspace/other/secret.txt is outside /workspace/site.",
+			[],
+		])
+	})
+
+	it("checks every size before saving anything, so a refusal leaves no files behind", async () => {
 		const large = workspace(
 			new Map([
 				["/w/a.bin", 1],
@@ -132,28 +159,77 @@ describe("the save_artifact tool", () => {
 		)
 		const tooLarge = await saveArtifact({ name: "Data", directory: "/w" }, large.ports)
 		expect(textOf(tooLarge)).toBe("b.bin is larger than 8 MiB.")
-		expect(large.saved).toEqual(["a.bin"])
-		expect(large.reads).toEqual([
-			["/w/a.bin", MAX_TOOL_ARTIFACT_FILE_BYTES],
-			["/w/b.bin", MAX_TOOL_ARTIFACT_FILE_BYTES],
-		])
-		expect(large.artifacts).toEqual([])
+		expect([large.saved, large.reads, large.artifacts]).toEqual([[], [], []])
 
 		const count = MAX_TOOL_ARTIFACT_TOTAL_BYTES / MAX_TOOL_ARTIFACT_FILE_BYTES
-		const full = workspace(
-			new Map([
-				...Array.from({ length: count }, (_, index): [string, number] => [
-					`/w/${index}.bin`,
-					MAX_TOOL_ARTIFACT_FILE_BYTES,
-				]),
-				["/w/z.txt", 1],
-			]),
-		)
+		const exact = Array.from({ length: count }, (_, index): [string, number] => [
+			`/w/${index}.bin`,
+			MAX_TOOL_ARTIFACT_FILE_BYTES,
+		])
+		const full = workspace(new Map([...exact, ["/w/z.txt", 1]]))
 		expect(textOf(await saveArtifact({ name: "Data", directory: "/w" }, full.ports))).toBe(
 			"The files total more than 64 MiB.",
 		)
-		expect(full.saved).toHaveLength(count)
-		expect(full.artifacts).toEqual([])
+		expect([full.saved, full.artifacts]).toEqual([[], []])
+
+		const fits = workspace(new Map(exact))
+		expect((await saveArtifact({ name: "Data", directory: "/w" }, fits.ports)).isError).toBe(false)
+		expect(fits.saved).toHaveLength(count)
+	})
+
+	it("refuses a file that grew past the limit after its size was checked", async () => {
+		const grown = workspace(new Map([["/w/a.bin", 1]]), {
+			read: async (_, limit) => new Uint8Array(limit + 1),
+		})
+		expect(textOf(await saveArtifact({ name: "Data", directory: "/w" }, grown.ports))).toBe(
+			"a.bin is larger than 8 MiB.",
+		)
+		expect(grown.artifacts).toEqual([])
+	})
+
+	it("stops when the turn is interrupted, before the next file and before the artifact", async () => {
+		let stopped = false
+		const world = workspace(
+			new Map([
+				["/w/a.txt", 1],
+				["/w/b.txt", 1],
+			]),
+			{ stopped: () => stopped },
+		)
+		const saveFile = world.ports.saveFile
+		const ports = {
+			...world.ports,
+			saveFile: async (path: string, bytes: Uint8Array) => {
+				const saved = await saveFile(path, bytes)
+				stopped = true
+				return saved
+			},
+		}
+		const result = await saveArtifact({ name: "Data", directory: "/w" }, ports)
+		expect([result.isError, textOf(result), world.saved, world.artifacts]).toEqual([
+			true,
+			"The turn was interrupted before the artifact was saved.",
+			["a.txt"],
+			[],
+		])
+	})
+
+	it("answers plainly when a save cannot reach the API", async () => {
+		const files = new Map<string, number | "symlink">([["/w/a.txt", 1]])
+		const unreachable = () => Promise.reject(new Error("internal: socket hang up at 10.0.0.4"))
+		const noFile = await saveArtifact(
+			{ name: "A", directory: "/w" },
+			workspace(files, { saveFile: unreachable }).ports,
+		)
+		expect([noFile.isError, textOf(noFile)]).toEqual([true, "Saving a.txt failed; try again."])
+		const noArtifact = await saveArtifact(
+			{ name: "A", directory: "/w" },
+			workspace(files, { saveArtifact: unreachable }).ports,
+		)
+		expect([noArtifact.isError, textOf(noArtifact)]).toEqual([
+			true,
+			"Saving the artifact failed; try again.",
+		])
 	})
 
 	it("passes on why a file or the artifact was not saved", async () => {

@@ -415,6 +415,8 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 							onActive((on) =>
 								saveArtifact(call.arguments, {
 									find: (directory, limit) => on.fs.find(directory, undefined, { limit }),
+									size: async (path) => (await on.fs.lstat(path)).size,
+									stopped: () => signal.aborted,
 									read: async (path, limit) => readUpTo(await on.fs.readFile(path), limit),
 									saveFile: (path, bytes) =>
 										askApi(api.sessionFileSave(sessionId, turn, path, bytes)),

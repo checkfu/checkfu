@@ -38,6 +38,9 @@ export interface ArtifactToolPorts {
 		directory: string,
 		limit: number,
 	) => Promise<ReadonlyArray<{ readonly path: string; readonly type: string }>>
+	readonly size: (path: string) => Promise<number>
+	/** True once the turn that made the call has been interrupted. */
+	readonly stopped: () => boolean
 	/** The file's bytes, or more than `limit` of them when it is larger. */
 	readonly read: (path: string, limit: number) => Promise<Uint8Array>
 	readonly saveFile: (path: string, bytes: Uint8Array) => Promise<SavedSessionFile>
@@ -54,6 +57,16 @@ const told = (text: string, isError: boolean): WorkspaceToolResult => ({
 
 const refused = (text: string) => told(text, true)
 
+const INTERRUPTED = "The turn was interrupted before the artifact was saved."
+
+const canonical = (directory: string): string | null => {
+	if (!directory.startsWith("/")) {
+		return null
+	}
+	const parts = directory.split("/").filter((part) => part !== "" && part !== ".")
+	return parts.includes("..") ? null : `/${parts.join("/")}`
+}
+
 export const saveArtifact = async (
 	args: unknown,
 	ports: ArtifactToolPorts,
@@ -63,16 +76,15 @@ export const saveArtifact = async (
 		return refused("save_artifact needs a name and a directory.")
 	}
 	const { name } = decoded.value
-	const directory =
-		decoded.value.directory.length > 1 && decoded.value.directory.endsWith("/")
-			? decoded.value.directory.slice(0, -1)
-			: decoded.value.directory
-	if (!directory.startsWith("/")) {
-		return refused("directory must be an absolute path, for example /workspace/site.")
+	const directory = canonical(decoded.value.directory)
+	if (directory === null) {
+		return refused(
+			"directory must be an absolute path with no .. in it, for example /workspace/site.",
+		)
 	}
 	const found = await ports.find(directory, MAX_TOOL_ARTIFACT_ENTRIES + 1).catch(() => null)
 	if (found === null) {
-		return refused(`${directory} is not a directory.`)
+		return refused(`${directory} is not a directory that can be read.`)
 	}
 	if (found.length > MAX_TOOL_ARTIFACT_ENTRIES) {
 		return refused(`${directory} holds more than ${MAX_TOOL_ARTIFACT_ENTRIES} files and folders.`)
@@ -83,7 +95,10 @@ export const saveArtifact = async (
 		if (entry.type === "dir") {
 			continue
 		}
-		const path = entry.path.startsWith(prefix) ? entry.path.slice(prefix.length) : entry.path
+		if (!entry.path.startsWith(prefix)) {
+			return refused(`${entry.path} is outside ${directory}.`)
+		}
+		const path = entry.path.slice(prefix.length)
 		if (entry.type !== "file") {
 			return refused(`${path} is not a regular file. Remove it or save a different directory.`)
 		}
@@ -100,9 +115,32 @@ export const saveArtifact = async (
 			`${paths.length} files; an artifact saved here holds at most ${MAX_TOOL_ARTIFACT_FILES}.`,
 		)
 	}
+	paths.sort()
+	const tooLarge = (path: string) =>
+		refused(`${path} is larger than ${MAX_TOOL_ARTIFACT_FILE_BYTES / MEBIBYTE} MiB.`)
+	const tooMuch = refused(
+		`The files total more than ${MAX_TOOL_ARTIFACT_TOTAL_BYTES / MEBIBYTE} MiB.`,
+	)
+	let expected = 0
+	for (const path of paths) {
+		const size = await ports.size(`${prefix}${path}`).catch(() => null)
+		if (size === null) {
+			return refused(`${path} could not be read.`)
+		}
+		if (size > MAX_TOOL_ARTIFACT_FILE_BYTES) {
+			return tooLarge(path)
+		}
+		expected += size
+		if (expected > MAX_TOOL_ARTIFACT_TOTAL_BYTES) {
+			return tooMuch
+		}
+	}
 	const entries: Array<{ readonly path: string; readonly file_id: string }> = []
 	let total = 0
-	for (const path of paths.toSorted()) {
+	for (const path of paths) {
+		if (ports.stopped()) {
+			return refused(INTERRUPTED)
+		}
 		const bytes = await ports
 			.read(`${prefix}${path}`, MAX_TOOL_ARTIFACT_FILE_BYTES)
 			.catch(() => null)
@@ -110,19 +148,28 @@ export const saveArtifact = async (
 			return refused(`${path} could not be read.`)
 		}
 		if (bytes.byteLength > MAX_TOOL_ARTIFACT_FILE_BYTES) {
-			return refused(`${path} is larger than ${MAX_TOOL_ARTIFACT_FILE_BYTES / MEBIBYTE} MiB.`)
+			return tooLarge(path)
 		}
 		total += bytes.byteLength
 		if (total > MAX_TOOL_ARTIFACT_TOTAL_BYTES) {
-			return refused(`The files total more than ${MAX_TOOL_ARTIFACT_TOTAL_BYTES / MEBIBYTE} MiB.`)
+			return tooMuch
 		}
-		const saved = await ports.saveFile(path, bytes)
+		const saved = await ports.saveFile(path, bytes).catch(() => null)
+		if (saved === null) {
+			return refused(`Saving ${path} failed; try again.`)
+		}
 		if (!saved.ok) {
 			return refused(saved.message)
 		}
 		entries.push({ path, file_id: saved.file_id })
 	}
-	const artifact = await ports.saveArtifact(name, entries)
+	if (ports.stopped()) {
+		return refused(INTERRUPTED)
+	}
+	const artifact = await ports.saveArtifact(name, entries).catch(() => null)
+	if (artifact === null) {
+		return refused("Saving the artifact failed; try again.")
+	}
 	if (!artifact.ok) {
 		return refused(artifact.message)
 	}

@@ -187,6 +187,71 @@ describe("An artifact the agent saves", () => {
 				}),
 		))
 
+	it("gives two saves racing for one name a version each that holds what that call sent", () =>
+		withSessions((apiFetch, { sessionArtifactSaves, runInWorld, createSession }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const saves = sessionArtifactSaves()
+				const run = <A>(effect: Effect.Effect<A>) => Effect.promise(() => runInWorld(effect))
+				const fileOf = (text: string) =>
+					Effect.map(
+						run(saves.sessionFileSave(session.id, 1, "page.html", new TextEncoder().encode(text))),
+						(saved) => (saved.ok ? saved.file_id : ""),
+					)
+				const contents = ["<p>first</p>", "<p>second</p>", "<p>third</p>"]
+				const ids = yield* Effect.forEach(contents, fileOf)
+				const outcomes = yield* Effect.forEach(
+					ids,
+					(file_id) =>
+						run(saves.sessionArtifactSave(session.id, "Page", [{ path: "page.html", file_id }])),
+					{ concurrency: "unbounded" },
+				)
+				expect(outcomes.map((outcome) => outcome.ok)).toEqual([true, true, true])
+				const versions = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.version] : []))
+				expect(versions.toSorted((left, right) => left - right)).toEqual([1, 2, 3])
+				const artifactId = outcomes[0]?.ok === true ? outcomes[0].artifact_id : ""
+				for (const [index, version] of versions.entries()) {
+					const page = yield* request(
+						apiFetch,
+						"GET",
+						`/v1/artifacts/${artifactId}/versions/${version}/content?file=page.html`,
+					)
+					expect([version, yield* Effect.promise(() => page.text())]).toEqual([
+						version,
+						contents[index],
+					])
+				}
+			}),
+		))
+
+	it("saves a file again after a client deleted the copy saved before", () =>
+		withSessions((apiFetch, { workspaceFiles, createSession, save }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				workspaceFiles(session.id).set("/workspace/out/a.txt", "a")
+				const id = idIn(yield* save(session.id, "Report", "/workspace/out"))
+				const listed = yield* json<{ data: ReadonlyArray<{ id: string }> }>(
+					yield* request(apiFetch, "GET", "/v1/files"),
+				).pipe(
+					Effect.repeat({
+						schedule: Schedule.spaced("5 millis"),
+						times: 200,
+						until: (page) => page.data.length >= 1,
+					}),
+				)
+				for (const file of listed.data) {
+					expect((yield* request(apiFetch, "DELETE", `/v1/files/${file.id}`)).status).toBe(200)
+				}
+				expect(yield* save(session.id, "Report", "/workspace/out")).toBe(
+					`"Report" is unchanged: artifact ${id} is still at version 1, with 1 file.`,
+				)
+				workspaceFiles(session.id).set("/workspace/out/b.txt", "b")
+				expect(yield* save(session.id, "Report", "/workspace/out")).toBe(
+					`Saved "Report" as artifact ${id}, version 2, with 2 files.`,
+				)
+			}),
+		))
+
 	it("refuses to save once the artifact was deleted or the session has ended", () =>
 		withSessions(
 			(apiFetch, { workspaceFiles, sessionArtifactSaves, runInWorld, createSession, save }) =>
