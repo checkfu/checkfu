@@ -36,7 +36,14 @@ import {
 } from "./WebhookTypes.ts"
 
 export const WebhookEndpointState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals([
+		"",
+		"active",
+		"paused",
+		"disabled_redirect",
+		"disabled_sustained_failure",
+		"deleted",
+	]),
 	url: Schema.String,
 	description: Schema.String,
 	event_types: Schema.String,
@@ -543,7 +550,7 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			state.status === ""
 				? {
 						...state,
-						status: "active",
+						status: "active" as const,
 						url: e.url,
 						description: e.description,
 						event_types: e.event_types,
@@ -571,7 +578,7 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			state.status !== "" && state.status !== "deleted"
 				? {
 						...state,
-						status: "paused",
+						status: "paused" as const,
 						updated_at: DateTime.toEpochMillis(envelope.at),
 					}
 				: state,
@@ -579,7 +586,7 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			state.status !== "" && state.status !== "deleted"
 				? {
 						...state,
-						status: "active",
+						status: "active" as const,
 						definition_revision: state.definition_revision + 1,
 						...CLEAR_HEALTH,
 						updated_at: DateTime.toEpochMillis(envelope.at),
@@ -641,7 +648,10 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			state.status === "active"
 				? {
 						...state,
-						status: e.reason === "redirect" ? "disabled_redirect" : "disabled_sustained_failure",
+						status:
+							e.reason === "redirect"
+								? ("disabled_redirect" as const)
+								: ("disabled_sustained_failure" as const),
 						failure_window_started_at: e.window_started_at,
 						last_failure_at:
 							e.last_failure_at >= e.window_started_at ? e.last_failure_at : e.window_started_at,
@@ -653,7 +663,7 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 			state.status !== ""
 				? {
 						...state,
-						status: "deleted",
+						status: "deleted" as const,
 						secret_salt: "",
 						previous_secret_revision: 0,
 						previous_secret_salt: "",

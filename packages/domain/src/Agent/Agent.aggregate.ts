@@ -9,7 +9,7 @@ import { AgentCreated } from "./CreateAgent.command.ts"
 import { AgentUpdated } from "./UpdateAgent.command.ts"
 
 export const AgentState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "archived"]),
 	version: NonNegativeInt,
 	current_version_id: Schema.String,
 	name: Schema.String,
@@ -141,7 +141,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 		"agent.created": (state, e) =>
 			state.status === ""
 				? {
-						status: "active",
+						status: "active" as const,
 						version: e.version,
 						current_version_id: e.version_id,
 						name: e.name,
@@ -174,7 +174,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 			state.status === "active"
 				? {
 						...state,
-						status: "archived",
+						status: "archived" as const,
 					}
 				: state,
 	},

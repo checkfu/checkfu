@@ -5,14 +5,14 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T12:00:16.936Z",
+			"cut_at": "2026-11-27T12:24:58.914Z",
 			"schemas": {
-				"state:Checkfu.Agent": "d3066bb97f215e710e47aa9d55a2c12341a996617e1ded0992d1d65f379bc777",
+				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
 				"event:Checkfu.Agent/agent.created": "09d20bd66cdd1deedd5487fe64b0918106c3b1d2f98257207ca6d8d38ddbb0ae",
 				"event:Checkfu.Agent/agent.updated": "059d625a1443504eb752b642d8006b9577d64db5d834b8a2c0033eaf326377eb",
 				"command-reply:Checkfu/ArchiveAgent": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Checkfu.Environment": "0c5d8220ee3f83a8422f1d67486b0b3bfe0143847474e818d326a9459abcb1f1",
+				"state:Checkfu.Environment": "1aa539aaad2cbe1c5cd1af794ddc567682c1c5f35c95b6bc05f2001d762a7fde",
 				"event:Checkfu.Environment/environment.created": "b60f7ea7dd7b67d23286de6aab10444c8655b3b8a86a83fc7c2a1292b630caf9",
 				"event:Checkfu.Environment/environment.updated": "297557bf2d815e74147e8d41c852b83f2b99749476a6abc37431e556912dd204",
 				"event:Checkfu.Environment/environment.archived": "cc40307a097fb02a89b0665b3b30d55b529c5c22181145057e4c8342f0bb7e76",
@@ -68,7 +68,7 @@
 				"event:Checkfu.ToolConfirmation/tool_confirmation.requested": "e202712255c81c9278eeb1f23cde7cfc174011ae232a657ca32d3f889cb9eb0b",
 				"event:Checkfu.ToolConfirmation/tool_confirmation.answered": "816ef3a0d58867c7123c0be0c8c87bc247c5d000f0b2323212048aa36425e8b5",
 				"event:Checkfu.ToolConfirmation/tool_confirmation.returned": "bc136e027fed9f09b91bb488f5654c49de571fd50ee311632e4cb490d4a0cb2e",
-				"state:Checkfu.Automation": "aa559295d7c55e9307b97468ed3826a9361bbb43a67c893e99fd2d51a59d6371",
+				"state:Checkfu.Automation": "2369fb6376d6d4bdd083f5708f8aca39fb94a8de3a87e55950d6035ec696897a",
 				"event:Checkfu.Automation/automation.created": "43d6d878aa861d6556ebcfca1609aad0d3cc8b8421b4f016c13fd2906a8b0aff",
 				"event:Checkfu.Automation/automation.paused": "4e6798de3129964ab3721fd4641d4472b18a73ddc46f7f1dcb4630630d29e974",
 				"event:Checkfu.Automation/automation.unpaused": "fdeab68b27879f7f3263399f0d765091909d376dfa3a3a972e8074e4a4930894",
@@ -95,7 +95,7 @@
 				"event:Checkfu.AutomationCapacity/automation_slot.reserved": "39920032495cad1bccecba6ec60e6058a40d44d90628c597a95d00dc311cebb6",
 				"command-reply:Checkfu/ReleaseAutomationSlot": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"scheduled-command:Checkfu.AutomationCapacity/ReleaseAutomationSlot": "48ee02b65cdaba75bd67fd865baaf7ea712318bb32511a60f5ba12ca7c97a7ea",
-				"state:Checkfu.Artifact": "37da4b6854660b5bc654937c90dff755f14050856fd3cff7631ac1ac302fcd41",
+				"state:Checkfu.Artifact": "b8fb847cb7f31a622da069566181448ad59ac05d6611194a9fd36c7500ed6415",
 				"event:Checkfu.Artifact/artifact.reserved": "16f16f1e5b5ab058e69385c48e5ff64a16d5cc9f64e8fda43649847f0e0121d8",
 				"event:Checkfu.Artifact/artifact.reservation_expired": "6d072406d5ea6f667ccb30dd90aec786586f9d364cc16661968e3d5fa713fd4a",
 				"event:Checkfu.Artifact/artifact.created": "7b296a7f9fe5ffb77f702ef51e27c5df2dbea74d7f632e710919747037a91c60",
@@ -115,7 +115,7 @@
 				"command-reply:Checkfu/PublishArtifact": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/UnpublishArtifact": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/ClaimArtifactIdempotencyKey": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Checkfu.File": "e2ca3e0943e7251d7369e01e16f88af77b1f9ec1f002b31c40ca3f5423974cc6",
+				"state:Checkfu.File": "fd21a71eda92f31b93f1a9804d82024222546ad6d9cbf23fa07a37ead411cbce",
 				"event:Checkfu.File/file.reserved": "84b3945d2fb2334ab2b4e234d5acd70e16d4b13f83c461298a73025dc85d7408",
 				"event:Checkfu.File/file.reservation_expired": "e56fb8bfed964c7e42a6a65e3b7fe2f5b80ac72207f152949af7ef25c5b24cfa",
 				"event:Checkfu.File/file.created": "49e191b833659ad46d6bffec320b2d8719d9ed10e73d09be3edb47b61d069b52",
@@ -125,7 +125,7 @@
 				"scheduled-command:Checkfu.File/ExpireFileReservation": "a616918cb19515f36fb91eb2d842846362a647ef0c0cd2ac99ff3ca4a41b5b06",
 				"command-reply:Checkfu/CreateFile": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/DeleteFile": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Checkfu.MemoryStore": "4a3e209443c6b81f059147bd03200cc2249ea4365c81e7fab18490d68c4ad259",
+				"state:Checkfu.MemoryStore": "7c0d30165b992eca2802e6bcc8a00b771ea03b5fe279275ef65061e7a13adc47",
 				"event:Checkfu.MemoryStore/memory_store.created": "20fc6a46e28cb13133df8445058c27ecf774a47254f0404d255b1c16f4e458e8",
 				"event:Checkfu.MemoryStore/memory_store.updated": "f96902894f3fb3ae2ea02c4b366e666f8e856e3db6bad82f213950cda9b068e3",
 				"event:Checkfu.MemoryStore/memory_store.archived": "8474c209717a2a24bfa185ff7a1f8b78d37125d2ff15b55dda44ad86354a477b",
@@ -136,7 +136,7 @@
 				"command-reply:Checkfu/UpdateMemoryStore": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/ArchiveMemoryStore": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/DeleteMemoryStore": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Checkfu.Memory": "e62942178bcb94c91d8e937d026fa006e9d0261e65ca072c12aba28b5d858e93",
+				"state:Checkfu.Memory": "e055678c860b45b53a0f57803bfb13abcef5de64b4f12c66dcd222e1add42e29",
 				"event:Checkfu.Memory/memory.written": "6ae8bc43d7b5d8d3795031b562dcaf2d27f1e3e74ba4254af10024ec70d37095",
 				"event:Checkfu.Memory/memory.deleted": "fe6459bf562a64e711914b1e74c843886af1b919db9db450f966417317e05fb3",
 				"command-reply:Checkfu/CreateAgent": "97506d720f7740b90ea82a50e4676cc0c88ba90d774fe016a2f4114175cb4c34",
@@ -187,7 +187,7 @@
 				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
 				"saga-input:Checkfu.RunTurn": "56b5422c6cc2f000891b60dfda037ee81cd6c9f86ce7ff528cc2a913eecfbfe1",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
-				"state:Webhooks.WebhookEndpoint": "0b173c30d84e4e7ba5f9491f5b7e1594dfb33c3dcaff8b9c8e42aa00bcd74eb5",
+				"state:Webhooks.WebhookEndpoint": "42513e12ece950579289bf9adcc879b8311c0c23eeaa1e49b2ed254ea30df2bb",
 				"event:Webhooks.WebhookEndpoint/webhook.created": "ee7244fa3a25a8a99d7ca1fd1b7d92271c78d6aaefe0c7f1dbf92f76d0c780c8",
 				"event:Webhooks.WebhookEndpoint/webhook.updated": "45d766cb1cded140ebe11d5279d21157c8f0127978a8ad3b98ddef47aa68d564",
 				"event:Webhooks.WebhookEndpoint/webhook.paused": "379a79cda3f3401c30e8695fc1995a8aa02fa4d6f081271f191eb46ad69e9ab3",
@@ -212,7 +212,7 @@
 				"command-reply:Webhooks/DeleteWebhookEndpoint": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Webhooks/ClaimWebhookIdempotencyKey": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"policy-delivery:Webhooks.ExpirePreviousWebhookSecrets/WebhookEndpoint": "868e59b051a72ae9b7f7f60b0a9d5cfd36d5ed7c6b3997fb54a5498dd696c6ef",
-				"state:Vaults.Vault": "0fa42fd1798b72009bb08185bc07b892d3aecc550eb6136aff9326d9dd47c2e7",
+				"state:Vaults.Vault": "84cc33191de008ef82a9a29883f24fb84592ba5d70f8754c1c8d6867f42e8da8",
 				"event:Vaults.Vault/vault.created": "2733b73079af265d8c8e7f39ec43d62673c146d29596e0f98b53d459ace552d3",
 				"event:Vaults.Vault/vault.renamed": "ebb9861dc217e650cbb75953f1d61929346d9187cf9a12d5dddac09d3a344648",
 				"event:Vaults.Vault/vault.archived": "7bf6fc06e548ca382ef92b84a8ced79d68fbb6571c813442f8d48cb20302e6c4",
@@ -226,7 +226,7 @@
 				"command-reply:Vaults/UpdateVault": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Vaults/ArchiveVault": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Vaults/DeleteVault": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
-				"state:Vaults.Credential": "a2e7738a2cac3371b7a391e3a00c771444da9eb8ce7667a462804272494802d9",
+				"state:Vaults.Credential": "1d52288474c2c9db5cb8363af4a07c5a8f8cb5fb87aa2fd31f5931bf2534f1f7",
 				"event:Vaults.Credential/vault_credential.created": "247c98c85fe9cc090d6f5766fd31efc5f8cad2823044e1aa2335cfbe43b8ba64",
 				"event:Vaults.Credential/vault_credential.renamed": "9eb1eb9f7c92acdb9e0b377381e0fbc60eea7410a57ab2f1838b6271cc361a6c",
 				"event:Vaults.Credential/vault_credential.rotated": "a8bb10c84121528eb8f1d14eb46d1afe5c1dfa634e4010568837fa1a8d29b0e2",
@@ -336,25 +336,25 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "(LNLrs^",
-							"version": 27,
-							"current_version_id": "-}kGaJnSA",
-							"name": "U|I#o3",
-							"model_id": "\udc00",
-							"has_system": false,
-							"system": "",
-							"has_description": true,
-							"description": "",
-							"mcp_servers": "\\@^'NfdhL<",
-							"tools": "__proto__"
+							"status": "active",
+							"version": 66,
+							"current_version_id": "-1",
+							"name": "-1",
+							"model_id": "P9Qkn-}",
+							"has_system": true,
+							"system": "prototype",
+							"has_description": false,
+							"description": "sXY",
+							"mcp_servers": "#o3+",
+							"tools": ""
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "yYVzNRkMu4",
-							"version": 59,
-							"current_version_id": "toString",
+							"status": "active",
+							"version": 6,
+							"current_version_id": "NRkMu4aW8d",
 							"name": "",
 							"model_id": "",
 							"has_system": false,
@@ -368,97 +368,97 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
+							"status": "active",
 							"version": 3,
-							"current_version_id": "😀",
+							"current_version_id": "4294967295",
 							"name": "😀",
-							"model_id": "",
+							"model_id": "😀",
 							"has_system": false,
-							"system": "W*#68o'!].",
-							"has_description": true,
-							"description": "dS/c",
-							"mcp_servers": "-1",
-							"tools": "0"
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "4294967295",
-							"version": 98,
-							"current_version_id": "<vF+L5@",
-							"name": "-1",
-							"model_id": "\t",
-							"has_system": true,
-							"system": "4294967295",
+							"system": "z#;W*#68o'",
 							"has_description": false,
-							"description": "'a+;",
-							"mcp_servers": "$e]3^_K6\"@",
-							"tools": "y:"
+							"description": "",
+							"mcp_servers": "dS/c",
+							"tools": "-1"
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "0",
-							"version": 3,
-							"current_version_id": "",
-							"name": "",
-							"model_id": "prototype",
+							"status": "active",
+							"version": 60,
+							"current_version_id": "a<vF+L5@I",
+							"name": "\u0000",
+							"model_id": "__proto__",
 							"has_system": false,
-							"system": "QFd~1tRqo6",
+							"system": "]I'a+;",
 							"has_description": true,
-							"description": "",
-							"mcp_servers": "",
+							"description": "-1",
+							"mcp_servers": "toString",
 							"tools": ""
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "rloX",
-							"version": 17,
-							"current_version_id": "oB",
-							"name": "4294967295",
+							"status": "",
+							"version": 4,
+							"current_version_id": "prototype",
+							"name": "prototype",
 							"model_id": "",
-							"has_system": true,
+							"has_system": false,
+							"system": "",
+							"has_description": false,
+							"description": "4294967295",
+							"mcp_servers": "toString",
+							"tools": "Rqo6~UV'X&"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "archived",
+							"version": 40,
+							"current_version_id": "Xw0rt2oB+",
+							"name": "1U$2^",
+							"model_id": "prototype",
+							"has_system": false,
 							"system": "\t",
 							"has_description": false,
-							"description": "prototype",
-							"mcp_servers": "+p/m7:}kZJ",
-							"tools": "0"
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "😀",
-							"version": 74,
-							"current_version_id": "",
-							"name": "__proto__",
-							"model_id": "\ud800",
-							"has_system": false,
-							"system": "XzJ12#C\\M",
-							"has_description": false,
 							"description": "",
-							"mcp_servers": "oxT:Ss[",
-							"tools": "\u0000"
+							"mcp_servers": "\n",
+							"tools": "JCDPO#"
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "N$vb",
-							"version": 100,
-							"current_version_id": "~yTzt?U",
-							"name": "toString",
-							"model_id": "8D|@;e2h {",
+							"status": "active",
+							"version": 90,
+							"current_version_id": "KWFq#hpnXz",
+							"name": "\t",
+							"model_id": "",
 							"has_system": false,
-							"system": "Se1nagA*QE",
-							"has_description": false,
-							"description": "\ud800",
-							"mcp_servers": "^*l{[2",
-							"tools": "prototype"
+							"system": "ZBlz~^oxT:",
+							"has_description": true,
+							"description": ";m6!s",
+							"mcp_servers": "c'N#7E3",
+							"tools": "\ud800"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "active",
+							"version": 38,
+							"current_version_id": "",
+							"name": "~rka~yTzt",
+							"model_id": "4294967295",
+							"has_system": true,
+							"system": "%8",
+							"has_description": true,
+							"description": "",
+							"mcp_servers": "",
+							"tools": "😀"
 						}
 					}
 				],
@@ -714,23 +714,18 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\t",
+							"status": "",
 							"version": 2,
-							"name": "Mr++}CtZHY",
-							"description": "h0iOgxZyP$",
-							"config": {
-								"type": "cloud",
-								"networking": {
-									"type": "unrestricted"
-								}
-							}
+							"name": "4294967295",
+							"description": null,
+							"config": null
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "0",
-							"version": 53,
+							"status": "active",
+							"version": 97,
 							"name": "",
 							"description": "4294967295",
 							"config": {
@@ -747,18 +742,23 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
-							"version": 96,
-							"name": "",
-							"description": "",
-							"config": null
+							"status": "active",
+							"version": 5,
+							"name": "\ud800",
+							"description": null,
+							"config": {
+								"type": "cloud",
+								"networking": {
+									"type": "unrestricted"
+								}
+							}
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
-							"version": 83,
+							"status": "active",
+							"version": 99,
 							"name": "h\"e&i@2e#/",
 							"description": "",
 							"config": {
@@ -772,18 +772,23 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": " ",
-							"version": 94,
-							"name": "K",
-							"description": "",
-							"config": null
+							"status": "active",
+							"version": 5,
+							"name": "toString",
+							"description": null,
+							"config": {
+								"type": "cloud",
+								"networking": {
+									"type": "unrestricted"
+								}
+							}
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\u0000",
-							"version": 89,
+							"status": "",
+							"version": 100,
 							"name": "\udc00",
 							"description": "",
 							"config": null
@@ -793,19 +798,19 @@
 						"schema_version": 1,
 						"state": {
 							"status": "",
-							"version": 1,
-							"name": "",
-							"description": null,
+							"version": 4,
+							"name": "toString",
+							"description": "prototype",
 							"config": null
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": ",UAQ$",
-							"version": 8,
-							"name": "\n",
-							"description": null,
+							"status": "archived",
+							"version": 52,
+							"name": "4294967295",
+							"description": "",
 							"config": {
 								"type": "cloud",
 								"networking": {
@@ -4214,89 +4219,89 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "bs)_dsHw?f",
-							"runs": 22,
-							"reported": 21,
-							"last_scheduled_at": 44,
-							"activation": 99,
-							"revision": 92
+							"status": "paused",
+							"runs": 96,
+							"reported": 89,
+							"last_scheduled_at": 99,
+							"activation": 43,
+							"revision": 33
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "eXQ:\"=g",
-							"runs": 15,
-							"reported": 73,
-							"last_scheduled_at": 77,
-							"activation": 69,
-							"revision": 6
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "G')tRc8z[",
-							"runs": 14,
-							"reported": 97,
-							"last_scheduled_at": 6,
-							"activation": 90,
-							"revision": 0
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "",
-							"runs": 3,
-							"reported": 99,
-							"last_scheduled_at": 84,
-							"activation": 6,
-							"revision": 44
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "\",YriL$irV",
-							"runs": 3,
-							"reported": 3,
-							"last_scheduled_at": 36,
+							"status": "archived",
+							"runs": 64,
+							"reported": 60,
+							"last_scheduled_at": 28,
 							"activation": 5,
-							"revision": 58
+							"revision": 15
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "0",
-							"runs": 94,
-							"reported": 5,
-							"last_scheduled_at": 78,
-							"activation": 3,
-							"revision": 6
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "__proto__",
-							"runs": 4,
-							"reported": 83,
-							"last_scheduled_at": 5,
-							"activation": 88,
-							"revision": 4
+							"status": "paused",
+							"runs": 88,
+							"reported": 0,
+							"last_scheduled_at": 53,
+							"activation": 26,
+							"revision": 63
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
 							"status": "",
-							"runs": 92,
-							"reported": 98,
-							"last_scheduled_at": 32,
-							"activation": 2,
-							"revision": 80
+							"runs": 0,
+							"reported": 5,
+							"last_scheduled_at": 93,
+							"activation": 20,
+							"revision": 97
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "archived",
+							"runs": 94,
+							"reported": 6,
+							"last_scheduled_at": 47,
+							"activation": 100,
+							"revision": 28
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "active",
+							"runs": 5,
+							"reported": 3,
+							"last_scheduled_at": 77,
+							"activation": 12,
+							"revision": 2
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
+							"runs": 4,
+							"reported": 5,
+							"last_scheduled_at": 35,
+							"activation": 99,
+							"revision": 1
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "paused",
+							"runs": 5,
+							"reported": 18,
+							"last_scheduled_at": 65,
+							"activation": 32,
+							"revision": 2
 						}
 					}
 				],
@@ -5428,65 +5433,65 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "nd7]GjYWG1",
-							"version": 0,
-							"name": "toString",
-							"manifest": "R.JU'\"D",
-							"replaced_manifest": "\t",
-							"file_count": 2,
-							"total_bytes": 0,
-							"reservations": 83,
-							"open_reservation": 47,
-							"created_at": 89,
-							"updated_at": 5,
-							"publication_token": "__proto__",
-							"pinned_version": 1,
-							"published_at": 11
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "a",
-							"version": 0,
-							"name": "9CY@fo3_>h",
-							"manifest": "msTSY}KPs",
-							"replaced_manifest": "\u0000",
-							"file_count": 33,
-							"total_bytes": 100,
-							"reservations": 2,
-							"open_reservation": 56,
-							"created_at": 26,
-							"updated_at": 80,
-							"publication_token": "^<+NShhAr/",
-							"pinned_version": 91,
-							"published_at": 48
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "-1",
-							"version": 94,
-							"name": "-1",
-							"manifest": "0",
-							"replaced_manifest": "{?\"\\.`1]_z",
-							"file_count": 5,
-							"total_bytes": 5,
-							"reservations": 6,
-							"open_reservation": 93,
+							"status": "deleted",
+							"version": 5,
+							"name": "",
+							"manifest": "\ud800",
+							"replaced_manifest": "1f 3",
+							"file_count": 99,
+							"total_bytes": 64,
+							"reservations": 15,
+							"open_reservation": 0,
 							"created_at": 2,
-							"updated_at": 5,
-							"publication_token": "'F_01Vp",
-							"pinned_version": 55,
-							"published_at": 22
+							"updated_at": 1,
+							"publication_token": "0",
+							"pinned_version": 5,
+							"published_at": 85
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\u0000",
-							"version": 91,
+							"status": "deleted",
+							"version": 14,
+							"name": " zEg9CY@fo",
+							"manifest": "prototype",
+							"replaced_manifest": "toString",
+							"file_count": 96,
+							"total_bytes": 82,
+							"reservations": 55,
+							"open_reservation": 61,
+							"created_at": 46,
+							"updated_at": 89,
+							"publication_token": "\u0000",
+							"pinned_version": 33,
+							"published_at": 100
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
+							"version": 5,
+							"name": "\t",
+							"manifest": "",
+							"replaced_manifest": "__proto__",
+							"file_count": 6,
+							"total_bytes": 4,
+							"reservations": 95,
+							"open_reservation": 67,
+							"created_at": 48,
+							"updated_at": 95,
+							"publication_token": "\ud800",
+							"pinned_version": 6,
+							"published_at": 93
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "active",
+							"version": 100,
 							"name": "",
 							"manifest": "prototype",
 							"replaced_manifest": "",
@@ -5504,32 +5509,32 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "__proto__",
-							"version": 83,
-							"name": "prototype",
+							"status": "",
+							"version": 55,
+							"name": "0hRD?-g}u+",
 							"manifest": "toString",
-							"replaced_manifest": "",
-							"file_count": 100,
-							"total_bytes": 12,
-							"reservations": 97,
-							"open_reservation": 6,
-							"created_at": 1,
-							"updated_at": 13,
-							"publication_token": "__proto__",
-							"pinned_version": 85,
-							"published_at": 97
+							"replaced_manifest": "-1",
+							"file_count": 97,
+							"total_bytes": 18,
+							"reservations": 13,
+							"open_reservation": 3,
+							"created_at": 43,
+							"updated_at": 56,
+							"publication_token": "",
+							"pinned_version": 25,
+							"published_at": 3
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
-							"version": 5,
-							"name": "\\t'biD3KaM",
-							"manifest": "",
-							"replaced_manifest": "-1",
-							"file_count": 34,
-							"total_bytes": 87,
+							"status": "deleted",
+							"version": 3,
+							"name": "toString",
+							"manifest": "\\t'biD3KaM",
+							"replaced_manifest": "",
+							"file_count": 6,
+							"total_bytes": 6,
 							"reservations": 57,
 							"open_reservation": 100,
 							"created_at": 50,
@@ -5542,39 +5547,39 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "?KnBhIHuKh",
-							"version": 42,
+							"status": "active",
+							"version": 96,
 							"name": "\ud800",
-							"manifest": "vdSLYFZL]A",
-							"replaced_manifest": "_/d",
-							"file_count": 59,
-							"total_bytes": 29,
-							"reservations": 32,
-							"open_reservation": 0,
-							"created_at": 4,
-							"updated_at": 1,
-							"publication_token": "-1",
-							"pinned_version": 2,
-							"published_at": 62
+							"manifest": "toString",
+							"replaced_manifest": "-1",
+							"file_count": 46,
+							"total_bytes": 51,
+							"reservations": 5,
+							"open_reservation": 4,
+							"created_at": 92,
+							"updated_at": 54,
+							"publication_token": "__proto__",
+							"pinned_version": 3,
+							"published_at": 35
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "prototype",
-							"version": 98,
-							"name": "\u0000",
-							"manifest": "\ud800",
-							"replaced_manifest": "SLz{",
-							"file_count": 62,
-							"total_bytes": 94,
-							"reservations": 4,
-							"open_reservation": 45,
-							"created_at": 91,
-							"updated_at": 97,
-							"publication_token": "\udc00",
-							"pinned_version": 46,
-							"published_at": 99
+							"status": "",
+							"version": 17,
+							"name": "A)j",
+							"manifest": "SLz{",
+							"replaced_manifest": "o(h",
+							"file_count": 3,
+							"total_bytes": 91,
+							"reservations": 97,
+							"open_reservation": 100,
+							"created_at": 5,
+							"updated_at": 31,
+							"publication_token": "\ud800",
+							"pinned_version": 32,
+							"published_at": 4
 						}
 					}
 				],
@@ -6132,59 +6137,59 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "N1O!bqFw5k",
-							"filename": "prototype",
-							"content_type": "__proto__",
-							"size": 60,
-							"sha256": "%7Hf*!E12o",
-							"reservations": 1,
-							"open_reservation": 2,
-							"created_at": 53
+							"status": "deleted",
+							"filename": "1O!bq",
+							"content_type": "\udc00",
+							"size": 97,
+							"sha256": "",
+							"reservations": 60,
+							"open_reservation": 40,
+							"created_at": 6
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "^FES@R`(pD",
-							"filename": "",
-							"content_type": "😀",
-							"size": 1,
-							"sha256": "😀",
-							"reservations": 55,
-							"open_reservation": 100,
-							"created_at": 4
+							"status": "deleted",
+							"filename": "\u0000",
+							"content_type": "S@R`(pDm&Y",
+							"size": 95,
+							"sha256": "{`S<s|%\\bu",
+							"reservations": 15,
+							"open_reservation": 3,
+							"created_at": 74
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\n",
-							"filename": "",
-							"content_type": "\\*=h3?V +=",
-							"size": 90,
-							"sha256": "\ud800",
-							"reservations": 66,
-							"open_reservation": 81,
-							"created_at": 87
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": " JVM,?%sk|",
-							"filename": "(]JuDPq3GH",
+							"status": "",
+							"filename": "__proto__",
 							"content_type": "\n",
-							"size": 4,
-							"sha256": "\u0000",
-							"reservations": 97,
-							"open_reservation": 97,
-							"created_at": 2
+							"size": 18,
+							"sha256": "=",
+							"reservations": 20,
+							"open_reservation": 0,
+							"created_at": 5
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "toString",
+							"status": "deleted",
+							"filename": "\n",
+							"content_type": "-1",
+							"size": 48,
+							"sha256": "\u0000",
+							"reservations": 99,
+							"open_reservation": 99,
+							"created_at": 94
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
 							"filename": "",
 							"content_type": "\ud800",
 							"size": 77,
@@ -6197,40 +6202,40 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "Q_Mu60d",
-							"filename": "",
-							"content_type": "\t",
-							"size": 4,
-							"sha256": "😀",
-							"reservations": 82,
-							"open_reservation": 96,
-							"created_at": 10
+							"status": "deleted",
+							"filename": "_Mu60",
+							"content_type": "",
+							"size": 3,
+							"sha256": "prototype",
+							"reservations": 99,
+							"open_reservation": 82,
+							"created_at": 86
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "HO\"?d4",
-							"filename": "",
-							"content_type": "s%DE",
-							"size": 6,
-							"sha256": "😀",
-							"reservations": 97,
-							"open_reservation": 62,
-							"created_at": 73
+							"status": "deleted",
+							"filename": "O\"?d",
+							"content_type": "\ud800",
+							"size": 100,
+							"sha256": "%DENMw3~Ie",
+							"reservations": 64,
+							"open_reservation": 89,
+							"created_at": 33
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\udc00",
-							"filename": "?eN",
-							"content_type": "\t",
-							"size": 97,
-							"sha256": "\udc00",
-							"reservations": 3,
-							"open_reservation": 99,
-							"created_at": 5
+							"status": "",
+							"filename": "??eN&/,vQ&",
+							"content_type": "",
+							"size": 5,
+							"sha256": "$)=r[,5G6=",
+							"reservations": 6,
+							"open_reservation": 98,
+							"created_at": 3
 						}
 					}
 				],
@@ -6488,81 +6493,81 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\ud800",
-							"name": "0",
+							"status": "",
+							"name": "nAUyD.s/AA",
+							"description": "l[P$&,$_&R",
+							"memory_count": 5,
+							"layout_version": 2
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
+							"name": "c$Q8#aRJTo",
+							"description": "<KkMU\\^5]<",
+							"memory_count": 97,
+							"layout_version": 9
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "deleted",
+							"name": "\n",
+							"description": "6;{cL}&dHw",
+							"memory_count": 80,
+							"layout_version": 2
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "archived",
+							"name": "",
+							"description": "?B+(\\P,y~h",
+							"memory_count": 6,
+							"layout_version": 0
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "deleted",
+							"name": "c1jzwE,",
 							"description": "",
-							"memory_count": 38,
-							"layout_version": 95
+							"memory_count": 4,
+							"layout_version": 68
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "😀",
-							"name": "toString",
-							"description": "8#aRJTorFH",
-							"memory_count": 5,
-							"layout_version": 4
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "]2?6;{cL}&",
-							"name": "",
-							"description": "*Fvk",
-							"memory_count": 58,
-							"layout_version": 66
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "",
-							"name": "#?B+",
-							"description": "__proto__",
+							"status": "active",
+							"name": "\t",
+							"description": "\t",
 							"memory_count": 13,
-							"layout_version": 100
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "_c1jzwE,",
-							"name": "",
-							"description": "\u0000",
-							"memory_count": 67,
-							"layout_version": 46
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "-1",
-							"name": "",
-							"description": "4294967295",
-							"memory_count": 98,
-							"layout_version": 89
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "\udc00",
-							"name": "",
-							"description": "\u0000",
-							"memory_count": 5,
-							"layout_version": 36
+							"layout_version": 64
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
 							"status": "",
-							"name": "prototype",
-							"description": "\n",
-							"memory_count": 100,
-							"layout_version": 16
+							"name": "K0=7<",
+							"description": "A w)",
+							"memory_count": 85,
+							"layout_version": 35
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "deleted",
+							"name": "-1",
+							"description": "prototype",
+							"memory_count": 0,
+							"layout_version": 87
 						}
 					}
 				],
@@ -6814,9 +6819,9 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": " ",
-							"memory_store_id": "4294967295",
-							"path": "\t",
+							"status": "present",
+							"memory_store_id": " ",
+							"path": "",
 							"content_sha256": "wl~p\\[",
 							"version": 0
 						}
@@ -6824,49 +6829,49 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\u0000",
-							"memory_store_id": "",
-							"path": "-1",
-							"content_sha256": "[t9A4R",
-							"version": 6
+							"status": "present",
+							"memory_store_id": "prototype",
+							"path": "\ud800",
+							"content_sha256": "-1",
+							"version": 83
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "tY5t",
-							"memory_store_id": "$=)",
-							"path": "\udc00",
-							"content_sha256": "2*Im.xJPh|",
-							"version": 6
+							"status": "deleted",
+							"memory_store_id": "Y5t[\\A$=)>",
+							"path": "o",
+							"content_sha256": " ",
+							"version": 95
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\n",
-							"memory_store_id": "",
-							"path": "E&d32.md:L",
-							"content_sha256": "\udc00",
-							"version": 3
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "iboNV\"1P<-",
-							"memory_store_id": "__proto__",
-							"path": "dd'-<d#? s",
-							"content_sha256": "",
-							"version": 1
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "'kB<q;7y[",
-							"memory_store_id": "__proto__",
+							"status": "present",
+							"memory_store_id": "\udc00",
 							"path": "",
+							"content_sha256": "\ud800",
+							"version": 5
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "deleted",
+							"memory_store_id": "prototype",
+							"path": "NV\"1P<-7[",
+							"content_sha256": "dd'-<d#? s",
+							"version": 0
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "deleted",
+							"memory_store_id": "",
+							"path": "q;7y[1Y`?9",
 							"content_sha256": "",
 							"version": 0
 						}
@@ -6874,21 +6879,21 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
-							"memory_store_id": "j",
-							"path": "toString",
-							"content_sha256": " ",
-							"version": 94
+							"status": "deleted",
+							"memory_store_id": "",
+							"path": "",
+							"content_sha256": "toString",
+							"version": 2
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "_xO?d",
-							"memory_store_id": "toString",
-							"path": "H6v",
-							"content_sha256": ">QH5\"kn tb",
-							"version": 3
+							"status": "deleted",
+							"memory_store_id": "",
+							"path": "",
+							"content_sha256": "",
+							"version": 56
 						}
 					}
 				],
@@ -10314,32 +10319,32 @@
 						"schema_version": 1,
 						"state": {
 							"status": "",
-							"url": "\u0000",
-							"description": "prototype",
-							"event_types": "CjQg<xg#P?",
-							"definition_revision": 55,
-							"secret_revision": 98,
-							"secret_salt": "\ud800",
-							"previous_secret_revision": 0,
-							"previous_secret_salt": "wJe40qzTP{",
-							"previous_secret_expires_at": 16,
-							"failure_window_started_at": 72,
-							"last_failure_at": 6,
-							"consecutive_failures": 0,
-							"created_at": 98,
-							"updated_at": 4
+							"url": " ",
+							"description": "-1",
+							"event_types": "f",
+							"definition_revision": 97,
+							"secret_revision": 30,
+							"secret_salt": "",
+							"previous_secret_revision": 33,
+							"previous_secret_salt": "`",
+							"previous_secret_expires_at": 30,
+							"failure_window_started_at": 84,
+							"last_failure_at": 4,
+							"consecutive_failures": 93,
+							"created_at": 95,
+							"updated_at": 100
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "pNk$R",
-							"url": "prototype",
-							"description": "\u0000",
-							"event_types": " ",
-							"definition_revision": 35,
-							"secret_revision": 25,
-							"secret_salt": ">jr\\PDEwcv",
+							"status": "disabled_sustained_failure",
+							"url": "Nk$RA_C?G",
+							"description": "prototype",
+							"event_types": "😀",
+							"definition_revision": 0,
+							"secret_revision": 5,
+							"secret_salt": "DEwcv",
 							"previous_secret_revision": 95,
 							"previous_secret_salt": "um|",
 							"previous_secret_expires_at": 8,
@@ -10353,27 +10358,27 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "3Y?fuo]wA}",
-							"url": "yVw/>W@u>j",
-							"description": "\n",
-							"event_types": "\n",
-							"definition_revision": 0,
-							"secret_revision": 99,
-							"secret_salt": "\t",
-							"previous_secret_revision": 34,
-							"previous_secret_salt": "0",
-							"previous_secret_expires_at": 94,
-							"failure_window_started_at": 1,
-							"last_failure_at": 99,
-							"consecutive_failures": 2,
-							"created_at": 98,
-							"updated_at": 29
+							"status": "disabled_redirect",
+							"url": "Y?",
+							"description": "]wA}a*nyV",
+							"event_types": "",
+							"definition_revision": 34,
+							"secret_revision": 32,
+							"secret_salt": "",
+							"previous_secret_revision": 3,
+							"previous_secret_salt": " ",
+							"previous_secret_expires_at": 99,
+							"failure_window_started_at": 5,
+							"last_failure_at": 2,
+							"consecutive_failures": 94,
+							"created_at": 1,
+							"updated_at": 99
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\ud800",
+							"status": "",
 							"url": "",
 							"description": "\t",
 							"event_types": "",
@@ -10393,28 +10398,28 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "u",
-							"url": "prototype",
-							"description": "",
-							"event_types": "toString",
-							"definition_revision": 5,
-							"secret_revision": 66,
-							"secret_salt": "PYp>u'F,EC",
-							"previous_secret_revision": 21,
-							"previous_secret_salt": "9  e)]nQPQ",
-							"previous_secret_expires_at": 3,
-							"failure_window_started_at": 95,
-							"last_failure_at": 36,
-							"consecutive_failures": 0,
-							"created_at": 58,
-							"updated_at": 87
+							"status": "deleted",
+							"url": "",
+							"description": "prototype",
+							"event_types": "",
+							"definition_revision": 94,
+							"secret_revision": 98,
+							"secret_salt": "^",
+							"previous_secret_revision": 61,
+							"previous_secret_salt": "'F,ECV4g=,",
+							"previous_secret_expires_at": 0,
+							"failure_window_started_at": 10,
+							"last_failure_at": 83,
+							"consecutive_failures": 51,
+							"created_at": 46,
+							"updated_at": 0
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "__proto__",
-							"url": "__proto__",
+							"status": "active",
+							"url": "",
 							"description": "prototype",
 							"event_types": "HD6' umV8,",
 							"definition_revision": 94,
@@ -10433,41 +10438,41 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\u0000",
-							"url": " ",
-							"description": "",
-							"event_types": "/E{G-GXQ|",
-							"definition_revision": 80,
-							"secret_revision": 83,
-							"secret_salt": "4294967295",
-							"previous_secret_revision": 71,
-							"previous_secret_salt": "=MMW+[iLU",
-							"previous_secret_expires_at": 4,
-							"failure_window_started_at": 94,
-							"last_failure_at": 1,
-							"consecutive_failures": 99,
-							"created_at": 4,
-							"updated_at": 93
+							"status": "paused",
+							"url": "-1",
+							"description": "\udc00",
+							"event_types": "4294967295",
+							"definition_revision": 55,
+							"secret_revision": 15,
+							"secret_salt": "😀",
+							"previous_secret_revision": 2,
+							"previous_secret_salt": "mkvn>Ric]W",
+							"previous_secret_expires_at": 31,
+							"failure_window_started_at": 4,
+							"last_failure_at": 5,
+							"consecutive_failures": 3,
+							"created_at": 0,
+							"updated_at": 9
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
-							"url": " ",
-							"description": "o!x{wmV6f9",
-							"event_types": "😀",
-							"definition_revision": 6,
-							"secret_revision": 95,
-							"secret_salt": "-1",
-							"previous_secret_revision": 89,
-							"previous_secret_salt": " ",
-							"previous_secret_expires_at": 25,
-							"failure_window_started_at": 5,
-							"last_failure_at": 93,
-							"consecutive_failures": 1,
-							"created_at": 2,
-							"updated_at": 32
+							"status": "disabled_sustained_failure",
+							"url": "prototype",
+							"description": " ",
+							"event_types": "o!x{wmV6f9",
+							"definition_revision": 96,
+							"secret_revision": 98,
+							"secret_salt": "cs=']7y$\\w",
+							"previous_secret_revision": 1,
+							"previous_secret_salt": "\u0000",
+							"previous_secret_expires_at": 2,
+							"failure_window_started_at": 85,
+							"last_failure_at": 100,
+							"consecutive_failures": 64,
+							"created_at": 0,
+							"updated_at": 30
 						}
 					}
 				],
@@ -11199,48 +11204,12 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "0",
-							"display_name": "4294967295",
-							"storing": -2,
-							"held": -2,
-							"erasing": -96,
-							"last_attached": "0",
-							"releasing": "😀"
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "\udc00",
-							"display_name": "8D2V",
-							"storing": -72,
-							"held": -92,
-							"erasing": 2,
-							"last_attached": "-1",
-							"releasing": " "
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "lmlWN",
-							"display_name": "",
-							"storing": 58,
-							"held": -46,
-							"erasing": -29,
-							"last_attached": "0",
-							"releasing": "ibO}~R1'yD"
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "4294967295",
+							"status": "active",
 							"display_name": "0",
-							"storing": -38,
-							"held": 68,
-							"erasing": 2,
-							"last_attached": " ",
+							"storing": -92,
+							"held": -28,
+							"erasing": -2,
+							"last_attached": "😀",
 							"releasing": ""
 						}
 					},
@@ -11248,44 +11217,80 @@
 						"schema_version": 1,
 						"state": {
 							"status": "",
-							"display_name": "\udc00",
-							"storing": -70,
-							"held": -2,
-							"erasing": 43,
-							"last_attached": "V8G=\\k_gyT",
-							"releasing": "2t[$hOboD["
+							"display_name": "G8D2VZ-W$",
+							"storing": 2,
+							"held": -6,
+							"erasing": 0,
+							"last_attached": "Z+7( 1)m/",
+							"releasing": "Pa"
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": " ",
-							"display_name": "\ud800",
-							"storing": -6,
-							"held": -95,
-							"erasing": -78,
-							"last_attached": "_9S",
-							"releasing": "\udc00"
+							"status": "archived",
+							"display_name": "mlWN%%`j",
+							"storing": -46,
+							"held": -29,
+							"erasing": 0,
+							"last_attached": " ",
+							"releasing": "}~R1'"
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "4294967295",
-							"display_name": "\n",
-							"storing": 0,
-							"held": -37,
-							"erasing": 94,
-							"last_attached": "LfX-1QK",
+							"status": "",
+							"display_name": "q=Xo*T\\:+|",
+							"storing": 4,
+							"held": -4,
+							"erasing": -95,
+							"last_attached": "toString",
 							"releasing": " "
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "4294967295",
+							"status": "archived",
+							"display_name": "t_.IC?VcnK",
+							"storing": -3,
+							"held": 2,
+							"erasing": 34,
+							"last_attached": "y=:2t[",
+							"releasing": "toString"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
+							"display_name": " ",
+							"storing": -4,
+							"held": -1,
+							"erasing": 60,
+							"last_attached": "j;_9SGt3Zp",
+							"releasing": "-1"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "active",
+							"display_name": ")>L^=Cn'lc",
+							"storing": -6,
+							"held": 20,
+							"erasing": 0,
+							"last_attached": "0",
+							"releasing": "\ud800"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
 							"display_name": "",
-							"storing": -18,
+							"storing": -98,
 							"held": 6,
 							"erasing": 98,
 							"last_attached": ">2@7[c#G/,",
@@ -11659,81 +11664,81 @@
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "I\\+QF+`zj?",
-							"vault_id": "",
-							"mcp_server_url": "H.&f+n)y",
-							"previous": "?^_dR/EM",
-							"custody": "Fy@%5?"
+							"status": "archived",
+							"vault_id": "\udc00",
+							"mcp_server_url": "__proto__",
+							"previous": "4294967295",
+							"custody": "held"
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
-							"vault_id": "",
+							"status": "archived",
+							"vault_id": "\u0000",
 							"mcp_server_url": "",
-							"previous": " ",
+							"previous": "",
 							"custody": ""
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "\n",
-							"vault_id": "prototype",
-							"mcp_server_url": "y8se",
-							"previous": "p)GTo<\"8M.",
+							"status": "active",
+							"vault_id": "",
+							"mcp_server_url": "Jy8seq*",
+							"previous": "G",
+							"custody": "held"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
+							"vault_id": "0",
+							"mcp_server_url": "\t",
+							"previous": "0",
+							"custody": "erasing"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "",
+							"vault_id": "ETW",
+							"mcp_server_url": "\u0000",
+							"previous": "",
+							"custody": "held"
+						}
+					},
+					{
+						"schema_version": 1,
+						"state": {
+							"status": "deleted",
+							"vault_id": "",
+							"mcp_server_url": "",
+							"previous": "0",
 							"custody": ""
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "",
+							"status": "archived",
 							"vault_id": "",
-							"mcp_server_url": "",
-							"previous": "toString",
-							"custody": "\ud800"
+							"mcp_server_url": "1+5eiZj",
+							"previous": "",
+							"custody": "storing"
 						}
 					},
 					{
 						"schema_version": 1,
 						"state": {
-							"status": "toString",
-							"vault_id": "",
-							"mcp_server_url": "",
-							"previous": "\ud800",
-							"custody": " "
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "",
-							"vault_id": "",
-							"mcp_server_url": "0",
-							"previous": "\u0000",
-							"custody": "?\"J;"
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": "&e}",
-							"vault_id": "",
-							"mcp_server_url": "toString",
-							"previous": "ZCF5*l,^",
-							"custody": "Q><_BljN.A"
-						}
-					},
-					{
-						"schema_version": 1,
-						"state": {
-							"status": ",9",
-							"vault_id": "&Fl-$B/.s)",
-							"mcp_server_url": "",
-							"previous": "HQB$B9u\"K}",
-							"custody": "__proto__"
+							"status": "archived",
+							"vault_id": "9iH7&Fl-$B",
+							"mcp_server_url": "\t",
+							"previous": "{\"h:xHQB$B",
+							"custody": "storing"
 						}
 					}
 				],

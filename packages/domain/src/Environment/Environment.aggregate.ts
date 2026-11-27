@@ -19,7 +19,7 @@ import {
 } from "./UpdateEnvironment.command.ts"
 
 export const EnvironmentState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "archived", "deleted"]),
 	version: NonNegativeInt,
 	name: Schema.String,
 	description: Schema.NullOr(Schema.String),
@@ -205,7 +205,7 @@ export class Environment extends Domain.Aggregate("Environment", {
 		"environment.created": (state, e) =>
 			state.status === ""
 				? {
-						status: "active",
+						status: "active" as const,
 						version: e.version,
 						name: e.name,
 						description: e.description,
@@ -226,14 +226,14 @@ export class Environment extends Domain.Aggregate("Environment", {
 			state.status === "active"
 				? {
 						...state,
-						status: "archived",
+						status: "archived" as const,
 					}
 				: state,
 		"environment.deleted": (state) =>
 			[state.status === "active", state.status === "archived"].some((live) => live)
 				? {
 						...state,
-						status: "deleted",
+						status: "deleted" as const,
 					}
 				: state,
 	},

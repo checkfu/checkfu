@@ -16,7 +16,7 @@ import { VaultNotFound } from "./VaultNotFound.rejection.ts"
 import { MAX_VAULT_CREDENTIALS } from "./VaultTypes.ts"
 
 export const VaultState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "archived", "deleted"]),
 	display_name: Schema.String,
 	storing: Schema.Int,
 	held: Schema.Int,
@@ -149,7 +149,7 @@ export class Vault extends Domain.Aggregate("Vault", {
 		"vault.created": (state, e) =>
 			state.status === ""
 				? {
-						status: "active",
+						status: "active" as const,
 						display_name: e.display_name,
 						storing: 0,
 						held: 0,
@@ -193,7 +193,7 @@ export class Vault extends Domain.Aggregate("Vault", {
 			state.status === "active"
 				? {
 						...state,
-						status: "archived",
+						status: "archived" as const,
 						storing: 0,
 						held: 0,
 						erasing: state.erasing + state.held + state.storing,
@@ -204,7 +204,7 @@ export class Vault extends Domain.Aggregate("Vault", {
 			[state.status === "active", state.status === "archived"].some((live) => live)
 				? {
 						...state,
-						status: "deleted",
+						status: "deleted" as const,
 						storing: 0,
 						held: 0,
 						erasing: state.erasing + state.held + state.storing,

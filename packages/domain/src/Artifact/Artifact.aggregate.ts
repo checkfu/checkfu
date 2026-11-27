@@ -31,7 +31,7 @@ import { ArtifactReserved, ReserveArtifact } from "./ReserveArtifact.command.ts"
 import { ArtifactUnpublished, UnpublishArtifact } from "./UnpublishArtifact.command.ts"
 
 export const ArtifactState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "deleted"]),
 	version: NonNegativeInt,
 	name: Schema.String,
 	manifest: Schema.String,
@@ -358,7 +358,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			state.status === ""
 				? {
 						...state,
-						status: "active",
+						status: "active" as const,
 						open_reservation: 0,
 						version: e.version,
 						name: e.name,
@@ -373,7 +373,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			state.status === ""
 				? {
 						...state,
-						status: "active",
+						status: "active" as const,
 						open_reservation: 0,
 						name: e.name,
 						created_at: DateTime.toEpochMillis(envelope.at),
@@ -396,7 +396,7 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			state.status === "active"
 				? {
 						...state,
-						status: "deleted",
+						status: "deleted" as const,
 						publication_token: "",
 						pinned_version: 0,
 						published_at: 0,

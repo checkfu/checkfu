@@ -7,7 +7,7 @@ import { NonNegativeInt } from "./MemoryTypes.ts"
 import { MemoryWritten } from "./WriteMemory.command.ts"
 
 export const MemoryState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "present", "deleted"]),
 	memory_store_id: Schema.String,
 	path: Schema.String,
 	content_sha256: Schema.String,
@@ -74,7 +74,7 @@ export class Memory extends Domain.Aggregate("Memory", {
 				].some((ok) => ok),
 			].every((ok) => ok)
 				? {
-						status: "present",
+						status: "present" as const,
 						memory_store_id: e.memory_store_id,
 						path: e.path,
 						content_sha256: e.content_sha256,
@@ -83,7 +83,7 @@ export class Memory extends Domain.Aggregate("Memory", {
 				: state,
 		"memory.deleted": (state, e) =>
 			[state.status === "present", e.version === state.version + 1].every((ok) => ok)
-				? { ...state, status: "deleted", content_sha256: "", version: e.version }
+				? { ...state, status: "deleted" as const, content_sha256: "", version: e.version }
 				: state,
 	},
 }) {}

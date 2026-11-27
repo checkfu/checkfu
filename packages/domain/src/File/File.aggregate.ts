@@ -12,7 +12,7 @@ import { NonNegativeInt } from "./FileTypes.ts"
 import { FileReserved, ReserveFile } from "./ReserveFile.command.ts"
 
 export const FileState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "ready", "deleted"]),
 	filename: Schema.String,
 	content_type: Schema.String,
 	size: NonNegativeInt,
@@ -142,7 +142,7 @@ export class File extends Domain.Aggregate("File", {
 			state.status === ""
 				? {
 						...state,
-						status: "ready",
+						status: "ready" as const,
 						open_reservation: 0,
 						filename: e.filename,
 						content_type: e.content_type,
@@ -151,6 +151,7 @@ export class File extends Domain.Aggregate("File", {
 						created_at: DateTime.toEpochMillis(envelope.at),
 					}
 				: state,
-		"file.deleted": (state) => (state.status === "ready" ? { ...state, status: "deleted" } : state),
+		"file.deleted": (state) =>
+			state.status === "ready" ? { ...state, status: "deleted" as const } : state,
 	},
 }) {}

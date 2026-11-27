@@ -27,7 +27,7 @@ import { AutomationUnpaused, UnpauseAutomation } from "./UnpauseAutomation.comma
 import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "paused", "archived"]),
 	runs: NonNegativeInt,
 	reported: NonNegativeInt,
 	last_scheduled_at: NonNegativeInt,
@@ -297,18 +297,20 @@ export class Automation extends Domain.Aggregate("Automation", {
 	},
 	evolve: {
 		"automation.created": (state) =>
-			state.status === "" ? { ...state, status: "active", revision: 1 } : state,
+			state.status === "" ? { ...state, status: "active" as const, revision: 1 } : state,
 		"automation.paused": (state) =>
-			state.status === "active" ? { ...state, status: "paused" } : state,
+			state.status === "active" ? { ...state, status: "paused" as const } : state,
 		"automation.unpaused": (state, e) =>
-			state.status === "paused" ? { ...state, status: "active", activation: e.activation } : state,
+			state.status === "paused"
+				? { ...state, status: "active" as const, activation: e.activation }
+				: state,
 		"automation.updated": (state, e) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)
 				? { ...state, revision: e.revision, activation: e.activation }
 				: state,
 		"automation.archived": (state) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)
-				? { ...state, status: "archived" }
+				? { ...state, status: "archived" as const }
 				: state,
 		"automation.fired": (state, e) => ({
 			...state,

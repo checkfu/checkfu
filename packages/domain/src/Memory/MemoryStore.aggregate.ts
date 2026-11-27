@@ -17,7 +17,7 @@ import { MemoryStoreUpdated, UpdateMemoryStore } from "./UpdateMemoryStore.comma
 import { MemoryAdded } from "./WriteMemory.command.ts"
 
 export const MemoryStoreState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "archived", "deleted"]),
 	name: Schema.String,
 	description: Schema.String,
 	memory_count: NonNegativeInt,
@@ -158,7 +158,7 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 		"memory_store.created": (state, e) =>
 			state.status === ""
 				? {
-						status: "active",
+						status: "active" as const,
 						name: e.name,
 						description: e.description,
 						memory_count: 0,
@@ -168,10 +168,10 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 		"memory_store.updated": (state, e) =>
 			state.status === "active" ? { ...state, name: e.name, description: e.description } : state,
 		"memory_store.archived": (state) =>
-			state.status === "active" ? { ...state, status: "archived" } : state,
+			state.status === "active" ? { ...state, status: "archived" as const } : state,
 		"memory_store.deleted": (state) =>
 			[state.status === "active", state.status === "archived"].some((live) => live)
-				? { ...state, status: "deleted" }
+				? { ...state, status: "deleted" as const }
 				: state,
 		"memory_store.memory_added": (state, e) =>
 			[

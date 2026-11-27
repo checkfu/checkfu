@@ -1,4 +1,5 @@
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
+import type { ArtifactState } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { SessionSnapshot, SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { MAX_ARTIFACT_FILE_BYTES, MAX_ARTIFACT_FILES } from "@checkfu/sdk/Limits"
@@ -104,7 +105,7 @@ export const mountReadFixture = (size: number, manifestFiles: number, backing?: 
 			updated_at: "2026-11-26T00:00:00.000Z",
 			archived_at: null,
 		})
-		const current = {
+		const current: ArtifactState = {
 			...(yield* artifacts.get(mountFixtureArtifactId)),
 			status: "active",
 			version: 2,

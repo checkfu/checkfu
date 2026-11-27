@@ -11,11 +11,11 @@ import { CredentialRotated } from "./RotateCredential.command.ts"
 import { CredentialRenamed } from "./UpdateCredential.command.ts"
 
 export const CredentialState = Schema.Struct({
-	status: Schema.String,
+	status: Schema.Literals(["", "active", "archived", "deleted"]),
 	vault_id: Schema.String,
 	mcp_server_url: Schema.String,
 	previous: Schema.String,
-	custody: Schema.String,
+	custody: Schema.Literals(["", "storing", "held", "erasing", "erased"]),
 })
 export type CredentialState = typeof CredentialState.Type
 
@@ -109,32 +109,34 @@ export class Credential extends Domain.Aggregate("Credential", {
 		"vault_credential.created": (state, e) =>
 			state.status === ""
 				? {
-						status: "active",
+						status: "active" as const,
 						vault_id: e.vault_id,
 						mcp_server_url: e.auth.mcp_server_url,
 						previous: e.previous,
-						custody: "storing",
+						custody: "storing" as const,
 					}
 				: state,
 		"vault_credential.renamed": (state) => state,
 		"vault_credential.rotated": (state) => state,
 		"vault_credential.secret_stored": (state) =>
 			[state.status === "active", state.custody === "storing"].every((ok) => ok)
-				? { ...state, custody: "held" }
+				? { ...state, custody: "held" as const }
 				: state,
 		"vault_credential.archived": (state) =>
-			state.status === "active" ? { ...state, status: "archived", custody: "erasing" } : state,
+			state.status === "active"
+				? { ...state, status: "archived" as const, custody: "erasing" as const }
+				: state,
 		"vault_credential.deleted": (state) =>
 			[state.status === "active", state.status === "archived"].some((live) => live)
 				? {
 						...state,
-						status: "deleted",
+						status: "deleted" as const,
 						custody: [state.custody === "held", state.custody === "storing"].some((live) => live)
 							? "erasing"
 							: state.custody,
 					}
 				: state,
 		"vault_credential.secret_erased": (state) =>
-			state.custody === "erasing" ? { ...state, custody: "erased" } : state,
+			state.custody === "erasing" ? { ...state, custody: "erased" as const } : state,
 	},
 }) {}
