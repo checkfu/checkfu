@@ -128,7 +128,8 @@ export const VisitorData = Effect.gen(function* () {
 			if (!isCollection(collection) || !permits(access, operation)) {
 				return refused(403, `This address does not allow ${operation} on ${collection}.`)
 			}
-			if (!(yield* throttle.admit(target.id, call.caller))) {
+			const kind = operation === "list" || operation === "get" ? "read" : "write"
+			if (!(yield* throttle.admit(target.id, call.caller, kind))) {
 				return refused(429, "Too many requests. Try again in a minute.")
 			}
 			if (operation === "list") {
