@@ -397,9 +397,7 @@ const settleOrPause = async (
 	Settled | { readonly status: "paused"; readonly calls: ReadonlyArray<ParkedAction> }
 > => {
 	const stop = new AbortController()
-	const stopWaiting = () => stop.abort()
-	signal.addEventListener("abort", stopWaiting, { once: true })
-	const settled = backend.wait(operationId, stop.signal)
+	const settled = backend.wait(operationId, AbortSignal.any([signal, stop.signal]))
 	settled.catch(() => undefined)
 	try {
 		while (true) {
@@ -424,8 +422,9 @@ const settleOrPause = async (
 				}
 			}
 		}
-	} finally {
-		signal.removeEventListener("abort", stopWaiting)
+	} catch (error) {
+		stop.abort()
+		throw error
 	}
 }
 

@@ -863,6 +863,36 @@ describe("turn engine", () => {
 	}
 
 	it.each(["fresh", "recovery"] as const)(
+		"releases the waiter after inspection fails on a %s wait",
+		async (path) => {
+			const { backend, release, started, calls } = await blockingBackend()
+			const request = turnRequest(1, "held during inspection")
+			const observer = await observePauseWait(backend, path, request)
+			try {
+				const wait = await observer.start()
+				await started
+				vi.mocked((await backend.pi()).inspect).mockRejectedValueOnce(
+					new Error("inspection failed"),
+				)
+				await expect(wait.result()).rejects.toThrow("inspection failed")
+				expect(wait.counts()).toMatchObject({ waitAborts: 1, turnAborts: 0 })
+				release()
+				expect(
+					await Effect.runPromise(recoverPiDurableTurn(backend, request.operationId)),
+				).toMatchObject({
+					ok: true,
+					reply: { text: "re: held during inspection" },
+				})
+				expect(calls()).toBe(1)
+			} finally {
+				release()
+				observer.restore()
+				await backend.close()
+			}
+		},
+	)
+
+	it.each(["fresh", "recovery"] as const)(
 		"counts pause polling during a %s wait",
 		async (path) => {
 			const { backend, release, started } = await blockingBackend()
