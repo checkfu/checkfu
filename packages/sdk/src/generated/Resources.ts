@@ -1285,7 +1285,7 @@ export class EffectArtifactsDataResource {
 		)
 	}
 
-	/** List the documents in a collection, oldest first. Use next_page to continue */
+	/** List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null. */
 	list(
 		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
 		collection: PathParam<"artifact_data", "listDocuments", "collection">,
@@ -1350,7 +1350,7 @@ export class EffectArtifactsDataResource {
 		)
 	}
 
-	/** Auto-paginate pages for List the documents in a collection, oldest first. Use next_page to continue */
+	/** Auto-paginate pages for List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null. */
 	listPages(
 		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
 		collection: PathParam<"artifact_data", "listDocuments", "collection">,
@@ -1372,7 +1372,7 @@ export class EffectArtifactsDataResource {
 		)
 	}
 
-	/** Auto-paginate items for List the documents in a collection, oldest first. Use next_page to continue */
+	/** Auto-paginate items for List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null. */
 	listStream(
 		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
 		collection: PathParam<"artifact_data", "listDocuments", "collection">,
@@ -5611,7 +5611,7 @@ export class ArtifactsDataResource {
 		)
 	}
 
-	/** List the documents in a collection, oldest first. Use next_page to continue */
+	/** List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null. */
 	list(
 		artifactId: PathParam<"artifact_data", "listDocuments", "artifact_id">,
 		collection: PathParam<"artifact_data", "listDocuments", "collection">,

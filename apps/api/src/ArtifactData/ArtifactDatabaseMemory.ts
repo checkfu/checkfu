@@ -19,7 +19,7 @@ export const makeDocumentsSqlite = () => {
 			const statement = db.prepare(query)
 			const values: ReadonlyArray<SQLInputValue> = bindings
 			if (statement.columns().length > 0) {
-				return statement.all(...values)
+				return statement.iterate(...values)
 			}
 			statement.run(...values)
 			return []

@@ -2,6 +2,7 @@ import {
 	MAX_ARTIFACT_COLLECTION_DOCUMENTS,
 	MAX_ARTIFACT_DATABASE_BYTES,
 	MAX_ARTIFACT_DOCUMENT_BYTES,
+	MAX_ARTIFACT_DOCUMENT_PAGE_BYTES,
 } from "@checkfu/sdk/Limits"
 import { MAX_ARTIFACT_COLLECTIONS } from "@checkfu/sdk/Schemas"
 import * as Option from "effect/Option"
@@ -122,20 +123,27 @@ export const makeArtifactDocuments = (sql: DocumentsSql) => {
 			if (totals().erased === 1) {
 				return { documents: [], next: null }
 			}
-			const rows = Array.from(
-				sql.exec(
-					`SELECT ${COLUMNS} FROM documents WHERE collection = ? AND seq > ? ORDER BY seq LIMIT ?`,
-					collection,
-					after,
-					limit + 1,
-				),
-				(row) => Option.getOrThrow(decodeDocument(row)),
+			const rows = sql.exec(
+				`SELECT ${COLUMNS} FROM documents WHERE collection = ? AND seq > ? ORDER BY seq LIMIT ?`,
+				collection,
+				after,
+				limit + 1,
 			)
-			const documents = rows.slice(0, limit)
-			return {
-				documents,
-				next: rows.length > limit ? (documents.at(-1)?.seq ?? null) : null,
+			const documents: Array<StoredDocument> = []
+			let bytes = 0
+			for (const row of rows) {
+				const document = Option.getOrThrow(decodeDocument(row))
+				const last = documents.at(-1)
+				if (
+					last !== undefined &&
+					(documents.length >= limit || bytes + document.size > MAX_ARTIFACT_DOCUMENT_PAGE_BYTES)
+				) {
+					return { documents, next: last.seq }
+				}
+				documents.push(document)
+				bytes += document.size
 			}
+			return { documents, next: null }
 		},
 
 		write: (

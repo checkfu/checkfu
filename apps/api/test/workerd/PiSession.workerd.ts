@@ -1893,6 +1893,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	}, 240_000)
 
 	it("lets the model save a directory as an artifact, and add a version when the files change", async () => {
+		let tailOffset = 0
 		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
 			Object.entries({
 				"Build the report.": [
@@ -1956,6 +1957,13 @@ describe("PiSession real Durable Object under workerd", () => {
 						arguments: { name: "Q3 report", collection: "numbers", operation: "list" },
 					},
 				],
+				"Measure the report's collection.": [
+					{
+						kind: "tool_call",
+						name: "artifact_data",
+						arguments: { name: "Q3 report", collection: "measured", operation: "list", limit: 100 },
+					},
+				],
 				"Read the report's large note.": [
 					{
 						kind: "tool_call",
@@ -1975,6 +1983,9 @@ describe("PiSession real Durable Object under workerd", () => {
 		fakeOpenAI.setHandler((req) => {
 			const latest = req.toolOutputs.at(-1) ?? ""
 			const path = /"path":"(\/mnt\/artifact-data-results\/[^"]+)"/u.exec(latest)?.[1]
+			if (req.lastUserText === "Measure the report's collection." && path !== undefined) {
+				return { kind: "tool_call", name: "read", arguments: { path, byteOffset: tailOffset } }
+			}
 			if (req.lastUserText === "Read the report's large note." && path !== undefined) {
 				return { kind: "tool_call", name: "read", arguments: { path, byteOffset: 0 } }
 			}
@@ -2035,7 +2046,56 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(await replyAfterTurn(session.id, "Read the report's large note.", 7)).toMatch(
 			/"next_byte_offset":4096/u,
 		)
-	}, 180_000)
+		if (process.env["CHECKFU_MEASURE_ARTIFACT_PAGES"] === "1") {
+			const artifactPath = `/v1/artifacts/${artifactId}`
+			const version = await apiFetch(`${artifactPath}/versions`, {
+				method: "POST",
+				body: {
+					version: 2,
+					files: [
+						{ path: "index.html", content: "<p>Measurements</p>" },
+						{
+							path: "artifact.json",
+							content: JSON.stringify({
+								capabilities: { database: { collections: { measured: { visitors: "read" } } } },
+							}),
+						},
+					],
+				},
+			})
+			expect(version.status).toBe(201)
+			const link = await apiJson<{ url: string }>(`${artifactPath}/versions/3/links`, {
+				method: "POST",
+				body: { access: "read" },
+			})
+			expect(link.status).toBe(201)
+			const collection = `${artifactPath}/data/measured`
+			const data = "x".repeat(65_534)
+			for (let i = 0; i < 100; i++) {
+				const written = await apiFetch(`${collection}/r${i}`, { method: "PUT", body: { data } })
+				expect(written.status).toBe(200)
+				await written.arrayBuffer()
+			}
+			const owner = await (await apiFetch(`${collection}?limit=100`)).text()
+			const visitor = await (await sendData(link.body.url, "measured?limit=100")).text()
+			const page = JSON.parse(owner) as { data: ReadonlyArray<unknown>; next_page: string | null }
+			expect(page.data).toHaveLength(8)
+			expect(page.next_page).toBeTypeOf("string")
+			expect(JSON.parse(visitor)).toEqual(page)
+			const bytes = new TextEncoder().encode(owner).byteLength
+			tailOffset = bytes - 32
+			const tail = await replyAfterTurn(session.id, "Measure the report's collection.", 8)
+			const result = JSON.parse(tail.replace(/^Done: /u, "")) as {
+				text: string
+				next_byte_offset: number | null
+			}
+			expect(result.next_byte_offset).toBeNull()
+			expect(result.text).toBe(owner.slice(-32))
+			process.stdout.write(
+				`${JSON.stringify({ rows: page.data.length, next_page: page.next_page, ownerBytes: bytes, visitorBytes: new TextEncoder().encode(visitor).byteLength, agentBytes: tailOffset + new TextEncoder().encode(result.text).byteLength })}\n`,
+			)
+		}
+	}, 240_000)
 
 	const uploadText = async (filename: string, text: string) => {
 		const response = await uploadFile(`filename=${filename}`, new TextEncoder().encode(text))

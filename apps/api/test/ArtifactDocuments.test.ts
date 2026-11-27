@@ -3,6 +3,7 @@ import {
 	MAX_ARTIFACT_COLLECTION_DOCUMENTS,
 	MAX_ARTIFACT_DATABASE_BYTES,
 	MAX_ARTIFACT_DOCUMENT_BYTES,
+	MAX_ARTIFACT_DOCUMENT_PAGE_BYTES,
 } from "@checkfu/sdk/Limits"
 import { MAX_ARTIFACT_COLLECTIONS } from "@checkfu/sdk/Schemas"
 import { makeDocumentsSqlite } from "../src/ArtifactData/ArtifactDatabaseMemory.ts"
@@ -50,6 +51,39 @@ describe("An artifact's documents", () => {
 			],
 			bytes: 6 + 5 * body({ index: 1 }).length,
 		})
+	})
+
+	it("caps body bytes before returning a page and continues past edits and deletions in sequence order", () => {
+		const { documents } = database()
+		const rowsPerPage = MAX_ARTIFACT_DOCUMENT_PAGE_BYTES / MAX_ARTIFACT_DOCUMENT_BYTES
+		// A JSON quote needs escaping and an emoji occupies four UTF-8 bytes.
+		const encoded = body('"' + "😀".repeat((MAX_ARTIFACT_DOCUMENT_BYTES - 4) / 4))
+		const bytes = new TextEncoder().encode(encoded).length
+		expect(bytes).toBe(MAX_ARTIFACT_DOCUMENT_BYTES)
+		for (let i = 0; i < 100; i++) {
+			expect(documents.write("rows", `r${i}`, encoded, "create", 1)).toMatchObject({
+				created: true,
+			})
+		}
+		const first = documents.list("rows", 0, 100)
+		expect(first.documents).toHaveLength(rowsPerPage)
+		expect(first.documents.reduce((sum, row) => sum + row.size, 0)).toBe(
+			MAX_ARTIFACT_DOCUMENT_PAGE_BYTES,
+		)
+		expect(first.next).toBe(first.documents.at(-1)?.seq)
+		documents.write("rows", "r0", body(null), "replace", 2)
+		documents.remove("rows", "r8")
+		const ids = first.documents.map((row) => row.id)
+		let cursor = first.next
+		while (cursor !== null) {
+			const page = documents.list("rows", cursor, 100)
+			expect(page.documents.length).toBeGreaterThan(0)
+			expect(page.documents.length).toBeLessThanOrEqual(rowsPerPage)
+			ids.push(...page.documents.map((row) => row.id))
+			cursor = page.next
+		}
+		expect(ids).toEqual(Array.from({ length: 100 }, (_, i) => `r${i}`).filter((id) => id !== "r8"))
+		expect(documents.list("rows", 100 - rowsPerPage, 100).next).toBeNull()
 	})
 
 	it("checks a keyed add against its original request after an edit", () => {

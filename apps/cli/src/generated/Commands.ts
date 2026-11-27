@@ -1033,7 +1033,7 @@ const artifactsDataListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsDataListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List the documents in a collection, oldest first. Use next_page to continue",
+		"List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null.",
 	),
 )
 
