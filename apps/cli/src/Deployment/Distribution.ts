@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { unpackTar } from "modern-tar"
 import * as Schema from "effect/Schema"
+import { readResponseBytes } from "./ResponseBytes.ts"
 
 export const REVISION = /^[a-f0-9]{40}$/
 export const STAGE = /^[a-z0-9]+[-_a-z0-9]*$/i
@@ -24,31 +25,7 @@ const bytes = async (response: Response, limit: number): Promise<Uint8Array> => 
 	if (response.body === null) {
 		throw new Error("Download returned an empty response.")
 	}
-	const chunks: Array<Uint8Array> = []
-	const reader = response.body.getReader()
-	let size = 0
-	try {
-		for (;;) {
-			const next = await reader.read()
-			if (next.done) {
-				break
-			}
-			size += next.value.length
-			if (size > limit) {
-				throw new Error("Download exceeds the supported size.")
-			}
-			chunks.push(next.value)
-		}
-	} finally {
-		await reader.cancel()
-	}
-	const result = new Uint8Array(size)
-	let offset = 0
-	for (const chunk of chunks) {
-		result.set(chunk, offset)
-		offset += chunk.length
-	}
-	return result
+	return readResponseBytes(response.body, limit)
 }
 
 export const makeGithubDistribution = (request: typeof fetch = fetch): Distribution => {
