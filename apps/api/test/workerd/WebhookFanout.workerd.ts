@@ -221,3 +221,121 @@ it("fans a single event out across three subscriber pages in Durable Objects", a
 		})
 	}
 }, 240_000)
+
+it("retries a delivery its receiver failed, at the engine's first retry delay", async () => {
+	interface Delivery {
+		readonly id: string
+		readonly event_id: string
+		readonly status: string
+		readonly attempt_count: number
+		readonly next_attempt_at: string | null
+		readonly last_attempt_at: string | null
+		readonly last_http_status: number | null
+		readonly last_outcome: string | null
+	}
+	const target = "https://receiver.example.test/retry"
+	const attempts: Array<{ readonly at: number; readonly body: string }> = []
+	const receiver = createServer((request, response) => {
+		if (
+			request.method !== "POST" ||
+			request.url !== "/egress" ||
+			request.headers[WEBHOOK_EGRESS_TARGET_HEADER] !== target
+		) {
+			response.writeHead(400).end()
+			return
+		}
+		const at = performance.now()
+		let body = ""
+		request.setEncoding("utf8")
+		request.on("data", (chunk: string) => {
+			body += chunk
+		})
+		request.on("end", () => {
+			attempts.push({ at, body })
+			response.writeHead(200, { "content-type": "application/json" })
+			response.end(JSON.stringify({ kind: "response", status: attempts.length === 1 ? 503 : 204 }))
+		})
+	})
+	try {
+		await new Promise<void>((resolveListen, rejectListen) => {
+			receiver.once("error", rejectListen)
+			receiver.listen(0, "127.0.0.1", resolveListen)
+		})
+		const address = receiver.address()
+		if (address === null || typeof address === "string") {
+			throw new Error("The local webhook receiver has no port.")
+		}
+		const unusedProvider = "http://127.0.0.1:1"
+		const worker = await startAlchemyDev(unusedProvider, unusedProvider, undefined, {
+			webhookEgressUrl: `http://127.0.0.1:${address.port}/egress`,
+		})
+		try {
+			const { apiJson } = apiAt(() => worker.baseUrl)
+			const webhook = await apiJson<{ readonly id: string }>("/v1/webhooks", {
+				method: "POST",
+				body: { url: target, event_types: ["agent.created"] },
+			})
+			expect(webhook.status).toBe(201)
+			const agent = await apiJson<{ readonly id: string }>("/v1/agents", {
+				method: "POST",
+				headers: { "idempotency-key": "webhook-receiver-retry" },
+				body: {
+					name: "Delivery retries",
+					model: `${TEST_CUSTOM_PROVIDER_ID}/custom-model-v1`,
+				},
+			})
+			expect(agent.status).toBe(201)
+			const event_id = `evt_agent_${agent.body.id}_1`
+			const id = `wdel_${sha256Hex(`wdel:${webhook.body.id}:${event_id}`).slice(0, 24)}`
+			const deliveries = async () => {
+				const page = await apiJson<{ readonly data: ReadonlyArray<Delivery> }>(
+					`/v1/webhooks/${webhook.body.id}/deliveries`,
+				)
+				expect(page.status).toBe(200)
+				return page.body.data
+			}
+			await expect.poll(deliveries, { timeout: 30_000 }).toMatchObject([
+				{
+					id,
+					event_id,
+					attempt_count: 1,
+					status: "pending",
+					last_http_status: 503,
+					last_outcome: "http_5xx",
+				},
+			])
+			const pending = (await deliveries())[0]
+			if (!pending?.last_attempt_at || !pending.next_attempt_at) {
+				throw new Error("Expected the attempt time and its durable retry time.")
+			}
+			const delay = Date.parse(pending.next_attempt_at) - Date.parse(pending.last_attempt_at)
+			expect(delay).toBeGreaterThanOrEqual(27_000)
+			expect(delay).toBeLessThanOrEqual(33_000)
+			await expect.poll(deliveries, { timeout: 60_000 }).toMatchObject([
+				{
+					id,
+					event_id,
+					attempt_count: 2,
+					status: "succeeded",
+					last_http_status: 204,
+					last_outcome: "http_2xx",
+					next_attempt_at: null,
+				},
+			])
+			expect(attempts).toHaveLength(2)
+			const [first, retry] = attempts
+			if (first === undefined || retry === undefined) {
+				throw new Error("Expected an initial delivery and one retry.")
+			}
+			expect(retry.at - first.at).toBeGreaterThanOrEqual(25_000)
+			expect(retry.body).toBe(first.body)
+		} finally {
+			await worker.stop()
+		}
+	} finally {
+		receiver.closeAllConnections()
+		await new Promise<void>((resolveClose) => {
+			receiver.close(() => resolveClose())
+		})
+	}
+}, 150_000)
