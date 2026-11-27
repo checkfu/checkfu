@@ -325,11 +325,10 @@ export const resolveCallIdempotencyKey = (
 	if (options?.idempotencyKey !== undefined) {
 		return decodeClientIdempotencyKey(options.idempotencyKey)
 	}
-	const defaultHeader = lookupHeader(runtime.defaultHeaders, "idempotency-key")
-	if (defaultHeader !== undefined) {
-		return defaultHeader === null ? Effect.undefined : decodeClientIdempotencyKey(defaultHeader)
-	}
-	if (!runtime.autoIdempotencyKey) {
+	if (
+		!runtime.autoIdempotencyKey ||
+		lookupHeader(runtime.defaultHeaders, "idempotency-key") === null
+	) {
 		return Effect.undefined
 	}
 	return Effect.flatMap(runtime.generateIdempotencyKey, decodeClientIdempotencyKey)

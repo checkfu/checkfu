@@ -48,6 +48,7 @@ import {
 	normalizeApiUrl,
 	resolveApiKey,
 	resolveBaseUrl,
+	resolveDefaultHeaders,
 } from "./Transport.ts"
 import type { HeaderMap } from "./Transport.ts"
 
@@ -75,6 +76,10 @@ export interface CheckfuClientConfig {
 	readonly allowInsecureHttp?: boolean | undefined
 	readonly maxRetries?: number | undefined
 	readonly timeout?: Duration.Input | null | undefined
+	/**
+	 * Headers applied to each request. Set Idempotency-Key to null to disable automatic keys.
+	 * Pass idempotencyKey in the options for an individual request.
+	 */
 	readonly defaultHeaders?: HeaderMap | undefined
 	readonly autoIdempotencyKey?: boolean | undefined
 }
@@ -85,6 +90,10 @@ export interface CheckfuClientEnvConfig {
 	readonly allowInsecureHttp?: boolean | undefined
 	readonly maxRetries?: number | undefined
 	readonly timeout?: Duration.Input | null | undefined
+	/**
+	 * Headers applied to each request. Set Idempotency-Key to null to disable automatic keys.
+	 * Pass idempotencyKey in the options for an individual request.
+	 */
 	readonly defaultHeaders?: HeaderMap | undefined
 	readonly autoIdempotencyKey?: boolean | undefined
 }
@@ -250,10 +259,11 @@ const buildCheckfuClient = (params: {
 	readonly rawHttpClient: HttpClient.HttpClient
 	readonly existingRequestInit: globalThis.RequestInit | undefined
 	readonly random: SecureRandom.SecureRandom["Service"]
-}): Effect.Effect<CheckfuClientService> =>
+}): Effect.Effect<CheckfuClientService, CheckfuConfigError> =>
 	Effect.gen(function* () {
+		const defaultHeaders = yield* Effect.fromResult(resolveDefaultHeaders(params.defaultHeaders))
 		const authedHttpClient = makeAuthorizedHttpClient(params.rawHttpClient, params.apiKey, {
-			defaultHeaders: params.defaultHeaders,
+			defaultHeaders,
 			existingRequestInit: params.existingRequestInit,
 		})
 
@@ -267,7 +277,7 @@ const buildCheckfuClient = (params: {
 		const runtime: EffectSdkRuntime = {
 			baseUrl: params.baseUrl,
 			raw,
-			defaultHeaders: params.defaultHeaders,
+			defaultHeaders,
 			maxRetries: params.maxRetries,
 			timeout: params.timeout,
 			autoIdempotencyKey: params.autoIdempotencyKey,
@@ -288,7 +298,7 @@ const buildCheckfuClient = (params: {
 					overrides.apiKey === undefined ? params.apiKey : yield* normalizeApiKey(overrides.apiKey)
 				const nextMaxRetries = yield* normalizeMaxRetries(overrides.maxRetries, params.maxRetries)
 				const nextTimeout = yield* resolveTimeout(overrides.timeout, params.timeout)
-				const nextHeaders = mergeHeaderMaps(params.defaultHeaders, overrides.defaultHeaders)
+				const nextHeaders = mergeHeaderMaps(defaultHeaders, overrides.defaultHeaders)
 				return yield* buildCheckfuClient({
 					...params,
 					apiKey: nextApiKey,

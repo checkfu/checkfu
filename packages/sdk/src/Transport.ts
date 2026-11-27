@@ -11,6 +11,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { CheckfuConfigError, isAPIError, isApiErrorEnvelope } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
@@ -279,6 +280,22 @@ export const mergeHeaderMaps = (
 		}
 	}
 	return Object.fromEntries(entries.values())
+}
+
+export const resolveDefaultHeaders = (
+	headers: HeaderMap | undefined,
+): Result.Result<HeaderMap | undefined, CheckfuConfigError> => {
+	const defaults = headers === undefined ? undefined : { ...headers }
+	const key = lookupHeader(defaults, "idempotency-key")
+	if (key !== undefined && key !== null) {
+		return Result.fail(
+			new CheckfuConfigError({
+				message:
+					"An idempotency key identifies one request. Pass idempotencyKey with each request.",
+			}),
+		)
+	}
+	return Result.succeed(defaults)
 }
 
 export const applyHeaders = (

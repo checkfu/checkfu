@@ -3,6 +3,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { PendingResource, isPendingResource } from "./Api.ts"
 import type {
@@ -75,6 +76,7 @@ import {
 	DEFAULT_TIMEOUT_MS,
 	mergeHeaderMaps,
 	parseNormalizedApiUrl,
+	resolveDefaultHeaders,
 } from "./Transport.ts"
 import type { HeaderMap } from "./Transport.ts"
 
@@ -112,6 +114,10 @@ export interface CheckfuOptions {
 	readonly allowInsecureHttp?: boolean | undefined
 	readonly maxRetries?: number | undefined
 	readonly timeout?: Duration.Input | null | undefined
+	/**
+	 * Headers applied to each request. Set Idempotency-Key to null to disable automatic keys.
+	 * Pass idempotencyKey in the options for an individual request.
+	 */
 	readonly defaultHeaders?: HeaderMap | undefined
 	readonly fetch?: typeof globalThis.fetch | undefined
 	readonly autoIdempotencyKey?: boolean | undefined
@@ -219,13 +225,17 @@ const resolveConstructorOptions = (
 		}
 	}
 
+	const defaultHeaders = Result.getOrThrowWith(
+		resolveDefaultHeaders(options?.defaultHeaders),
+		(error) => error,
+	)
 	return {
 		apiKey,
 		baseUrl: parsedUrl.url,
 		allowInsecureHttp,
 		maxRetries,
 		timeout,
-		defaultHeaders: options?.defaultHeaders,
+		defaultHeaders,
 		fetch: options?.fetch,
 		autoIdempotencyKey: options?.autoIdempotencyKey ?? true,
 	}

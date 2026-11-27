@@ -1740,6 +1740,103 @@ describe("@checkfu/sdk", () => {
 	})
 
 	describe("safety & lifecycle regression coverage", () => {
+		it.effect("rejects constant idempotency headers before sending requests", () =>
+			Effect.gen(function* () {
+				let calls = 0
+				const fetch = async () => {
+					calls += 1
+					return jsonResponse(sampleAgent(), 201)
+				}
+				const defaultHeaders = { "iDeMpOtEnCy-KeY": "constant" }
+				const config = { apiKey: "ck_test_key", fetch }
+				expect(() => new Checkfu({ ...config, defaultHeaders })).toThrow(CheckfuConfigError)
+				const promiseClient = new Checkfu(config)
+				try {
+					expect(() => promiseClient.withOptions({ defaultHeaders })).toThrow(CheckfuConfigError)
+				} finally {
+					yield* Effect.promise(() => promiseClient.close())
+				}
+
+				const baseError = yield* Effect.flip(
+					Effect.provide(CheckfuClient, makeEffectLayer(fetch, { defaultHeaders })),
+				)
+				const derivedError = yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					return yield* Effect.flip(client.withOptions({ defaultHeaders }))
+				}).pipe(
+					Effect.provide(makeEffectLayer(fetch, { defaultHeaders: { "Idempotency-Key": null } })),
+				)
+				for (const error of [baseError, derivedError]) {
+					expect(error).toBeInstanceOf(CheckfuConfigError)
+					expect(error.message).toContain("Pass idempotencyKey with each request")
+				}
+				expect(calls).toBe(0)
+			}),
+		)
+
+		it.live("keeps automatic keys on one logical operation in both clients", () =>
+			Effect.gen(function* () {
+				const recordRequests = () => {
+					const keys: Array<string | null> = []
+					const fetch: typeof globalThis.fetch = async (input, init) => {
+						keys.push(toWebRequest(input, init).headers.get("idempotency-key"))
+						return keys.length === 1
+							? jsonResponse(apiErrorBody("service_unavailable", "retry"), 503, {
+									"retry-after-ms": "1",
+								})
+							: jsonResponse(sampleAgent(), 201)
+					}
+					return { fetch, keys }
+				}
+				const first = { name: "First", model: "fixture-model" }
+				const second = { name: "Second", model: "fixture-model" }
+				let defaultKey: string | null = null
+				const defaultHeaders = {
+					"Idempotency-Key": "overridden",
+					get ["idempotency-key"]() {
+						return defaultKey
+					},
+				}
+				const effectTransport = recordRequests()
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					yield* client.agents.create(first)
+					yield* client.agents.create(second)
+					const unkeyed = yield* client.withOptions({ defaultHeaders })
+					defaultKey = "changed-after-construction"
+					const derived = yield* unkeyed.withOptions({ defaultHeaders: { "x-test": "derived" } })
+					yield* derived.agents.create(first)
+					yield* derived.agents.create(second, { idempotencyKey: "explicit" })
+				}).pipe(Effect.provide(makeEffectLayer(effectTransport.fetch)))
+
+				const promiseTransport = recordRequests()
+				yield* Effect.promise(async () => {
+					const client = new Checkfu({ apiKey: "ck_test_key", fetch: promiseTransport.fetch })
+					defaultKey = null
+					const unkeyed = client.withOptions({ defaultHeaders })
+					defaultKey = "changed-after-construction"
+					const derived = unkeyed.withOptions({ defaultHeaders: { "x-test": "derived" } })
+					try {
+						await client.agents.create(first)
+						await client.agents.create(second)
+						await derived.agents.create(first)
+						await derived.agents.create(second, { idempotencyKey: "explicit" })
+					} finally {
+						await Promise.all([client.close(), unkeyed.close(), derived.close()])
+					}
+				})
+
+				for (const { keys } of [effectTransport, promiseTransport]) {
+					const [firstKey, retryKey, secondKey] = keys
+					expect(firstKey).toMatch(/^sdk_[0-9a-f]{24}$/)
+					expect(retryKey).toBe(firstKey)
+					expect(secondKey).toMatch(/^sdk_[0-9a-f]{24}$/)
+					expect(secondKey).not.toBe(firstKey)
+					expect(keys.slice(3)).toEqual([null, "explicit"])
+				}
+			}),
+		)
+
 		it.live(
 			"bases mutation retry safety on the effective Idempotency-Key header sent on the wire",
 			() =>
@@ -2768,6 +2865,14 @@ describe("@checkfu/sdk", () => {
 
 				yield* Effect.gen(function* () {
 					const client = yield* CheckfuClient
+					expectNotCallable(client.automations.create)<[typeof body]>()
+					const looseAutomations = client.automations as unknown as {
+						create(payload: typeof body): ReturnType<typeof client.automations.create>
+					}
+					const missingKey = yield* Effect.flip(looseAutomations.create(body))
+					expect(missingKey).toBeInstanceOf(BadRequestError)
+					expect(missingKey.message).toContain("needs an idempotencyKey")
+					expect(createKeys).toEqual([])
 					const created = yield* client.waitForPending(
 						yield* client.automations.create(body, { idempotencyKey: "effect-create" }),
 						pollOpts,
