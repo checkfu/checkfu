@@ -302,6 +302,27 @@ describe("Session credentials", () => {
 		)
 	})
 
+	it("admits an MCP host listed with mixed case in a saved environment", async () => {
+		await world((call) =>
+			Effect.gen(function* () {
+				const agent = yield* agentWith(call, [
+					{ type: "url", name: "docs", url: "https://docs.example.test:8443/mcp" },
+				])
+				const config = limited(["Docs.Example.Test:8443"])
+				const saved = yield* environment(call, config)
+				const loaded = yield* call("GET", `/v1/environments/${saved.id}`)
+				expect(loaded.status).toBe(200)
+				expect(loaded.body.config).toEqual(config)
+				const session = yield* call("POST", "/v1/sessions", {
+					agent: agent.id,
+					environment_id: loaded.body.id,
+				})
+				expect(session.status).toBe(201)
+				expect(session.body.environment_id).toBe(saved.id)
+			}),
+		)
+	})
+
 	it("admits the version whose servers it read, and none that appears between the read and admission", async () => {
 		let beforeAdmission: Effect.Effect<unknown> = Effect.void
 		const admitted: Array<number | null> = []

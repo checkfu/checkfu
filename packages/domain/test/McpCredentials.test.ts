@@ -176,11 +176,21 @@ describe("The credential each MCP server gets", () => {
 			allow_package_managers: false,
 			allowed_hosts,
 		})
-		expect(mcpHostAllowed(null, "docs.example")).toBe(true)
-		expect(mcpHostAllowed({ type: "unrestricted" }, "docs.example")).toBe(true)
-		expect(mcpHostAllowed(limited(true, []), "docs.example")).toBe(true)
-		expect(mcpHostAllowed(limited(false, ["docs.example"]), "docs.example")).toBe(true)
-		expect(mcpHostAllowed(limited(false, ["docs.example"]), "docs.example:8443")).toBe(false)
-		expect(mcpHostAllowed(limited(false, []), "docs.example")).toBe(false)
+		expect(mcpHostAllowed(null, "docs.example.test")).toBe(true)
+		expect(mcpHostAllowed(undefined, "docs.example.test")).toBe(true)
+		expect(mcpHostAllowed({ type: "unrestricted" }, "docs.example.test")).toBe(true)
+		expect(mcpHostAllowed(limited(true, []), "docs.example.test")).toBe(true)
+		expect(mcpHostAllowed(limited(false, []), "docs.example.test")).toBe(false)
+		for (const [configured, requested, allowed] of [
+			["docs.example.test", "docs.example.test", true],
+			["Docs.Example.Test", "docs.example.test", true],
+			["docs.example.test", "DOCS.EXAMPLE.TEST", true],
+			["Docs.Example.Test", "other.example.test", false],
+			["docs.example.test", "docs.example.test:8443", false],
+			["Docs.Example.Test:8443", "docs.example.test:8443", true],
+			["docs.example.test:8443", "docs.example.test:9443", false],
+		] as const) {
+			expect(mcpHostAllowed(limited(false, [configured]), requested)).toBe(allowed)
+		}
 	})
 })

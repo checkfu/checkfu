@@ -86,7 +86,7 @@ export const mcpHostAllowed = (
 	networking === undefined ||
 	networking.type === "unrestricted" ||
 	networking.allow_mcp_servers ||
-	networking.allowed_hosts.includes(host)
+	networking.allowed_hosts.some((allowed) => allowed.toLowerCase() === host.toLowerCase())
 
 export const bindMcpServers = (
 	servers: ReadonlyArray<McpServer>,
