@@ -1,5 +1,7 @@
 import * as v8 from "node:v8"
+import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
+import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
 import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import * as Domain from "@alchemy.run/domain"
@@ -47,7 +49,14 @@ import {
 	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
 	MAX_ENVIRONMENT_NAME_LENGTH,
 } from "@checkfu/domain/Environment/EnvironmentTypes"
+import { CreateMemoryStore } from "@checkfu/domain/Memory/CreateMemoryStore.command"
+import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
+import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
+import {
+	AdmitMountedSession,
+	AdmitMountedSessionDecision,
+} from "@checkfu/domain/Session/AdmitMountedSession.decision"
 import { AdmitSessionWithMessages } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
 import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
@@ -123,8 +132,8 @@ import {
 } from "./helpers/SessionInitialMessages.ts"
 
 class SessionAdmissionStorage extends Domain.Model("SessionAdmissionStorage", {
-	aggregates: [Agent, Environment, Session],
-	decisions: [CreateAgentDecision, AdmitSessionWithMessagesDecision],
+	aggregates: [Agent, Environment, Session, File, Artifact, MemoryStore],
+	decisions: [CreateAgentDecision, AdmitSessionWithMessagesDecision, AdmitMountedSessionDecision],
 	views: [TurnInput],
 	policies: [RecordInitialMessages],
 }) {}
@@ -3302,6 +3311,8 @@ describe("Agent and environment field length limits", () => {
 						const createAgent = yield* CreateAgentDecision
 						const environments = yield* Environment
 						const admit = yield* AdmitSessionWithMessagesDecision
+						const admitMounted = yield* AdmitMountedSessionDecision
+						const stores = yield* MemoryStore
 						const turns = yield* TurnInput
 						const agent_id = AgentId.make("agent_initial_messages_storage")
 						const environment_id = EnvironmentId.make("env_initial_messages_storage")
@@ -3337,30 +3348,54 @@ describe("Agent and environment field length limits", () => {
 								mount_path: `/mnt/memory/reports-${index}`,
 							})),
 						)
+						for (const resource of resources) {
+							if (resource.type === "memory_store") {
+								yield* stores.send(
+									new CreateMemoryStore({
+										memory_store_id: MemoryStoreId.make(resource.memory_store_id),
+										name: resource.name,
+										description: resource.description ?? "",
+									}),
+								)
+							}
+						}
 						const max = MAX_SESSION_INITIAL_MESSAGES_BYTES
 						const samples = [
-							["ascii", fullAsciiInitialMessages()],
-							["under", mixedInitialMessagesAt(max - 1)],
-							["exact", mixedInitialMessagesAt(max)],
+							{ label: "ascii", messages: fullAsciiInitialMessages(), mounted: true },
+							{ label: "under", messages: mixedInitialMessagesAt(max - 1), mounted: true },
+							{ label: "exact", messages: mixedInitialMessagesAt(max), mounted: true },
+							{ label: "ordinary", messages: mixedInitialMessagesAt(max), mounted: false },
 						] as const
 						const encoder = new TextEncoder()
-						for (const [label, messages] of samples) {
+						for (const { label, messages, mounted } of samples) {
 							const session_id = SessionId.make(`sess_initial_messages_${label}`)
 							const encoded = encodeInitialMessages(messages)
 							const before = writes.length
-							const receipt = yield* admit.send(
-								new AdmitSessionWithMessages({
-									session_id,
-									agent_id,
-									agent_version: 1,
-									environment_id,
-									title: "漢".repeat(1024),
-									resources,
-									mcp_server_credentials: "[]",
-									initial_messages: { count: messages.length, messages: encoded },
-								}),
-							)
-							expect(receipt.events[0]?.initial_messages?.messages === encoded, label).toBe(true)
+							const input = {
+								session_id,
+								agent_id,
+								agent_version: 1,
+								environment_id,
+								title: "漢".repeat(1024),
+								mcp_server_credentials: "[]",
+							}
+							const initial = { count: messages.length, messages: encoded }
+							const receipt = mounted
+								? yield* admitMounted.send(
+										new AdmitMountedSession({
+											...input,
+											resources,
+											initial: { type: "queue", plan: initial },
+										}),
+									)
+								: yield* admit.send(
+										new AdmitSessionWithMessages({ ...input, initial_messages: initial }),
+									)
+							const event = receipt.events[0]
+							expect(
+								event?._tag === "session.created" && event.initial_messages?.messages === encoded,
+								label,
+							).toBe(true)
 							const turn = yield* turns.waitFor(
 								Session.ref(session_id),
 								{ turn: 1 },
