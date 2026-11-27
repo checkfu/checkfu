@@ -11,6 +11,8 @@ import {
 } from "../src/Artifact/AddArtifactVersion.command.ts"
 import { Artifact } from "../src/Artifact/Artifact.aggregate.ts"
 import { ArtifactBytes, ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { decodeCapabilities, encodeCapabilities } from "../src/Artifact/ArtifactCapabilities.ts"
+import type { ArtifactCapabilities } from "../src/Artifact/ArtifactCapabilities.ts"
 import { ArtifactNotFound } from "../src/Artifact/ArtifactNotFound.rejection.ts"
 import {
 	ArtifactVersionView,
@@ -563,5 +565,93 @@ describe("Artifacts", () => {
 		expect(Artifacts.decisions).toEqual([])
 		expect(Artifact.definition.commands).toContain(PublishArtifact)
 		expect(Artifact.definition.commands).toContain(UnpublishArtifact)
+	})
+
+	it("records capabilities in one order whatever order they were declared in, and nothing for an empty declaration", () => {
+		const forward: ArtifactCapabilities = {
+			database: { collections: { a: { visitors: "read" }, b: { visitors: "add" } } },
+		}
+		const backward: ArtifactCapabilities = {
+			database: { collections: { b: { visitors: "add" }, a: { visitors: "read" } } },
+		}
+		const text = encodeCapabilities(forward)
+		expect(text).toBe(
+			'{"database":{"collections":{"a":{"visitors":"read"},"b":{"visitors":"add"}}}}',
+		)
+		expect(encodeCapabilities(backward)).toBe(text)
+		expect(decodeCapabilities(text ?? "")).toEqual(forward)
+		expect(encodeCapabilities({})).toBe("")
+		expect(encodeCapabilities({ database: { collections: {} } })).toBe("")
+		expect(decodeCapabilities("")).toEqual({})
+		expect(decodeCapabilities("not json")).toEqual({})
+	})
+
+	it.effect("keeps each version's capabilities, and changes them only with a new version", () => {
+		const artifact = Artifact.ref("art_capable")
+		const declared = '{"database":{"collections":{"votes":{"visitors":"add"}}}}'
+		return story(
+			Story.clock(t0),
+			Story.when(new ReserveArtifact({ artifact_id: artifact.id })),
+			Story.then(artifact, new ArtifactReserved({ reservation: 1 })),
+			Story.when(
+				new CreateArtifact({
+					artifact_id: artifact.id,
+					name: "Poll",
+					manifest: manifestA,
+					file_count: 2,
+					total_bytes: 20,
+					capabilities: declared,
+					reservation: 1,
+				}),
+			),
+			Story.then(
+				artifact,
+				new ArtifactCreated({
+					version: 1,
+					name: "Poll",
+					manifest: manifestA,
+					file_count: 2,
+					total_bytes: 20,
+					capabilities: declared,
+				}),
+			),
+			Story.state(artifact, { version: 1, capabilities: declared }),
+			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
+				version: 1,
+				capabilities: declared,
+			}),
+			Story.when(
+				new PublishArtifact({ artifact_id: artifact.id, token: "tok", pinned_version: 0 }),
+			),
+			Story.then(artifact, new ArtifactPublished({ token: "tok", pinned_version: 0 })),
+			Story.state(artifact, { capabilities: declared }),
+			Story.when(
+				new AddArtifactVersion({
+					artifact_id: artifact.id,
+					expected_version: 1,
+					manifest: manifestB,
+					file_count: 1,
+					total_bytes: 10,
+					capabilities: "",
+				}),
+			),
+			Story.then(
+				artifact,
+				new ArtifactVersionAdded({
+					version: 2,
+					manifest: manifestB,
+					file_count: 1,
+					total_bytes: 10,
+					capabilities: "",
+				}),
+			),
+			Story.state(artifact, { version: 2, capabilities: "" }),
+			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
+				capabilities: declared,
+			}),
+			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), {
+				capabilities: "",
+			}),
+		)
 	})
 })

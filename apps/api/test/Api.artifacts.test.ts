@@ -2088,6 +2088,62 @@ describe("Artifact bytes", () => {
 			}),
 		))
 
+	it("answers a retried create with the committed artifact after the file that declared its capabilities is deleted", () =>
+		withApi(({ call, uploadFile }) =>
+			Effect.gen(function* () {
+				const capabilities = { database: { collections: { votes: { visitors: "add" } } } }
+				const declaration = yield* json<{ id: string }>(
+					yield* uploadFile(
+						"artifact.json",
+						new TextEncoder().encode(JSON.stringify({ capabilities })),
+					),
+				)
+				const body = {
+					name: "Poll",
+					files: [
+						{ path: "index.html", content: "<h1>Poll</h1>" },
+						{ path: "artifact.json", file_id: declaration.id },
+					],
+				}
+				const key = { "idempotency-key": "poll" }
+				const created = yield* json<ArtifactBody & { capabilities: unknown }>(
+					yield* call("POST", "/v1/artifacts", body, key),
+				)
+				expect(created.capabilities).toEqual(capabilities)
+				expect((yield* call("DELETE", `/v1/files/${declaration.id}`)).status).toBe(200)
+				const retried = yield* call("POST", "/v1/artifacts", body, key)
+				expect(retried.status).toBe(201)
+				expect(yield* json(retried)).toMatchObject({ id: created.id, capabilities })
+			}),
+		))
+
+	it("refuses a new version with an unusable artifact.json or a reserved path, and keeps the version before", () =>
+		withApi(({ call }) =>
+			Effect.gen(function* () {
+				const page = { path: "index.html", content: "x" }
+				const artifact = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", { name: "Page", files: [page] }),
+				)
+				const add = (files: ReadonlyArray<unknown>) =>
+					Effect.map(
+						call("POST", `/v1/artifacts/${artifact.id}/versions`, { version: 1, files }),
+						(res) => res.status,
+					)
+				expect(yield* add([page, { path: "artifact.json", content: "[]" }])).toBe(400)
+				expect(yield* add([page, { path: "_/data/votes", content: "x" }])).toBe(400)
+				expect(
+					yield* add([
+						page,
+						{ path: "artifact.json", content: `{"pad":"${"x".repeat(64 * 1024)}"}` },
+					]),
+				).toBe(400)
+				expect(
+					(yield* json<ArtifactBody>(yield* call("GET", `/v1/artifacts/${artifact.id}`))).version,
+				).toBe(1)
+				expect(yield* add([page, { path: "docs/artifact.json", content: "not read" }])).toBe(201)
+			}),
+		))
+
 	it("refuses a version whose artifact.json cannot be used, or that holds files under the reserved directory", () =>
 		withApi(({ call, statusForKey }) =>
 			Effect.gen(function* () {

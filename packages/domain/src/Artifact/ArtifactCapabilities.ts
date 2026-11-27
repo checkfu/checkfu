@@ -15,10 +15,26 @@ const fits = Schema.is(CapabilitiesText)
 
 const NONE: ArtifactCapabilities = {}
 
-export const encodeCapabilities = (capabilities: ArtifactCapabilities): string | undefined =>
-	Object.keys(capabilities).length === 0
-		? ""
-		: Option.getOrUndefined(Option.filter(encode(capabilities), fits))
+const canonical = (capabilities: ArtifactCapabilities): ArtifactCapabilities => {
+	const names = Object.keys(capabilities.database?.collections ?? {}).toSorted()
+	return names.length === 0
+		? NONE
+		: {
+				database: {
+					collections: Object.fromEntries(
+						names.flatMap((name) => {
+							const collection = capabilities.database?.collections[name]
+							return collection === undefined ? [] : [[name, collection]]
+						}),
+					),
+				},
+			}
+}
+
+export const encodeCapabilities = (capabilities: ArtifactCapabilities): string | undefined => {
+	const ordered = canonical(capabilities)
+	return ordered === NONE ? "" : Option.getOrUndefined(Option.filter(encode(ordered), fits))
+}
 
 export const decodeCapabilities = (text: string): ArtifactCapabilities =>
 	text === "" ? NONE : Option.getOrElse(read(text), () => NONE)

@@ -231,6 +231,11 @@ interface FileSource {
 const unusableDeclaration = (why: string) =>
 	reject(400, `${ARTIFACT_DECLARATION_FILE} cannot be used: ${why}.`)
 
+const declaredBy = (bytes: Uint8Array) => {
+	const read = readDeclaration(bytes)
+	return Result.isFailure(read) ? unusableDeclaration(read.failure) : Effect.succeed(read.success)
+}
+
 export const artifactWrites = Effect.gen(function* () {
 	const store = yield* ArtifactStore
 	const files = yield* File
@@ -379,28 +384,33 @@ export const artifactWrites = Effect.gen(function* () {
 				)
 			}
 			const inline = built.blobs.find((blob) => blob.sha256 === declared.sha256)?.bytes
-			const source = sources.get(declared.sha256)
-			const bytes =
-				inline ??
-				(declared.size === 0
-					? new Uint8Array()
-					: source === undefined
-						? yield* stored(store.getBlob(id, declared.sha256))
-						: yield* fileStore
-								.read(source.file_id, { offset: 0, length: declared.size })
-								.pipe(
-									Effect.catchTag("FileStoreError", (error) =>
-										Effect.andThen(
-											Effect.logError("File storage failed", error),
-											reject(503, "File storage is unavailable. Retry the request."),
-										),
-									),
-								))
-			if (bytes === null) {
-				return yield* reject(404, `${ARTIFACT_DECLARATION_FILE} could not be read.`)
+			if (inline !== undefined) {
+				return yield* declaredBy(inline)
 			}
-			const read = readDeclaration(bytes)
-			return Result.isFailure(read) ? yield* unusableDeclaration(read.failure) : read.success
+			if (declared.size === 0) {
+				return yield* declaredBy(new Uint8Array())
+			}
+			const held = yield* stored(store.getBlob(id, declared.sha256))
+			if (held !== null) {
+				return yield* declaredBy(held)
+			}
+			const source = sources.get(declared.sha256)
+			if (source === undefined) {
+				return yield* reject(404, `Artifact ${id} not found.`)
+			}
+			const sent = yield* fileStore
+				.read(source.file_id, { offset: 0, length: declared.size })
+				.pipe(
+					Effect.catchTag("FileStoreError", (error) =>
+						Effect.andThen(
+							Effect.logError("File storage failed", error),
+							reject(503, "File storage is unavailable. Retry the request."),
+						),
+					),
+				)
+			return sent === null
+				? yield* reject(404, `File ${source.file_id} not found.`)
+				: yield* declaredBy(sent)
 		})
 
 	return { build, fromFiles, copyIn, stage, keptIn, capabilitiesOf }
