@@ -2309,9 +2309,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			.filter((message) => message.role === "system" || message.role === "developer")
 			.map((message) => message.text)
 			.join("\n")
-		expect(systemText).toContain(
-			"Files you leave in /mnt/session/outputs are published as this session's artifact each time your turn ends",
-		)
+		expect(systemText).toMatch(/\/mnt\/session\/outputs\b[^.]*artifact[^.]*completed turn/u)
 		expect(systemText).toContain("at most 64 files, 1 MiB each and 4 MiB in total")
 		expect(systemText).toContain(
 			"An empty directory publishes nothing either, so the last version stays.",
