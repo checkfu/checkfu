@@ -10,6 +10,7 @@ import type {
 	SendSessionEventsBody,
 	UpdateAgentBody,
 	UpdateAutomationBody,
+	UpdateEnvironmentBody,
 	UpdateMemoryBody,
 } from "@checkfu/sdk/Api"
 import { changesOf, conflictsOf, draftOf, showsChanges } from "./automation-draft.ts"
@@ -236,6 +237,12 @@ export const checkfu = {
 		retrieve: retrieveEnvironment,
 		create: async (body: CreateEnvironmentBody, idempotencyKey: string) =>
 			settled(retrieveEnvironment, await request("environments.create", { body, idempotencyKey })),
+		update: async (environment_id: string, body: UpdateEnvironmentBody) =>
+			settled(
+				retrieveEnvironment,
+				await request("environments.update", { path: { environment_id }, body }),
+				(saved) => saved.version > body.version,
+			),
 		archive: async (environment_id: string) =>
 			settled(
 				retrieveEnvironment,

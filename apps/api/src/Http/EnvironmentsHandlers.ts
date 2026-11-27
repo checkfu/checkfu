@@ -3,7 +3,7 @@ import {
 	ArchiveEnvironmentIfCurrentDecision,
 } from "@checkfu/domain/Automation/GuardedArchives"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
-import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/Schemas"
+import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/EnvironmentDefaults"
 import { ArchiveEnvironment } from "@checkfu/domain/Environment/ArchiveEnvironment.command"
 import { CreateEnvironment } from "@checkfu/domain/Environment/CreateEnvironment.command"
 import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"

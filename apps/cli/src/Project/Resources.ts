@@ -8,12 +8,8 @@ import {
 } from "@checkfu/sdk/Api"
 import type { Agent, ApiError, Automation, Environment, PendingResource } from "@checkfu/sdk/Api"
 import { agentProjectDefinition, canonicalProjectJson } from "@checkfu/authoring/project"
-import {
-	AgentId,
-	AutomationId,
-	DEFAULT_ENVIRONMENT_CONFIG,
-	EnvironmentId,
-} from "@checkfu/sdk/Schemas"
+import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/EnvironmentDefaults"
+import { AgentId, AutomationId, EnvironmentId } from "@checkfu/sdk/Schemas"
 import * as Effect from "effect/Effect"
 import * as HttpClientError from "effect/http/HttpClientError"
 import * as Schedule from "effect/Schedule"
