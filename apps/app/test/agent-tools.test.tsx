@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
+import * as codec from "@checkfu/authoring/document"
 import type { JsonAgent, JsonAutomation, JsonSession } from "@checkfu/sdk/client"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router"
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, render, waitFor } from "@testing-library/react"
 import { act, useState } from "react"
 import type * as React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -10,7 +11,7 @@ import { bodyOf, draftOf, problemsOf } from "../src/agent-draft.ts"
 import { AgentToolsFields, AgentToolsSummary } from "../src/pages/agent-tools.tsx"
 import { agentQuery } from "../src/queries.ts"
 import { routeTree } from "../src/routeTree.gen.ts"
-import { button, click, mount, newQueryClient, settle, stubApi, type } from "./dom.tsx"
+import { button, click, mount, newQueryClient, settle, stubApi, submit, type } from "./dom.tsx"
 
 const AT = "2026-11-24T00:00:00.000Z"
 
@@ -172,7 +173,8 @@ describe("agent revision navigation", () => {
 		archived_at: null,
 	}
 
-	const openRoute = async (initialPath: string) => {
+	const openRoute = async (initialPath: string, initialAgent = head) => {
+		let current = initialAgent
 		vi.stubGlobal(
 			"EventSource",
 			class {
@@ -180,7 +182,7 @@ describe("agent revision navigation", () => {
 				close(): void {}
 			},
 		)
-		const sent = stubApi(({ path }) => {
+		const sent = stubApi(({ path, method, body }) => {
 			const url = new URL(path, "https://dashboard.test")
 			switch (url.pathname) {
 				case "/auth/session":
@@ -195,8 +197,23 @@ describe("agent revision navigation", () => {
 				case `/v1/automations/${automation.id}`:
 					return { body: automation }
 				case agentApiPath:
+					if (method === "POST") {
+						const { version, ...changes } = body as {
+							version: number
+							name?: string
+							system?: string
+						}
+						if (version !== current.version) {
+							return {
+								status: 409,
+								body: { error: { type: "conflict_error", message: "Agent changed." } },
+							}
+						}
+						current = { ...current, ...changes, version: version + 1 }
+						return { body: current }
+					}
 					if (!url.searchParams.has("version")) {
-						return { body: head }
+						return { body: current }
 					}
 					if (url.searchParams.get("version") === String(revision.version)) {
 						return { body: revision }
@@ -228,6 +245,17 @@ describe("agent revision navigation", () => {
 			...view,
 			router,
 			queryClient,
+			current: () => current,
+			updateAgent: async (changes: Partial<JsonAgent>) => {
+				current = { ...current, ...changes, version: current.version + 1 }
+				await act(async () => {
+					await queryClient.invalidateQueries({ queryKey: agentQuery(current.id).queryKey })
+				})
+			},
+			posts: () =>
+				sent
+					.filter(({ path, method }) => path === agentApiPath && method === "POST")
+					.map(({ body }) => body),
 			agentRequests: () =>
 				sent.filter(({ path }) => path.startsWith(agentApiPath)).map(({ path }) => path),
 		}
@@ -274,6 +302,184 @@ describe("agent revision navigation", () => {
 		expect(view.agentRequests()).toEqual([`${agentApiPath}?version=1`, agentApiPath])
 	})
 
+	const exactAgent: JsonAgent = {
+		...head,
+		name: " Padded ",
+		description: "",
+		system: "  Keep the original prompt.\n\n",
+		mcp_servers: [{ type: "url", name: "reports", url: "https://reports.example/mcp" }],
+		tools: [
+			{
+				type: "custom",
+				name: "before",
+				description: "Read the report.",
+				input_schema: { type: "object" },
+			},
+			{ type: "mcp_toolset", mcp_server_name: "reports" },
+			{
+				type: "custom",
+				name: "after",
+				description: "Save the report.",
+				input_schema: { type: "object" },
+			},
+		],
+	}
+
+	const sourceIn = async (view: Awaited<ReturnType<typeof openRoute>>) => {
+		await click(view.getByRole("button", { name: "YAML" }))
+		await view.findByRole("textbox", { name: "Agent definition" }, routeRenderWait)
+		const field = view.container.querySelector("textarea")
+		if (field === null) {
+			throw new Error("Missing editor for the agent definition")
+		}
+		return field
+	}
+
+	const editExactAgent = async () => {
+		const view = await openRoute(agentPath, exactAgent)
+		await click(await view.findByRole("button", { name: "Edit" }, routeRenderWait))
+		return view
+	}
+
+	it("saves untouched YAML without writing or changing the saved representation", async () => {
+		const view = await editExactAgent()
+		const source = await sourceIn(view)
+		expect(codec.parseAgentDefinition(source.value)).toMatchObject({
+			name: exactAgent.name,
+			system: exactAgent.system,
+			description: "",
+			mcp_servers: exactAgent.mcp_servers,
+			tools: exactAgent.tools,
+		})
+		await submit(view.container.querySelector("form"))
+		await view.findByRole("button", { name: "Edit" }, routeRenderWait)
+		expect(view.posts()).toEqual([])
+		expect(view.current()).toEqual(exactAgent)
+	})
+
+	it("retains an edited YAML definition through mode switches and sends a sparse update", async () => {
+		const view = await editExactAgent()
+		const source = await sourceIn(view)
+		const edited = codec.agentDefinitionYaml({
+			...codec.parseAgentDefinition(source.value),
+			system: "Use recent data.",
+		})
+		await type(source, edited)
+		await click(view.getByRole("button", { name: "Form" }))
+		await waitFor(() =>
+			expect(view.getByRole("textbox", { name: "System prompt" })).toHaveProperty(
+				"value",
+				"Use recent data.",
+			),
+		)
+		expect((await sourceIn(view)).value).toBe(edited)
+		await submit(view.container.querySelector("form"))
+		await view.findByRole("button", { name: "Edit" }, routeRenderWait)
+		expect(view.posts()).toEqual([{ version: exactAgent.version, system: "Use recent data." }])
+		expect(view.current()).toEqual({
+			...exactAgent,
+			system: "Use recent data.",
+			version: exactAgent.version + 1,
+		})
+	})
+
+	it("rebuilds YAML from the new saved version and the explicitly rebased edit", async () => {
+		const view = await editExactAgent()
+		const source = await sourceIn(view)
+		await type(
+			source,
+			codec.agentDefinitionYaml({
+				...codec.parseAgentDefinition(source.value),
+				system: "My new prompt.",
+			}),
+		)
+		await view.updateAgent({ description: "New description from a teammate." })
+		await click(await view.findByRole("button", { name: "Apply my edits to v3" }, routeRenderWait))
+		expect(codec.parseAgentDefinition((await sourceIn(view)).value)).toMatchObject({
+			name: exactAgent.name,
+			system: "My new prompt.",
+			description: "New description from a teammate.",
+			tools: exactAgent.tools,
+		})
+		await submit(view.container.querySelector("form"))
+		await view.findByRole("button", { name: "Edit" }, routeRenderWait)
+		expect(view.posts()).toEqual([{ version: 3, system: "My new prompt." }])
+	})
+
+	it.each(["Form", "YAML"])(
+		"keeps mixed tool order after editing a tool and server from %s",
+		async (mode) => {
+			const view = await editExactAgent()
+			const url = "https://reports.example/new"
+			await type(view.container.querySelector('input[type="url"]'), url)
+			const toolDescription = view.container.querySelector<HTMLInputElement>(
+				'input[value="Read the report."]',
+			)
+			await type(toolDescription, "Review the report.")
+			const tools = exactAgent.tools.map((tool) =>
+				tool.type === "custom" && tool.name === "before"
+					? { ...tool, description: "Review the report." }
+					: tool,
+			)
+			const mcp_servers = [{ type: "url", name: "reports", url }]
+			if (mode === "YAML") {
+				expect(codec.parseAgentDefinition((await sourceIn(view)).value)).toMatchObject({
+					tools,
+					mcp_servers,
+				})
+			}
+			await submit(view.container.querySelector("form"))
+			await view.findByRole("button", { name: "Edit" }, routeRenderWait)
+			expect(view.posts()).toEqual([{ version: exactAgent.version, tools, mcp_servers }])
+		},
+	)
+
+	it("keeps an explicit YAML name and tool order across form edits and a concurrent save", async () => {
+		const view = await editExactAgent()
+		const source = await sourceIn(view)
+		const ordered = [...exactAgent.tools].reverse()
+		const name = "  Revised report  "
+		await type(
+			source,
+			codec.agentDefinitionYaml({
+				...codec.parseAgentDefinition(source.value),
+				name,
+				tools: ordered,
+			}),
+		)
+		await click(view.getByRole("button", { name: "Form" }))
+		await type(view.container.querySelector("textarea"), "My new prompt.")
+		expect(codec.parseAgentDefinition((await sourceIn(view)).value)).toMatchObject({
+			name,
+			system: "My new prompt.",
+			tools: ordered,
+		})
+		const added = {
+			type: "custom" as const,
+			name: "audit",
+			description: "Audit the report.",
+			input_schema: { type: "object" },
+		}
+		await view.updateAgent({ tools: [...exactAgent.tools, added] })
+		await click(await view.findByRole("button", { name: "Apply my edits to v3" }, routeRenderWait))
+		const tools = [...ordered, added]
+		expect(codec.parseAgentDefinition((await sourceIn(view)).value)).toMatchObject({
+			name,
+			system: "My new prompt.",
+			tools,
+		})
+		await submit(view.container.querySelector("form"))
+		await view.findByRole("button", { name: "Edit" }, routeRenderWait)
+		expect(view.posts()).toEqual([
+			{
+				version: 3,
+				name,
+				system: "My new prompt.",
+				mcp_servers: exactAgent.mcp_servers,
+				tools,
+			},
+		])
+	})
 	it.each([
 		["invalid", "Agent version must be a positive integer.", []],
 		["0", "Agent version must be a positive integer.", []],

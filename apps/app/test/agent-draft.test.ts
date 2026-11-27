@@ -56,12 +56,9 @@ describe("agent drafts", () => {
 		const latest = agent(2, { system: "Be kind.", name: "Theirs" })
 		const rebased = rebase(base, draft, latest)
 		expect(rebased.draft).toEqual({
-			name: "Theirs",
-			model: "claude-sonnet-5-5",
+			...draftOf(latest),
 			system: "Be thorough.",
 			description: "Mine",
-			servers: [],
-			customTools: [],
 		})
 		expect(rebased.overlapping).toEqual(["system prompt"])
 		expect(rebased.orphaned).toEqual([])
@@ -151,7 +148,7 @@ describe("agent drafts with MCP servers and tools", () => {
 				{ name: "delete_repo", permission_policy: { type: "always_allow" } },
 			],
 		})
-		expect(changesFrom(stored, tuned).tools).toHaveLength(1)
+		expect(changesFrom(stored, tuned).tools?.[1]).toEqual(stored.tools[1])
 	})
 
 	it("round-trips servers, permissions and custom tools to the request body", () => {
@@ -343,7 +340,7 @@ describe("a server's permissions stay on its row", () => {
 			changesFrom(stored, withServer(draft, { ...rowNamed(draft, "docs"), name: "wiki" })),
 		).toEqual({
 			mcp_servers: [urlServer("git"), urlServer("wiki", "https://docs.example.com/mcp")],
-			tools: [],
+			tools: [{ type: "mcp_toolset", mcp_server_name: "wiki" }],
 		})
 	})
 
@@ -427,6 +424,94 @@ describe("carrying server edits onto a newer version", () => {
 		expect(rowNamed(rebased.draft, "docs")).toMatchObject({
 			url: "https://docs.example.com/mcp",
 			fallback: "always_ask",
+		})
+	})
+
+	it("keeps a concurrent server insertion when YAML only deletes a tool", () => {
+		const base = tooled
+		const latestSet = { type: "mcp_toolset" as const, mcp_server_name: "tickets" }
+		const latest = {
+			...base,
+			version: base.version + 1,
+			mcp_servers: [urlServer("tickets"), ...base.mcp_servers],
+			tools: [latestSet, ...base.tools],
+		}
+		const edited = draftOf({ ...base, tools: base.tools.filter((tool) => tool.type !== "custom") })
+		const rebased = rebase(base, edited, latest)
+		expect(rebased.overlapping).toEqual([])
+		expect(changesFrom(latest, rebased.draft).tools).toEqual([latestSet, base.tools[0]])
+	})
+
+	it("follows a subsequent server URL after the user and teammate first set the same value", () => {
+		const common = "https://shared.example.com/mcp"
+		const draft = draftOf(docs)
+		const edited = withServer(draft, { ...rowNamed(draft, "docs"), url: common })
+		const latest = {
+			...docs,
+			version: 2,
+			mcp_servers: [urlServer("docs", common), urlServer("mail")],
+		}
+		const rebased = rebase(docs, edited, latest)
+		expect(rebased.overlapping).toEqual([])
+		expect(changesFrom(latest, rebased.draft)).toEqual({})
+		const newer = {
+			...latest,
+			version: 3,
+			mcp_servers: [urlServer("docs", "https://new.example.com/mcp"), urlServer("mail")],
+		}
+		const again = rebase(latest, rebased.draft, newer)
+		expect(again.overlapping).toEqual([])
+		expect(changesFrom(newer, again.draft)).toEqual({})
+	})
+
+	it("carries an explicit YAML server order past an unrelated concurrent change", () => {
+		const reordered = [...docs.mcp_servers].reverse()
+		const draft = draftOf({ ...docs, mcp_servers: reordered })
+		const latest = { ...docs, version: 2, description: "Edited elsewhere" }
+		const rebased = rebase(docs, draft, latest)
+		expect(rebased.overlapping).toEqual([])
+		expect(changesFrom(latest, rebased.draft)).toEqual({ mcp_servers: reordered, tools: [] })
+	})
+
+	it("does not overwrite a teammate's order when both made the same tool edit", () => {
+		const base = tooled
+		const draft = draftOf(base)
+		const customTools = draft.customTools.map((tool) => ({ ...tool, name: "renamed" }))
+		const renamed = base.tools.flatMap((tool) =>
+			tool.type === "custom" ? [{ ...tool, name: "renamed" }] : [],
+		)
+		const latest = {
+			...base,
+			version: base.version + 1,
+			tools: [...renamed, ...base.tools.filter((tool) => tool.type === "mcp_toolset")],
+		}
+		const rebased = rebase(base, { ...draft, customTools }, latest)
+		expect(rebased.overlapping).toEqual([])
+		expect(changesFrom(latest, rebased.draft)).toEqual({})
+	})
+
+	it("keeps the reordered position of a server the user changed and a teammate deleted", () => {
+		const base = agent(1, { mcp_servers: [urlServer("a"), urlServer("b"), urlServer("c")] })
+		const c = urlServer("c", "https://changed.example.com/mcp")
+		const order = [c, urlServer("a"), urlServer("b")]
+		const edited = draftOf({ ...base, mcp_servers: order })
+		const latest = { ...base, version: 2, mcp_servers: [urlServer("a"), urlServer("b")] }
+		const rebased = rebase(base, edited, latest)
+		expect(rebased.orphaned).toEqual(["c"])
+		expect(changesFrom(latest, rebased.draft)).toEqual({ mcp_servers: order, tools: [] })
+	})
+
+	it("merges concurrent additions of the same server by its name", () => {
+		const edited = draftOf(docs)
+		const local = urlServer("tickets", "https://local.example.com/mcp")
+		const remote = urlServer("tickets", "https://remote.example.com/mcp")
+		const servers = [...edited.servers, { ...newServer(), name: local.name, url: local.url }]
+		const latest = { ...docs, version: 2, mcp_servers: [remote, ...docs.mcp_servers] }
+		const rebased = rebase(docs, { ...edited, servers }, latest)
+		expect(rebased.overlapping).toEqual(["MCP server tickets"])
+		expect(changesFrom(latest, rebased.draft)).toEqual({
+			mcp_servers: [local, ...docs.mcp_servers],
+			tools: [],
 		})
 	})
 

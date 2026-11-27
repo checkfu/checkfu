@@ -31,6 +31,7 @@ export interface ServerDraft {
 	readonly fallback: Policy | ""
 	readonly overrides: ReadonlyArray<ToolOverride>
 	readonly stored: StoredToolset | undefined
+	readonly savedUrl?: string
 }
 
 export interface CustomToolDraft {
@@ -47,6 +48,9 @@ export interface AgentDraft {
 	readonly description: string | null
 	readonly servers: ReadonlyArray<ServerDraft>
 	readonly customTools: ReadonlyArray<CustomToolDraft>
+	readonly toolOrder: ReadonlyArray<string>
+	readonly savedName?: string | undefined
+	readonly savedModel?: string | undefined
 }
 
 const FIELDS = ["name", "model", "system", "description", "customTools"] as const
@@ -66,12 +70,16 @@ export const emptyDraft: AgentDraft = {
 	description: null,
 	servers: [],
 	customTools: [],
+	toolOrder: [],
 }
 
 const same = (a: unknown, b: unknown): boolean =>
 	canonicalProjectJson(a) === canonicalProjectJson(b)
 
 const savedRow = (name: string): string => `saved:${name}`
+
+const toolKey = (tool: JsonAgent["tools"][number]): string =>
+	tool.type === "custom" ? `custom:${tool.name}` : `mcp:${tool.mcp_server_name}`
 
 export const newServer = (): ServerDraft => ({
 	row: `new:${crypto.randomUUID()}`,
@@ -105,13 +113,23 @@ export const draftOf = (input: CreateAgentBody): AgentDraft => {
 	return {
 		name: agent.name,
 		model: agent.model.id,
+		savedName: agent.name,
+		savedModel: agent.model.id,
+		toolOrder: (agent.tools ?? []).map(toolKey),
 		system: agent.system,
 		description: agent.description,
 		servers: (agent.mcp_servers ?? []).map(({ name, url }) => {
 			const toolset = (agent.tools ?? []).flatMap((tool) =>
 				tool.type === "mcp_toolset" && tool.mcp_server_name === name ? [tool] : [],
 			)[0]
-			return { row: savedRow(name), name, url, ...settingsOf(toolset), stored: toolset }
+			return {
+				row: savedRow(name),
+				name,
+				url,
+				savedUrl: url,
+				...settingsOf(toolset),
+				stored: toolset,
+			}
 		}),
 		customTools: (agent.tools ?? []).flatMap((tool) =>
 			tool.type === "custom"
@@ -180,21 +198,31 @@ export const problemsOf = (draft: AgentDraft): DraftProblems => {
 export const hasProblems = (problems: DraftProblems): boolean =>
 	problems.servers.size > 0 || problems.customTools.size > 0
 
-const serversOf = (draft: AgentDraft) =>
-	draft.servers.map((server) => ({
-		type: "url" as const,
-		name: server.name.trim(),
-		url: server.url.trim(),
-	}))
+const exactOrTrimmed = (value: string, saved: string | undefined): string =>
+	value === saved ? value : value.trim()
 
-const toolsetOf = (server: ServerDraft) => {
+const serverOf = (server: ServerDraft, preserveSaved: boolean) => ({
+	type: "url" as const,
+	name: server.name.trim(),
+	url: exactOrTrimmed(server.url, preserveSaved ? server.savedUrl : undefined),
+})
+
+const serversOf = (draft: AgentDraft, preserveSaved: boolean) =>
+	draft.servers.map((server) => serverOf(server, preserveSaved))
+
+const toolsetOf = (server: ServerDraft, preserveEmpty: boolean) => {
 	const name = server.name.trim()
 	const settings = { fallback: server.fallback, overrides: server.overrides }
-	if (server.fallback === "" && server.overrides.length === 0) {
-		return []
-	}
-	if (server.stored !== undefined && same(settings, settingsOf(server.stored))) {
+	const empty = server.fallback === "" && server.overrides.length === 0
+	if (
+		server.stored !== undefined &&
+		(preserveEmpty || !empty) &&
+		same(settings, settingsOf(server.stored))
+	) {
 		return [{ ...server.stored, mcp_server_name: name }]
+	}
+	if (empty) {
+		return []
 	}
 	return [
 		{
@@ -216,50 +244,50 @@ const toolsetOf = (server: ServerDraft) => {
 	]
 }
 
-const unedited = (tool: CustomToolDraft): StoredCustomTool | undefined =>
-	tool.stored !== undefined &&
-	tool.name === tool.stored.name &&
-	tool.description === tool.stored.description &&
-	tool.schema === schemaText(tool.stored.input_schema)
-		? tool.stored
-		: undefined
+const customToolOf = (tool: CustomToolDraft): StoredCustomTool => ({
+	type: "custom",
+	name: tool.name === tool.stored?.name ? tool.name : tool.name.trim(),
+	description:
+		tool.description === tool.stored?.description ? tool.description : tool.description.trim(),
+	input_schema: parseSchema(tool.schema) ?? {},
+})
 
-const toolsOf = (draft: AgentDraft) => [
-	...draft.servers.flatMap(toolsetOf),
-	...draft.customTools.map(
-		(tool) =>
-			unedited(tool) ?? {
-				type: "custom" as const,
-				name: tool.name.trim(),
-				description: tool.description.trim(),
-				input_schema: parseSchema(tool.schema) ?? {},
-			},
-	),
-]
+const toolsOf = (draft: AgentDraft, preserveSaved: boolean) => {
+	const candidates = [
+		...draft.servers.flatMap((server) =>
+			toolsetOf(server, preserveSaved).map((tool) => ({ tool, saved: server.stored })),
+		),
+		...draft.customTools.map((custom) => ({ tool: customToolOf(custom), saved: custom.stored })),
+	]
+	if (preserveSaved) {
+		const positions = new Map(draft.toolOrder.map((key, index) => [key, index]))
+		const position = ({ tool, saved }: (typeof candidates)[number]): number =>
+			positions.get(toolKey(saved ?? tool)) ?? draft.toolOrder.length
+		candidates.sort((a, b) => position(a) - position(b))
+	}
+	return candidates.map(({ tool }) => tool)
+}
 
 export const bodyOf = (draft: AgentDraft) => ({
 	name: draft.name.trim(),
 	model: draft.model.trim(),
 	system: draft.system,
 	description: draft.description,
-	mcp_servers: serversOf(draft),
-	tools: toolsOf(draft),
+	mcp_servers: serversOf(draft, false),
+	tools: toolsOf(draft, false),
 })
 
-export const changesFrom = (from: JsonAgent, draft: AgentDraft) => {
-	const before = draftOf(from)
-	const body = bodyOf(draft)
-	const was = bodyOf(before)
-	return {
-		...(draft.name === before.name ? {} : { name: body.name }),
-		...(draft.model === before.model ? {} : { model: body.model }),
-		...(draft.system === before.system ? {} : { system: body.system }),
-		...(draft.description === before.description ? {} : { description: body.description }),
-		...(same(body.mcp_servers, was.mcp_servers) && same(body.tools, was.tools)
-			? {}
-			: { mcp_servers: body.mcp_servers, tools: body.tools }),
-	}
-}
+export const editSourceBody = (draft: AgentDraft): CreateAgentBody => ({
+	name: exactOrTrimmed(draft.name, draft.savedName),
+	model: exactOrTrimmed(draft.model, draft.savedModel),
+	system: draft.system,
+	description: draft.description,
+	mcp_servers: serversOf(draft, true),
+	tools: toolsOf(draft, true),
+})
+
+export const changesFrom = (base: JsonAgent, draft: AgentDraft) =>
+	changesFromSource(base, editSourceBody(draft))
 
 export const changesFromSource = (from: JsonAgent, source: CreateAgentBody) => {
 	const body = normalizeAgentCreateBody(source)
@@ -283,13 +311,81 @@ export interface Rebased {
 }
 
 const sameServer = (a: ServerDraft, b: ServerDraft): boolean =>
-	same({ ...a, row: "" }, { ...b, row: "" })
+	same(serverOf(a, true), serverOf(b, true)) && same(toolsetOf(a, true), toolsetOf(b, true))
+
+const customToolsByName = (draft: AgentDraft) =>
+	draft.customTools.map(customToolOf).sort((a, b) => a.name.localeCompare(b.name))
+
+const sameField = (a: AgentDraft, b: AgentDraft, field: (typeof FIELDS)[number]): boolean => {
+	switch (field) {
+		case "customTools":
+			return same(customToolsByName(a), customToolsByName(b))
+		case "name":
+			return exactOrTrimmed(a.name, a.savedName) === exactOrTrimmed(b.name, b.savedName)
+		case "model":
+			return exactOrTrimmed(a.model, a.savedModel) === exactOrTrimmed(b.model, b.savedModel)
+		default:
+			return a[field] === b[field]
+	}
+}
+
+const sameRelativeOrder = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean => {
+	const inA = new Set(a)
+	const inB = new Set(b)
+	return same(
+		a.filter((key) => inB.has(key)),
+		b.filter((key) => inA.has(key)),
+	)
+}
+
+const reconcileOrder = (
+	base: ReadonlyArray<string>,
+	mine: ReadonlyArray<string>,
+	theirs: ReadonlyArray<string>,
+) => {
+	const reordered = !sameRelativeOrder(mine, base)
+	const chosen = [...(reordered ? mine : theirs)]
+	const other = reordered ? theirs : mine
+	let next = chosen.length
+	for (const key of [...other].reverse()) {
+		const existing = chosen.indexOf(key)
+		if (existing === -1) {
+			chosen.splice(next, 0, key)
+		} else {
+			next = existing
+		}
+	}
+	return {
+		chosen,
+		reordered,
+		conflicted: reordered && !sameRelativeOrder(theirs, base) && !sameRelativeOrder(mine, theirs),
+	}
+}
 
 export const rebase = (base: JsonAgent, draft: AgentDraft, latest: JsonAgent): Rebased => {
 	const was = draftOf(base)
 	const current = draftOf(latest)
-	const fields = FIELDS.filter((field) => !same(draft[field], was[field]))
-	const mine = new Map(draft.servers.map((server) => [server.row, server]))
+	const tools = reconcileOrder(was.toolOrder, draft.toolOrder, current.toolOrder)
+	const known = new Set(was.servers.map((server) => server.row))
+	const newServerRows = new Map(
+		current.servers.filter(({ row }) => !known.has(row)).map(({ name, row }) => [name, row]),
+	)
+	const newNames = draft.servers.filter(({ row }) => !known.has(row)).map(({ name }) => name.trim())
+	const editedServers = draft.servers.map((server) => {
+		const name = server.name.trim()
+		const row = newServerRows.get(name)
+		return row === undefined ||
+			known.has(server.row) ||
+			newNames.indexOf(name) !== newNames.lastIndexOf(name)
+			? server
+			: { ...server, row }
+	})
+	const rows = (servers: AgentDraft["servers"]) => servers.map(({ row }) => row)
+	const serverOrder = reconcileOrder(rows(was.servers), rows(editedServers), rows(current.servers))
+	const fields = FIELDS.filter(
+		(field) => !sameField(draft, was, field) && !sameField(draft, current, field),
+	)
+	const mine = new Map(editedServers.map((server) => [server.row, server]))
 	const theirs = new Map(current.servers.map((server) => [server.row, server]))
 	const carried = new Map<string, ServerDraft | undefined>()
 	const overlapping: Array<string> = []
@@ -300,7 +396,10 @@ export const rebase = (base: JsonAgent, draft: AgentDraft, latest: JsonAgent): R
 		if (my !== undefined && sameServer(my, server)) {
 			carried.set(server.row, their)
 		} else {
-			carried.set(server.row, my)
+			carried.set(
+				server.row,
+				my !== undefined && their !== undefined && sameServer(my, their) ? their : my,
+			)
 			if (their === undefined) {
 				if (my !== undefined) {
 					orphaned.push(server.name)
@@ -310,30 +409,50 @@ export const rebase = (base: JsonAgent, draft: AgentDraft, latest: JsonAgent): R
 			}
 		}
 	}
-	const known = new Set(was.servers.map((server) => server.row))
-	const pick = <K extends (typeof FIELDS)[number]>(field: K): AgentDraft[K] =>
-		(fields.includes(field) ? draft : current)[field]
+	for (const server of editedServers) {
+		if (!known.has(server.row)) {
+			const their = theirs.get(server.row)
+			if (their !== undefined && !sameServer(server, their)) {
+				overlapping.push(`MCP server ${server.name}`)
+			}
+		}
+	}
+	const changedDraft = (field: (typeof FIELDS)[number]): AgentDraft =>
+		fields.includes(field) ? draft : current
 	return {
 		draft: {
-			name: pick("name"),
-			model: pick("model"),
-			system: pick("system"),
-			description: pick("description"),
+			name: changedDraft("name").name,
+			savedName: changedDraft("name").savedName,
+			model: changedDraft("model").model,
+			savedModel: changedDraft("model").savedModel,
+			system: changedDraft("system").system,
+			description: changedDraft("description").description,
 			servers: [
-				...current.servers.flatMap((server) => {
-					const kept = known.has(server.row) ? carried.get(server.row) : server
-					return kept === undefined ? [] : [kept]
+				...serverOrder.chosen.flatMap((row) => {
+					const kept = known.has(row) ? carried.get(row) : (mine.get(row) ?? theirs.get(row))
+					if (kept === undefined) {
+						return []
+					}
+					return known.has(row) && !theirs.has(row)
+						? serverOrder.reordered
+							? [{ ...kept, row: `kept:${row}` }]
+							: []
+						: [kept]
 				}),
-				...was.servers.flatMap((server) => {
-					const kept = theirs.has(server.row) ? undefined : carried.get(server.row)
-					return kept === undefined ? [] : [{ ...kept, row: `kept:${kept.row}` }]
-				}),
-				...draft.servers.filter((server) => !known.has(server.row)),
+				...(serverOrder.reordered
+					? []
+					: was.servers.flatMap((server) => {
+							const kept = theirs.has(server.row) ? undefined : carried.get(server.row)
+							return kept === undefined ? [] : [{ ...kept, row: `kept:${kept.row}` }]
+						})),
 			],
-			customTools: pick("customTools"),
+			customTools: changedDraft("customTools").customTools,
+			toolOrder: tools.chosen,
 		},
 		overlapping: [
-			...fields.flatMap((field) => (same(current[field], was[field]) ? [] : [FIELD_LABELS[field]])),
+			...fields.flatMap((field) => (sameField(current, was, field) ? [] : [FIELD_LABELS[field]])),
+			...(tools.conflicted ? ["tool order"] : []),
+			...(serverOrder.conflicted ? ["MCP server order"] : []),
 			...overlapping,
 		],
 		orphaned,

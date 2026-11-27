@@ -3,7 +3,7 @@ import * as codec from "@checkfu/authoring/document"
 import type { JsonAgent } from "@checkfu/sdk/client"
 import { strFromU8, unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
-import { bodyOf, changesFromSource, draftOf } from "../src/agent-draft.ts"
+import { bodyOf, changesFromSource, draftOf, editSourceBody } from "../src/agent-draft.ts"
 import { agentProjectArchive } from "../src/agent-export.ts"
 import { readAgentSource } from "../src/agent-source.ts"
 
@@ -71,6 +71,37 @@ describe("dashboard agent definitions", () => {
 		const exported = files[definitionFile]
 		expect(exported).toContain("system:")
 		expect(codec.parseAgentDefinition(exported ?? "").system).toBe(exact.system)
+	})
+
+	it("derives saved YAML from the exact baseline and carries only genuine form edits", () => {
+		const tools = [
+			{
+				type: "custom" as const,
+				name: "check",
+				description: "Check the report.",
+				input_schema: { type: "object" },
+			},
+			...agent.tools,
+		]
+		const saved = { ...agent, tools }
+		const draft = draftOf(saved)
+		const exact = codec.parseAgentDefinition(codec.agentDefinitionYaml(editSourceBody(draft)))
+		expect(changesFromSource(saved, exact)).toEqual({})
+		expect(exact).toMatchObject({ name: saved.name, description: "", system: saved.system, tools })
+
+		const edited = {
+			...draft,
+			system: "Use today's data.",
+			servers: draft.servers.map((server) => ({ ...server, url: "https://reports.example/new" })),
+		}
+		const source = codec.parseAgentDefinition(codec.agentDefinitionYaml(editSourceBody(edited)))
+		expect(source).toMatchObject({
+			name: saved.name,
+			description: "",
+			system: edited.system,
+			mcp_servers: [{ type: "url", name: "reports", url: "https://reports.example/new" }],
+			tools,
+		})
 	})
 
 	it("keeps the exact saved configuration and binds the archive to the API deployment", async () => {

@@ -23,6 +23,7 @@ import {
 	changesFrom,
 	changesFromSource,
 	draftOf,
+	editSourceBody,
 	emptyDraft,
 	hasProblems,
 	problemsOf,
@@ -465,6 +466,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 				<AgentForm
 					key={edit.base.version}
 					draft={edit.draft}
+					sourceBody={editSourceBody}
 					onChange={(draft) => setEdit({ ...edit, draft })}
 					submitLabel="Save new version"
 					notice={(canRebase) =>
