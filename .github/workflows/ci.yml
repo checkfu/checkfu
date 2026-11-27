@@ -83,16 +83,17 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
-  # The required check: it passes only when every test leg passed.
+  # The required check includes both package tests and complete journey evidence.
   test:
-    needs: test-packages
+    needs: [test-packages, verification]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - run: test "$RESULT" = success
+      - run: test "$PACKAGES" = success && test "$JOURNEYS" = success
         env:
-          RESULT: ${{ needs.test-packages.result }}
+          PACKAGES: ${{ needs.test-packages.result }}
+          JOURNEYS: ${{ needs.verification.result }}
 
   # Long Z3 proofs get their own runners. The other domain files share one, in parallel.
   domain-proofs:
@@ -250,7 +251,7 @@ jobs:
 
   sandbox-image:
     if: github.event_name == 'push'
-    needs: [static, test, domain, domain-checkfu, workerd, cli-platforms, verification]
+    needs: [static, test, domain, domain-checkfu, workerd, cli-platforms]
     runs-on: ubuntu-latest
     timeout-minutes: 6
     permissions:
