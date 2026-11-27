@@ -1,6 +1,4 @@
-import { EventEmitter } from "node:events"
 import * as http from "node:http"
-import type * as https from "node:https"
 import * as Domain from "@alchemy.run/domain"
 import { makeListingStoreMemory } from "@checkfu/domain/Listing/ListingStore"
 import { CreateWebhookEndpoint } from "@checkfu/domain/Webhook/CreateWebhookEndpoint.command"
@@ -22,9 +20,9 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import {
-	deliverThroughPublicHttps,
-	startPublicWebhookEgressServer,
-} from "../src/Webhooks/PublicWebhookEgress.ts"
+	WEBHOOK_EGRESS_TARGET_HEADER,
+	WEBHOOK_EGRESS_TIMEOUT_HEADER,
+} from "../src/Webhooks/WebhookEgressConfig.ts"
 import {
 	WebhookDeliveryStore,
 	WebhookDeliveryStoreError,
@@ -60,142 +58,7 @@ const sampleEvent: WebhookEventPublication = {
 	occurred_at: Date.parse("2026-01-01T00:00:00.000Z"),
 }
 
-describe("PublicWebhookEgress connection-time enforcement", () => {
-	it("refuses DNS names resolving to private, loopback, link-local, or mixed private+public IPs before connecting", async () => {
-		let connectAttempts = 0
-		const fakeHttpsRequest = (() => {
-			connectAttempts += 1
-			throw new Error("should never be called for non-public destinations")
-		}) as unknown as NonNullable<Parameters<typeof deliverThroughPublicHttps>[0]["httpsRequest"]>
-
-		for (const addresses of [
-			[{ address: "127.0.0.1", family: 4 }],
-			[{ address: "10.0.0.5", family: 4 }],
-			[{ address: "169.254.169.254", family: 4 }],
-			[{ address: "100.64.0.1", family: 4 }],
-			[{ address: "::1", family: 6 }],
-			[{ address: "fc00::1", family: 6 }],
-			[{ address: "::ffff:127.0.0.1", family: 6 }],
-			[
-				{ address: "93.184.216.34", family: 4 },
-				{ address: "127.0.0.1", family: 4 },
-			],
-		]) {
-			const res = await deliverThroughPublicHttps({
-				targetUrl: "https://rebinding.example.com/hook",
-				headers: {},
-				body: Buffer.from("{}"),
-				timeoutMs: 2000,
-				lookupAll: async () => addresses,
-				httpsRequest: fakeHttpsRequest,
-			})
-			expect(res.kind, JSON.stringify(addresses)).toBe("invalid_destination")
-		}
-		expect(connectAttempts).toBe(0)
-	})
-
-	it("enforces an end-to-end deadline across DNS resolution and prevents late lookups from connecting", async () => {
-		let connectAttempts = 0
-		let releaseLookup!: (
-			addrs: ReadonlyArray<{ readonly address: string; readonly family: number }>,
-		) => void
-		const slowLookup = () =>
-			new Promise<ReadonlyArray<{ readonly address: string; readonly family: number }>>(
-				(resolve) => {
-					releaseLookup = resolve
-				},
-			)
-		const fakeHttpsRequest = (() => {
-			connectAttempts += 1
-			throw new Error("should never start after deadline expired")
-		}) as unknown as typeof https.request
-
-		const result = await deliverThroughPublicHttps({
-			targetUrl: "https://slow-dns.example.com/hook",
-			headers: {},
-			body: Buffer.from("{}"),
-			timeoutMs: 40,
-			lookupAll: slowLookup,
-			httpsRequest: fakeHttpsRequest,
-		})
-		expect(result).toEqual({ kind: "timeout" })
-		releaseLookup([{ address: "93.184.216.34", family: 4 }])
-		await new Promise((resolve) => {
-			setTimeout(resolve, 25)
-		})
-		expect(connectAttempts).toBe(0)
-	})
-
-	it("supplies all verified addresses for family selection and falls back to the next verified address on pre-TLS connect failure", async () => {
-		const seenPrimaryAddresses: Array<string> = []
-		const seenAllCounts: Array<number> = []
-		const fakeHttpsRequest = ((
-			options: https.RequestOptions,
-			onResponse?: (res: http.IncomingMessage) => void,
-		) => {
-			const req = new EventEmitter() as EventEmitter & {
-				end: () => void
-				destroy: () => void
-			}
-			req.destroy = () => undefined
-			req.end = () => {
-				const lookup = options.lookup
-				if (lookup === undefined) {
-					throw new Error("Expected custom pinned lookup")
-				}
-				lookup("dualstack.example.com", { all: true }, (_err, allResult) => {
-					if (Array.isArray(allResult)) {
-						seenAllCounts.push(allResult.length)
-					}
-				})
-				lookup("dualstack.example.com", {}, (_err, address) => {
-					if (typeof address !== "string") {
-						throw new Error("Expected string address")
-					}
-					seenPrimaryAddresses.push(address)
-					if (seenPrimaryAddresses.length === 1) {
-						queueMicrotask(() => {
-							req.emit("error", new Error("ENETUNREACH"))
-						})
-						return
-					}
-					const socket = Object.assign(new EventEmitter(), {
-						connecting: false,
-						destroyed: false,
-						remoteAddress: address,
-						destroy: () => undefined,
-					})
-					queueMicrotask(() => {
-						req.emit("socket", socket)
-						socket.emit("secureConnect")
-						const res = Object.assign(new EventEmitter(), {
-							statusCode: 204,
-							resume: () => undefined,
-							destroy: () => undefined,
-						}) as unknown as http.IncomingMessage
-						onResponse?.(res)
-					})
-				})
-			}
-			return req as unknown as http.ClientRequest
-		}) as unknown as typeof https.request
-
-		const result = await deliverThroughPublicHttps({
-			targetUrl: "https://dualstack.example.com/hook",
-			headers: {},
-			body: Buffer.from("{}"),
-			timeoutMs: 2000,
-			lookupAll: async () => [
-				{ address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
-				{ address: "93.184.216.34", family: 4 },
-			],
-			httpsRequest: fakeHttpsRequest,
-		})
-		expect(result).toEqual({ kind: "response", status: 204 })
-		expect(seenAllCounts).toEqual([2, 1])
-		expect(seenPrimaryAddresses).toEqual(["2606:2800:220:1:248:1893:25c8:1946", "93.184.216.34"])
-	})
-
+describe("Webhook egress", () => {
 	it.effect(
 		"disables direct delivery in EVERY local runtime even when stage is production, while keeping loopback HTTP disallowed in production",
 		() =>
@@ -259,92 +122,86 @@ describe("PublicWebhookEgress connection-time enforcement", () => {
 			}),
 	)
 
-	it("fails closed in local runtime without CHECKFU_WEBHOOK_EGRESS_URL and returns egress_error on proxy auth/outage", async () => {
-		let localHits = 0
-		const victimServer = http.createServer((_req, res) => {
-			localHits += 1
-			res.writeHead(200)
-			res.end("leaked")
-		})
-		await new Promise<void>((resolve) => {
-			victimServer.listen(0, "127.0.0.1", () => {
-				resolve()
+	it("fails closed without local egress and keeps the relay request and failure contract", async () => {
+		const target = "https://hooks.example.com/hook"
+		const seen: Array<{
+			readonly target: string | undefined
+			readonly timeout: string | undefined
+			readonly eventId: string | undefined
+			readonly body: string
+		}> = []
+		const relay = http.createServer((request, response) => {
+			if (request.headers.authorization !== "Bearer egress-secret-token") {
+				response.writeHead(401).end()
+				return
+			}
+			let body = ""
+			request.setEncoding("utf8")
+			request.on("data", (chunk: string) => {
+				body += chunk
+			})
+			request.on("end", () => {
+				seen.push({
+					target: request.headers[WEBHOOK_EGRESS_TARGET_HEADER]?.toString(),
+					timeout: request.headers[WEBHOOK_EGRESS_TIMEOUT_HEADER]?.toString(),
+					eventId: request.headers["webhook-id"]?.toString(),
+					body,
+				})
+				response.writeHead(200, { "content-type": "application/json" })
+				response.end(
+					JSON.stringify({ kind: "invalid_destination", message: "Destination refused." }),
+				)
 			})
 		})
-		const victimAddress = victimServer.address()
-		if (victimAddress === null || typeof victimAddress === "string") {
-			throw new Error("Expected TCP address")
-		}
-		const victimPort = victimAddress.port
-
-		const egress = await startPublicWebhookEgressServer({
-			token: "egress-secret-token",
-			lookupAll: async () => [{ address: "127.0.0.1", family: 4 }],
-		})
-
 		try {
-			expect(() =>
-				parseWebhookEgressUrl(`http://127.0.0.1:${victimPort}/egress`, {
-					allowLoopbackHttp: false,
-				}),
-			).toThrow(/must use https:\/\//)
-			expect(
-				parseWebhookEgressUrl(egress.url, {
-					allowLoopbackHttp: true,
-				}),
-			).toBe(egress.url)
+			await new Promise<void>((resolve, reject) => {
+				relay.once("error", reject)
+				relay.listen(0, "127.0.0.1", resolve)
+			})
+			const address = relay.address()
+			if (address === null || typeof address === "string") {
+				throw new Error("Expected a local relay port.")
+			}
+			const egressUrl = `http://127.0.0.1:${address.port}/egress`
+			expect(() => parseWebhookEgressUrl(egressUrl, { allowLoopbackHttp: false })).toThrow(
+				/must use https:\/\//,
+			)
+			expect(parseWebhookEgressUrl(egressUrl, { allowLoopbackHttp: true })).toBe(egressUrl)
 
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const client = yield* HttpClient.HttpClient
-					const localBlocked = makeConfiguredWebhookHttpSender(client, {
+					const request = {
+						url: target,
+						headers: { "webhook-id": "evt_1" },
+						body: "{}",
+						timeoutMs: 2000,
+					}
+					const local = makeConfiguredWebhookHttpSender(client, {
 						egressUrl: null,
 						egressToken: null,
 						localRuntime: true,
 					})
-					const blockedRes = yield* localBlocked.send({
-						url: `https://127.0.0.1.nip.io:${victimPort}/hook`,
-						headers: {},
-						body: "{}",
-						timeoutMs: 2000,
-					})
-					expect(blockedRes.kind).toBe("egress_unconfigured")
+					expect((yield* local.send(request)).kind).toBe("egress_unconfigured")
+					expect(seen).toEqual([])
 
-					const viaEgress = makeConfiguredWebhookHttpSender(client, {
-						egressUrl: egress.url,
-						egressToken: Redacted.make("egress-secret-token"),
-						localRuntime: true,
-					})
-					const egressRes = yield* viaEgress.send({
-						url: `https://127.0.0.1.nip.io:${victimPort}/hook`,
-						headers: { "webhook-id": "evt_1" },
-						body: "{}",
-						timeoutMs: 2000,
-					})
-					expect(egressRes.kind).toBe("invalid_destination")
-
-					// Proxy auth failure / outage returns egress_error so endpoint health is not degraded.
-					const badAuth = makeConfiguredWebhookHttpSender(client, {
-						egressUrl: egress.url,
-						egressToken: Redacted.make("wrong-token"),
-						localRuntime: true,
-					})
-					const badAuthRes = yield* badAuth.send({
-						url: "https://hooks.example.com/hook",
-						headers: {},
-						body: "{}",
-						timeoutMs: 2000,
-					})
-					expect(badAuthRes.kind).toBe("egress_error")
+					const enabled = (token: string) =>
+						makeConfiguredWebhookHttpSender(client, {
+							egressUrl,
+							egressToken: Redacted.make(token),
+							localRuntime: true,
+						})
+					expect((yield* enabled("egress-secret-token").send(request)).kind).toBe(
+						"invalid_destination",
+					)
+					expect((yield* enabled("wrong-token").send(request)).kind).toBe("egress_error")
+					expect(seen).toEqual([{ target, timeout: "2000", eventId: "evt_1", body: "{}" }])
 				}).pipe(Effect.provide(FetchHttpClient.layer)),
 			)
-			expect(localHits).toBe(0)
 		} finally {
-			await egress.close()
+			relay.closeAllConnections()
 			await new Promise<void>((resolve) => {
-				victimServer.close(() => {
-					resolve()
-				})
+				relay.close(() => resolve())
 			})
 		}
 	})
