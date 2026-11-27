@@ -14,6 +14,7 @@ import {
 } from "@checkfu/domain/Automation/AdmitAutomation.command"
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
+import { AutomationArchivedError } from "@checkfu/domain/Automation/AutomationArchived.rejection"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import { AutomationId, automationRunId } from "@checkfu/domain/Automation/Automation.id"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
@@ -221,11 +222,11 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					: yield* present(head)
 			})
 
-		const projected = (id: AutomationId) =>
+		const projected = (id: AutomationId, revision?: number) =>
 			Effect.gen(function* () {
 				const snapshot = yield* automationViews.waitFor(
 					Automation.ref(id),
-					{ id },
+					revision === undefined ? { id } : { revision: { gte: revision } },
 					{ timeout: yield* AutomationReadWaitTimeout },
 				)
 				if (snapshot === null) {
@@ -240,14 +241,33 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				return snapshot === null ? projected(id) : Effect.succeed(snapshot)
 			})
 
-		const currentOf = (id: AutomationId) =>
+		const currentOf = (id: AutomationId, revision?: number) =>
 			Effect.gen(function* () {
 				const found = Option.getOrNull(yield* automationViews.get(Automation.ref(id)))
-				if (found !== null) {
+				if (found !== null && (revision === undefined || revision === found.revision)) {
 					return found
 				}
-				yield* committed(id)
-				return yield* projected(id)
+				const head = yield* committed(id)
+				if (revision === undefined) {
+					return yield* projected(id)
+				}
+				if (head.status === "archived") {
+					return yield* new AutomationArchivedError({ automation_id: id })
+				}
+				const conflict = (current_revision: number) =>
+					new AutomationRevisionConflict({
+						automation_id: id,
+						expected_revision: revision,
+						current_revision,
+					})
+				if (head.revision !== revision) {
+					return yield* conflict(head.revision)
+				}
+				const snapshot = yield* projected(id, revision)
+				if (snapshot.revision !== revision) {
+					return yield* conflict(snapshot.revision)
+				}
+				return snapshot
 			})
 
 		const archive = (id: AutomationId, revision?: number) =>
@@ -338,14 +358,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const ref = Automation.ref(id)
 					const timeout = yield* AutomationReadWaitTimeout
 					const send = Effect.gen(function* () {
-						const current = yield* currentOf(id)
-						if (payload.revision !== undefined && payload.revision !== current.revision) {
-							return yield* new AutomationRevisionConflict({
-								automation_id: id,
-								expected_revision: payload.revision,
-								current_revision: current.revision,
-							})
-						}
+						const current = yield* currentOf(id, payload.revision)
 						const next = {
 							name: payload.name ?? current.name,
 							description:
