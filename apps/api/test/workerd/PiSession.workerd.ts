@@ -222,16 +222,34 @@ describe("PiSession real Durable Object under workerd", () => {
 		await fakeGitHub?.close()
 	}, 30_000)
 
-	const bytesOf = async (artifactId: string, version: number, path: string) => {
-		const file = await apiJson<{
-			readonly encoding: "utf8" | "base64"
-			readonly content: string
-		}>(`/v1/artifacts/${artifactId}/versions/${version}/file?file=${encodeURIComponent(path)}`)
-		expect(file.status).toBe(200)
-		return {
-			encoding: file.body.encoding,
-			bytes: Buffer.from(file.body.content, file.body.encoding),
+	interface SavedOutputs {
+		readonly turn: number
+		readonly status: string
+		readonly files: ReadonlyArray<{
+			readonly id: string
+			readonly size: number
+			readonly sha256: string
+			readonly content_type: string
+			readonly origin: { readonly path: string; readonly turn: number }
+		}>
+		readonly skipped: ReadonlyArray<{ readonly path: string; readonly reason: string }>
+	}
+	const outputsAt = async (sessionId: string, turn: number): Promise<SavedOutputs> => {
+		const deadline = Date.now() + 30_000
+		for (;;) {
+			const current = await apiJson<SavedOutputs>(`/v1/sessions/${sessionId}/outputs`)
+			expect(current.status).toBe(200)
+			if (current.body.turn >= turn || Date.now() > deadline) {
+				return current.body
+			}
+			await sleep(100)
 		}
+	}
+	const savedPaths = (saved: SavedOutputs) => saved.files.map((file) => file.origin.path)
+	const fileBytes = async (fileId: string) => {
+		const response = await apiFetch(`/v1/files/${fileId}/content`)
+		expect(response.status).toBe(200)
+		return Buffer.from(await response.arrayBuffer())
 	}
 
 	it("takes a YAML project through the installed npm CLI and an independent MCP client without losing history or competing edits", async () => {
@@ -1854,7 +1872,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(reply?.content?.[0]?.text).toBe(`Log: ${onBranch} On the branch`)
 	}, 300_000)
 
-	it("publishes the first output a turn on the machine writes, after a turn that left none", async () => {
+	it("saves the first output a turn on the machine writes, and skips by name a file it cannot save", async () => {
 		const outputs = "/mnt/session/outputs"
 		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
 			Object.entries({
@@ -1898,61 +1916,37 @@ describe("PiSession real Durable Object under workerd", () => {
 			expect(sent.status).toBe(200)
 			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 240_000)
 		}
-		const published = () =>
-			apiJson<{
-				readonly version: number
-				readonly files: ReadonlyArray<{ readonly path: string }>
-			}>(`/v1/sessions/${session.id}/outputs`)
 		await turn("Say hello.", 1)
-		await sleep(1000)
-		expect((await published()).status).toBe(404)
+		expect(await outputsAt(session.id, 1)).toMatchObject({ turn: 1, status: "saved", files: [] })
 		await turn("Write it on the machine.", 2)
 		expect(
 			(await listAllEvents(session.id)).filter(
 				(event) => event.type === "agent.tool_result" && event.is_error,
 			),
 		).toEqual([])
-		const deadline = Date.now() + 30_000
-		let current = await published()
-		while (current.status !== 200 && Date.now() < deadline) {
-			await sleep(100)
-			current = await published()
-		}
-		expect(current.status).toBe(200)
-		expect(current.body.files.map(({ path }) => path)).toEqual(["report.md"])
-		const first = current.body
-		const since = workerLogs.length
+		const first = await outputsAt(session.id, 2)
+		expect(savedPaths(first)).toEqual(["report.md"])
+		expect((await fileBytes(first.files[0]?.id ?? "")).toString()).toBe("# Late\n")
+
 		await turn("Leave an invalid name.", 3)
-		const refusedName = () => {
-			const recent = stripAnsi(workerLogs.slice(since).join(""))
-			return (
-				recent.includes("File path") &&
-				recent.includes("slash.txt") &&
-				recent.includes("is not allowed.")
-			)
-		}
-		const refusalDeadline = Date.now() + 30_000
-		while (!refusedName() && Date.now() < refusalDeadline) {
-			await sleep(100)
-		}
-		expect(refusedName()).toBe(true)
-		expect((await published()).body).toEqual(first)
+		const withInvalid = await outputsAt(session.id, 3)
+		expect(withInvalid.status).toBe("saved")
+		expect(savedPaths(withInvalid)).toEqual(["draft.md", "report.md"])
+		expect(withInvalid.files[1]).toEqual(first.files[0])
+		expect(withInvalid.skipped).toHaveLength(1)
+		expect(withInvalid.skipped[0]?.path).toContain("slash.txt")
+		expect(withInvalid.skipped[0]?.reason).toBe("This path is not allowed.")
 
 		await turn("Remove the invalid name.", 4)
-		const recoveryDeadline = Date.now() + 30_000
-		current = await published()
-		while (current.body.version === 1 && Date.now() < recoveryDeadline) {
-			await sleep(100)
-			current = await published()
-		}
-		expect(current.body.version).toBe(2)
-		expect(current.body.files.map(({ path }) => path)).toEqual(["draft.md", "report.md"])
+		const recovered = await outputsAt(session.id, 4)
+		expect(savedPaths(recovered)).toEqual(["draft.md", "report.md"])
+		expect(recovered.skipped).toEqual([])
 
 		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
 		expect(archived.status).toBe(200)
 	}, 300_000)
 
-	it("publishes what the model leaves in the outputs directory as the session's artifact, byte for byte", async () => {
+	it("saves what the model leaves in the outputs directory as files, byte for byte", async () => {
 		const outputs = "/mnt/session/outputs"
 		const report = "# Q3\n\nSales rose 12%.\n"
 		const totals = "region,total\nEMEA,4217\n"
@@ -1993,71 +1987,44 @@ describe("PiSession real Durable Object under workerd", () => {
 		)
 		const startCount = fakeOpenAI.requests.length
 		const session = await createSession()
-		interface PublishedFile {
-			readonly path: string
-			readonly sha256: string
-			readonly size: number
-			readonly content_type: string
-		}
-		const published = () =>
-			apiJson<{
-				readonly id: string
-				readonly name: string
-				readonly version: number
-				readonly files: ReadonlyArray<PublishedFile>
-			}>(`/v1/sessions/${session.id}/outputs`)
-		const publishedAt = async (version: number) => {
-			const deadline = Date.now() + 30_000
-			for (;;) {
-				const current = await published()
-				if ((current.status === 200 && current.body.version >= version) || Date.now() > deadline) {
-					return current
-				}
-				await new Promise((resolve) => {
-					setTimeout(resolve, 100)
-				})
-			}
-		}
-		expect((await published()).status).toBe(404)
+		expect(await outputsAt(session.id, 0)).toMatchObject({ turn: 0, status: "none", files: [] })
 		await replyAfterTurn(session.id, "Write the report.", 1)
-		const first = await publishedAt(1)
-		expect(first.status).toBe(200)
-		expect(first.body).toMatchObject({
-			name: `Session ${session.id} outputs`,
-			version: 1,
+		const first = await outputsAt(session.id, 1)
+		expect(first).toMatchObject({
+			turn: 1,
+			status: "saved",
 			files: [
 				{
-					path: "data/totals.csv",
 					sha256: sha256(Buffer.from(totals)),
 					size: Buffer.byteLength(totals),
 					content_type: "text/csv",
+					origin: { type: "session", session_id: session.id, turn: 1, path: "data/totals.csv" },
 				},
 				{
-					path: "report.md",
 					sha256: sha256(Buffer.from(report)),
 					size: Buffer.byteLength(report),
 					content_type: "text/markdown",
+					origin: { type: "session", session_id: session.id, turn: 1, path: "report.md" },
 				},
 			],
+			skipped: [],
 		})
-		const artifactId = first.body.id
-		expect((await bytesOf(artifactId, 1, "report.md")).bytes.toString()).toBe(report)
+		expect((await fileBytes(first.files[1]?.id ?? "")).toString()).toBe(report)
 
 		await replyAfterTurn(session.id, "Anything else?", 2)
-		expect((await published()).body.version).toBe(1)
+		expect((await outputsAt(session.id, 2)).files).toEqual(first.files)
 
 		await replyAfterTurn(session.id, "Add a summary.", 3)
-		const second = await publishedAt(2)
-		expect(second.body.version).toBe(2)
-		expect(second.body.files.map((file) => file.path)).toEqual([
-			"data/totals.csv",
-			"report.md",
-			"summary.md",
+		const second = await outputsAt(session.id, 3)
+		expect(second.files.map((file) => [file.origin.path, file.origin.turn])).toEqual([
+			["data/totals.csv", 1],
+			["report.md", 1],
+			["summary.md", 3],
 		])
-		for (const file of second.body.files) {
-			const { bytes } = await bytesOf(artifactId, 2, file.path)
-			expect([file.path, bytes.byteLength, sha256(bytes)]).toEqual([
-				file.path,
+		for (const file of second.files) {
+			const bytes = await fileBytes(file.id)
+			expect([file.origin.path, bytes.byteLength, sha256(bytes)]).toEqual([
+				file.origin.path,
 				file.size,
 				file.sha256,
 			])
@@ -2067,14 +2034,14 @@ describe("PiSession real Durable Object under workerd", () => {
 			.filter((message) => message.role === "system" || message.role === "developer")
 			.map((message) => message.text)
 			.join("\n")
-		expect(systemText).toMatch(/\/mnt\/session\/outputs\b[^.]*artifact[^.]*completed turn/u)
-		expect(systemText).toContain("at most 64 files, 1 MiB each and 4 MiB in total")
-		expect(systemText).toContain(
-			"An empty directory publishes nothing either, so the last version stays.",
+		expect(systemText).toMatch(
+			/\/mnt\/session\/outputs\b[^.]*saved for the user[^.]*completed turn/u,
 		)
+		expect(systemText).toContain("A file over 1 MiB, or past 4 MiB in total, is not saved")
+		expect(systemText).toContain("With more than 64 files")
 	}, 180_000)
 
-	it("publishes exact capture limits from storage without starting a machine", async () => {
+	it("saves files at the exact limits from storage without starting a machine", async () => {
 		const chunkSize = 256 * 1024
 		const fileSize = 4 * chunkSize
 		const names = ["a", "b", "c", "d"]
@@ -2103,20 +2070,9 @@ describe("PiSession real Durable Object under workerd", () => {
 			results.map((result) => result.is_error),
 			JSON.stringify(results).slice(0, 2000),
 		).toEqual(scripts.map(() => false))
-		const published = () =>
-			apiJson<{
-				readonly id: string
-				readonly version: number
-				readonly files: ReadonlyArray<{ readonly path: string; readonly size: number }>
-			}>(`/v1/sessions/${session.id}/outputs`)
-		const deadline = Date.now() + 30_000
-		let artifact = await published()
-		while (artifact.status !== 200 && Date.now() < deadline) {
-			await sleep(100)
-			artifact = await published()
-		}
-		expect(artifact.status).toBe(200)
-		expect(artifact.body.files.map(({ path, size }) => [path, size])).toEqual(
+		const saved = await outputsAt(session.id, 1)
+		expect(saved.skipped).toEqual([])
+		expect(saved.files.map((file) => [file.origin.path, file.size])).toEqual(
 			names.map((name) => [`${name}.txt`, fileSize]),
 		)
 	}, 180_000)

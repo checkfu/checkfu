@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
-import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import { AgentVersionByNumberView } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
@@ -214,7 +214,7 @@ describe("interrupted turns and turn recovery", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),
@@ -370,7 +370,7 @@ describe("interrupted turns and turn recovery", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),
@@ -575,7 +575,7 @@ describe("interrupted turns and turn recovery", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),
@@ -686,7 +686,7 @@ describe("interrupted turns and turn recovery", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),

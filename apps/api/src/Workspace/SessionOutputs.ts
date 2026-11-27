@@ -3,7 +3,11 @@ import * as Predicate from "effect/Predicate"
 import * as Hex from "effect/encoding/Hex"
 import * as Schema from "effect/Schema"
 import { ArtifactPath } from "../Artifacts/ArtifactFiles.ts"
+import { MAX_OUTPUT_FILES } from "@checkfu/domain/Outputs/OutputsTypes"
+
 import { NonNegativeInt } from "@checkfu/sdk/Schemas"
+
+export { MAX_OUTPUT_FILES }
 
 export const OutputRead = Schema.Struct({ path: Schema.String, size: NonNegativeInt })
 export type OutputRead = typeof OutputRead.Type
@@ -11,8 +15,15 @@ export type OutputRead = typeof OutputRead.Type
 export const OutputFile = OutputRead.mapFields((fields) => ({ ...fields, sha256: Schema.String }))
 export type OutputFile = typeof OutputFile.Type
 
+export const OutputSkipped = Schema.Struct({ path: Schema.String, reason: Schema.String })
+export type OutputSkipped = typeof OutputSkipped.Type
+
 export const OutputsListing = Schema.Union([
-	Schema.Struct({ ok: Schema.Literal(true), files: Schema.Array(OutputFile) }),
+	Schema.Struct({
+		ok: Schema.Literal(true),
+		files: Schema.Array(OutputFile),
+		skipped: Schema.Array(OutputSkipped),
+	}),
 	Schema.Struct({ ok: Schema.Literal(false), reason: Schema.String }),
 ])
 export type OutputsListing = typeof OutputsListing.Type
@@ -22,7 +33,6 @@ export type OutputBytes = typeof OutputBytes.Type
 
 export const SESSION_OUTPUTS_PATH = "/mnt/session/outputs"
 
-export const MAX_OUTPUT_FILES = 64
 export const MAX_OUTPUT_FILE_BYTES = 1024 * 1024
 export const MAX_OUTPUT_TOTAL_BYTES = 4 * 1024 * 1024
 export const MAX_OUTPUT_ENTRIES = 8 * MAX_OUTPUT_FILES
@@ -88,6 +98,19 @@ export const makeStoredOutputFiles = (workspace: Workspace): OutputFiles => {
 
 const refused = (reason: string): OutputsListing => ({ ok: false, reason })
 
+const SHOWN_PATH_LENGTH = 128
+
+const printable = (character: string): boolean => {
+	const code = character.codePointAt(0) ?? 0
+	return code > 0x1f && (code < 0x7f || code > 0x9f) && code !== 0x20_28 && code !== 0x20_29
+}
+
+const shownPath = (path: string): string =>
+	Array.from(path.toWellFormed())
+		.slice(0, SHOWN_PATH_LENGTH)
+		.map((character) => (printable(character) ? character : "?"))
+		.join("") || "?"
+
 const hasCode = (error: unknown, code: string): boolean =>
 	Predicate.hasProperty(error, "code") && error.code === code
 
@@ -120,15 +143,18 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 		if (entries.length > MAX_OUTPUT_ENTRIES) {
 			return refused(`More than ${MAX_OUTPUT_ENTRIES} files and directories.`)
 		}
+		const skipped: Array<OutputSkipped> = []
 		const paths: Array<string> = []
 		for (const entry of entries) {
-			if (!isArtifactPath(entry.path)) {
-				return refused(`File path ${JSON.stringify(entry.path)} is not allowed.`)
+			if (entry.type === "dir") {
+				continue
 			}
-			if (entry.type === "file") {
+			if (!isArtifactPath(entry.path)) {
+				skipped.push({ path: shownPath(entry.path), reason: "This path is not allowed." })
+			} else if (entry.type === "file") {
 				paths.push(entry.path)
-			} else if (entry.type !== "dir") {
-				return refused(`Output ${JSON.stringify(entry.path)} must be a regular file or directory.`)
+			} else {
+				skipped.push({ path: entry.path, reason: "Not a regular file." })
 			}
 		}
 		if (paths.length > MAX_OUTPUT_FILES) {
@@ -137,7 +163,7 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 
 		const listed: Array<OutputFile> = []
 		let remaining = MAX_OUTPUT_TOTAL_BYTES
-		for (const path of paths) {
+		for (const path of paths.toSorted()) {
 			const limit = Math.min(MAX_OUTPUT_FILE_BYTES, remaining)
 			const bytes = await files.read(path, limit + 1).catch((error: unknown) => {
 				if (changedDuringCapture(error)) {
@@ -146,19 +172,24 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 				throw error
 			})
 			if (bytes === null) {
-				return refused(`Output ${JSON.stringify(path)} changed during capture.`)
+				skipped.push({ path, reason: "Changed while it was being read." })
+			} else if (bytes.byteLength > limit) {
+				skipped.push({
+					path,
+					reason:
+						remaining < MAX_OUTPUT_FILE_BYTES
+							? `The outputs total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`
+							: `Larger than ${MAX_OUTPUT_FILE_BYTES} bytes.`,
+				})
+			} else {
+				remaining -= bytes.byteLength
+				listed.push({ path, sha256: await sha256Hex(bytes), size: bytes.byteLength })
 			}
-			if (bytes.byteLength > limit) {
-				return refused(
-					remaining < MAX_OUTPUT_FILE_BYTES
-						? `Files total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`
-						: `File "${path}" exceeds the limit of ${MAX_OUTPUT_FILE_BYTES} bytes.`,
-				)
-			}
-			remaining -= bytes.byteLength
-			listed.push({ path, sha256: await sha256Hex(bytes), size: bytes.byteLength })
 		}
-		return { ok: true, files: listed }
+		if (skipped.length > MAX_OUTPUT_FILES) {
+			return refused(`${skipped.length} outputs could not be saved.`)
+		}
+		return { ok: true, files: listed, skipped }
 	},
 
 	read: async (wanted: ReadonlyArray<OutputRead>): Promise<ReadonlyArray<OutputBytes>> => {
@@ -183,10 +214,9 @@ export const makeSessionOutputs = (files: OutputFiles) => ({
 				}
 				throw error
 			})
-			if (bytes === null || bytes.byteLength !== size) {
-				return read
+			if (bytes !== null && bytes.byteLength === size) {
+				read.push({ path, bytes })
 			}
-			read.push({ path, bytes })
 		}
 		return read
 	},

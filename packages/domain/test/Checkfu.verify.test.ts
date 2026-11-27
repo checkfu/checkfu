@@ -2,7 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { FileBytesKept } from "../src/File/FileBytes.external.ts"
-import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
+import { OutputsUnsaved } from "../src/Session/OutputsSaver.external.ts"
 import {
 	NO_AGENT_TOOLS,
 	NO_MCP_SERVERS,
@@ -186,6 +186,7 @@ const STANDING = {
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"File.StatusIsKnown": "proved",
 	"File.DescribedExactlyWhenCreated": "proved",
+	"File.AnOriginNamesASessionATurnAndAPathOrNone": "proved",
 	"File.AReservationIsOpenOnlyBeforeCreation": "proved",
 	"File.OnlyTheLatestReservationIsOpen": "proved",
 	"File.CreatedFileNeverReturnsToUninitialized": "proved",
@@ -193,6 +194,14 @@ const STANDING = {
 	"File.ContentNeverChanges": "proved",
 	"File.ReservationsAreNumberedInOrder": "proved",
 	"File.CreatingTakesTheOpenReservation": "proved",
+	"SessionOutputs.OutcomeIsKnown": "proved",
+	"SessionOutputs.AnOutcomeIsRecordedExactlyWhenATurnIs": "proved",
+	"SessionOutputs.AReasonIsGivenExactlyWhenTheTurnWasSkipped": "proved",
+	"SessionOutputs.TheRecordedTurnNeverGoesBack": "proved",
+	"SessionOutputs.ATurnIsRecordedAtMostOnce": "proved",
+	"SessionOutputs.ASkippedTurnKeepsTheFilesSavedBefore": "proved",
+	"SessionOutputs.ASavedTurnReplacesTheFiles": "proved",
+	"SessionOutputs.NothingChangesWithoutARecord": "proved",
 	"Session.APausedTurnHoldsNoModelRequest": "proved",
 	"Session.APausedTurnWaitsOnACall": "proved",
 	"Session.APausedTurnAskedWhatItWaitsOn": "proved",
@@ -392,6 +401,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"ReserveFile",
 			"CreateFile",
 			"DeleteFile",
+			"RecordSessionOutputs",
+			"SkipSessionOutputs",
 			"CreateMemoryStore",
 			"UpdateMemoryStore",
 			"ArchiveMemoryStore",
@@ -448,7 +459,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		expect(report.explored.followed).toEqual([
 			"RecordInitialMessages",
 			"StartTurn",
-			"PublishSessionOutputs",
+			"SaveSessionOutputs",
 			"EnsureTurnStopped",
 		])
 		expect(report.explored.idle).toEqual([
@@ -497,12 +508,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const observedViewKeys = new Map<string, Set<string>>()
 		const layer = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
-				Layer.provide([
-					ArtifactBytesKept,
-					FileBytesKept,
-					SessionOutputsUnpublished,
-					WebhookEventsNoop,
-				]),
+				Layer.provide([ArtifactBytesKept, FileBytesKept, OutputsUnsaved, WebhookEventsNoop]),
 				Layer.provide([HarnessStubLayer, ListingStore.memory]),
 			),
 		).pipe(

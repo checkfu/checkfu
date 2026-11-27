@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
-import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { makeFileStoreMemory } from "@checkfu/api/Files/FileStoreMemory"
@@ -96,7 +96,7 @@ export const makeTestServer = Effect.gen(function* () {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(listingStore),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(HarnessLive),

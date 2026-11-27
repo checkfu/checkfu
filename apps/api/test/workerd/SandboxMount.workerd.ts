@@ -323,7 +323,7 @@ describe("a session's machine, in a container of its image", () => {
 		await sh("rm -rf /workspace/gone")
 	}, 120_000)
 
-	it("captures exact publication limits from the machine's output directory", async () => {
+	it("lists outputs at the exact limits from the machine's output directory, and skips what is past them", async () => {
 		const root = "/mnt/session/outputs/bounded-capture"
 		const outputs = makeSessionOutputs(makeSandboxOutputFiles(root, inContainer))
 		const full = patterned(MAX_OUTPUT_FILE_BYTES)
@@ -342,16 +342,25 @@ describe("a session's machine, in a container of its image", () => {
 			const read = await outputs.read(listing.files)
 			expect(read.map(({ bytes }) => sha256(bytes))).toEqual(Array(4).fill(sha256(full)))
 
+			const reports = ["a", "b", "c", "d"].map((name) => `reports/${name}.txt`)
 			await Effect.runPromise(sandbox.writeFile(`${root}/extra.txt`, "one more file"))
-			expect(await outputs.list()).toEqual({
-				ok: false,
-				reason: `Files total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`,
-			})
+			const withExtra = await outputs.list()
+			expect(withExtra.ok && withExtra.files.map(({ path }) => path)).toEqual([
+				"extra.txt",
+				...reports.slice(0, 3),
+			])
+			expect(withExtra.ok && withExtra.skipped).toEqual([
+				{
+					path: "reports/d.txt",
+					reason: `The outputs total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`,
+				},
+			])
 			await sh(`rm -- ${root}/extra.txt; ln -s reports/a.txt ${root}/alias.txt`)
-			expect(await outputs.list()).toEqual({
-				ok: false,
-				reason: 'Output "alias.txt" must be a regular file or directory.',
-			})
+			const withAlias = await outputs.list()
+			expect(withAlias.ok && withAlias.files.map(({ path }) => path)).toEqual(reports)
+			expect(withAlias.ok && withAlias.skipped).toEqual([
+				{ path: "alias.txt", reason: "Not a regular file." },
+			])
 		} finally {
 			await sh(`rm -rf -- ${root}`)
 		}

@@ -27,6 +27,7 @@ interface FileBody {
 	readonly content_type: string
 	readonly size: number
 	readonly sha256: string
+	readonly origin: { readonly type: string }
 	readonly created_at: string
 }
 
@@ -112,6 +113,7 @@ describe("Files API", () => {
 					content_type: "application/pdf",
 					size: 70_000,
 					sha256: sha256(data),
+					origin: { type: "upload" },
 					created_at: expect.any(String),
 				})
 				expect(yield* json(yield* call("GET", `/v1/files/${file.id}`))).toEqual(file)

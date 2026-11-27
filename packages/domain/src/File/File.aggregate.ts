@@ -2,7 +2,12 @@ import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as DateTime from "effect/DateTime"
 import * as Schema from "effect/Schema"
-import { CreateFile, FileAlreadyExists, FileCreated } from "./CreateFile.command.ts"
+import {
+	CreateFile,
+	FileAlreadyExists,
+	FileCreated,
+	FileOriginIncomplete,
+} from "./CreateFile.command.ts"
 import { DeleteFile, FileDeleted } from "./DeleteFile.command.ts"
 import { ExpireFileReservation, FileReservationExpired } from "./ExpireFileReservation.command.ts"
 import { FileId } from "./File.id.ts"
@@ -17,6 +22,9 @@ export const FileState = Schema.Struct({
 	content_type: Schema.String,
 	size: NonNegativeInt,
 	sha256: Schema.String,
+	origin_session_id: Schema.String,
+	origin_turn: NonNegativeInt,
+	origin_path: Schema.String,
 	reservations: NonNegativeInt,
 	open_reservation: NonNegativeInt,
 	created_at: NonNegativeInt,
@@ -39,6 +47,9 @@ export class File extends Domain.Aggregate("File", {
 		content_type: "",
 		size: 0,
 		sha256: "",
+		origin_session_id: "",
+		origin_turn: 0,
+		origin_path: "",
 		reservations: 0,
 		open_reservation: 0,
 		created_at: 0,
@@ -61,6 +72,16 @@ export class File extends Domain.Aggregate("File", {
 					(ok) => ok,
 				),
 			].some((ok) => ok),
+		AnOriginNamesASessionATurnAndAPathOrNone: (s) =>
+			[
+				[s.origin_session_id === "", s.origin_turn === 0, s.origin_path === ""].every((ok) => ok),
+				[
+					s.status !== "",
+					s.origin_session_id !== "",
+					s.origin_turn >= 1,
+					s.origin_path !== "",
+				].every((ok) => ok),
+			].some((ok) => ok),
 		AReservationIsOpenOnlyBeforeCreation: (s) =>
 			[s.open_reservation === 0, s.status === ""].some((ok) => ok),
 		OnlyTheLatestReservationIsOpen: (s) =>
@@ -79,6 +100,9 @@ export class File extends Domain.Aggregate("File", {
 					after.content_type === before.content_type,
 					after.size === before.size,
 					after.sha256 === before.sha256,
+					after.origin_session_id === before.origin_session_id,
+					after.origin_turn === before.origin_turn,
+					after.origin_path === before.origin_path,
 				].every((ok) => ok),
 			].some((ok) => ok),
 		ReservationsAreNumberedInOrder: ({ before, after, command }) =>
@@ -116,12 +140,28 @@ export class File extends Domain.Aggregate("File", {
 			if (state.open_reservation === 0 || state.open_reservation !== cmd.reservation) {
 				return new FileReservationLapsed({ file_id: ctx.id })
 			}
+			const uploaded = [
+				cmd.origin_session_id === "",
+				cmd.origin_turn === 0,
+				cmd.origin_path === "",
+			].every((ok) => ok)
+			const produced = [
+				cmd.origin_session_id !== "",
+				cmd.origin_turn >= 1,
+				cmd.origin_path !== "",
+			].every((ok) => ok)
+			if (!uploaded && !produced) {
+				return new FileOriginIncomplete({ file_id: ctx.id })
+			}
 			return [
 				new FileCreated({
 					filename: cmd.filename,
 					content_type: cmd.content_type,
 					size: cmd.size,
 					sha256: cmd.sha256,
+					origin_session_id: cmd.origin_session_id,
+					origin_turn: cmd.origin_turn,
+					origin_path: cmd.origin_path,
 				}),
 			]
 		},
@@ -148,6 +188,9 @@ export class File extends Domain.Aggregate("File", {
 						content_type: e.content_type,
 						size: e.size,
 						sha256: e.sha256,
+						origin_session_id: e.origin_session_id,
+						origin_turn: e.origin_turn,
+						origin_path: e.origin_path,
 						created_at: DateTime.toEpochMillis(envelope.at),
 					}
 				: state,

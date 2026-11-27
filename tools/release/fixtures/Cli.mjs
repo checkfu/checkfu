@@ -240,7 +240,9 @@ const events = (await run(["sessions:events", "list", ...sessionId, "--limit", "
 assert.equal(events.filter(({ type }) => type === "agent.message").length, 2)
 const stream = await raw(["sessions:events", "stream", ...sessionId])
 assert.match(stream.stdout, /Final message without newline/)
-await fails(["sessions:outputs", "retrieve", ...sessionId], /published no outputs/)
+const outputs = await run(["sessions:outputs", "retrieve", ...sessionId])
+assert.equal(outputs.type, "session_outputs")
+assert.deepEqual(outputs.files, [])
 
 const automation = await run(["automations", "create"], {
 	name: "CLI report",

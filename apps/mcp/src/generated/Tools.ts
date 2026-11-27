@@ -3097,7 +3097,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_getOutputs",
 		title: "Retrieve a session's outputs",
 		description:
-			"Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version",
+			"Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason",
 		method: "GET",
 		path: "/v1/sessions/{session_id}/outputs",
 		readOnly: true,

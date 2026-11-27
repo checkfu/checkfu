@@ -83,7 +83,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(15)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(16)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -439,7 +439,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			Effect.gen(function* () {
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
-						"policy-delivery:Checkfu.PublishSessionOutputs/Session",
+						"policy-delivery:Checkfu.SaveSessionOutputs/Session",
 						"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact",
 					]),
 				)

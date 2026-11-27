@@ -505,7 +505,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					listOutputs: (turn: number): Effect.Effect<OutputsListing | null> =>
 						Effect.promise(async () =>
 							storage.kv.get(DISCARDED) === true
-								? { ok: true, files: [] }
+								? { ok: true, files: [], skipped: [] }
 								: ((await fence.run({ turn }, () => onActive((on) => on.outputs.list()))) ?? null),
 						),
 					readOutputs: (

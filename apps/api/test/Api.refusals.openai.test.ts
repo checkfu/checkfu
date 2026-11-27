@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
-import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { createRegistry } from "@earendil-works/pi-durable"
@@ -360,7 +360,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),

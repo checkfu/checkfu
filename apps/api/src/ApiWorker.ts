@@ -22,7 +22,7 @@ import {
 } from "./Connection/CredentialCustody.ts"
 import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
-import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
+import { OutputsSaverLive } from "./Files/OutputsSaverLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { FileBytesLive } from "./Files/FileBytesLive.ts"
@@ -203,7 +203,7 @@ const WebhookEventsRuntimeLive = WebhookEventsLive.pipe(
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(PiDurableHarnessLive),
-		Layer.provide(SessionOutputsLive),
+		Layer.provide(OutputsSaverLive),
 		Layer.provide(ArtifactBytesLive),
 		Layer.provide(FileBytesLive),
 		Layer.provide(ListingLive),

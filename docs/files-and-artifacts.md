@@ -1,10 +1,10 @@
 # Files and artifacts: the domain
 
-Status: step 1 (Files) is built; the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
+Status: steps 1 (Files) and 3 (outputs saved as files) are built; the rest is planned. Nothing is deployed and there are no users, so this describes the end state with no compatibility or migration steps.
 
 ## The problem
 
-One concept, the artifact, does four jobs today:
+Before this work one concept, the artifact, did four jobs:
 
 1. **Input.** A session mounts an artifact version to read files.
 2. **Skill.** A skill is an artifact that happens to hold a `SKILL.md`.
@@ -15,7 +15,7 @@ Each job pulls the artifact a different way, and the seams show:
 
 - Giving an agent one PDF takes three calls and leaves a named, versioned, publishable thing behind.
 - A message cannot carry a file, because there is no single-file id to refer to.
-- An output over a limit loses the whole turn's outputs, and no one can see why. `docs/session-output-visibility.md` lists eight situations the outputs endpoint cannot tell apart.
+- An output over a limit lost the whole turn's outputs, and no one could see why: the outputs endpoint answered the same way for a turn that wrote nothing, a save still running, a refusal and a failure.
 - A client can add versions to, publish or delete a session's outputs artifact, so the publisher needs rules for each.
 - Nothing lists skills or checks one when it is uploaded.
 - An artifact needs an empty state (version 0) and a blob upload route only so that large files have somewhere to go.
@@ -48,7 +48,7 @@ client ──upload──▶ File ──mounted read-only──▶ Session works
 
 ## File
 
-**State:** `status` (none, ready, deleted), `filename`, `content_type`, `size`, `sha256`, reservation counters, `created_at`. Step 3 adds `origin` (uploaded, or `{session_id, turn, path}`).
+**State:** `status` (none, ready, deleted), `filename`, `content_type`, `size`, `sha256`, `origin` (uploaded, or the session, turn and path that produced it), reservation counters, `created_at`.
 
 **Commands and events**
 
@@ -64,7 +64,8 @@ client ──upload──▶ File ──mounted read-only──▶ Session works
 **Rules proved**
 
 - A file is described (filename, size, sha256) exactly when it has been created.
-- Filename, content type, size and sha256 never change once created.
+- Filename, content type, size, sha256 and origin never change once created.
+- An origin names a session, a turn and a path together, or none of them.
 - A deleted file stays deleted.
 - Creating takes the open reservation; only the latest reservation is open.
 
@@ -77,7 +78,7 @@ client ──upload──▶ File ──mounted read-only──▶ Session works
 | Route | Purpose |
 |---|---|
 | `POST /v1/files` | Upload one file. Returns the file. |
-| `GET /v1/files` | List in creation order. Step 3 adds a `session_id` filter for a session's outputs. |
+| `GET /v1/files` | List in creation order. A `session_id` filter for everything a session ever saved can follow. |
 | `GET /v1/files/{file_id}` | Metadata. |
 | `GET /v1/files/{file_id}/content` | Raw bytes. |
 | `DELETE /v1/files/{file_id}` | Delete. |
@@ -90,18 +91,27 @@ CLI: `checkfu files upload <path>`, `list`, `retrieve`, `download --file-id <id>
 
 **Output.** After each turn that ends with a reply, a policy saves the outputs folder:
 
-1. List `/mnt/session/outputs` inside the turn fence.
-2. For each path whose content differs from the last save of that path, create a File with origin `{session_id, turn, path}`. The file id is derived from session, turn and path, so a replay creates nothing twice.
-3. Record the result on the session: `session.outputs_saved {turn, files}` or `session.outputs_skipped {turn, reason}`.
+1. List `/mnt/session/outputs` inside the turn fence. A file over a limit, one that changed while it was read, or one that is not a regular file is skipped on its own and named with the reason. Only a folder that cannot be read as one, or that holds more files than a record can name, skips the whole turn.
+2. For each file, derive its file id from the session, the path and the content's sha256. If that file already exists it is reused, so unchanged content is never stored twice and a replay creates nothing. Otherwise the bytes are read and a File is created with origin `{session_id, turn, path}`.
+3. Record the turn on the session's outputs record, `SessionOutputs`: either `session_outputs.saved {turn, files, skipped}`, where `files` is the folder as that turn left it, or `session_outputs.skipped {turn, reason}`, which keeps the files of the last turn that saved.
 
-Each file is saved on its own. One file over a limit is skipped and named in the record; the rest are saved.
+`GET /v1/sessions/{session_id}/outputs` answers from that record: the latest recorded turn, whether it was saved or skipped and why, the files, and the files that were skipped. A file the client has since deleted is left out. Every saved file is also an ordinary file under `/v1/files`.
 
-`GET /v1/sessions/{session_id}/outputs` returns the latest file for each path, from a view over those events. `GET /v1/files?session_id=` returns every saved file.
+The record is its own aggregate, keyed by the session. Its lists travel as bounded text, as an agent's tools and servers do, so every rule about it is proved rather than checked on small lists.
 
-**Rules**
+**Rules proved**
 
-- A turn records its outputs at most once, and only a turn that replied records any (proved, on Session).
-- Every file a session records as an output has that session as its origin (checked, across aggregates).
+- A turn is recorded at most once, and the recorded turn never goes back.
+- A saved turn replaces the files; a skipped turn keeps the files saved before.
+- A reason is given exactly when the turn was skipped.
+
+The record is written only by the save, and a file's id carries its session. The endpoint also leaves out any file whose origin is another session.
+
+Three consequences worth knowing:
+
+- **A deleted output stays deleted.** If a client deletes a saved file and the same content is still at that path, later turns list the path under skipped with that reason instead of saving it again. Changed content at the path is saved as usual.
+- **A skipped turn can leave files behind.** A save that fails or times out partway has already created some files. They are ordinary files with that turn as their origin, the record does not name them, and the next save reuses them.
+- **Skips are never dropped.** If more outputs are skipped than a record can name, the turn is skipped with the count instead.
 
 **Later, on the same foundation:** adding and removing file resources on a running session, and `image` and `document` blocks in a user message that name a `file_id`.
 
@@ -134,10 +144,10 @@ A skill becomes its own resource: `POST /v1/skills` with files, versions as full
 
 | Removed | Replaced by |
 |---|---|
-| Outputs as an artifact with a derived id; its publisher; the "follows the directory" contract | Outputs saved as Files; `session.outputs_saved` |
+| Outputs as an artifact with a derived id; its publisher; the "follows the directory" contract | Outputs saved as Files; the session's outputs record |
 | `OpenArtifact`, version 0, `PUT /v1/artifacts/{id}/blobs/{sha256}`, per-blob upload lock | `POST /v1/files`, then versions that name file ids |
 | The `skill` resource as a convention over artifacts | The Skill resource |
-| Separate, smaller output limits for the whole folder | Per-file limits shared with Files |
+| One limit failure losing the whole folder | Each file saved or skipped on its own. The per-file size limit stays at 1 MiB until outputs can be streamed from the machine |
 | "Publish" used for adding a version or saving outputs | "Publish" only for an artifact's public address |
 
 ## Order of work
@@ -146,7 +156,7 @@ A skill becomes its own resource: `POST /v1/skills` with files, versions as full
 |---|---|---|
 | 1 (built) | File aggregate, shared byte owner, `/v1/files`, CLI commands, proofs | |
 | 2 | `file` session resource, admission rule, copy into the machine | 1 |
-| 3 | Outputs saved as Files; session outputs record and view; remove the outputs publisher | 1 |
+| 3 (built) | Outputs saved as Files; the session outputs record; remove the outputs publisher | 1 |
 | 4 | Artifact versions from file ids; remove empty artifacts and blob upload | 1 |
 | 5 | Skill resource, attached to agents | 4 |
 | 6 | File blocks in messages; add and remove resources on a running session | 2 |

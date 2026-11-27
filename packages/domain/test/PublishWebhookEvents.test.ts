@@ -21,7 +21,7 @@ import { MemoryStoreId } from "../src/Memory/MemoryStore.id.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
-import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
+import { OutputsUnsaved } from "../src/Session/OutputsSaver.external.ts"
 import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
 import { CredentialId } from "../src/Vault/Credential.id.ts"
 import { VaultId } from "../src/Vault/Vault.id.ts"
@@ -85,7 +85,7 @@ describe("PublishWebhookEvents policy", () => {
 			})
 			const layer = Checkfu.layer(
 				CheckfuHandlersLive.pipe(
-					Layer.provide([ArtifactBytesKept, FileBytesKept, SessionOutputsUnpublished, eventsLayer]),
+					Layer.provide([ArtifactBytesKept, FileBytesKept, OutputsUnsaved, eventsLayer]),
 					Layer.provide([HarnessStubLayer, ListingStore.memory]),
 				),
 			).pipe(Layer.provide(Domain.InMemory))

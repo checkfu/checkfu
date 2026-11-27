@@ -11,6 +11,7 @@ const story = Story.make(Files, { layer: FilesHandlersLive, stub: [FileBytes] })
 const STANDING = {
 	"File.StatusIsKnown": "proved",
 	"File.DescribedExactlyWhenCreated": "proved",
+	"File.AnOriginNamesASessionATurnAndAPathOrNone": "proved",
 	"File.AReservationIsOpenOnlyBeforeCreation": "proved",
 	"File.OnlyTheLatestReservationIsOpen": "proved",
 	"File.CreatedFileNeverReturnsToUninitialized": "proved",
@@ -18,9 +19,20 @@ const STANDING = {
 	"File.ContentNeverChanges": "proved",
 	"File.ReservationsAreNumberedInOrder": "proved",
 	"File.CreatingTakesTheOpenReservation": "proved",
+	"SessionOutputs.OutcomeIsKnown": "proved",
+	"SessionOutputs.AnOutcomeIsRecordedExactlyWhenATurnIs": "proved",
+	"SessionOutputs.AReasonIsGivenExactlyWhenTheTurnWasSkipped": "proved",
+	"SessionOutputs.TheRecordedTurnNeverGoesBack": "proved",
+	"SessionOutputs.ATurnIsRecordedAtMostOnce": "proved",
+	"SessionOutputs.ASkippedTurnKeepsTheFilesSavedBefore": "proved",
+	"SessionOutputs.ASavedTurnReplacesTheFiles": "proved",
+	"SessionOutputs.NothingChangesWithoutARecord": "proved",
 	"Files.NoFileReservationStaysOpen": "checked",
 	"Files.AFileIsCreated": "reached",
 	"Files.AFileIsDeleted": "reached",
+	"Files.ASessionProducesAFile": "reached",
+	"Files.OutputsAreSaved": "reached",
+	"Files.OutputsAreSkippedAfterASave": "reached",
 } as const
 
 const PROVED = Object.entries(STANDING)

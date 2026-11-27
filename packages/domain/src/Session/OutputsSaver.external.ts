@@ -3,12 +3,10 @@ import * as Effect from "effect/Effect"
 import { SessionId } from "./Session.id.ts"
 import { PositiveInt } from "./SessionTypes.ts"
 
-export class SessionOutputs extends Domain.ExternalSystem("SessionOutputs", {
-	publish: {
+export class OutputsSaver extends Domain.ExternalSystem("OutputsSaver", {
+	save: {
 		args: { session_id: SessionId, turn: PositiveInt },
 	},
 }) {}
 
-export const SessionOutputsUnpublished = SessionOutputs.toLayer(
-	Effect.succeed({ publish: () => Effect.void }),
-)
+export const OutputsUnsaved = OutputsSaver.toLayer(Effect.succeed({ save: () => Effect.void }))

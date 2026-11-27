@@ -636,7 +636,7 @@ const NO_WORKSPACES: WorkspaceExecutorService = {
 	prepareWorkspace: () => Effect.succeed({ ok: true }),
 	storeRepositoryToken: () => Effect.void,
 	interruptWorkspace: () => Effect.void,
-	listOutputs: () => Effect.succeed({ ok: true, files: [] }),
+	listOutputs: () => Effect.succeed({ ok: true, files: [], skipped: [] }),
 	readOutputs: () => Effect.succeed([]),
 	discardWorkspace: () => Effect.void,
 }

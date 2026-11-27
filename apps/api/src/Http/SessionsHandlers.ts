@@ -61,7 +61,7 @@ import { MAX_SKILL_FILE_BYTES } from "@checkfu/sdk/Schemas"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
-import type * as DateTime from "effect/DateTime"
+import * as DateTime from "effect/DateTime"
 import * as Cache from "effect/Cache"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -76,6 +76,9 @@ import * as Struct from "effect/Struct"
 import * as Unify from "effect/Unify"
 import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
+import { File } from "@checkfu/domain/File/File.aggregate"
+import { decodeSavedOutputs, decodeSkippedOutputs } from "@checkfu/domain/Outputs/OutputsTypes"
+import { SessionOutputs } from "@checkfu/domain/Outputs/SessionOutputs.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import {
 	AdmitSession,
@@ -111,10 +114,10 @@ import { VaultId } from "@checkfu/domain/Vault/Vault.id"
 import * as Result from "effect/Result"
 import { ArtifactManifestAt } from "../Artifacts/ResolveArtifactVersion.ts"
 import { PinnedArtifact } from "../Artifacts/PinnedArtifact.ts"
+import { fileResource } from "./FileResources.ts"
 import { SkillReader } from "../Skills/SkillReader.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
-import { artifactReads, stored } from "./ArtifactsHandlers.ts"
-import { outputsArtifactId } from "../OutputsIdentity.ts"
+import { stored } from "./ArtifactsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, apiError, statusOf } from "./Api.ts"
 import type {
 	ClientEventId,
@@ -468,6 +471,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sessionViews = yield* SessionView
 		const memoryStores = yield* MemoryStore
 		const artifacts = yield* Artifact
+		const files = yield* File
+		const outputs = yield* SessionOutputs
 		const manifestAt = yield* ArtifactManifestAt
 		const pinnedArtifact = yield* PinnedArtifact
 		const skills = yield* SkillReader
@@ -496,7 +501,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		if (overObjectSockets && connectSessionView === undefined) {
 			return yield* Effect.die(new Error("SessionView is not pushed over object sockets."))
 		}
-		const { readArtifact } = yield* artifactReads
 
 		const agents = yield* Agent
 		const environments = yield* Environment
@@ -1045,17 +1049,35 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("getOutputs", ({ params }) =>
 				Effect.gen(function* () {
 					const sessionId = params.session_id
-					const id = yield* outputsArtifactId(digest, sessionId)
-					const artifact = yield* artifacts.get(id)
-					if (artifact.status === "active") {
-						return yield* readArtifact(id, artifact)
+					if ((yield* sessions.get(sessionId))._tag === "Uninitialized") {
+						return yield* reject(404, `Session ${sessionId} not found.`)
 					}
-					return yield* reject(
-						404,
-						(yield* sessions.get(sessionId))._tag === "Uninitialized"
-							? `Session ${sessionId} not found.`
-							: `Session ${sessionId} has published no outputs.`,
+					const record = yield* outputs.get(sessionId)
+					const saved = yield* Effect.forEach(
+						decodeSavedOutputs(record.files),
+						({ file_id }) =>
+							Effect.map(files.get(file_id), (state) =>
+								state.status === "ready" && state.origin_session_id === sessionId
+									? [fileResource(file_id, state)]
+									: [],
+							),
+						{ concurrency: 8 },
 					)
+					return {
+						type: "session_outputs" as const,
+						session_id: sessionId,
+						turn: record.turn,
+						status:
+							record.outcome === "saved"
+								? ("saved" as const)
+								: record.outcome === "skipped"
+									? ("skipped" as const)
+									: ("none" as const),
+						reason: record.reason === "" ? null : record.reason,
+						files: saved.flat(),
+						skipped: decodeSkippedOutputs(record.skipped),
+						recorded_at: record.turn === 0 ? null : DateTime.makeUnsafe(record.recorded_at),
+					}
 				}).pipe(handled),
 			)
 			.handle("listResources", ({ params }) =>

@@ -64,11 +64,8 @@ import {
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import { makeSessionOutputs, SESSION_OUTPUTS_PATH } from "../../src/Workspace/SessionOutputs.ts"
-import { makeSessionOutputsPublisher } from "../../src/Artifacts/SessionOutputsLive.ts"
-import {
-	SessionOutputs,
-	SessionOutputsUnpublished,
-} from "@checkfu/domain/Session/SessionOutputs.external"
+import { makeOutputsSaver } from "../../src/Files/OutputsSaverLive.ts"
+import { OutputsSaver, OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { FileBytesLive } from "../../src/Files/FileBytesLive.ts"
 import { makeFileStoreMemory } from "../../src/Files/FileStoreMemory.ts"
@@ -254,7 +251,7 @@ export const checkfuWithHarness = <E, R>(
 		CheckfuHandlersLive.pipe(
 			Layer.provide(ArtifactBytesKept),
 			Layer.provide(FileBytesKept),
-			Layer.provide(SessionOutputsUnpublished),
+			Layer.provide(OutputsUnsaved),
 			Layer.provide(ListingStore.memory),
 			Layer.provide(harness),
 		),
@@ -519,22 +516,20 @@ export const makePiDurableTestLayer = (
 	let beforeOutputsRead: ((sessionId: string) => void | Promise<void>) | undefined
 	const enteredTurns = new Map<string, number>()
 	const superseded = (sessionId: string, turn: number) => (enteredTurns.get(sessionId) ?? 0) > turn
-	const publishedTurns: Array<string> = []
-	type PublishArgs = Parameters<SessionOutputs["Service"]["publish"]>[0]
-	let publish: ((args: PublishArgs) => Effect.Effect<void>) | undefined
-	const publishOutputs = (args: PublishArgs) =>
-		Effect.suspend(() => publish?.(args) ?? Effect.die(new Error("no publisher yet")))
-	const SessionOutputsRecorded = SessionOutputs.toLayer(
-		Effect.map(makeSessionOutputsPublisher, (publisher) => {
-			publish = (args) =>
-				publisher
-					.publish(args)
+	const savedTurns: Array<string> = []
+	type SaveArgs = Parameters<OutputsSaver["Service"]["save"]>[0]
+	let save: ((args: SaveArgs) => Effect.Effect<void>) | undefined
+	const saveOutputs = (args: SaveArgs) =>
+		Effect.suspend(() => save?.(args) ?? Effect.die(new Error("no saver yet")))
+	const OutputsSaverRecorded = OutputsSaver.toLayer(
+		Effect.map(makeOutputsSaver, (saver) => {
+			save = (args) =>
+				saver
+					.save(args)
 					.pipe(
-						Effect.ensuring(
-							Effect.sync(() => publishedTurns.push(`${args.session_id}:${args.turn}`)),
-						),
+						Effect.ensuring(Effect.sync(() => savedTurns.push(`${args.session_id}:${args.turn}`))),
 					)
-			return { publish: (args: PublishArgs) => publishOutputs(args) }
+			return { save: (args: SaveArgs) => saveOutputs(args) }
 		}),
 	)
 	const preparedWorkspaces: Array<{
@@ -820,7 +815,7 @@ export const makePiDurableTestLayer = (
 			Layer.provide(HarnessLive),
 			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
 			Layer.provide(FileBytesLive.pipe(Layer.provide(fileStore.layer))),
-			Layer.provide(SessionOutputsRecorded.pipe(Layer.provide(artifactStore.layer))),
+			Layer.provide(OutputsSaverRecorded.pipe(Layer.provide(fileStore.layer))),
 			Layer.provide(WebhookEventsRuntimeLive),
 		),
 	).pipe(Layer.provide(executorLayer))
@@ -900,6 +895,7 @@ export const makePiDurableTestLayer = (
 
 	return {
 		layer,
+		executorLayer,
 		closeAll,
 		restartPi,
 		requests,
@@ -917,8 +913,8 @@ export const makePiDurableTestLayer = (
 		outputListReads,
 		outputWalks,
 		failingOutputReads,
-		publishedTurns,
-		publishOutputs,
+		savedTurns,
+		saveOutputs,
 		setBeforeOutputsRead: (run: (sessionId: string) => void | Promise<void>) => {
 			beforeOutputsRead = run
 		},

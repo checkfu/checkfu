@@ -28,7 +28,7 @@
 			},
 			"File.ContentNeverChanges": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.filename === before.filename,\n\t\t\t\t\tafter.content_type === before.content_type,\n\t\t\t\t\tafter.size === before.size,\n\t\t\t\t\tafter.sha256 === before.sha256,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.filename === before.filename,\n\t\t\t\t\tafter.content_type === before.content_type,\n\t\t\t\t\tafter.size === before.size,\n\t\t\t\t\tafter.sha256 === before.sha256,\n\t\t\t\t\tafter.origin_session_id === before.origin_session_id,\n\t\t\t\t\tafter.origin_turn === before.origin_turn,\n\t\t\t\t\tafter.origin_path === before.origin_path,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
 			"File.ReservationsAreNumberedInOrder": {
 				"kind": "transition",
@@ -49,6 +49,54 @@
 			"Files.AFileIsDeleted": {
 				"kind": "sometimes",
 				"source": "(m) => m.File.some((f) => f.state.status === \"deleted\")"
+			},
+			"File.AnOriginNamesASessionATurnAndAPathOrNone": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.origin_session_id === \"\", s.origin_turn === 0, s.origin_path === \"\"].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.status !== \"\",\n\t\t\t\t\ts.origin_session_id !== \"\",\n\t\t\t\t\ts.origin_turn >= 1,\n\t\t\t\t\ts.origin_path !== \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"SessionOutputs.OutcomeIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.outcome === \"\", s.outcome === \"saved\", s.outcome === \"skipped\"].some((ok) => ok)"
+			},
+			"SessionOutputs.AnOutcomeIsRecordedExactlyWhenATurnIs": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.turn === 0, s.outcome === \"\", s.files === \"\", s.skipped === \"\"].every((ok) => ok),\n\t\t\t\t[s.turn >= 1, s.outcome !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"SessionOutputs.TheRecordedTurnNeverGoesBack": {
+				"kind": "transition",
+				"source": "({ before, after }) => after.turn >= before.turn"
+			},
+			"SessionOutputs.ATurnIsRecordedAtMostOnce": {
+				"kind": "transition",
+				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\t[events.length === 0, command.turn <= before.turn].every((ok) => ok),\n\t\t\t\t[events.length === 1, command.turn > before.turn, after.turn === command.turn].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"SessionOutputs.ASkippedTurnKeepsTheFilesSavedBefore": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[command._tag !== \"SkipSessionOutputs\", after.files === before.files].some((ok) => ok)"
+			},
+			"Files.ASessionProducesAFile": {
+				"kind": "sometimes",
+				"source": "(m) => m.File.some((f) => f.state.origin_turn >= 1)"
+			},
+			"Files.OutputsAreSaved": {
+				"kind": "sometimes",
+				"source": "(m) => m.SessionOutputs.some((o) => o.state.outcome === \"saved\")"
+			},
+			"Files.OutputsAreSkippedAfterASave": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.SessionOutputs.some((o) => o.state.outcome === \"skipped\" && o.state.files !== \"\")"
+			},
+			"SessionOutputs.AReasonIsGivenExactlyWhenTheTurnWasSkipped": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.outcome === \"skipped\", s.reason !== \"\"].every((ok) => ok),\n\t\t\t\t[s.outcome !== \"skipped\", s.reason === \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"SessionOutputs.ASavedTurnReplacesTheFiles": {
+				"kind": "transition",
+				"source": "({ after, command, events }) => {\n\t\t\tif (command._tag !== \"RecordSessionOutputs\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tevents.length === 0,\n\t\t\t\t[after.files === command.files, after.skipped === command.skipped].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"SessionOutputs.NothingChangesWithoutARecord": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\t[\n\t\t\t\tevents.length !== 0,\n\t\t\t\t[\n\t\t\t\t\tafter.turn === before.turn,\n\t\t\t\t\tafter.outcome === before.outcome,\n\t\t\t\t\tafter.reason === before.reason,\n\t\t\t\t\tafter.files === before.files,\n\t\t\t\t\tafter.skipped === before.skipped,\n\t\t\t\t\tafter.recorded_at === before.recorded_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

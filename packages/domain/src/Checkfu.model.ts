@@ -44,6 +44,7 @@ import {
 } from "./File/ExpireFileReservations.policy.ts"
 import { File } from "./File/File.aggregate.ts"
 import { ReleaseFileBytes, ReleaseFileBytesLive } from "./File/ReleaseFileBytes.policy.ts"
+import { SessionOutputs } from "./Outputs/SessionOutputs.aggregate.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
@@ -61,10 +62,7 @@ import {
 } from "./Session/RecordInitialMessages.policy.ts"
 import { AdmitSessionWithMessagesDecision } from "./Session/AdmitSessionWithMessages.decision.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
-import {
-	PublishSessionOutputs,
-	PublishSessionOutputsLive,
-} from "./Session/PublishSessionOutputs.policy.ts"
+import { SaveSessionOutputs, SaveSessionOutputsLive } from "./Session/SaveSessionOutputs.policy.ts"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
 import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.ts"
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
@@ -93,6 +91,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AutomationCapacity,
 		Artifact,
 		File,
+		SessionOutputs,
 		MemoryStore,
 		Memory,
 	],
@@ -136,7 +135,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ArmAutomation,
 		StartAutomationRun,
 		FreeAutomationSlot,
-		PublishSessionOutputs,
+		SaveSessionOutputs,
 		ExpireArtifactReservations,
 		ReleaseArtifactBytes,
 		ExpireFileReservations,
@@ -556,6 +555,8 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"ReserveFile",
 		"CreateFile",
 		"DeleteFile",
+		"RecordSessionOutputs",
+		"SkipSessionOutputs",
 		"CreateMemoryStore",
 		"UpdateMemoryStore",
 		"ArchiveMemoryStore",
@@ -583,7 +584,7 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	StartTurnLive,
 	EnsureTurnStartedLive,
 	EnsureTurnStoppedLive,
-	PublishSessionOutputsLive,
+	SaveSessionOutputsLive,
 	RunTurnLive,
 	ArmAutomationLive,
 	StartAutomationRunLive,
