@@ -1429,7 +1429,7 @@ export const WebhookEventSubscriptions = Schema.Array(WebhookEventSubscription)
 	.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_WEBHOOK_EVENT_TYPES))
 	.annotate({
 		description:
-			'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running.',
+			'Subscribed event types (or ["*"] to subscribe to all events). session.status_idled is sent when a turn ends or pauses for input, including tool approval. Scheduled runs emit automation_run.started when triggered, automation_run.succeeded when they create a session, and automation_run.failed when session creation fails. Manual runs do not emit automation_run events.',
 	})
 
 export const CreateWebhookBody = Schema.Struct({

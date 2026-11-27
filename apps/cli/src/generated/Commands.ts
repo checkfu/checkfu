@@ -4286,7 +4286,7 @@ const webhooksCreateCommand = CommandMake(
 		eventTypes: FlagString("event-types").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running. (JSON, YAML, or @file)',
+				'Subscribed event types (or ["*"] to subscribe to all events). session.status_idled is sent when a turn ends or pauses for input, including tool approval. Scheduled runs emit automation_run.started when triggered, automation_run.succeeded when they create a session, and automation_run.failed when session creation fails. Manual runs do not emit automation_run events. (JSON, YAML, or @file)',
 			),
 			FlagOptional,
 		),
@@ -4645,7 +4645,7 @@ const webhooksUpdateCommand = CommandMake(
 		eventTypes: FlagString("event-types").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running. (JSON, YAML, or @file)',
+				'Subscribed event types (or ["*"] to subscribe to all events). session.status_idled is sent when a turn ends or pauses for input, including tool approval. Scheduled runs emit automation_run.started when triggered, automation_run.succeeded when they create a session, and automation_run.failed when session creation fails. Manual runs do not emit automation_run events. (JSON, YAML, or @file)',
 			),
 			FlagOptional,
 		),

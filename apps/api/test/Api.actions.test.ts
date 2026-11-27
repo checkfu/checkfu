@@ -24,7 +24,7 @@ import { AbandonTurn } from "@checkfu/domain/Session/AbandonTurn.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId, toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
 import { emptySessionFold, foldSessionEvents } from "@checkfu/sdk"
-import { SessionEvent, SessionResource } from "@checkfu/sdk/Api"
+import { ListWebhookDeliveriesResponse, SessionEvent, SessionResource } from "@checkfu/sdk/Api"
 import { idempotentCommandId } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { conversationName } from "../src/Pi/PiDurableHarness.ts"
@@ -500,6 +500,32 @@ describe("tool calls that wait on an answer", () => {
 		await world((call) =>
 			Effect.gen(function* () {
 				const id = yield* session(call)
+				const webhook = yield* call("POST", "/v1/webhooks", {
+					url: "https://hooks.example.com/session-idle",
+					event_types: ["session.status_idled"],
+				})
+				expect(webhook.status).toBe(201)
+				const deliveries = (count: number) =>
+					Effect.gen(function* () {
+						const observed = yield* call("GET", `/v1/webhooks/${webhook.body.id}/deliveries`).pipe(
+							Effect.map((response) => {
+								expect(response.status).toBe(200)
+								return Schema.decodeUnknownSync(Schema.toCodecJson(ListWebhookDeliveriesResponse))(
+									response.body,
+								).data
+							}),
+							Effect.repeat({
+								schedule: Schedule.spaced("10 millis"),
+								times: 500,
+								until: (deliveries) => deliveries.length >= count,
+							}),
+						)
+						expect(observed).toHaveLength(count)
+						for (const delivery of observed) {
+							expect(delivery.event_type).toBe("session.status_idled")
+						}
+						return observed.map(({ event_id }) => event_id)
+					})
 				expect((yield* send(call, id, [message("deploy")])).status).toBe(200)
 				const paused = yield* until(call, id, waiting(1), "no pause")
 				const use = find(paused, "agent.mcp_tool_use")
@@ -515,6 +541,7 @@ describe("tool calls that wait on an answer", () => {
 				})
 				expect((yield* call("GET", `/v1/sessions/${id}`)).body.status).toBe("idle")
 				expect(ran).toEqual([])
+				const [pausedNotification] = yield* deliveries(1)
 
 				const answered = yield* send(call, id, [confirm(use.id, "allow")])
 				expect(answered.status).toBe(200)
@@ -535,6 +562,9 @@ describe("tool calls that wait on an answer", () => {
 					{ tool_use_id: use.tool_use_id, is_error: false },
 				])
 				expect(idles(all).at(-1)).toMatchObject({ stop_reason: { type: "end_turn" }, turn: 1 })
+				const notifications = yield* deliveries(2)
+				expect(notifications).toContain(pausedNotification)
+				expect(new Set(notifications).size).toBe(2)
 				const spans = all.filter((e) => e.type === "span.model_request_end")
 				expect(spans.map((e) => e.model_usage)).toEqual([
 					{ input_tokens: 3, output_tokens: 2 },
