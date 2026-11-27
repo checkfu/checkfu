@@ -2,6 +2,7 @@ import type { Field, Forge, Group, Method, Type } from "@cloudflare/forge"
 import { file, module } from "@cloudflare/forge/ts"
 import {
 	cleanGeneratedHeader,
+	buildSurfaceCatalog,
 	collectFieldsFromType,
 	extractArrayMaxItems,
 	extractStringLiterals,
@@ -11,8 +12,6 @@ import {
 	isJsonRecord,
 	isAnyJson,
 	isObjectOrComplexUnion,
-	isSseMethod,
-	readEndpointRef,
 } from "./SurfaceCatalog.ts"
 import type { GeneratedFile } from "./SurfaceCatalog.ts"
 
@@ -507,8 +506,6 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	return flags
 }
 
-const cliGroupName = (group: Group): string => group.path.map((part) => part.kebab()).join(":")
-
 const groupExtrasTypeParam = (group: Group): string =>
 	`${group.path.map((part) => part.pascal()).join("")}Extras`
 
@@ -538,7 +535,8 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 	const invokeGeneratedStream = runtimeMod.ident("invokeGeneratedStream")
 	const GeneratedOperationDescriptor = runtimeMod.ident("GeneratedOperationDescriptor").ty()
 
-	const activeGroups = forge.groups.filter((g) => g.path.length > 0 && g.methods.length > 0)
+	const operations = buildSurfaceCatalog(forge).operations.filter((op) => op.cliGroup !== "")
+	const groups = Map.groupBy(operations, (op) => op.group)
 
 	const groupEntries: Array<{
 		readonly cliName: string
@@ -548,25 +546,20 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 	}> = []
 
 	const out = file("Commands.ts")
-	for (const group of activeGroups) {
-		const cliName = cliGroupName(group)
+	for (const [group, methods] of groups) {
+		const cliName = methods[0]?.cliGroup ?? ""
 		const methodVars: Array<string> = []
 		let groupDescription = group.description
 
-		for (const method of group.methods) {
-			const endpointRef = readEndpointRef(method)
+		for (const operation of methods) {
+			const { method, cliMethod, cliCommand, apiGroup, apiEndpoint, hasBody, sse } = operation
 			const cliExt = readCliExtension(method)
 			if (!groupDescription && cliExt.groupDescription) {
 				groupDescription = cliExt.groupDescription
 			}
 			const flags = collectMethodFlags(method, cliExt)
 			const varName = methodVarName(group, method)
-			const streaming = isSseMethod(method)
-			if (streaming && (method.httpMethod.toUpperCase() !== "GET" || method.body !== undefined)) {
-				throw new Error(
-					`Unsupported SSE endpoint ${endpointRef.group}.${endpointRef.endpoint}: generated streaming commands only support GET endpoints without a request body.`,
-				)
-			}
+			const streaming = sse !== undefined
 			const descriptorVar = `${varName}Spec`
 			methodVars.push(varName)
 
@@ -583,10 +576,10 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 
 			out("const ", descriptorVar, ": ", GeneratedOperationDescriptor, " = {")
 			out.indent(() => {
-				out("cliLabel: ", JSON.stringify(`${cliName} ${method.name.kebab()}`), ",")
-				out("apiGroup: ", JSON.stringify(endpointRef.group), ",")
-				out("apiEndpoint: ", JSON.stringify(endpointRef.endpoint), ",")
-				out("hasBody: ", method.body !== undefined, ",")
+				out("cliLabel: ", JSON.stringify(cliCommand), ",")
+				out("apiGroup: ", JSON.stringify(apiGroup), ",")
+				out("apiEndpoint: ", JSON.stringify(apiEndpoint), ",")
+				out("hasBody: ", hasBody, ",")
 				if (cliExt.maxInputBytes !== undefined) {
 					out(
 						"maxInputBytes: ",
@@ -601,7 +594,7 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 
 			out("const ", varName, " = ", CommandMake, "(")
 			out.indent(() => {
-				out(JSON.stringify(method.name.kebab()), ",")
+				out(JSON.stringify(cliMethod), ",")
 				out("{")
 				out.indent(() => {
 					for (const fl of flags) {
@@ -681,8 +674,8 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 				}
 			})
 			const description = formatCliCommandDescription(
-				method.description || method.summary || `${cliName} ${method.name.kebab()}`,
-				method.body !== undefined,
+				operation.description || operation.summary || cliCommand,
+				hasBody,
 			)
 			const examples = cliExt.examples ?? []
 			out(").pipe(")

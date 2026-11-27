@@ -32,6 +32,7 @@ export interface SurfaceOperation {
 	readonly groupPathCamel: ReadonlyArray<string>
 	readonly cliGroup: string
 	readonly cliCommand: string
+	readonly cliMethod: string
 	readonly methodName: string
 	readonly apiGroup: string
 	readonly apiEndpoint: string
@@ -218,7 +219,7 @@ export const isAnyJson = (ty: Type): boolean => {
 	return unwrapped.kind === "scalar" && unwrapped.scalar === "unknown"
 }
 
-export const isSseMethod = (method: Method): boolean =>
+const isSseMethod = (method: Method): boolean =>
 	method.responses.some((res) => res.contents.some((c) => c.mediaType === "text/event-stream"))
 
 export const splitInlineTypeImports = (content: string): string =>
@@ -420,6 +421,7 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 		groupPathCamel,
 		cliGroup,
 		cliCommand,
+		cliMethod,
 		methodName,
 		apiGroup: endpointRef.group,
 		apiEndpoint: endpointRef.endpoint,
