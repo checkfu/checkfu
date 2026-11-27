@@ -1,3 +1,4 @@
+import { foldSessionEvents, outstandingCalls } from "@checkfu/sdk/SessionFold"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import { infiniteQueryOptions, QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
@@ -5,6 +6,14 @@ import type { EventPage } from "../src/api.ts"
 import { EventBatch, mergeBySeq, transcriptEvents } from "../src/event-tail.ts"
 import { eventsOf, isFinal, liveQuery, newestSeqOf, transcriptQuery } from "../src/queries.ts"
 import type { Transcript } from "../src/queries.ts"
+
+import { sessionCallsOf } from "../src/tool-calls.ts"
+import {
+	appendBatch,
+	makeTranscriptFixture,
+	transcriptSizes,
+	waitingCallId,
+} from "./transcript-fixture.ts"
 
 const at = "2026-11-24T00:00:00.000Z"
 
@@ -121,4 +130,127 @@ describe("transcript", () => {
 		expect(isFinal([message(1)])).toBe(false)
 		expect(isFinal([message(1), archived(2)])).toBe(true)
 	})
+})
+
+const fixtureHistory = (fixture: ReturnType<typeof makeTranscriptFixture>, pageCount: number) =>
+	transcript(
+		...Array.from({ length: pageCount }, (_, index) =>
+			fixture.page(fixture.newest - fixture.pageSize * index),
+		),
+	)
+
+describe("long transcript playback", () => {
+	it.each(transcriptSizes)("preserves event order and one waiting call with %i events", (size) => {
+		const fixture = makeTranscriptFixture(size)
+		const newestPage = fixture.page()
+		expect(sessionCallsOf(eventsOf(transcript(newestPage))).unseen).toEqual([waitingCallId])
+		const history = fixtureHistory(fixture, size / fixture.pageSize)
+		let tail: ReadonlyArray<JsonSessionEvent> = []
+		let writes = 0
+		const batch = new EventBatch((incoming) => {
+			writes++
+			tail = mergeBySeq(tail, incoming)
+		})
+		const first = appendBatch(fixture.newest)
+		const reconnect = appendBatch(fixture.newest + first.length)
+		batch.add(first)
+		batch.flush()
+		batch.add([...first, ...reconnect, ...reconnect.slice(0, 1)])
+		batch.flush()
+		expect(writes).toBe(2)
+		const visible = transcriptEvents(eventsOf(history), tail)
+		expect(seqs(visible)).toEqual(
+			Array.from(
+				{ length: size + first.length + reconnect.length },
+				(_, index) => fixture.newest - size + 1 + index,
+			),
+		)
+		const calls = sessionCallsOf(visible)
+		expect([...calls.waiting]).toEqual([waitingCallId])
+		expect(calls.unseen).toEqual([])
+		expect(calls.fold.calls.get(waitingCallId)).toMatchObject({ status: "waiting" })
+	})
+
+	it.runIf(process.env["CHECKFU_MEASURE_DASHBOARD_TRANSCRIPT"] === "1")(
+		"measures history flattening, tail merge and tool folding",
+		() => {
+			for (const size of transcriptSizes) {
+				const fixture = makeTranscriptFixture(size)
+				const count = size / fixture.pageSize
+				const history = fixtureHistory(fixture, count)
+				const olderHistory = fixtureHistory(fixture, count + 1)
+				const tail = appendBatch(fixture.newest)
+				const appended = appendBatch(fixture.newest + tail.length)
+				const cases = [
+					{ name: "append", history, tail: [], incoming: tail },
+					{ name: "preview", history, tail, incoming: undefined },
+					{
+						name: "reconnect",
+						history,
+						tail,
+						incoming: [...tail.slice(-2).map((event) => structuredClone(event)), ...appended],
+					},
+					{
+						name: "prepend",
+						history: olderHistory,
+						tail: [...tail, ...appended],
+						incoming: undefined,
+					},
+				]
+				const stableEvents = transcriptEvents(eventsOf(history), tail)
+				const stableCalls = sessionCallsOf(stableEvents)
+				for (const workload of cases) {
+					for (let run = 0; run < 8; run++) {
+						let nextTail: ReadonlyArray<JsonSessionEvent> = workload.tail
+						const batch = new EventBatch((events) => {
+							nextTail = mergeBySeq(workload.tail, events)
+						})
+						const started = performance.now()
+						if (workload.incoming !== undefined) {
+							batch.add(workload.incoming)
+							batch.flush()
+						}
+						const merged = transcriptEvents(eventsOf(workload.history), nextTail)
+						const mergedAt = performance.now()
+						const calls = sessionCallsOf(merged)
+						const foldedAt = performance.now()
+						expect(calls.waiting.has(waitingCallId)).toBe(true)
+						let candidateMs: number | null = null
+						if (workload.name === "reconnect") {
+							const candidateStarted = performance.now()
+							const keepsPrefix = tail.every(
+								(event, index) =>
+									nextTail[index] === event ||
+									JSON.stringify(nextTail[index]) === JSON.stringify(event),
+							)
+							const fold = keepsPrefix
+								? foldSessionEvents(stableCalls.fold, nextTail.slice(tail.length))
+								: sessionCallsOf(merged).fold
+							const waiting = outstandingCalls(fold)
+							const candidate = {
+								fold,
+								waiting,
+								unseen: [...waiting].filter((id) => !fold.calls.has(id)),
+							}
+							candidateMs = performance.now() - candidateStarted
+							expect(candidate).toEqual(calls)
+						}
+						if (run >= 3) {
+							process.stdout.write(
+								`${JSON.stringify({
+									size,
+									workload: workload.name,
+									run: run - 2,
+									mergeMs: mergedAt - started,
+									foldMs: foldedAt - mergedAt,
+									candidateMs,
+								})}\n`,
+							)
+						}
+					}
+				}
+			}
+		},
+		20_000,
+	)
 })
