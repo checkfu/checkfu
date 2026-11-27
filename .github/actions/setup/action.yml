@@ -27,6 +27,41 @@ runs:
         case "$version" in v24.*) ;; *) echo "::error::expected Node 24 on the runner image, found $version"; exit 1 ;; esac
         echo "node-version=$version" >> "$GITHUB_OUTPUT"
 
+    - name: Allow only the domain verification patch
+      shell: bash
+      run: |
+        bun - <<'JS'
+        import { lstatSync, readdirSync } from "node:fs"
+
+        const manifest = await Bun.file("package.json").json()
+        const lock = Bun.JSONC.parse(await Bun.file("bun.lock").text())
+        const dependency = "@alchemy.run/domain"
+        const pin = manifest.workspaces.catalog[dependency]
+        const encode = (value) => encodeURIComponent(value).replaceAll("%40", "@")
+        const patch = `${encode(dependency)}@${encode(pin)}.patch`
+        const expected = `patches/${patch}`
+        for (const { patchedDependencies } of [manifest, lock]) {
+          const entries = Object.entries(patchedDependencies ?? {})
+          if (entries.length !== 1 || patchedDependencies[`${dependency}@${pin}`] !== expected) {
+            throw new Error("Only the pinned domain verification patch is allowed.")
+          }
+        }
+        if (!lstatSync("patches").isDirectory()) {
+          throw new Error("Expected a regular patches directory.")
+        }
+        const files = readdirSync("patches", { withFileTypes: true })
+        if (
+          !files.some((entry) => entry.isFile() && entry.name === patch) ||
+          files.some((entry) => !entry.isFile() || ![patch, "README.md"].includes(entry.name))
+        ) {
+          throw new Error("Unexpected file in patches.")
+        }
+        const digest = new Bun.CryptoHasher("sha256").update(await Bun.file(expected).bytes()).digest("hex")
+        if (digest !== "24922326d1eb5c50ad910cc1934d5c08e83528d51f91416ca9900464d49bc5b1") {
+          throw new Error("The domain verification patch differs from the approved contents.")
+        }
+        JS
+
     # No cache for Bun's packages: a cold install takes about 4 seconds on a hosted runner, and
     # restoring the 444 MB cache took 6 to 9.
     - run: bun install --frozen-lockfile

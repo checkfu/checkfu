@@ -1,0 +1,56 @@
+diff --git a/lib/Explore.js b/lib/Explore.js
+index 24056505f85882602411c13bdcb6cce2643b2585..69c7aba3f7e706f830542846fafd253c00622d90 100644
+--- a/lib/Explore.js
++++ b/lib/Explore.js
+@@ -19,6 +19,7 @@ import * as Path from "effect/Path";
+ import * as ModelSearch from "./Explore/internal/ModelSearch.js";
+ import * as Script from "./Explore/internal/Script.js";
+ import * as Search from "./Explore/internal/Search.js";
++import * as Check from "./Prove/internal/Check.js";
+ import * as Interpreter from "./Prove/internal/Interpreter.js";
+ import * as Paths from "./Prove/internal/Paths.js";
+ import * as Smt from "./Prove/internal/Smt.js";
+@@ -54,6 +55,7 @@ const reportModel = (model, options) => Effect.gen(function* () {
+     const loader = yield* Source.loader(options);
+     const solver = yield* Smt.solver;
+     const interpreter = Interpreter.make(loader, new Value.Run([]));
++    interpreter.current.feasible = Check.feasible(solver);
+     loader.adopt(model);
+     const located = yield* ModelSearch.locate(loader, interpreter, model, file);
+     if (located.missing.length > 0)
+@@ -93,6 +95,7 @@ const reportAggregate = (aggregate, options) => Effect.gen(function* () {
+     const { loader, definition } = yield* Paths.load(aggregate, options.source, options);
+     const solver = yield* Smt.solver;
+     const interpreter = Interpreter.make(loader, new Value.Run([]));
++    interpreter.current.feasible = Check.feasible(solver);
+     const depth = options.depth ?? 3;
+     const found = yield* Search.search(solver, interpreter, aggregate, definition, {
+         depth,
+diff --git a/src/Explore.ts b/src/Explore.ts
+index b245ec002956a507d2c0cb3597ab81991cb85ac4..c3cb3053fc64f2add9d081dd58b797a61f241371 100644
+--- a/src/Explore.ts
++++ b/src/Explore.ts
+@@ -24,6 +24,7 @@ import * as Script from "./Explore/internal/Script.ts";
+ import type { Found, Move, Story } from "./Explore/internal/Search.ts";
+ import * as Search from "./Explore/internal/Search.ts";
+ import type * as Model from "./Model.ts";
++import * as Check from "./Prove/internal/Check.ts";
+ import * as Interpreter from "./Prove/internal/Interpreter.ts";
+ import * as Paths from "./Prove/internal/Paths.ts";
+ import * as Smt from "./Prove/internal/Smt.ts";
+@@ -229,6 +230,7 @@ const reportModel = (
+     const loader = yield* Source.loader(options);
+     const solver = yield* Smt.solver;
+     const interpreter = Interpreter.make(loader, new Value.Run([]));
++    interpreter.current.feasible = Check.feasible(solver);
+     loader.adopt(model);
+     const located = yield* ModelSearch.locate(loader, interpreter, model, file);
+     if (located.missing.length > 0)
+@@ -284,6 +286,7 @@ const reportAggregate = (
+     const { loader, definition } = yield* Paths.load(aggregate, options.source, options);
+     const solver = yield* Smt.solver;
+     const interpreter = Interpreter.make(loader, new Value.Run([]));
++    interpreter.current.feasible = Check.feasible(solver);
+     const depth = options.depth ?? 3;
+     const found = yield* Search.search(solver, interpreter, aggregate, definition, {
+       depth,
