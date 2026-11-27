@@ -45,6 +45,7 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
 		system_context: Schema.optionalKey(Schema.String),
+		unattended: Schema.optionalKey(Schema.Literal(true)),
 		last_reply_turn: NonNegativeInt,
 		segment: PositiveInt,
 	},
@@ -106,6 +107,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						...(payload.system_context === undefined
 							? {}
 							: { system_context: payload.system_context }),
+						...(payload.unattended === true ? { unattended: true as const } : {}),
 						last_reply_turn: payload.last_reply_turn,
 						segment,
 					})

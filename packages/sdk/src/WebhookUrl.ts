@@ -5,9 +5,14 @@ import * as NetAddress from "effect/net/NetAddress"
 
 const reservedIpv4 = [
 	"0.0.0.0/8",
+	"10.0.0.0/8",
 	"100.64.0.0/10",
+	"127.0.0.0/8",
+	"169.254.0.0/16",
+	"172.16.0.0/12",
 	"192.0.0.0/24",
 	"192.0.2.0/24",
+	"192.168.0.0/16",
 	"198.18.0.0/15",
 	"198.51.100.0/24",
 	"203.0.113.0/24",
@@ -28,18 +33,10 @@ const isPublicAddress = (ip: NetAddress.IpAddress): boolean => {
 	const address = NetAddress.isIpv6Address(ip)
 		? Option.getOrElse(NetAddress.fromIpv4Mapped(ip), () => ip)
 		: ip
-	if (NetAddress.isIpv4Address(address)) {
-		return (
-			!NetAddress.isLoopback(address) &&
-			!NetAddress.isLinkLocal(address) &&
-			!NetAddress.isPrivate(address) &&
-			!reservedIpv4.some((range) => IpNetwork.contains(range, address))
-		)
-	}
-	return (
-		IpNetwork.contains(ipv6GlobalUnicast, address) &&
-		!reservedIpv6.some((range) => IpNetwork.contains(range, address))
-	)
+	return NetAddress.isIpv4Address(address)
+		? !reservedIpv4.some((range) => IpNetwork.contains(range, address))
+		: IpNetwork.contains(ipv6GlobalUnicast, address) &&
+				!reservedIpv6.some((range) => IpNetwork.contains(range, address))
 }
 
 /**

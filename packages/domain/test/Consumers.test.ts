@@ -24,6 +24,7 @@ const SOURCES = [
 	{ name: "TurnInput", version: 3, from: ["Session"] },
 	{ name: "TurnInput", version: 4, from: ["Session"] },
 	{ name: "TurnInput", version: 5, from: ["Session"] },
+	{ name: "TurnInput", version: 6, from: ["Session"] },
 	{ name: "AutomationView", version: 5, from: ["Automation"] },
 	{ name: "AutomationRunView", version: 1, from: ["Automation"] },
 	{ name: "ArtifactVersionView", version: 1, from: ["Artifact"] },

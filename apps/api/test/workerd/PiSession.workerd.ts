@@ -352,6 +352,81 @@ describe("PiSession real Durable Object under workerd", () => {
 			},
 		})
 
+	it("finishes an automation run whose tool would wait in a user-started session", async () => {
+		const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+			name: "Receipt reporter",
+			model: "gpt-4o-mini",
+			tools: [
+				{
+					type: "custom",
+					name: "receipt",
+					description: "Return a receipt",
+					input_schema: { type: "object", properties: {} },
+				},
+			],
+		})
+		fakeOpenAI.setHandler((request) =>
+			request.toolOutputs.length === 0
+				? { kind: "tool_call", name: "receipt", arguments: {} }
+				: { kind: "reply", text: "Finished checking for a receipt." },
+		)
+		const initial_events = [userMessage("Find the receipt.")]
+		const automation = await apiJson<{ readonly id: string }>("/v1/automations", {
+			method: "POST",
+			headers: { "idempotency-key": "unattended-custom-tool" },
+			body: {
+				name: "Receipt report",
+				agent: agent.id,
+				environment_id: environmentId,
+				initial_events,
+				schedule: { type: "cron", expression: "0 0 1 1 *", timezone: "UTC" },
+			},
+		})
+		expect([201, 202]).toContain(automation.status)
+		const automationPath = `/v1/automations/${automation.body.id}`
+		await pollResourceReady(automationPath)
+		const queued = await apiJson<{ readonly run: number }>(`${automationPath}/run`, {
+			method: "POST",
+		})
+		expect(queued.status).toBe(201)
+		const ran = await pollResourceReady<{ readonly session_id: string }>(
+			`${automationPath}/runs/${queued.body.run}`,
+			(row) => typeof row.session_id === "string",
+		)
+		const automated = await waitForSession(
+			ran.session_id,
+			(session) => session.status === "idle" && session.turn === 1,
+		)
+		const automaticEvents = await listAllEvents(automated.id)
+		expect(automaticEvents.at(-1)?.stop_reason).toEqual({ type: "end_turn" })
+		const refused = automaticEvents.find((event) => event.type === "agent.tool_result")
+		expect(refused?.is_error).toBe(true)
+		expect(refused?.content?.some((part) => part.text?.includes("started by an automation"))).toBe(
+			true,
+		)
+
+		const attended = await createResource<SessionResource>("/v1/sessions", {
+			agent: agent.id,
+			environment_id: environmentId,
+			initial_events,
+		})
+		await expect
+			.poll(
+				async () =>
+					(await listAllEvents(attended.id)).findLast(
+						(event) => event.type === "session.status_idle",
+					)?.stop_reason?.type,
+			)
+			.toBe("requires_action")
+		const pending = (await listAllEvents(attended.id)).find(
+			(event) => event.type === "agent.custom_tool_use",
+		)
+		if (pending?.tool_use_id === undefined) {
+			throw new Error("No pending receipt")
+		}
+		expect((await answer(attended.id, pending.tool_use_id, "Receipt found")).status).toBe(200)
+	}, 60_000)
+
 	it("isolates pending custom tools across parallel sessions, including archived and repeated answers", async () => {
 		const agent = await createResource<{ readonly id: string }>("/v1/agents", {
 			name: "Parallel receipts",

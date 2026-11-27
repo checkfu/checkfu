@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { AutomationId } from "@checkfu/sdk/Schemas"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { AgentArchivedError } from "../Agent/AgentArchived.rejection.ts"
@@ -20,6 +21,7 @@ import { MessageText, PositiveInt, SessionTitle } from "../Session/SessionTypes.
 export class OpenAutomationSession extends Domain.Command("OpenAutomationSession", {
 	input: {
 		session_id: SessionId,
+		automation_id: Schema.optionalKey(AutomationId),
 		agent_id: BoundedAgentId,
 		agent_version: Schema.NullOr(PositiveInt),
 		environment_id: BoundedEnvironmentId,

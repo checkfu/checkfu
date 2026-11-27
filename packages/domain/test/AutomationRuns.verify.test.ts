@@ -69,6 +69,7 @@ const STANDING = {
 	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
+	"OpenAutomationSession.AnAutomationSessionRecordsItsAutomation": "proved",
 	"OpenAutomationSession.FirstTurnAdmissionKeepsGivenCredentials": "proved",
 	"OpenAutomationSession.OnlyActiveAgentAndEnvironmentOpenAnAutomationSession": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",

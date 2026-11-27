@@ -393,6 +393,10 @@
 			"AdmitAutomation.AnAdmittedAutomationHasAUsableSchedule": {
 				"kind": "transition",
 				"source": "({ command }) =>\n\t\t\tisUsableSchedule(command.schedule.expression, command.schedule.timezone)"
+			},
+			"OpenAutomationSession.AnAutomationSessionRecordsItsAutomation": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" && event.automation_id === command.automation_id,\n\t\t\t)"
 			}
 		}
 	}

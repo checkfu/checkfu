@@ -43,6 +43,14 @@ describe("the gate before a tool runs", () => {
 		expect(gateDecision({ name: "read" }, asks)).toEqual({ kind: "run" })
 	})
 
+	it("refuses approval in an automation session and allows tools that do not need it", () => {
+		expect(gateDecision({ name: "mcp__docs__deploy" }, asks, true)).toMatchObject({
+			kind: "refuse",
+			message: expect.stringContaining("started by an automation"),
+		})
+		expect(gateDecision({ name: "mcp__docs__search" }, asks, true)).toEqual({ kind: "run" })
+	})
+
 	it("refuses a script's call to a tool that asks, telling the model to call it directly", () => {
 		const decision = gateDecision(
 			{ name: "mcp__docs__deploy", parent: { taskId: 7 as never, callId: "c1" } },

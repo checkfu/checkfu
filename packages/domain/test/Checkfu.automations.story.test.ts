@@ -249,6 +249,7 @@ const opened = (
 			agent_version,
 			environment_id: environment.id,
 			title: name,
+			automation_id: automation.id,
 		}),
 		new UserMessage({ content: [{ type: "text", text }] }),
 		new SessionStatusRunning({ turn: 1 }),
@@ -260,6 +261,7 @@ const opened = (
 		agent_version,
 		environment_id: environment.id,
 		turn: 1,
+		unattended: true,
 	}),
 	Story.succeed(Harness.runTurn, {
 		thinking: null,

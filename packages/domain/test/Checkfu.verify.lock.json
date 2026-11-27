@@ -789,6 +789,10 @@
 			"File.CreatingTakesTheOpenReservation": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"CreateFile\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.open_reservation !== 0, before.open_reservation === command.reservation].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"OpenAutomationSession.AnAutomationSessionRecordsItsAutomation": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" && event.automation_id === command.automation_id,\n\t\t\t)"
 			}
 		}
 	}

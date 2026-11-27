@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { AutomationId } from "@checkfu/sdk/Schemas"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { McpServerCredentialsText } from "../Mcp/McpServers.ts"
@@ -11,6 +12,7 @@ export class SessionCreated extends Domain.Event("session.created", {
 	agent_id: ResourceId,
 	agent_version: PositiveInt,
 	environment_id: ResourceId,
+	automation_id: Schema.optionalKey(AutomationId),
 	title: Schema.NullOr(Schema.String),
 	mcp_server_credentials: Schema.optionalKey(McpServerCredentialsText),
 	resources: SessionResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),

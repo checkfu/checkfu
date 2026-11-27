@@ -29,6 +29,7 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 					agent_id: agent.id,
 					agent_version: pinnedVersion,
 					environment_id: environment.id,
+					...(cmd.automation_id === undefined ? {} : { automation_id: cmd.automation_id }),
 					title: cmd.title,
 					resources: cmd.resources,
 					...(cmd.mcp_server_credentials === undefined
@@ -55,6 +56,11 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 			events.length === 3,
 		AnAutomationSessionPinsAVersionWithinTheAgentHead: ({ before, command }) =>
 			command.agent_version === null || command.agent_version <= before.agent.version,
+		AnAutomationSessionRecordsItsAutomation: ({ command, events }) =>
+			events.some(
+				(event) =>
+					event._tag === "session.created" && event.automation_id === command.automation_id,
+			),
 		FirstTurnAdmissionKeepsGivenCredentials: ({ command, events }) =>
 			events.some(
 				(event) =>

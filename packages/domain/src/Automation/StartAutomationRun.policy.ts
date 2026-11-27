@@ -60,6 +60,7 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 				.send(
 					new OpenAutomationSession({
 						session_id: event.session_id,
+						automation_id: source.id,
 						agent_id: BoundedAgentId.make(state.agent_id),
 						agent_version: state.agent_version,
 						environment_id: BoundedEnvironmentId.make(state.environment_id),

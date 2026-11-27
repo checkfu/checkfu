@@ -80,10 +80,17 @@ export const gateDecision = (
 	) =>
 		| { readonly server: string; readonly tool: string; readonly permission?: Permission }
 		| undefined,
+	unattended = false,
 ): GateDecision => {
 	const mcp = toolOf(call.name)
 	if (mcp === undefined || mcp.permission !== "ask") {
 		return { kind: "run" }
+	}
+	if (unattended) {
+		return {
+			kind: "refuse",
+			message: `${mcp.tool} needs a person's approval. This session was started by an automation. Continue without the tool and explain what you could not do.`,
+		}
 	}
 	if (call.parent !== undefined) {
 		return {
@@ -114,12 +121,16 @@ const tooLarge = (name: string) =>
 const denial = (message: string) =>
 	message.length === 0 ? "The user denied this call." : `The user denied this call: ${message}`
 
+const NOBODY_ANSWERS =
+	"This tool needs a result from the owner's application. This session was started by an automation. Continue without the tool and explain what you could not do."
+
 const TURN_FULL = `This turn has recorded ${MAX_TOOL_CALLS_PER_TURN} tool calls, its limit, so a call that waits for an answer cannot start in it. Finish the turn; the call can be made in the next one.`
 
 export const actionsExtension = (
 	toolOf: Parameters<typeof gateDecision>[1],
 	calls: Pick<TurnCalls, "admit"> = turnCalls(),
 	waitsForAResult: (name: string) => boolean = () => false,
+	unattended: () => boolean = () => false,
 ): Extension =>
 	defineExtension({
 		name: "checkfu.actions",
@@ -129,11 +140,16 @@ export const actionsExtension = (
 					const placed = () =>
 						(call.parent === undefined || calls.admit(call.parent.taskId)) &&
 						calls.admit(api.taskId)
-					const decision = gateDecision(call, toolOf)
+					const isUnattended = unattended()
+					const decision = gateDecision(call, toolOf, isUnattended)
 					if (decision.kind === "run") {
-						return waitsForAResult(call.name) && !placed()
-							? blockAtGate(api, TURN_FULL, context)
-							: undefined
+						if (!waitsForAResult(call.name)) {
+							return undefined
+						}
+						if (isUnattended) {
+							return blockAtGate(api, NOBODY_ANSWERS, context)
+						}
+						return placed() ? undefined : blockAtGate(api, TURN_FULL, context)
 					}
 					if (decision.kind === "refuse") {
 						return blockAtGate(api, decision.message, context)

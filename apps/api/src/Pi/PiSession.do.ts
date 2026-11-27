@@ -72,6 +72,7 @@ class PiSessionHost {
 
 const ADMITTED_TURN = "workspace-turn"
 const AGENT_TOOLS = "agent-tools"
+const UNATTENDED = "unattended"
 
 export const makePiHarnessBackend = (
 	harness: PiHarness,
@@ -229,6 +230,7 @@ export const PiSessionLive = PiSession.make(
 				const turnCalls = turnCallLog({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 				})
+				let unattended = rawCtx.storage.kv.get<boolean>(UNATTENDED) === true
 				let declared: ReadonlyArray<AgentTool> | undefined
 				const agentTools = (): ReadonlyArray<AgentTool> => {
 					if (declared === undefined) {
@@ -306,6 +308,7 @@ export const PiSessionLive = PiSession.make(
 							(name) => mcp?.toolOf(name),
 							{ admit: (taskId) => turnCalls(admittedTurn()).admit(taskId) },
 							(name) => agentTools().some((tool) => tool.type === "custom" && tool.name === name),
+							() => unattended,
 						),
 					)
 				}
@@ -362,6 +365,10 @@ export const PiSessionLive = PiSession.make(
 					...harnessBackend,
 					turnCalls,
 					publishMcp: async (request) => {
+						if (request.unattended === true && !unattended) {
+							rawCtx.storage.kv.put(UNATTENDED, true)
+							unattended = true
+						}
 						const session = request.mcp === undefined ? undefined : await loadMcp()
 						const published =
 							session !== undefined &&

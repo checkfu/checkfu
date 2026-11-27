@@ -18,6 +18,7 @@ export const TurnInputState = Schema.Struct({
 	turn: NonNegativeInt,
 	input: Schema.Array(MessageText),
 	system_context: Schema.optionalKey(Schema.String),
+	unattended: Schema.optionalKey(Schema.Literal(true)),
 	unsent: Schema.Array(MessageText),
 	last_reply_turn: NonNegativeInt,
 	segment: PositiveInt,
@@ -25,7 +26,7 @@ export const TurnInputState = Schema.Struct({
 export type TurnInputState = typeof TurnInputState.Type
 
 export class TurnInput extends Domain.View("TurnInput", {
-	version: 5,
+	version: 6,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(TurnInputState),
@@ -46,6 +47,7 @@ export class TurnInput extends Domain.View("TurnInput", {
 						agent_id: e.agent_id,
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,
+						...(e.automation_id === undefined ? {} : { unattended: true as const }),
 						resources: e.resources,
 						turn: 0,
 						input: [],
