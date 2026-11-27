@@ -821,6 +821,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							maximum: 604800,
 							description: "Seconds until the link stops working (default 3600, at most 7 days)",
 						},
+						access: {
+							type: "string",
+							enum: ["view", "read", "write"],
+							description:
+								"What anyone with the link may do with the artifact's data: view (files only, the default), read or write. Each collection still allows at most what this version declares for visitors",
+						},
 					},
 					additionalProperties: false,
 				},
@@ -1398,6 +1404,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							],
 							description:
 								'Version to serve, or "latest" (the default) to serve each new version as it is added',
+						},
+						access: {
+							type: "string",
+							enum: ["view", "read", "write"],
+							description:
+								"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Omit it to keep the level already set; a new publication starts at view",
 						},
 					},
 					additionalProperties: false,

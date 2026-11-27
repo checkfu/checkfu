@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T16:46:22.606Z",
+			"cut_at": "2026-11-27T17:20:25.082Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -95,13 +95,13 @@
 				"event:Checkfu.AutomationCapacity/automation_slot.reserved": "39920032495cad1bccecba6ec60e6058a40d44d90628c597a95d00dc311cebb6",
 				"command-reply:Checkfu/ReleaseAutomationSlot": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"scheduled-command:Checkfu.AutomationCapacity/ReleaseAutomationSlot": "48ee02b65cdaba75bd67fd865baaf7ea712318bb32511a60f5ba12ca7c97a7ea",
-				"state:Checkfu.Artifact": "98f0e292e44c8ef5eb605722c956c773821a41ce11a9e69c01df8037be16ecbd",
+				"state:Checkfu.Artifact": "8baa1bdb46a38cc9af3129a981ce43bb47eec0c93be1a915047cb1e345fe3b20",
 				"event:Checkfu.Artifact/artifact.reserved": "16f16f1e5b5ab058e69385c48e5ff64a16d5cc9f64e8fda43649847f0e0121d8",
 				"event:Checkfu.Artifact/artifact.reservation_expired": "6d072406d5ea6f667ccb30dd90aec786586f9d364cc16661968e3d5fa713fd4a",
 				"event:Checkfu.Artifact/artifact.created": "5b2b812e3fcc1e5d5ed419ea55b974d9723d1bce298135837b0dc74d91d3737c",
 				"event:Checkfu.Artifact/artifact.version_added": "e59c86834c9c0ca9d1a39a1a0e83601bc591990391c0e7f12f281c6149de9784",
 				"event:Checkfu.Artifact/artifact.deleted": "f4a9b59a11486240383562ecc29249179066687f46e5b2c3eb2b1fb45c4a9e2b",
-				"event:Checkfu.Artifact/artifact.published": "593155b5e447ae0fb694476e52073291e1cd94989075f46648ec1fe09b159128",
+				"event:Checkfu.Artifact/artifact.published": "dd472dd15025c30b690e51bd3fe9450a04d5f6e794ef8dcb29b9a552c7e1721e",
 				"event:Checkfu.Artifact/artifact.unpublished": "f1d07cfebc7f8378d2e47b1cc56401ee44d8f74b67a5710f6c3895d564fd2c2e",
 				"event:Checkfu.Artifact/artifact.idempotency_key_claimed": "33fb974a346433d4cced6fb265cd92c5dc66591477c67edd390042bbfb87ddd2",
 				"command-reply:Checkfu/ReserveArtifact": "7ccaa8271d8c79d5d632afeb75d263e2f97c4d4a4b1c2f472feb6342ef5fa1a4",
@@ -184,12 +184,12 @@
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
 				"policy-delivery:Checkfu.ExpireFileReservations/File": "d951fbd467e214195ff7deae09aa0b6f98712dd79d1c84ce4eeecf0ffadb932d",
 				"policy-delivery:Checkfu.ReleaseFileBytes/File": "961c35cf6b9d19dcd8802f695f23e10c0892d5678bcd9df446d57ebba4e1842e",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "3c7558b52728f61e32ac26f0a206313e42a5f7ac0ab755f5e30c34bebfa089a3",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "3c7558b52728f61e32ac26f0a206313e42a5f7ac0ab755f5e30c34bebfa089a3",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "3c7558b52728f61e32ac26f0a206313e42a5f7ac0ab755f5e30c34bebfa089a3",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "3c7558b52728f61e32ac26f0a206313e42a5f7ac0ab755f5e30c34bebfa089a3",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "3c7558b52728f61e32ac26f0a206313e42a5f7ac0ab755f5e30c34bebfa089a3",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "3c7558b52728f61e32ac26f0a206313e42a5f7ac0ab755f5e30c34bebfa089a3",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "118bc8cf8b781c402758aa81e9044bcfc7cc9c77b97ab1a372c16ddfdb997e77",
 				"saga-input:Checkfu.RunTurn": "be6d5b2bc9abaad51b588b72f00272ade393111e2ff0c907edbb1deb761b84d7",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "42513e12ece950579289bf9adcc879b8311c0c23eeaa1e49b2ed254ea30df2bb",
@@ -5469,7 +5469,9 @@
 							"updated_at": 89,
 							"publication_token": "4294967295",
 							"pinned_version": 24,
-							"published_at": 27
+							"published_at": 27,
+							"public_access": "view",
+							"public_grant": "toString"
 						}
 					},
 					{
@@ -5489,7 +5491,9 @@
 							"updated_at": 5,
 							"publication_token": "^<+NShhAr/",
 							"pinned_version": 91,
-							"published_at": 48
+							"published_at": 48,
+							"public_access": "write",
+							"public_grant": "-dqS E`RY3"
 						}
 					},
 					{
@@ -5509,7 +5513,9 @@
 							"updated_at": 95,
 							"publication_token": "\ud800",
 							"pinned_version": 6,
-							"published_at": 93
+							"published_at": 93,
+							"public_access": "write",
+							"public_grant": "\t"
 						}
 					},
 					{
@@ -5529,7 +5535,9 @@
 							"updated_at": 96,
 							"publication_token": "\n",
 							"pinned_version": 6,
-							"published_at": 27
+							"published_at": 27,
+							"public_access": "view",
+							"public_grant": "\n"
 						}
 					},
 					{
@@ -5549,7 +5557,9 @@
 							"updated_at": 60,
 							"publication_token": "\ud800",
 							"pinned_version": 94,
-							"published_at": 0
+							"published_at": 0,
+							"public_access": "write",
+							"public_grant": "😀"
 						}
 					},
 					{
@@ -5569,7 +5579,9 @@
 							"updated_at": 1,
 							"publication_token": "toString",
 							"pinned_version": 10,
-							"published_at": 97
+							"published_at": 97,
+							"public_access": "view",
+							"public_grant": "v0\"zS,|"
 						}
 					},
 					{
@@ -5589,7 +5601,9 @@
 							"updated_at": 55,
 							"publication_token": "T>N",
 							"pinned_version": 2,
-							"published_at": 65
+							"published_at": 65,
+							"public_access": "",
+							"public_grant": "\t"
 						}
 					},
 					{
@@ -5609,7 +5623,9 @@
 							"updated_at": 98,
 							"publication_token": "__proto__",
 							"pinned_version": 5,
-							"published_at": 21
+							"published_at": 21,
+							"public_access": "write",
+							"public_grant": "=e84"
 						}
 					}
 				],
@@ -5851,42 +5867,58 @@
 					{
 						"_tag": "artifact.published",
 						"token": "e^chOIf2~O",
-						"pinned_version": 26
+						"pinned_version": 26,
+						"access": "write",
+						"grant": "\udc00"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": "\"g",
-						"pinned_version": 76
+						"pinned_version": 76,
+						"access": "view",
+						"grant": "4294967295"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": "&",
-						"pinned_version": 98
+						"pinned_version": 98,
+						"access": "write",
+						"grant": "@a-[v#Cm"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": "4294967295",
-						"pinned_version": 3
+						"pinned_version": 3,
+						"access": "read",
+						"grant": "!"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": ":>:L]11q'",
-						"pinned_version": 4
+						"pinned_version": 4,
+						"access": "view",
+						"grant": "+zZ0i@El)"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": "@>7",
-						"pinned_version": 2
+						"pinned_version": 2,
+						"access": "write",
+						"grant": "4294967295"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": "Ed3q([[",
-						"pinned_version": 4
+						"pinned_version": 4,
+						"access": "write",
+						"grant": "1O^"
 					},
 					{
 						"_tag": "artifact.published",
 						"token": "\udc00",
-						"pinned_version": 55
+						"pinned_version": 55,
+						"access": "write",
+						"grant": "0ML=YiP$_X"
 					}
 				],
 				"event:Checkfu.Artifact/artifact.unpublished": [
@@ -10356,7 +10388,9 @@
 					{
 						"_tag": "artifact.published",
 						"token": "\ud800",
-						"pinned_version": 5
+						"pinned_version": 5,
+						"access": "write",
+						"grant": "9N.[\\{$615"
 					},
 					{
 						"_tag": "automation.created",
@@ -10403,7 +10437,9 @@
 					{
 						"_tag": "artifact.published",
 						"token": "__proto__",
-						"pinned_version": 3
+						"pinned_version": 3,
+						"access": "view",
+						"grant": "NJm{g1C"
 					},
 					{
 						"_tag": "automation.updated",
@@ -17550,14 +17586,14 @@
 					}
 				],
 				"signed-link:ArtifactLink/claims": [
-					"J.TX2qffJa7.624548283.17",
-					"AYnuIjFwGr.9.19.3",
-					"j.INLl.999999979.6",
-					"X.-j1j.100070571.375422633043",
-					"q.ym.50238805.778081020759",
-					"_H1N5v99Cu.-.914514190.26",
-					"DhCdg-nOTo.kv8cqMmQN.10.999999999998",
-					"i_VA7.v.13.30"
+					"J.TX2qffJa7.624548283.17.read",
+					"AYnuIjFwGr.9.19.3.view",
+					"j.INLl.999999979.6.write",
+					"X.-j1j.100070571.375422633043.write",
+					"q.ym.50238805.778081020759.view",
+					"_H1N5v99Cu.-.914514190.26.read",
+					"DhCdg-nOTo.kv8cqMmQN.10.999999999998.write",
+					"i_VA7.v.13.30.read"
 				],
 				"api-call:Api.resolveArtifactVersion/args": [
 					[

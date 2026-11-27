@@ -8,7 +8,11 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
-import { PUBLICATION_TOKEN_LENGTH, PublicationAddress } from "@checkfu/sdk/Schemas"
+import {
+	ArtifactAccessLevel,
+	PUBLICATION_TOKEN_LENGTH,
+	PublicationAddress,
+} from "@checkfu/sdk/Schemas"
 
 export {
 	DEFAULT_LINK_TTL_SECONDS,
@@ -22,6 +26,8 @@ const SEPARATOR = "."
 
 const Segment = Schema.String.check(Schema.isPattern(/^[\w-]+$/))
 
+const isAccessLevel = Schema.is(ArtifactAccessLevel)
+
 const canonicalNumber = (text: string | undefined): number | undefined => {
 	const value = Number(text)
 	return text !== undefined && String(value) === text ? value : undefined
@@ -34,20 +40,22 @@ export const ArtifactLinkClaims = Schema.String.pipe(
 			artifactId: Segment,
 			version: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999 })),
 			expiresAt: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999 })),
+			access: ArtifactAccessLevel,
 		}),
 		SchemaTransformation.transformEffect({
 			decode: (text: string) => {
-				const [scope, artifactId, version, expiresAt, ...rest] = text.split(SEPARATOR)
+				const [scope, artifactId, version, expiresAt, access, ...rest] = text.split(SEPARATOR)
 				const parsedVersion = canonicalNumber(version)
 				const parsedExpiresAt = canonicalNumber(expiresAt)
 				return scope === undefined ||
 					artifactId === undefined ||
 					parsedVersion === undefined ||
 					parsedExpiresAt === undefined ||
+					!isAccessLevel(access) ||
 					rest.length > 0
 					? Effect.fail(
 							new SchemaIssue.InvalidValue(
-								{ message: "Expected scope.artifactId.version.expiresAt" },
+								{ message: "Expected scope.artifactId.version.expiresAt.access" },
 								text,
 							),
 						)
@@ -56,11 +64,14 @@ export const ArtifactLinkClaims = Schema.String.pipe(
 							artifactId,
 							version: parsedVersion,
 							expiresAt: parsedExpiresAt,
+							access,
 						})
 			},
 			encode: (claims) =>
 				Effect.succeed(
-					[claims.scope, claims.artifactId, claims.version, claims.expiresAt].join(SEPARATOR),
+					[claims.scope, claims.artifactId, claims.version, claims.expiresAt, claims.access].join(
+						SEPARATOR,
+					),
 				),
 		}),
 	),

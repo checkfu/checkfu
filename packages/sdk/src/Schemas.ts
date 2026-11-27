@@ -994,6 +994,17 @@ export const ArtifactVisitorAccess = Schema.Literals(["none", "read", "add", "wr
 		"What someone opening the page may do with a collection: nothing, list and get, add only, or everything",
 })
 
+export const ArtifactAccessLevel = Schema.Literals(["view", "read", "write"])
+export type ArtifactAccessLevel = typeof ArtifactAccessLevel.Type
+
+export const MAX_ARTIFACT_GRANT_TEXT_LENGTH = 1024
+
+export const ArtifactDataGrant = Schema.Record(
+	ArtifactCollectionName,
+	Schema.Literals(["read", "add", "write"]),
+)
+export type ArtifactDataGrant = typeof ArtifactDataGrant.Type
+
 export const ArtifactDatabaseCapability = Schema.Struct({
 	collections: Schema.Record(
 		ArtifactCollectionName,

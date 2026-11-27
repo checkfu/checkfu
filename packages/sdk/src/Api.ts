@@ -23,8 +23,10 @@ import {
 	AgentName,
 	AgentSnapshot,
 	AgentSystem,
+	ArtifactAccessLevel,
 	ArtifactCapabilities,
 	ArtifactCollectionName,
+	ArtifactDataGrant,
 	ArtifactDocumentId,
 	MAX_ARTIFACT_COLLECTIONS,
 	ArtifactFile,
@@ -1160,6 +1162,14 @@ export const ArtifactPublication = Schema.Struct({
 	version: Schema.NullOr(PositiveInt).annotate({
 		description: "The version served, or null when the latest version is served",
 	}),
+	access: ArtifactAccessLevel.annotate({
+		description:
+			"What anyone with the address may do: view the files only, also read the artifact's data, or also write it",
+	}),
+	grants: ArtifactDataGrant.annotate({
+		description:
+			"The most a visitor may do in each collection, recorded from the version served when the access level was set. A later version cannot widen it",
+	}),
 	published_at: Schema.DateTimeUtc,
 })
 export type ArtifactPublication = typeof ArtifactPublication.Type
@@ -1191,6 +1201,12 @@ export const PublishArtifactBody = Schema.Struct({
 		Schema.Union([PositiveInt, Schema.Literal("latest")]).annotate({
 			description:
 				'Version to serve, or "latest" (the default) to serve each new version as it is added',
+		}),
+	),
+	access: Schema.optionalKey(
+		ArtifactAccessLevel.annotate({
+			description:
+				"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Omit it to keep the level already set; a new publication starts at view",
 		}),
 	),
 })
@@ -1227,6 +1243,12 @@ export const CreateArtifactLinkBody = Schema.Struct({
 			description: "Seconds until the link stops working (default 3600, at most 7 days)",
 		}),
 	),
+	access: Schema.optionalKey(
+		ArtifactAccessLevel.annotate({
+			description:
+				"What anyone with the link may do with the artifact's data: view (files only, the default), read or write. Each collection still allows at most what this version declares for visitors",
+		}),
+	),
 })
 export type CreateArtifactLinkBody = typeof CreateArtifactLinkBody.Type
 
@@ -1235,6 +1257,7 @@ export const ArtifactLinkResource = Schema.Struct({
 	artifact_id: Schema.String,
 	version: PositiveInt,
 	url: Schema.String,
+	access: ArtifactAccessLevel,
 	expires_at: Schema.DateTimeUtc,
 })
 export type ArtifactLink = typeof ArtifactLinkResource.Type

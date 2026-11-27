@@ -441,10 +441,90 @@ describe("Artifacts", () => {
 		},
 	)
 
+	it.effect(
+		"opens a publication for viewing only, and changes what the public may do only when told",
+		() => {
+			const artifact = Artifact.ref("art_granted")
+			const responses = '{"responses":"add"}'
+			const publish = (access: "" | "view" | "read" | "write", grant: string, pinned_version = 0) =>
+				new PublishArtifact({
+					artifact_id: artifact.id,
+					token: "tok",
+					pinned_version,
+					access,
+					grant,
+				})
+			const published = (access: "view" | "read" | "write", grant: string, pinned_version = 0) =>
+				new ArtifactPublished({ token: "tok", pinned_version, access, grant })
+			return story(
+				Story.given(
+					artifact,
+					new ArtifactCreated({
+						version: 1,
+						name: "Form",
+						manifest: manifestA,
+						file_count: 1,
+						total_bytes: 1,
+						capabilities: "",
+					}),
+				),
+				Story.given(
+					artifact,
+					new ArtifactVersionAdded({
+						version: 2,
+						manifest: manifestB,
+						file_count: 1,
+						total_bytes: 2,
+						capabilities: "",
+					}),
+				),
+				Story.clock(t0),
+				Story.when(publish("", "")),
+				Story.then(artifact, published("view", "")),
+				Story.state(artifact, { public_access: "view", public_grant: "" }),
+				Story.when(publish("write", responses)),
+				Story.then(artifact, published("write", responses)),
+				Story.state(artifact, { public_access: "write", public_grant: responses }),
+				Story.when(publish("write", responses)),
+				Story.then(artifact),
+				Story.when(publish("", "", 1)),
+				Story.then(artifact, published("write", responses, 1)),
+				Story.state(artifact, {
+					pinned_version: 1,
+					public_access: "write",
+					public_grant: responses,
+				}),
+				Story.when(publish("", '{"ignored":"write"}', 1)),
+				Story.then(artifact),
+				Story.when(publish("read", "", 1)),
+				Story.then(artifact, published("read", "", 1)),
+				Story.when(publish("view", '{"dropped":"read"}', 1)),
+				Story.then(artifact, published("view", "", 1)),
+				Story.state(artifact, { public_access: "view", public_grant: "" }),
+				Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),
+				Story.then(artifact, new ArtifactUnpublished()),
+				Story.state(artifact, { publication_token: "", public_access: "", public_grant: "" }),
+				Story.when(publish("read", '{"settings":"read"}')),
+				Story.then(artifact, published("read", '{"settings":"read"}')),
+				Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
+				Story.then(artifact, new ArtifactDeleted()),
+				Story.call(ArtifactBytes.purge, { artifact_id: artifact.id }),
+				Story.succeed(ArtifactBytes.purge, undefined),
+				Story.state(artifact, { status: "deleted", public_access: "", public_grant: "" }),
+			)
+		},
+	)
+
 	it.effect("publishes with a fresh token, keeps it on republish and never takes another", () => {
 		const artifact = Artifact.ref("art_pub")
 		const publish = (token: string, pinned_version: number) =>
-			new PublishArtifact({ artifact_id: artifact.id, token, pinned_version })
+			new PublishArtifact({
+				artifact_id: artifact.id,
+				token,
+				pinned_version,
+				access: "",
+				grant: "",
+			})
 		const millis = DateTime.toEpochMillis
 		return story(
 			Story.given(
@@ -470,7 +550,10 @@ describe("Artifacts", () => {
 			),
 			Story.clock(t0),
 			Story.when(publish("first", 0)),
-			Story.then(artifact, new ArtifactPublished({ token: "first", pinned_version: 0 })),
+			Story.then(
+				artifact,
+				new ArtifactPublished({ token: "first", pinned_version: 0, access: "view", grant: "" }),
+			),
 			Story.state(artifact, {
 				publication_token: "first",
 				pinned_version: 0,
@@ -480,7 +563,10 @@ describe("Artifacts", () => {
 			Story.then(artifact),
 			Story.clock(t1),
 			Story.when(publish("unused", 2)),
-			Story.then(artifact, new ArtifactPublished({ token: "first", pinned_version: 2 })),
+			Story.then(
+				artifact,
+				new ArtifactPublished({ token: "first", pinned_version: 2, access: "view", grant: "" }),
+			),
 			Story.state(artifact, {
 				publication_token: "first",
 				pinned_version: 2,
@@ -495,7 +581,10 @@ describe("Artifacts", () => {
 			Story.then(artifact),
 			Story.clock(t2),
 			Story.when(publish("second", 1)),
-			Story.then(artifact, new ArtifactPublished({ token: "second", pinned_version: 1 })),
+			Story.then(
+				artifact,
+				new ArtifactPublished({ token: "second", pinned_version: 1, access: "view", grant: "" }),
+			),
 			Story.state(artifact, {
 				publication_token: "second",
 				pinned_version: 1,
@@ -621,9 +710,18 @@ describe("Artifacts", () => {
 				capabilities: declared,
 			}),
 			Story.when(
-				new PublishArtifact({ artifact_id: artifact.id, token: "tok", pinned_version: 0 }),
+				new PublishArtifact({
+					artifact_id: artifact.id,
+					token: "tok",
+					pinned_version: 0,
+					access: "",
+					grant: "",
+				}),
 			),
-			Story.then(artifact, new ArtifactPublished({ token: "tok", pinned_version: 0 })),
+			Story.then(
+				artifact,
+				new ArtifactPublished({ token: "tok", pinned_version: 0, access: "view", grant: "" }),
+			),
 			Story.state(artifact, { capabilities: declared }),
 			Story.when(
 				new AddArtifactVersion({
