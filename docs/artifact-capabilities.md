@@ -69,6 +69,12 @@ A capability call is allowed only if the address it arrived at grants it.
 - **Viewing link.** The link's signed claims gain a level: `view` (the default, files only), `read` or `write`. Creating a link names the level.
 - **Publication.** An explicit grant sets the public level (`view`, `read` or `write`) and records the collection operations the version being published permits at that level. If the grant is omitted, a new publication starts at `view` and an existing publication keeps its saved grant.
 
+In the API, creating a link and publishing both take `access`. A link answers with its `access`; a publication shows its `access` and its saved `grants`, one entry for each collection a visitor could use when the level was set:
+
+```json
+{ "access": "write", "grants": { "responses": "add", "settings": "read" } }
+```
+
 Each call uses the grant and the declaration for the version resolved by that address. A `write` link on a collection the version marks `"visitors": "read"` can only read. A signed link keeps its version and grant until it expires or its artifact is deleted. A public address grants only the operations allowed by both the saved publication grant and the version it currently serves. Following the latest version or moving an existing publication to a different version cannot exceed the saved grant. Access beyond those saved operations requires an explicit new grant from the owner. Unpublishing revokes the public address.
 
 There are no visitor accounts. A call is made by "whoever holds this address". Knowing who a visitor is would be a capability of its own, and is not designed here.
@@ -164,9 +170,11 @@ These are to be proved or checked when each part is built, in the same way as th
 |---|---|---|
 | A (built) | Read and check `artifact.json`; record capabilities on the version; reserve `_/` | |
 | B (built) | The artifact's database object and the owner's data API | A |
-| C | Levels on viewing links and publications; the page's `_/data` calls; rate limits | B |
+| C1 (built) | Levels on viewing links and publications, and the grant a publication saves | A |
+| C2 | The page's `_/data` calls through the content Worker | B, C1 |
+| C3 | Rate limits per address and per artifact | C2 |
 | D | A tool for the agent to write an artifact's data | B |
-| E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C |
+| E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C2 |
 | F | The document, slides and dashboard types | E |
 
 

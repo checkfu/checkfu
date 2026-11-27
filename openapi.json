@@ -24196,11 +24196,34 @@
 															],
 															"description": "The version served, or null when the latest version is served"
 														},
+														"access": {
+															"type": "string",
+															"enum": ["view", "read", "write"],
+															"description": "What anyone with the address may do: view the files only, also read the artifact's data, or also write it"
+														},
+														"grants": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "string",
+																	"enum": ["read", "add", "write"]
+																}
+															},
+															"additionalProperties": false,
+															"description": "The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it"
+														},
 														"published_at": {
 															"type": "string"
 														}
 													},
-													"required": ["address", "url", "version", "published_at"],
+													"required": [
+														"address",
+														"url",
+														"version",
+														"access",
+														"grants",
+														"published_at"
+													],
 													"additionalProperties": false
 												},
 												{
@@ -24945,11 +24968,34 @@
 																		],
 																		"description": "The version served, or null when the latest version is served"
 																	},
+																	"access": {
+																		"type": "string",
+																		"enum": ["view", "read", "write"],
+																		"description": "What anyone with the address may do: view the files only, also read the artifact's data, or also write it"
+																	},
+																	"grants": {
+																		"type": "object",
+																		"patternProperties": {
+																			"^[a-z][a-z0-9_-]{0,31}$": {
+																				"type": "string",
+																				"enum": ["read", "add", "write"]
+																			}
+																		},
+																		"additionalProperties": false,
+																		"description": "The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it"
+																	},
 																	"published_at": {
 																		"type": "string"
 																	}
 																},
-																"required": ["address", "url", "version", "published_at"],
+																"required": [
+																	"address",
+																	"url",
+																	"version",
+																	"access",
+																	"grants",
+																	"published_at"
+																],
 																"additionalProperties": false
 															},
 															{
@@ -25501,11 +25547,34 @@
 															],
 															"description": "The version served, or null when the latest version is served"
 														},
+														"access": {
+															"type": "string",
+															"enum": ["view", "read", "write"],
+															"description": "What anyone with the address may do: view the files only, also read the artifact's data, or also write it"
+														},
+														"grants": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "string",
+																	"enum": ["read", "add", "write"]
+																}
+															},
+															"additionalProperties": false,
+															"description": "The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it"
+														},
 														"published_at": {
 															"type": "string"
 														}
 													},
-													"required": ["address", "url", "version", "published_at"],
+													"required": [
+														"address",
+														"url",
+														"version",
+														"access",
+														"grants",
+														"published_at"
+													],
 													"additionalProperties": false
 												},
 												{
@@ -28419,11 +28488,15 @@
 										"url": {
 											"type": "string"
 										},
+										"access": {
+											"type": "string",
+											"enum": ["view", "read", "write"]
+										},
 										"expires_at": {
 											"type": "string"
 										}
 									},
-									"required": ["type", "artifact_id", "version", "url", "expires_at"],
+									"required": ["type", "artifact_id", "version", "url", "access", "expires_at"],
 									"additionalProperties": false
 								}
 							}
@@ -28875,6 +28948,11 @@
 										"minimum": 60,
 										"maximum": 604800,
 										"description": "Seconds until the link stops working (default 3600, at most 7 days)"
+									},
+									"access": {
+										"type": "string",
+										"enum": ["view", "read", "write"],
+										"description": "What anyone with the link may do with the artifact's data: view (files only, the default), read or write. Each collection still allows at most what this version declares for visitors"
 									}
 								},
 								"additionalProperties": false
@@ -29059,11 +29137,34 @@
 															],
 															"description": "The version served, or null when the latest version is served"
 														},
+														"access": {
+															"type": "string",
+															"enum": ["view", "read", "write"],
+															"description": "What anyone with the address may do: view the files only, also read the artifact's data, or also write it"
+														},
+														"grants": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "string",
+																	"enum": ["read", "add", "write"]
+																}
+															},
+															"additionalProperties": false,
+															"description": "The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it"
+														},
 														"published_at": {
 															"type": "string"
 														}
 													},
-													"required": ["address", "url", "version", "published_at"],
+													"required": [
+														"address",
+														"url",
+														"version",
+														"access",
+														"grants",
+														"published_at"
+													],
 													"additionalProperties": false
 												},
 												{
@@ -29551,6 +29652,11 @@
 											}
 										],
 										"description": "Version to serve, or \"latest\" (the default) to serve each new version as it is added"
+									},
+									"access": {
+										"type": "string",
+										"enum": ["view", "read", "write"],
+										"description": "What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view"
 									}
 								},
 								"additionalProperties": false
@@ -29732,11 +29838,34 @@
 															],
 															"description": "The version served, or null when the latest version is served"
 														},
+														"access": {
+															"type": "string",
+															"enum": ["view", "read", "write"],
+															"description": "What anyone with the address may do: view the files only, also read the artifact's data, or also write it"
+														},
+														"grants": {
+															"type": "object",
+															"patternProperties": {
+																"^[a-z][a-z0-9_-]{0,31}$": {
+																	"type": "string",
+																	"enum": ["read", "add", "write"]
+																}
+															},
+															"additionalProperties": false,
+															"description": "The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it"
+														},
 														"published_at": {
 															"type": "string"
 														}
 													},
-													"required": ["address", "url", "version", "published_at"],
+													"required": [
+														"address",
+														"url",
+														"version",
+														"access",
+														"grants",
+														"published_at"
+													],
 													"additionalProperties": false
 												},
 												{

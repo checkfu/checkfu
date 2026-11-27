@@ -648,6 +648,14 @@ const artifactsPublishCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "access",
+			flagName: "access",
+			wireName: "access",
+			location: "body",
+			kind: "literals",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -669,6 +677,12 @@ const artifactsPublishCommand = CommandMake(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
 				'Version to serve, or "latest" (the default) to serve each new version as it is added (JSON, YAML, or @file)',
+			),
+			FlagOptional,
+		),
+		access: FlagLiterals("access", ["view", "read", "write"]).pipe(
+			FlagWithDescription(
+				"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view",
 			),
 			FlagOptional,
 		),
@@ -1258,6 +1272,14 @@ const artifactsVersionsLinkCommandSpec: GeneratedOperationDescriptor = {
 			kind: "int",
 			required: false,
 		},
+		{
+			propName: "access",
+			flagName: "access",
+			wireName: "access",
+			location: "body",
+			kind: "literals",
+			required: false,
+		},
 	],
 }
 
@@ -1275,6 +1297,12 @@ const artifactsVersionsLinkCommand = CommandMake(
 		expiresIn: FlagInt("expires-in").pipe(
 			FlagWithMetavar("INT"),
 			FlagWithDescription("Seconds until the link stops working (default 3600, at most 7 days)"),
+			FlagOptional,
+		),
+		access: FlagLiterals("access", ["view", "read", "write"]).pipe(
+			FlagWithDescription(
+				"What anyone with the link may do with the artifact's data: view (files only, the default), read or write. Each collection still allows at most what this version declares for visitors",
+			),
 			FlagOptional,
 		),
 	},

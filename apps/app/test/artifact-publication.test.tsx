@@ -23,7 +23,14 @@ const open = async ({ refuse = false, failRefresh = false } = {}) => {
 		file_count: 0,
 		total_bytes: 0,
 		files: [],
-		publication: { address: "public_report", url, version: 1, published_at: at },
+		publication: {
+			address: "public_report",
+			url,
+			version: 1,
+			access: "view" as const,
+			grants: {},
+			published_at: at,
+		},
 		created_at: at,
 		updated_at: at,
 	}

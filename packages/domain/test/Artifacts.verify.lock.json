@@ -48,7 +48,7 @@
 			},
 			"Artifact.UnpublishedHoldsNoSettings": {
 				"kind": "invariant",
-				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.publication_token !== \"\",\n\t\t\t\t[s.pinned_version === 0, s.published_at === 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.publication_token !== \"\",\n\t\t\t\t[\n\t\t\t\t\ts.pinned_version === 0,\n\t\t\t\t\ts.published_at === 0,\n\t\t\t\t\ts.public_access === \"\",\n\t\t\t\t\ts.public_grant === \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
 			"Artifact.PinnedVersionWithinHead": {
 				"kind": "invariant",
@@ -96,7 +96,7 @@
 			},
 			"Artifact.ClaimingAKeyChangesNoState": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"ClaimArtifactIdempotencyKey\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.manifest === before.manifest,\n\t\t\t\t\tafter.reservations === before.reservations,\n\t\t\t\t\tafter.open_reservation === before.open_reservation,\n\t\t\t\t\tafter.created_at === before.created_at,\n\t\t\t\t\tafter.updated_at === before.updated_at,\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.published_at === before.published_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"ClaimArtifactIdempotencyKey\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.manifest === before.manifest,\n\t\t\t\t\tafter.reservations === before.reservations,\n\t\t\t\t\tafter.open_reservation === before.open_reservation,\n\t\t\t\t\tafter.created_at === before.created_at,\n\t\t\t\t\tafter.updated_at === before.updated_at,\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.published_at === before.published_at,\n\t\t\t\t\tafter.public_access === before.public_access,\n\t\t\t\t\tafter.public_grant === before.public_grant,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
 			"Artifact.ADeletedArtifactIsNotPublished": {
 				"kind": "invariant",
@@ -113,6 +113,26 @@
 			"Artifact.OnlyANewVersionChangesTheCapabilities": {
 				"kind": "transition",
 				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag === \"CreateArtifact\",\n\t\t\t\tcommand._tag === \"AddArtifactVersion\",\n\t\t\t\tafter.capabilities === before.capabilities,\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.APublicationHasAnAccessLevel": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.publication_token === \"\", s.public_access !== \"\"].some((ok) => ok)"
+			},
+			"Artifact.OnlyAReadOrWritePublicationGrantsData": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.public_grant === \"\", s.public_access === \"read\", s.public_access === \"write\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Artifact.APublicationStartsAtViewUnlessGranted": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.publication_token !== \"\",\n\t\t\t\tafter.publication_token === \"\",\n\t\t\t\tcommand.access !== \"\",\n\t\t\t\tafter.public_access === \"view\",\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.OnlyAnExplicitGrantChangesWhatThePublicMayDo": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag === \"PublishArtifact\" && command.access !== \"\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\t[\n\t\t\t\t\tafter.public_access === before.public_access,\n\t\t\t\t\tafter.public_grant === before.public_grant,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\tbefore.publication_token === \"\",\n\t\t\t\tafter.publication_token === \"\",\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.AnExplicitGrantIsRecordedAsGiven": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\" || command.access === \"\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tcommand.pinned_version > before.version,\n\t\t\t\t[\n\t\t\t\t\tafter.public_access === command.access,\n\t\t\t\t\t[command.access === \"view\", after.public_grant === command.grant].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
 			}
 		}
 	}

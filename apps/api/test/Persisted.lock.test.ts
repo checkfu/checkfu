@@ -578,7 +578,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				].toSorted(),
 			)
 			const claims = "signed-link:ArtifactLink/claims"
-			const signed = lockWith({ [claims]: ["default.art_1.1.1800000000"] })
+			const signed = lockWith({ [claims]: ["default.art_1.1.1800000000.read"] })
 			expect(yield* lockProblems(signed)).toEqual([])
 			const shape = persistedShapes.find((candidate) => candidate.id === claims)
 			const mac = yield* Mac.Mac

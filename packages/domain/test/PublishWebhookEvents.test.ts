@@ -139,6 +139,8 @@ describe("PublishWebhookEvents policy", () => {
 					artifact_id: artifactId,
 					pinned_version: 1,
 					token: "pub_secret_token_never_leak",
+					access: "",
+					grant: "",
 				})
 				yield* domain.ReserveArtifact({ artifact_id: uploadedId })
 				yield* domain.CreateArtifact({

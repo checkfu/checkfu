@@ -11,7 +11,11 @@ import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { File } from "@checkfu/domain/File/File.aggregate"
 import type { FileId } from "@checkfu/domain/File/File.id"
-import { PublishArtifact } from "@checkfu/domain/Artifact/PublishArtifact.command"
+import {
+	ArtifactVersionNotFound,
+	KEEP_ACCESS,
+	PublishArtifact,
+} from "@checkfu/domain/Artifact/PublishArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
 import { UnpublishArtifact } from "@checkfu/domain/Artifact/UnpublishArtifact.command"
 import * as Context from "effect/Context"
@@ -31,6 +35,11 @@ import {
 	MAX_ARTIFACT_DECLARATION_BYTES,
 	PublicationAddress,
 } from "@checkfu/sdk/Schemas"
+import { decodeGrant, encodeGrant, grantAt } from "@checkfu/domain/Artifact/ArtifactAccess"
+import type {
+	ArtifactAccessLevel,
+	ArtifactDataGrant,
+} from "@checkfu/domain/Artifact/ArtifactAccess"
 import { decodeCapabilities } from "@checkfu/domain/Artifact/ArtifactCapabilities"
 import * as Result from "effect/Result"
 import {
@@ -116,6 +125,8 @@ interface Publication {
 	readonly address: PublicationAddress
 	readonly url: string
 	readonly version: number | null
+	readonly access: ArtifactAccessLevel
+	readonly grants: ArtifactDataGrant
 	readonly published_at: DateTime.Utc
 }
 
@@ -202,6 +213,8 @@ export const artifactReads = Effect.gen(function* () {
 				address,
 				url: yield* links.publicationUrl(address),
 				version: state.pinned_version === 0 ? null : state.pinned_version,
+				access: state.public_access === "" ? "view" : state.public_access,
+				grants: decodeGrant(state.public_grant),
 				published_at: DateTime.makeUnsafe(state.published_at),
 			}
 			return publication
@@ -439,7 +452,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 			id: ArtifactId,
 			idempotencyKey: string | undefined,
 			request:
-				| { readonly operation: "publish"; readonly pinned_version: number }
+				| {
+						readonly operation: "publish"
+						readonly pinned_version: number
+						readonly access: string
+				  }
 				| { readonly operation: "unpublish" },
 		) =>
 			Effect.gen(function* () {
@@ -582,15 +599,33 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const id = params.artifact_id
 					const pinned_version =
 						payload.version === undefined || payload.version === "latest" ? 0 : payload.version
+					const access = payload.access ?? KEEP_ACCESS
 					const sendOptions = yield* sentWith(id, headers["idempotency-key"], {
 						operation: "publish",
 						pinned_version,
+						access,
 					})
+					const state = yield* requireActive(id)
+					const served = pinned_version === 0 ? state.version : pinned_version
+					if (served > state.version) {
+						return yield* new ArtifactVersionNotFound({ artifact_id: id, version: served })
+					}
+					const grant =
+						access === "read" || access === "write"
+							? (encodeGrant(
+									grantAt(
+										access,
+										decodeCapabilities((yield* locateVersion(id, state, served)).capabilities),
+									),
+								) ?? "")
+							: ""
 					yield* artifacts.send(
 						new PublishArtifact({
 							artifact_id: id,
 							token: yield* newPublicationToken(random),
 							pinned_version,
+							access,
+							grant,
 						}),
 						sendOptions,
 					)
@@ -705,12 +740,14 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const expiresAt =
 						Math.floor((yield* Clock.currentTimeMillis) / 1000) +
 						(payload.expires_in ?? DEFAULT_LINK_TTL_SECONDS)
-					const url = yield* links.mint({ artifactId: id, version, expiresAt })
+					const access = payload.access ?? "view"
+					const url = yield* links.mint({ artifactId: id, version, expiresAt, access })
 					return {
 						type: "artifact_link" as const,
 						artifact_id: id,
 						version,
 						url,
+						access,
 						expires_at: DateTime.makeUnsafe(expiresAt * 1000),
 					}
 				}).pipe(handled),

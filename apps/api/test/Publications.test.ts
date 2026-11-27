@@ -330,6 +330,101 @@ describe("Publishing an artifact", () => {
 			}),
 		))
 
+	it("opens a publication for viewing only, and widens what the public may do only when the owner sets a level", () =>
+		withPublishing(({ api }) =>
+			Effect.gen(function* () {
+				const declaring = (collections: Record<string, string>) => [
+					{ path: "index.html", content: "page" },
+					{
+						path: "artifact.json",
+						content: JSON.stringify({
+							capabilities: {
+								database: {
+									collections: Object.fromEntries(
+										Object.entries(collections).map(([name, visitors]) => [name, { visitors }]),
+									),
+								},
+							},
+						}),
+					},
+				]
+				const created = yield* json<ArtifactBody>(
+					yield* api("POST", "/v1/artifacts", {
+						name: "Form",
+						files: declaring({ votes: "add", settings: "read", notes: "write", hidden: "none" }),
+					}),
+				)
+				const path = `/v1/artifacts/${created.id}/publication`
+				const granted = (body: unknown, headers?: Record<string, string>) =>
+					Effect.map(
+						Effect.flatMap(api("POST", path, body, headers), (response) =>
+							json<{
+								readonly publication: {
+									readonly access: string
+									readonly grants: unknown
+									readonly version: number | null
+								} | null
+							}>(response),
+						),
+						({ publication }) => [publication?.access, publication?.grants, publication?.version],
+					)
+
+				expect(yield* granted({})).toEqual(["view", {}, null])
+				const all = { notes: "write", settings: "read", votes: "add" }
+				expect(yield* granted({ access: "write" })).toEqual(["write", all, null])
+				expect(yield* granted({ access: "read" })).toEqual([
+					"read",
+					{ notes: "read", settings: "read" },
+					null,
+				])
+				expect(yield* granted({})).toEqual(["read", { notes: "read", settings: "read" }, null])
+
+				expect(
+					(yield* api("POST", `/v1/artifacts/${created.id}/versions`, {
+						version: 1,
+						files: declaring({ votes: "write", settings: "read", extra: "write" }),
+					})).status,
+				).toBe(201)
+				const shown = Effect.map(
+					Effect.flatMap(api("GET", `/v1/artifacts/${created.id}`), (response) =>
+						json<{ readonly publication: { readonly grants: unknown } | null }>(response),
+					),
+					({ publication }) => publication?.grants,
+				)
+				expect(yield* shown).toEqual({ notes: "read", settings: "read" })
+				expect(yield* granted({ version: 1 })).toEqual([
+					"read",
+					{ notes: "read", settings: "read" },
+					1,
+				])
+				expect(yield* granted({ access: "write" })).toEqual([
+					"write",
+					{ extra: "write", settings: "read", votes: "write" },
+					null,
+				])
+				expect(yield* granted({ access: "write", version: 1 })).toEqual(["write", all, 1])
+				expect(yield* granted({ access: "view", version: 1 })).toEqual(["view", {}, 1])
+
+				expect((yield* api("DELETE", path)).status).toBe(200)
+				expect(yield* granted({ version: 1 })).toEqual(["view", {}, 1])
+
+				const key = { "idempotency-key": "grant-once" }
+				expect(yield* granted({ access: "read" }, key)).toEqual([
+					"read",
+					{ extra: "read", settings: "read", votes: "read" },
+					null,
+				])
+				expect(yield* granted({ access: "read" }, key)).toEqual([
+					"read",
+					{ extra: "read", settings: "read", votes: "read" },
+					null,
+				])
+				expect((yield* api("POST", path, { access: "write" }, key)).status).toBe(409)
+				expect((yield* api("POST", path, {}, key)).status).toBe(409)
+				expect((yield* api("POST", path, { access: "everything" })).status).toBe(400)
+			}),
+		))
+
 	it("refuses versions and artifacts that do not exist", () =>
 		withPublishing(({ api, open, lookups }) =>
 			Effect.gen(function* () {

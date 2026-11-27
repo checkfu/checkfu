@@ -55,13 +55,14 @@ const VERSION = 3
 const NOW = 1_800_000_000
 const NOW_MS = NOW * 1000
 const GOLDEN_TOKEN =
-	"ZGVmYXVsdC5hcnRfMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3LjcuMTgwMDAwMDAwMA.0Rai4HJ5nNmhHoc8udE9dc9AENS5VUIAEi_xWpjyCuE"
+	"ZGVmYXVsdC5hcnRfMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3LjcuMTgwMDAwMDAwMC53cml0ZQ.oWGWxqIuZbicrL86hqazd3QplEaXGucqqKVbBXVNq20"
 
 interface LinkBody {
 	readonly type: string
 	readonly artifact_id: string
 	readonly version: number
 	readonly url: string
+	readonly access: string
 	readonly expires_at: string
 }
 
@@ -261,6 +262,7 @@ describe("Artifact link tokens", () => {
 					artifactId: `art_${"0123456789abcdef".repeat(2).slice(0, 24)}`,
 					version: VERSION,
 					expiresAt: NOW + 60,
+					access: "read" as const,
 				}
 				const token = yield* signLink(mac, key, claims)
 				expect(yield* verifyLink(mac, key, token, NOW_MS)).toEqual(claims)
@@ -307,6 +309,7 @@ describe("Artifact link tokens", () => {
 					artifactId: "art_0123456789abcdef01234567",
 					version: 7,
 					expiresAt: 1_800_000_000,
+					access: "write" as const,
 				}
 				expect(yield* verifyLink(mac, key, GOLDEN_TOKEN, NOW_MS - 1)).toEqual(claims)
 				expect(yield* signLink(mac, key, claims)).toBe(GOLDEN_TOKEN)
@@ -646,6 +649,35 @@ describe("Artifact viewing links", () => {
 			}),
 		))
 
+	it("signs the level a link was made with into the link, and makes a link for viewing only by default", () =>
+		withContent(({ api, open }) =>
+			Effect.gen(function* () {
+				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "one" }])
+				const levelIn = (url: string) => {
+					const token = new URL(url).pathname.split("/")[2] ?? ""
+					const claims = Base64Url.decodeString(token.split(".")[0] ?? "")
+					return (claims._tag === "Success" ? claims.success : "").split(".")[4]
+				}
+				const plain = yield* createLink(api, id)
+				expect([plain.access, levelIn(plain.url)]).toEqual(["view", "view"])
+				for (const access of ["view", "read", "write"]) {
+					const link = yield* createLink(api, id, { access })
+					expect([link.access, levelIn(link.url)]).toEqual([access, access])
+					expect((yield* open(link.url)).status).toBe(200)
+				}
+				const [claims = "", tag = ""] = (new URL(plain.url).pathname.split("/")[2] ?? "").split(".")
+				const text = Base64Url.decodeString(claims)
+				const forgedClaims = Base64Url.encode(
+					(text._tag === "Success" ? text.success : "").replace(/view$/, "write"),
+				)
+				expect(forgedClaims).not.toBe(claims)
+				expect((yield* open(`${TEST_CONTENT_ORIGIN}/a/${forgedClaims}.${tag}/`)).status).toBe(404)
+				expect(
+					(yield* api("POST", `/v1/artifacts/${id}/versions/1/links`, { access: "admin" })).status,
+				).toBe(400)
+			}),
+		))
+
 	it("refuses a link made for another jurisdiction's storage", () =>
 		withContent(({ api, open, openIn, sign }) =>
 			Effect.gen(function* () {
@@ -660,7 +692,13 @@ describe("Artifact viewing links", () => {
 					claims._tag === "Success" ? claims.success : ""
 				).split(".")
 				const signed = (scope: string) =>
-					sign({ scope, artifactId, version: Number(version), expiresAt: Number(expiresAt) })
+					sign({
+						scope,
+						artifactId,
+						version: Number(version),
+						expiresAt: Number(expiresAt),
+						access: "view",
+					})
 				const euLink = `${TEST_CONTENT_ORIGIN}/a/${yield* signed("eu")}/`
 				expect((yield* openIn("eu", euLink)).status).toBe(200)
 				expect((yield* open(euLink)).status).toBe(404)
@@ -738,6 +776,7 @@ describe("Artifact viewing links", () => {
 					artifactId: id,
 					version: 3,
 					expiresAt: Math.floor((yield* Clock.currentTimeMillis) / 1000) + 60,
+					access: "view",
 				})
 				expect((yield* openLagging("never", `${TEST_CONTENT_ORIGIN}/a/${ahead}/`)).status).toBe(404)
 				expect((yield* api("DELETE", `/v1/artifacts/${id}`)).status).toBe(200)

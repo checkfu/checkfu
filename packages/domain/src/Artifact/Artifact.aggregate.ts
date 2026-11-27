@@ -45,6 +45,8 @@ export const ArtifactState = Schema.Struct({
 	publication_token: Schema.String,
 	pinned_version: NonNegativeInt,
 	published_at: NonNegativeInt,
+	public_access: Schema.Literals(["", "view", "read", "write"]),
+	public_grant: Schema.String,
 })
 export type ArtifactState = typeof ArtifactState.Type
 
@@ -74,6 +76,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		publication_token: "",
 		pinned_version: 0,
 		published_at: 0,
+		public_access: "",
+		public_grant: "",
 	},
 	commands: [
 		ReserveArtifact,
@@ -100,8 +104,19 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		UnpublishedHoldsNoSettings: (s) =>
 			[
 				s.publication_token !== "",
-				[s.pinned_version === 0, s.published_at === 0].every((ok) => ok),
+				[
+					s.pinned_version === 0,
+					s.published_at === 0,
+					s.public_access === "",
+					s.public_grant === "",
+				].every((ok) => ok),
 			].some((ok) => ok),
+		APublicationHasAnAccessLevel: (s) =>
+			[s.publication_token === "", s.public_access !== ""].some((ok) => ok),
+		OnlyAReadOrWritePublicationGrantsData: (s) =>
+			[s.public_grant === "", s.public_access === "read", s.public_access === "write"].some(
+				(ok) => ok,
+			),
 		PinnedVersionWithinHead: (s) => s.pinned_version <= s.version,
 		AReservationIsOpenOnlyBeforeCreation: (s) =>
 			[s.open_reservation === 0, s.status === ""].some((ok) => ok),
@@ -225,6 +240,43 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				].every((ok) => ok),
 			].some((ok) => ok)
 		},
+		APublicationStartsAtViewUnlessGranted: ({ before, after, command }) => {
+			if (command._tag !== "PublishArtifact") {
+				return true
+			}
+			return [
+				before.publication_token !== "",
+				after.publication_token === "",
+				command.access !== "",
+				after.public_access === "view",
+			].some((ok) => ok)
+		},
+		OnlyAnExplicitGrantChangesWhatThePublicMayDo: ({ before, after, command }) => {
+			if (command._tag === "PublishArtifact" && command.access !== "") {
+				return true
+			}
+			return [
+				[
+					after.public_access === before.public_access,
+					after.public_grant === before.public_grant,
+				].every((ok) => ok),
+				before.publication_token === "",
+				after.publication_token === "",
+			].some((ok) => ok)
+		},
+		AnExplicitGrantIsRecordedAsGiven: ({ before, after, command }) => {
+			if (command._tag !== "PublishArtifact" || command.access === "") {
+				return true
+			}
+			return [
+				before.status !== "active",
+				command.pinned_version > before.version,
+				[
+					after.public_access === command.access,
+					[command.access === "view", after.public_grant === command.grant].some((ok) => ok),
+				].every((ok) => ok),
+			].some((ok) => ok)
+		},
 		ClaimingAKeyChangesNoState: ({ before, after, command }) =>
 			[
 				command._tag !== "ClaimArtifactIdempotencyKey",
@@ -240,6 +292,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					after.publication_token === before.publication_token,
 					after.pinned_version === before.pinned_version,
 					after.published_at === before.published_at,
+					after.public_access === before.public_access,
+					after.public_grant === before.public_grant,
 				].every((ok) => ok),
 			].some((ok) => ok),
 	},
@@ -304,15 +358,23 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			if (cmd.pinned_version > state.version) {
 				return new ArtifactVersionNotFound({ artifact_id: ctx.id, version: cmd.pinned_version })
 			}
-			if (state.publication_token === "") {
-				return [new ArtifactPublished({ token: cmd.token, pinned_version: cmd.pinned_version })]
-			}
-			return state.pinned_version === cmd.pinned_version
+			const kept = state.public_access === "" ? "view" : state.public_access
+			const access = cmd.access === "" ? kept : cmd.access
+			const granted = cmd.access === "" ? state.public_grant : cmd.grant
+			const grant = access === "view" ? "" : granted
+			return [
+				state.publication_token !== "",
+				state.pinned_version === cmd.pinned_version,
+				state.public_access === access,
+				state.public_grant === grant,
+			].every((ok) => ok)
 				? []
 				: [
 						new ArtifactPublished({
-							token: state.publication_token,
+							token: state.publication_token === "" ? cmd.token : state.publication_token,
 							pinned_version: cmd.pinned_version,
+							access,
+							grant,
 						}),
 					]
 		},
@@ -376,6 +438,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						publication_token: "",
 						pinned_version: 0,
 						published_at: 0,
+						public_access: "" as const,
+						public_grant: "",
 					}
 				: state,
 		"artifact.published": (state, e, envelope) =>
@@ -385,11 +449,20 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						publication_token: e.token,
 						pinned_version: e.pinned_version,
 						published_at: DateTime.toEpochMillis(envelope.at),
+						public_access: e.access,
+						public_grant: e.grant,
 					}
 				: state,
 		"artifact.unpublished": (state) =>
 			state.status === "active"
-				? { ...state, publication_token: "", pinned_version: 0, published_at: 0 }
+				? {
+						...state,
+						publication_token: "",
+						pinned_version: 0,
+						published_at: 0,
+						public_access: "" as const,
+						public_grant: "",
+					}
 				: state,
 		"artifact.idempotency_key_claimed": (state) => state,
 	},

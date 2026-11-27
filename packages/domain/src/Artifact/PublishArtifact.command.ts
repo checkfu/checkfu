@@ -1,11 +1,19 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactId } from "./Artifact.id.ts"
 import { ArtifactNotFound } from "./ArtifactNotFound.rejection.ts"
+import * as Schema from "effect/Schema"
+import { ArtifactAccessLevel, GrantText } from "./ArtifactAccess.ts"
 import { NonNegativeInt, PositiveInt, PublicationToken } from "./ArtifactTypes.ts"
+
+export const KEEP_ACCESS = ""
+
+export const RequestedAccess = Schema.Literals([KEEP_ACCESS, ...ArtifactAccessLevel.literals])
 
 export class ArtifactPublished extends Domain.Event("artifact.published", {
 	token: PublicationToken,
 	pinned_version: NonNegativeInt,
+	access: ArtifactAccessLevel,
+	grant: GrantText,
 }) {}
 
 export class ArtifactVersionNotFound extends Domain.Rejection(
@@ -19,6 +27,8 @@ export class PublishArtifact extends Domain.Command("PublishArtifact", {
 		artifact_id: ArtifactId,
 		token: PublicationToken,
 		pinned_version: NonNegativeInt,
+		access: RequestedAccess,
+		grant: GrantText,
 	},
 	events: [ArtifactPublished],
 	rejects: [ArtifactNotFound, ArtifactVersionNotFound],
