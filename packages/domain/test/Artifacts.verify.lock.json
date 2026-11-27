@@ -132,7 +132,7 @@
 			},
 			"Artifact.AnExplicitGrantIsRecordedAsGiven": {
 				"kind": "transition",
-				"source": "({ after, command, events }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\" || command.access === \"\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tevents.length === 0,\n\t\t\t\t[\n\t\t\t\t\tafter.public_access === command.access,\n\t\t\t\t\t[command.access === \"view\", after.public_grant === command.grant].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\" || command.access === \"\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tcommand.pinned_version > before.version,\n\t\t\t\t[\n\t\t\t\t\tafter.public_access === command.access,\n\t\t\t\t\t[command.access === \"view\", after.public_grant === command.grant].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
 			}
 		}
 	}

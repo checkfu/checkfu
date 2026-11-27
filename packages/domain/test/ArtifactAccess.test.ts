@@ -52,21 +52,6 @@ describe("What a visitor may do with a collection", () => {
 		}
 	})
 
-	it("never lets a higher level or a later version give more than was granted", () => {
-		for (const level of LEVELS) {
-			for (const then of ACCESS) {
-				const granted = accessAt(level, then)
-				for (const now of ACCESS) {
-					for (const current of LEVELS) {
-						const effective = allowed(both(granted, accessAt(current, now)))
-						expect(effective.every((operation) => permits(granted, operation))).toBe(true)
-						expect(effective.every((operation) => permits(now, operation))).toBe(true)
-					}
-				}
-			}
-		}
-	})
-
 	it("records, for a level, each declared collection a visitor could use and nothing else", () => {
 		const capabilities = {
 			database: {

@@ -1168,7 +1168,7 @@ export const ArtifactPublication = Schema.Struct({
 	}),
 	grants: ArtifactDataGrant.annotate({
 		description:
-			"The most a visitor may do in each collection, recorded from the version served when the access level was set. A later version cannot widen it",
+			"The most a visitor may do in each collection, recorded when the access level was set from the version then served. A later version cannot widen it",
 	}),
 	published_at: Schema.DateTimeUtc,
 })
@@ -1206,7 +1206,7 @@ export const PublishArtifactBody = Schema.Struct({
 	access: Schema.optionalKey(
 		ArtifactAccessLevel.annotate({
 			description:
-				"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Omit it to keep the level already set; a new publication starts at view",
+				"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view",
 		}),
 	),
 })

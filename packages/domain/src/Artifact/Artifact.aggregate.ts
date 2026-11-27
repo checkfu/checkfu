@@ -264,12 +264,13 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				after.publication_token === "",
 			].some((ok) => ok)
 		},
-		AnExplicitGrantIsRecordedAsGiven: ({ after, command, events }) => {
+		AnExplicitGrantIsRecordedAsGiven: ({ before, after, command }) => {
 			if (command._tag !== "PublishArtifact" || command.access === "") {
 				return true
 			}
 			return [
-				events.length === 0,
+				before.status !== "active",
+				command.pinned_version > before.version,
 				[
 					after.public_access === command.access,
 					[command.access === "view", after.public_grant === command.grant].some((ok) => ok),
@@ -357,42 +358,23 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			if (cmd.pinned_version > state.version) {
 				return new ArtifactVersionNotFound({ artifact_id: ctx.id, version: cmd.pinned_version })
 			}
-			if (cmd.access !== "") {
-				const grant = cmd.access === "view" ? "" : cmd.grant
-				return [
-					state.publication_token !== "",
-					state.pinned_version === cmd.pinned_version,
-					state.public_access === cmd.access,
-					state.public_grant === grant,
-				].every((ok) => ok)
-					? []
-					: [
-							new ArtifactPublished({
-								token: state.publication_token === "" ? cmd.token : state.publication_token,
-								pinned_version: cmd.pinned_version,
-								access: cmd.access,
-								grant,
-							}),
-						]
-			}
-			if (state.publication_token === "" || state.public_access === "") {
-				return [
-					new ArtifactPublished({
-						token: cmd.token,
-						pinned_version: cmd.pinned_version,
-						access: "view",
-						grant: "",
-					}),
-				]
-			}
-			return state.pinned_version === cmd.pinned_version
+			const kept = state.public_access === "" ? "view" : state.public_access
+			const access = cmd.access === "" ? kept : cmd.access
+			const granted = cmd.access === "" ? state.public_grant : cmd.grant
+			const grant = access === "view" ? "" : granted
+			return [
+				state.publication_token !== "",
+				state.pinned_version === cmd.pinned_version,
+				state.public_access === access,
+				state.public_grant === grant,
+			].every((ok) => ok)
 				? []
 				: [
 						new ArtifactPublished({
-							token: state.publication_token,
+							token: state.publication_token === "" ? cmd.token : state.publication_token,
 							pinned_version: cmd.pinned_version,
-							access: state.public_access,
-							grant: state.public_grant,
+							access,
+							grant,
 						}),
 					]
 		},

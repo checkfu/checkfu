@@ -11,7 +11,11 @@ import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { File } from "@checkfu/domain/File/File.aggregate"
 import type { FileId } from "@checkfu/domain/File/File.id"
-import { KEEP_ACCESS, PublishArtifact } from "@checkfu/domain/Artifact/PublishArtifact.command"
+import {
+	ArtifactVersionNotFound,
+	KEEP_ACCESS,
+	PublishArtifact,
+} from "@checkfu/domain/Artifact/PublishArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
 import { UnpublishArtifact } from "@checkfu/domain/Artifact/UnpublishArtifact.command"
 import * as Context from "effect/Context"
@@ -604,7 +608,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const state = yield* requireActive(id)
 					const served = pinned_version === 0 ? state.version : pinned_version
 					if (served > state.version) {
-						return yield* reject(404, `Artifact ${id} has no version ${served}.`)
+						return yield* new ArtifactVersionNotFound({ artifact_id: id, version: served })
 					}
 					const grant =
 						access === "read" || access === "write"

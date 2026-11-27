@@ -1409,7 +1409,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							type: "string",
 							enum: ["view", "read", "write"],
 							description:
-								"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Omit it to keep the level already set; a new publication starts at view",
+								"What anyone with the address may do with the artifact's data: view (files only), read or write. Each collection still allows at most what the version served declares for visitors. Collections a later version adds stay closed to visitors until a level is set again. Omit it to keep the level already set; a new publication starts at view",
 						},
 					},
 					additionalProperties: false,
