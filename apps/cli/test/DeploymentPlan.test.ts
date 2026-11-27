@@ -5,7 +5,48 @@ import * as Provider from "alchemy/Provider"
 import { isResolved } from "alchemy/Diff"
 import { Resource } from "alchemy/Resource"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import { execFile } from "node:child_process"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { promisify } from "node:util"
 import { applyManagedPlan } from "../scripts/Deployment.ts"
+import { cliProcessEnv } from "./helpers/ProcessEnv.ts"
+
+it("prints actionable destroy guidance from the real helper when confirmation is missing", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "checkfu-confirmation-"))
+	try {
+		const failure = await promisify(execFile)(
+			"bun",
+			[
+				"--no-env-file",
+				`--config=${fileURLToPath(new URL("../bunfig.toml", import.meta.url))}`,
+				fileURLToPath(new URL("../scripts/Deployment.ts", import.meta.url)),
+				"destroy",
+				"--stage",
+				"confirmation-qa",
+				"--log-level",
+				"warn",
+			],
+			{ cwd, env: cliProcessEnv(), timeout: 10_000 },
+		).then(
+			() => {
+				throw new Error("Unconfirmed destroy succeeded")
+			},
+			(error: unknown) =>
+				Schema.decodeUnknownSync(
+					Schema.Struct({ code: Schema.Int, stdout: Schema.String, stderr: Schema.String }),
+				)(error),
+		)
+		expect(failure.code).toBe(1)
+		expect(failure.stdout).toBe("")
+		expect(failure.stderr).toContain("checkfu destroy --stage confirmation-qa --yes")
+	} finally {
+		await rm(cwd, { recursive: true, force: true })
+	}
+})
 
 type DataStore = Resource<
 	"Checkfu.Test.DataStore",

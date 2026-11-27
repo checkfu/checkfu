@@ -6,7 +6,7 @@ import * as Prompt from "effect/cli/Prompt"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Stdio from "effect/Stdio"
-import { CliFailure, configError } from "../src/Errors.ts"
+import { CliFailure, configError, isCliFailure } from "../src/Errors.ts"
 import { writeStderrLine } from "../src/TerminalOutput.ts"
 
 /** Plan and apply share one Alchemy lease; a later re-plan cannot slip past the guard. */
@@ -93,6 +93,12 @@ if (import.meta.main) {
 				Command.withSubcommands([operation("deploy"), operation("destroy")]),
 			),
 			{ version: "1" },
-		).pipe(Effect.scoped, Effect.provide(Alchemist.layer())),
+		).pipe(
+			Effect.tapError((error) =>
+				isCliFailure(error) ? writeStderrLine(`Error: ${error.message}`) : Effect.void,
+			),
+			Effect.scoped,
+			Effect.provide(Alchemist.layer()),
+		),
 	)
 }

@@ -1455,6 +1455,27 @@ describe("checkfu destroy", () => {
 	const env = { CHECKFU_CONFIG_DIR: "/config" }
 	const PROFILE = ["--profile", "default"]
 
+	it.live(
+		"refuses unconfirmed headless destruction before account lookup and preserves the connection",
+		() =>
+			Effect.gen(function* () {
+				const cli = yield* makeTestServer()
+				const files = virtualFiles({ ...liveCheckout, [CONFIG_FILE]: savedLive })
+				const calls: Array<ReadonlyArray<string>> = []
+				const result = yield* cli.run(["destroy", "--stage", "live"], {
+					env,
+					files,
+					stdinIsTerminal: false,
+					spawn: fakeAlchemy(calls),
+				})
+				expect(result.exitCode).toBe(1)
+				expect(result.errorMessage).toContain("--yes")
+				expect(calls).toEqual([])
+				expect(files[CONFIG_FILE]).toBe(savedLive)
+				expect(files[RECORD_FILE]).toBe(record("live"))
+			}),
+	)
+
 	it.live("deletes the deployment that is both named and recorded, then forgets it", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()

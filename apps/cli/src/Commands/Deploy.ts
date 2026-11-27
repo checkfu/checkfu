@@ -964,6 +964,12 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 				`This CLI has no record of deploying "${stage}"${record === undefined ? "" : ` (it last deployed "${record.stage}")`}. Nothing was deleted. Use the configuration directory that originally deployed this stage.`,
 			)
 		}
+		const stdio = yield* Stdio.Stdio
+		if (!input.yes && !(yield* stdio.stdinIsTerminal)) {
+			return yield* usageError(
+				`Run ${COMMAND} destroy --stage ${stage} --yes to approve a non-interactive destroy.`,
+			)
+		}
 		const target = yield* resolveTarget(
 			checkout,
 			path.join(checkout.dataRoot ?? checkout.root, ".env"),
