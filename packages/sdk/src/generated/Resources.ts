@@ -3301,7 +3301,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn. */
+	/** Send events to start, resume, follow up, or interrupt. Send up to 8 events and 802816 UTF-8 JSON bytes. Each user message allows up to 16384 UTF-16 code units after joining blocks with newlines. */
 	send(
 		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
@@ -5881,7 +5881,7 @@ export class SessionsEventsResource {
 		)
 	}
 
-	/** Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn. */
+	/** Send events to start, resume, follow up, or interrupt. Send up to 8 events and 802816 UTF-8 JSON bytes. Each user message allows up to 16384 UTF-16 code units after joining blocks with newlines. */
 	send(
 		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,

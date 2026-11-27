@@ -3026,7 +3026,7 @@ const sessionsEventsSendCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsEventsSendCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn. (accepts flags and/or JSON/YAML on stdin)",
+		"Send events to start, resume, follow up, or interrupt. Send up to 8 events and 802816 UTF-8 JSON bytes. Each user message allows up to 16384 UTF-16 code units after joining blocks with newlines. (accepts flags and/or JSON/YAML on stdin)",
 	),
 	CommandWithExamples([
 		{

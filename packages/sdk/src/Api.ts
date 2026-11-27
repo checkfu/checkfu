@@ -133,7 +133,9 @@ import {
 } from "./Schemas.ts"
 import type { AgentTool, SessionEventType } from "./Schemas.ts"
 import {
+	MAX_EVENTS_BODY_BYTES,
 	MAX_SESSION_BODY_BYTES,
+	MAX_SESSION_EVENTS_PER_BATCH,
 	MAX_SESSION_INITIAL_MESSAGES_BYTES,
 	MAX_SESSION_VAULTS,
 } from "./Limits.ts"
@@ -950,10 +952,9 @@ export const SendSessionEventsBody = Schema.Struct({
 			}),
 		]),
 	)
-		.check(Schema.isMinLength(1), Schema.isMaxLength(8))
+		.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_SESSION_EVENTS_PER_BATCH))
 		.annotate({
-			description:
-				"Events to send to the session. Send user.message to give the agent work or user.interrupt to stop the current turn.",
+			description: "Session events in submission order.",
 		}),
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
@@ -2285,7 +2286,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "Send session events")
 			.annotate(
 				OpenApi.Description,
-				"Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn.",
+				`Send events to start, resume, follow up, or interrupt. Send up to ${MAX_SESSION_EVENTS_PER_BATCH} events and ${MAX_EVENTS_BODY_BYTES} UTF-8 JSON bytes. Each user message allows up to ${MAX_MESSAGE_TEXT_LENGTH} UTF-16 code units after joining blocks with newlines.`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",
@@ -2297,7 +2298,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					repeatArrayField: {
 						field: "events",
 						flag: "event",
-						description: "Event payload as JSON, YAML, or @file (repeatable, up to 8)",
+						description: `Event payload as JSON, YAML, or @file (repeatable, up to ${MAX_SESSION_EVENTS_PER_BATCH})`,
 					},
 					examples: [
 						{

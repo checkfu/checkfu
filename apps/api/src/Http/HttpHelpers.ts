@@ -4,8 +4,7 @@ import {
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
 import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
-import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
-import { MAX_FILE_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
+import { MAX_EVENTS_BODY_BYTES, MAX_FILE_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
 	MAX_MCP_SERVERS_TEXT_LENGTH,
@@ -63,7 +62,6 @@ export const MAX_AGENT_BODY_BYTES =
 		ESCAPED_CODE_POINT_BYTES +
 	(MAX_MCP_SERVERS_TEXT_LENGTH + MAX_AGENT_TOOLS_TEXT_LENGTH) * ESCAPED_UNIT_BYTES +
 	16 * 1024
-export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
 export const MAX_MEMORY_BODY_BYTES = MAX_MEMORY_CONTENT_BYTES * 6 + 16 * 1024
 
 const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined => {

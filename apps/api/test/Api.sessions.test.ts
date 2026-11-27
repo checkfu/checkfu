@@ -47,7 +47,12 @@ import {
 	sessionTurnKey,
 } from "@checkfu/domain/Session/SessionTurnCompletion.view"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
-import { MAX_SESSION_INITIAL_MESSAGES_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
+import {
+	MAX_EVENTS_BODY_BYTES,
+	MAX_SESSION_BODY_BYTES,
+	MAX_SESSION_EVENTS_PER_BATCH,
+	MAX_SESSION_INITIAL_MESSAGES_BYTES,
+} from "@checkfu/sdk/Limits"
 import {
 	MAX_MESSAGE_TEXT_LENGTH,
 	MAX_SESSION_INITIAL_EVENTS,
@@ -63,6 +68,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import {
 	AdmitSession,
@@ -105,6 +111,97 @@ const testNotice = (message: string) =>
 	})
 
 describe("Session event batching, interrupts, and SSE streaming", () => {
+	it("enforces the encoded event batch limit without accepting a prefix", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch)
+					const path = `/v1/sessions/${session.id}/events`
+					const post = (key: string, rawBody: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path,
+							headers: { ...AUTH_HEADERS, "idempotency-key": key },
+							rawBody,
+						})
+					const history = yield* SessionView
+					const sessionRef = Session.ref(SessionId.make(session.id))
+					const recorded = () =>
+						history
+							.list(sessionRef, { take: 100 })
+							.pipe(
+								Effect.map(({ entries }) =>
+									entries.flatMap(({ event }) =>
+										event._tag === "user.message" ? event.content.map(({ text }) => text) : [],
+									),
+								),
+							)
+					const fragmented = Array.from({ length: MAX_SESSION_EVENTS_PER_BATCH }, (_, index) => ({
+						id: `budget-message-${index}`,
+						type: "user.message",
+						content: Array.from({ length: 4096 }, (_, block) => ({
+							type: "text",
+							text: block === 0 ? `${index} 漢😀"\\` : "x",
+						})),
+					}))
+					const joined = fragmented.map(({ content }) => content.map(({ text }) => text).join("\n"))
+					expect(joined.every((message) => message.length <= MAX_MESSAGE_TEXT_LENGTH)).toBe(true)
+					const size = (value: string) => new TextEncoder().encode(value).byteLength
+					const raw = JSON.stringify({ events: fragmented })
+					expect(size(raw)).toBeGreaterThan(MAX_EVENTS_BODY_BYTES)
+					const rejected = yield* post("fragmented", raw)
+					expect(rejected.status).toBe(413)
+					expect(yield* Effect.promise(() => rejected.json())).toMatchObject({
+						error: { type: "payload_too_large", message: "Request body is too large." },
+					})
+
+					const compact = fragmented.map(({ id, type, content }) => ({
+						id,
+						type,
+						content: [{ type: "text", text: content.map(({ text }) => text).join("\n") }],
+					}))
+					const first = JSON.stringify({ events: compact.slice(0, 4) })
+					const exact = first.padEnd(first.length + MAX_EVENTS_BODY_BYTES - size(first), " ")
+					expect(size(exact)).toBe(MAX_EVENTS_BODY_BYTES)
+					expect(size(exact + " ")).toBe(MAX_EVENTS_BODY_BYTES + 1)
+					expect((yield* post("first", exact + " ")).status).toBe(413)
+					expect(yield* recorded()).toEqual([])
+
+					const accepted = yield* post("first", exact)
+					expect(accepted.status).toBe(200)
+					const receipt: unknown = yield* Effect.promise(() => accepted.json())
+					const retry = yield* post("first", first)
+					expect(retry.status).toBe(200)
+					expect(yield* Effect.promise(() => retry.json())).toEqual(receipt)
+					const second = JSON.stringify({ events: compact.slice(4) })
+					const conflict = yield* post("first", second)
+					expect(conflict.status).toBe(409)
+					expect(yield* Effect.promise(() => conflict.json())).toMatchObject({
+						error: { code: "idempotency_key_reused" },
+					})
+					expect((yield* post("second", second)).status).toBe(200)
+					const messages = yield* recorded().pipe(
+						Effect.repeat({
+							schedule: Schedule.spaced("5 millis"),
+							times: 400,
+							until: (events) => events.length >= joined.length,
+						}),
+					)
+					expect(messages).toHaveLength(joined.length)
+					expect(messages.map((text, index) => text === joined[index])).toEqual(
+						joined.map(() => true),
+					)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("records system guidance without starting a turn and uses it for later requests", async () => {
 		const threadInstructions: Array<string> = []
 		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) => {

@@ -3473,7 +3473,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_sendSessionEvents",
 		title: "Send session events",
 		description:
-			"Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn.",
+			"Send events to start, resume, follow up, or interrupt. Send up to 8 events and 802816 UTF-8 JSON bytes. Each user message allows up to 16384 UTF-16 code units after joining blocks with newlines.",
 		method: "POST",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: false,
@@ -3673,8 +3673,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							minItems: 1,
 							maxItems: 8,
-							description:
-								"Events to send to the session. Send user.message to give the agent work or user.interrupt to stop the current turn.",
+							description: "Session events in submission order.",
 						},
 					},
 					required: ["events"],

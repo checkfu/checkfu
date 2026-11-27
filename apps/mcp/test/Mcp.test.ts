@@ -1,8 +1,5 @@
-import {
-	MAX_AGENT_BODY_BYTES,
-	MAX_EVENTS_BODY_BYTES,
-	MAX_REQUEST_BODY_BYTES,
-} from "@checkfu/api/Http/HttpHelpers"
+import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "@checkfu/api/Http/HttpHelpers"
+import { MAX_EVENTS_BODY_BYTES } from "@checkfu/sdk/Limits"
 import { ClientEventId } from "@checkfu/api/Http/Api"
 import { ArtifactVersionFromString } from "@checkfu/sdk/Api"
 import {

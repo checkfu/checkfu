@@ -132,6 +132,12 @@ const { data, status, request_id, requestId } = await client.agents
 
 Pass `agent: agent.id` when creating a session to pin the latest agent version. To pin a specific version, pass `agent: { type: "agent", id: agent.id, version: agent.version }`.
 
+## Sending session events
+
+`sessions.events.send` accepts up to 8 events in a single JSON request of at most 802,816 UTF-8 bytes. Measure the encoded body including the `events` wrapper, field names, and JSON escaping. Each user message accepts up to 16,384 UTF-16 code units after joining its text blocks with a newline.
+
+If a batch exceeds the byte limit, combine adjacent text blocks using `blocks.map(({ text }) => text).join("\n")` to preserve the message text. An HTTP 413 accepts no events. To split a batch, keep the same event IDs for those events and send the batches in order. Give each distinct batch its own idempotency key and reuse that key when retrying the same batch.
+
 ## Confirming vault and credential erasure
 
 Deleting a vault returns a `vault_deleted` receipt. Read `secrets` to tell
