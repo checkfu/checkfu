@@ -411,6 +411,39 @@ describe("session workspace", () => {
 		expect(allowedHostsOf({ type: "cloud", networking: { type: "unrestricted" } })).toBeNull()
 	})
 
+	it("blocks local and private addresses unless the environment names the exact host", async () => {
+		const forwarded: Array<string> = []
+		let allowed: ReadonlyArray<string> | null = null
+		const egress = createMachineEgress({
+			allowedHosts: () => allowed,
+			fetch: async (request) => {
+				expect(request.redirect).toBe("manual")
+				forwarded.push(request.url)
+				return new Response("ok")
+			},
+		})
+		for (const url of [
+			"http://127.0.0.1:8080/",
+			"http://localhost/",
+			"http://service.localhost./",
+			"http://169.254.169.254/",
+			"http://10.0.0.5/",
+			"http://[::1]/",
+			"http://[::ffff:127.0.0.1]/",
+		]) {
+			const refused = await egress(new Request(url))
+			expect(refused.status, url).toBe(403)
+			expect(await refused.text()).toContain("local or private address")
+		}
+		expect(forwarded).toEqual([])
+		expect((await egress(new Request("https://example.com/"))).status).toBe(200)
+
+		allowed = ["127.0.0.1:8080"]
+		expect((await egress(new Request("http://127.0.0.1:8080/"))).status).toBe(200)
+		expect((await egress(new Request("http://127.0.0.1:9090/"))).status).toBe(403)
+		expect(forwarded).toEqual(["https://example.com/", "http://127.0.0.1:8080/"])
+	})
+
 	it("reads an allowed host the way the MCP servers' check does, port included", async () => {
 		const reach = async (allowed: ReadonlyArray<string>, url: string) =>
 			(

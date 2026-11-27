@@ -57,7 +57,7 @@ export const isPublicIpAddress = (ip: string): boolean => {
 	return Result.isSuccess(parsed) && isPublicAddress(parsed.success)
 }
 
-const isDisallowedHost = (hostname: string): boolean => {
+export const isLocalOrPrivateHost = (hostname: string): boolean => {
 	const lower = hostname.toLowerCase().replace(/\.+$/, "")
 	if (lower.length === 0) {
 		return true
@@ -110,7 +110,7 @@ export const parsePublicHttpsWebhookUrl = (raw: string): string | null => {
 	) {
 		return null
 	}
-	if (isDisallowedHost(parsed.hostname)) {
+	if (isLocalOrPrivateHost(parsed.hostname)) {
 		return null
 	}
 	const canonical = parsed.toString()

@@ -1,3 +1,5 @@
+import { isLocalOrPrivateHost } from "@checkfu/sdk/WebhookUrl"
+
 const notAllowed = (host: string) =>
 	`The session's environment does not let the workspace reach ${host}: add it to its networking's allowed_hosts.`
 
@@ -29,9 +31,16 @@ export const isAllowedHost = (allowed: ReadonlyArray<string> | null, host: strin
 export const createMachineEgress =
 	(network: MachineNetwork) =>
 	async (request: Request): Promise<Response> => {
-		const { host } = new URL(request.url)
-		if (!isAllowedHost(network.allowedHosts(), host)) {
+		const { host, hostname } = new URL(request.url)
+		const allowed = network.allowedHosts()
+		if (!isAllowedHost(allowed, host)) {
 			return new Response(notAllowed(host), { status: 403 })
+		}
+		if (allowed === null && isLocalOrPrivateHost(hostname)) {
+			return new Response(
+				`The workspace cannot reach ${host}: it is a local or private address. Add it to the environment's networking allowed_hosts to permit it.`,
+				{ status: 403 },
+			)
 		}
 		return network.fetch(new Request(request, { redirect: "manual" }))
 	}
