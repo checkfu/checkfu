@@ -4,16 +4,16 @@ import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { SessionStatusIdle } from "./CommitModelReply.command.ts"
 import { Harness } from "./Harness.external.ts"
 import { Session } from "./Session.aggregate.ts"
-import { SessionOutputs } from "./SessionOutputs.external.ts"
+import { OutputsSaver } from "./OutputsSaver.external.ts"
 
-export class PublishSessionOutputs extends Domain.Policy("PublishSessionOutputs", {
+export class SaveSessionOutputs extends Domain.Policy("SaveSessionOutputs", {
 	from: Session,
 	on: [SessionStatusIdle, SessionStatusTerminated],
 }) {}
 
-export const PublishSessionOutputsLive = PublishSessionOutputs.toLayer(
+export const SaveSessionOutputsLive = SaveSessionOutputs.toLayer(
 	Effect.gen(function* () {
-		const outputs = yield* SessionOutputs
+		const outputs = yield* OutputsSaver
 		const harness = yield* Harness
 		return Effect.fn(function* ({ source, event }) {
 			if (event._tag === "session.status_terminated") {
@@ -23,7 +23,7 @@ export const PublishSessionOutputsLive = PublishSessionOutputs.toLayer(
 			if (stop !== "end_turn" && stop !== "budget_reached" && stop !== "refusal") {
 				return
 			}
-			yield* outputs.publish({ session_id: source.id, turn: event.turn })
+			yield* outputs.save({ session_id: source.id, turn: event.turn })
 		})
 	}),
 )

@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
-import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
@@ -198,7 +198,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),
@@ -466,7 +466,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(PiDurableHarnessLive),

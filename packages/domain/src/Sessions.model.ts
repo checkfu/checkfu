@@ -4,10 +4,7 @@ import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
 import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
-import {
-	PublishSessionOutputs,
-	PublishSessionOutputsLive,
-} from "./Session/PublishSessionOutputs.policy.ts"
+import { SaveSessionOutputs, SaveSessionOutputsLive } from "./Session/SaveSessionOutputs.policy.ts"
 import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.ts"
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
@@ -28,7 +25,7 @@ export class Sessions extends Domain.Model("Sessions", {
 		SendSystemMessageDecision,
 	],
 	views: [SessionView, SessionTurnCompletion, TurnInput],
-	policies: [StartTurn, EnsureTurnStopped, PublishSessionOutputs],
+	policies: [StartTurn, EnsureTurnStopped, SaveSessionOutputs],
 	sagas: [RunTurn],
 	invariants: {
 		SessionViewMatchesSession: (m) =>
@@ -145,6 +142,6 @@ export class SessionsApi extends Domain.Api("SessionsApi", {
 export const SessionsHandlersLive = Layer.mergeAll(
 	StartTurnLive,
 	EnsureTurnStoppedLive,
-	PublishSessionOutputsLive,
+	SaveSessionOutputsLive,
 	RunTurnLive,
 )

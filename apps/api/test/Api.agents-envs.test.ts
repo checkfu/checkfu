@@ -1,7 +1,7 @@
 import * as v8 from "node:v8"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
-import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
@@ -1737,7 +1737,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			CheckfuHandlersLive.pipe(
 				Layer.provide(ArtifactBytesKept),
 				Layer.provide(FileBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide(OutputsUnsaved),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(WebhookEventsNoop),
 				Layer.provide(Layer.fresh(PiDurableHarnessLive)),
@@ -1890,7 +1890,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				CheckfuHandlersLive.pipe(
 					Layer.provide(ArtifactBytesKept),
 					Layer.provide(FileBytesKept),
-					Layer.provide(SessionOutputsUnpublished),
+					Layer.provide(OutputsUnsaved),
 					Layer.provide(ListingStore.memory),
 					Layer.provide(WebhookEventsNoop),
 					Layer.provide(Layer.fresh(PiDurableHarnessLive)),

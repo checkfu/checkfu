@@ -1,13 +1,9 @@
-import { CreateFile } from "@checkfu/domain/File/CreateFile.command"
 import { DeleteFile } from "@checkfu/domain/File/DeleteFile.command"
 import { File } from "@checkfu/domain/File/File.aggregate"
-import type { FileState } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
-import { ReserveFile } from "@checkfu/domain/File/ReserveFile.command"
 import { MAX_FILE_BYTES } from "@checkfu/sdk/Limits"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
-import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Mime from "effect/http/Mime"
@@ -16,7 +12,9 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { FileStore, FileStoreError } from "../Files/FileStore.ts"
+import { makeStoreFile } from "../Files/StoreFile.ts"
 import { CheckfuApi, FileResource, apiError } from "./Api.ts"
+import { fileResource } from "./FileResources.ts"
 import { makeLister } from "./Listing.ts"
 import {
 	currentRequestId,
@@ -47,8 +45,6 @@ const stored = <A, E extends { readonly _tag: string }, R>(
 		),
 	)
 
-const interrupted = reject(503, "The upload took too long; retry the request.")
-
 const encodeFile = Schema.encodeEffect(FileResource)
 
 const attachmentNamed = (filename: string) =>
@@ -58,20 +54,11 @@ const attachmentNamed = (filename: string) =>
 		.replaceAll(")", "%29")
 		.replaceAll("*", "%2A")}`
 
-const fileResource = (id: FileId, state: FileState) => ({
-	id,
-	type: "file" as const,
-	filename: state.filename,
-	content_type: state.content_type,
-	size: state.size,
-	sha256: state.sha256,
-	created_at: DateTime.makeUnsafe(state.created_at),
-})
-
 export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 	Effect.gen(function* () {
 		const files = yield* File
 		const store = yield* FileStore
+		const storeFile = yield* makeStoreFile
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
@@ -109,71 +96,36 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 						idempotencyKey === undefined
 							? FileId.make(yield* randomId(random, "file"))
 							: yield* keyedFileId(digest, idempotencyKey)
-					const existing = yield* files.get(id)
-					if (existing.status === "deleted") {
-						return yield* reusedKey
-					}
-					const reservation =
-						existing.status === "ready"
-							? null
-							: yield* files.send(new ReserveFile({ file_id: id })).pipe(
-									Effect.map((reserved): number | null => reserved.reply.reservation),
-									Effect.catchTag("FileAlreadyExists", () => Effect.succeed(null)),
-								)
 					let received = 0
-					const lengthMismatch = (actual: number) =>
-						reject(
-							400,
-							`The body was ${actual} bytes, not the ${size} its Content-Length declared.`,
-						)
-					const body = request.stream.pipe(
-						Stream.takeUntil((chunk) => {
-							received += chunk.byteLength
-							return received > size
-						}),
-						Stream.mapError((cause) => new FileStoreError({ cause })),
-					)
-					const bytes = yield* stored(
-						reservation === null ? store.measure(body) : store.put(id, reservation, body, size),
-					).pipe(
-						Effect.catchTags({
-							BytesPurged: () => interrupted,
-							ReservationStale: () => interrupted,
-							FileSizeMismatch: (mismatch) => lengthMismatch(mismatch.received),
+					const outcome = yield* stored(
+						storeFile({
+							id,
+							filename,
+							content_type,
+							origin: null,
+							body: request.stream.pipe(
+								Stream.takeUntil((chunk) => {
+									received += chunk.byteLength
+									return received > size
+								}),
+								Stream.mapError((cause) => new FileStoreError({ cause })),
+							),
+							size,
 						}),
 					)
-					if (bytes.size !== size) {
-						return yield* lengthMismatch(bytes.size)
-					}
-					if (reservation !== null) {
-						yield* files
-							.send(
-								new CreateFile({
-									file_id: id,
-									filename,
-									content_type,
-									size: bytes.size,
-									sha256: bytes.sha256,
-									reservation,
-								}),
-								{ commandId: `create-file:${id}:${reservation}` },
-							)
-							.pipe(
-								Effect.catchTags({
-									FileReservationLapsed: () => interrupted,
-									FileAlreadyExists: () => Effect.void,
-								}),
-							)
-					}
-					const state = yield* files.get(id)
-					if (
-						state.status !== "ready" ||
-						state.sha256 !== bytes.sha256 ||
-						state.filename !== filename ||
-						state.content_type !== content_type
-					) {
+					if (outcome._tag === "Taken") {
 						return yield* reusedKey
 					}
+					if (outcome._tag === "Busy") {
+						return yield* reject(503, "The upload took too long; retry the request.")
+					}
+					if (outcome._tag === "SizeMismatch") {
+						return yield* reject(
+							400,
+							`The body was ${outcome.received} bytes, not the ${outcome.declared} its Content-Length declared.`,
+						)
+					}
+					const { state } = outcome
 					return HttpServerResponse.jsonUnsafe(
 						yield* Effect.orDie(encodeFile(fileResource(id, state))),
 						{ status: 201 },

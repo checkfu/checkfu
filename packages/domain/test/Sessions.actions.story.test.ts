@@ -1,4 +1,4 @@
-import { SessionOutputs } from "../src/Session/SessionOutputs.external.ts"
+import { OutputsSaver } from "../src/Session/OutputsSaver.external.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
@@ -55,7 +55,7 @@ import { Sessions, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
 const story = Story.make(Sessions, {
 	layer: SessionsHandlersLive,
-	stub: [Harness, SessionOutputs],
+	stub: [Harness, OutputsSaver],
 })
 const t0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
 
@@ -220,8 +220,8 @@ describe("Sessions: a turn that waits on its calls", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
-				Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
-				Story.succeed(SessionOutputs.publish, undefined),
+				Story.call(OutputsSaver.save, { session_id: session.id, turn: 1 }),
+				Story.succeed(OutputsSaver.save, undefined),
 				Story.saga(RunTurn, segmentKey(session.id, 1, 2), {
 					_tag: "Completed",
 					result: { status: "completed" },
@@ -315,8 +315,8 @@ describe("Sessions: a turn that waits on its calls", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
-			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
-			Story.succeed(SessionOutputs.publish, undefined),
+			Story.call(OutputsSaver.save, { session_id: session.id, turn: 1 }),
+			Story.succeed(OutputsSaver.save, undefined),
 			Story.saga(RunTurn, segmentKey(session.id, 1, 2), {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -496,8 +496,8 @@ describe("Sessions: a turn that waits on its calls", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 			),
-			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 1 }),
-			Story.succeed(SessionOutputs.publish, undefined),
+			Story.call(OutputsSaver.save, { session_id: session.id, turn: 1 }),
+			Story.succeed(OutputsSaver.save, undefined),
 			Story.saga(RunTurn, segmentKey(session.id, 1, 2), {
 				_tag: "Completed",
 				result: { status: "completed" },
@@ -685,8 +685,8 @@ describe("Sessions: a turn that waits on its calls", () => {
 				}),
 				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
 			),
-			Story.call(SessionOutputs.publish, { session_id: session.id, turn: 2 }),
-			Story.succeed(SessionOutputs.publish, undefined),
+			Story.call(OutputsSaver.save, { session_id: session.id, turn: 2 }),
+			Story.succeed(OutputsSaver.save, undefined),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 		)
 	})

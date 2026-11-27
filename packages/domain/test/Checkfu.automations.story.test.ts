@@ -2,10 +2,7 @@ import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { FileBytesKept } from "../src/File/FileBytes.external.ts"
-import {
-	SessionOutputs,
-	SessionOutputsUnpublished,
-} from "../src/Session/SessionOutputs.external.ts"
+import { OutputsSaver, OutputsUnsaved } from "../src/Session/OutputsSaver.external.ts"
 import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -94,7 +91,7 @@ import { SessionView } from "../src/Session/SessionView.view.ts"
 
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
-		Layer.provide([ArtifactBytesKept, FileBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
+		Layer.provide([ArtifactBytesKept, FileBytesKept, OutputsUnsaved, WebhookEventsNoop]),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
@@ -280,8 +277,8 @@ const opened = (
 		}),
 		new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 	),
-	Story.call(SessionOutputs.publish, { session_id: sessionOf(run).id, turn: 1 }),
-	Story.returned(SessionOutputs.publish, undefined),
+	Story.call(OutputsSaver.save, { session_id: sessionOf(run).id, turn: 1 }),
+	Story.returned(OutputsSaver.save, undefined),
 ]
 
 describe("Checkfu automations", () => {

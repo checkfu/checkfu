@@ -2,7 +2,7 @@ import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { FileBytesKept } from "../src/File/FileBytes.external.ts"
-import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
+import { OutputsUnsaved } from "../src/Session/OutputsSaver.external.ts"
 import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
@@ -148,12 +148,7 @@ describe("Automation alarms", () => {
 			Effect.provide(
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
-						Layer.provide([
-							ArtifactBytesKept,
-							FileBytesKept,
-							SessionOutputsUnpublished,
-							WebhookEventsNoop,
-						]),
+						Layer.provide([ArtifactBytesKept, FileBytesKept, OutputsUnsaved, WebhookEventsNoop]),
 						Layer.provide([harness, ListingStore.memory]),
 					),
 				).pipe(Layer.provide(platform.layer)),

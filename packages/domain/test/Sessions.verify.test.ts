@@ -42,7 +42,7 @@ describe("Sessions Z3 formal verification", () => {
 				yield* Effect.logInfo(Verify.render(report))
 				expect(report.explored.followed.toSorted()).toEqual([
 					"EnsureTurnStopped",
-					"PublishSessionOutputs",
+					"SaveSessionOutputs",
 					"StartTurn",
 				])
 				expect(report.explored.idle).toEqual([])

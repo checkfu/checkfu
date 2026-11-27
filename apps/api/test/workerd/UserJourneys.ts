@@ -192,13 +192,19 @@ export const authoredProjectJourney = async (options: {
 		])
 		expect(history.data.filter((event) => event.type === "agent.message")).toHaveLength(1)
 		await expect
-			.poll(async () => (await sdk.sessions.outputs.retrieve(sessionId)).id, { timeout: 10_000 })
-			.toBeTruthy()
+			.poll(async () => (await sdk.sessions.outputs.retrieve(sessionId)).turn, { timeout: 10_000 })
+			.toBe(1)
 		const outputs = await sdk.sessions.outputs.retrieve(sessionId)
-		const report = await sdk.artifacts.versions.file(outputs.id, outputs.version, {
-			file: "report.csv",
-		})
-		expect(report.content).toBe("region,total\nEMEA,4217\n")
+		expect(outputs.files.map((file) => file.filename)).toEqual(["report.csv"])
+		const reportId = outputs.files[0]?.id ?? ""
+		const reportText = async () => {
+			const response = await fetch(`${options.baseUrl}/v1/files/${reportId}/content`, {
+				headers: { authorization: `Bearer ${options.apiKey}` },
+			})
+			expect(response.status).toBe(200)
+			return response.text()
+		}
+		expect(await reportText()).toBe("region,total\nEMEA,4217\n")
 		await writeFile(agentFile, definition("Use the new report instructions."))
 		await cli("apply", "--yes")
 		const updated = decodeAutomation(
@@ -287,10 +293,13 @@ export const authoredProjectJourney = async (options: {
 			decodeAutomation(await call({ name: "automations_getAutomation", arguments: { path } }))
 				.archived_at,
 		).not.toBeNull()
-		expect(
-			(await sdk.artifacts.versions.file(outputs.id, outputs.version, { file: "report.csv" }))
-				.content,
-		).toBe(report.content)
+		expect(await reportText()).toBe("region,total\nEMEA,4217\n")
+		expect((await sdk.files.retrieve(reportId)).origin).toEqual({
+			type: "session",
+			session_id: sessionId,
+			turn: 1,
+			path: "report.csv",
+		})
 	} finally {
 		await mcp.close()
 		await rm(scratch, { recursive: true, force: true })

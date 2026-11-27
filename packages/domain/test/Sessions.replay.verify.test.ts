@@ -10,7 +10,7 @@ import {
 	decodeMcpServers,
 } from "../src/Mcp/McpServers.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
-import { SessionOutputs } from "../src/Session/SessionOutputs.external.ts"
+import { OutputsSaver } from "../src/Session/OutputsSaver.external.ts"
 import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
 import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { Sessions, SessionsApi, SessionsHandlersLive } from "../src/Sessions.model.ts"
@@ -24,7 +24,7 @@ import {
 
 const story = Story.make(Sessions, {
 	layer: SessionsHandlersLive,
-	stub: [Harness, SessionOutputs],
+	stub: [Harness, OutputsSaver],
 })
 
 describe("Sessions Z3 formal verification, replayed", () => {
@@ -57,7 +57,7 @@ describe("Sessions Z3 formal verification, replayed", () => {
 				yield* Effect.logInfo(Verify.render(report))
 				expect(report.explored.followed.toSorted()).toEqual([
 					"EnsureTurnStopped",
-					"PublishSessionOutputs",
+					"SaveSessionOutputs",
 					"StartTurn",
 				])
 				expect(report.explored.idle).toEqual([])

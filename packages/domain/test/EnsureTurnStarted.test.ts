@@ -7,8 +7,8 @@ import { ExpireFileReservationsLive } from "../src/File/ExpireFileReservations.p
 import { ReleaseFileBytesLive } from "../src/File/ReleaseFileBytes.policy.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { FileBytesKept } from "../src/File/FileBytes.external.ts"
-import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
-import { PublishSessionOutputsLive } from "../src/Session/PublishSessionOutputs.policy.ts"
+import { OutputsUnsaved } from "../src/Session/OutputsSaver.external.ts"
+import { SaveSessionOutputsLive } from "../src/Session/SaveSessionOutputs.policy.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -142,7 +142,7 @@ const handlersOf =
 				),
 			),
 			EnsureTurnStoppedLive,
-			PublishSessionOutputsLive,
+			SaveSessionOutputsLive,
 			RunTurnLive,
 			ArmAutomationLive,
 			StartAutomationRunLive,
@@ -212,7 +212,7 @@ const run = <A, E, R>(
 						ListingStore.memory,
 						ArtifactBytesKept,
 						FileBytesKept,
-						SessionOutputsUnpublished,
+						OutputsUnsaved,
 						WebhookEventsNoop,
 					]),
 				),

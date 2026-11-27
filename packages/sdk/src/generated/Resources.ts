@@ -3223,7 +3223,7 @@ export class EffectSessionsOutputsResource {
 		this.#runtime = runtime
 	}
 
-	/** Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version */
+	/** Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason */
 	retrieve(
 		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
 		options: WithResponseRequestOptions,
@@ -5659,7 +5659,7 @@ export class SessionsOutputsResource {
 		this.#runtime = runtime
 	}
 
-	/** Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version */
+	/** Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason */
 	retrieve(
 		sessionId: PathParam<"sessions", "getOutputs", "session_id">,
 		options?: PromiseRequestOptions,

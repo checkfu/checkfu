@@ -1209,6 +1209,19 @@ export const ArtifactLinkResource = Schema.Struct({
 })
 export type ArtifactLink = typeof ArtifactLinkResource.Type
 
+export const FileOrigin = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("upload") }),
+	Schema.Struct({
+		type: Schema.Literal("session"),
+		session_id: SessionId,
+		turn: PositiveInt,
+		path: ArtifactPath,
+	}),
+]).annotate({
+	description:
+		"Where the file came from: an upload, or a session that left it in its outputs directory at a turn",
+})
+
 export const FileResource = Schema.Struct({
 	id: FileId,
 	type: Schema.Literal("file"),
@@ -1216,9 +1229,31 @@ export const FileResource = Schema.Struct({
 	content_type: Schema.String,
 	size: NonNegativeInt.annotate({ description: "Size in bytes" }),
 	sha256: Sha256Hex,
+	origin: FileOrigin,
 	created_at: Schema.DateTimeUtc,
 })
 export type File = typeof FileResource.Type
+
+export const SessionOutputsResource = Schema.Struct({
+	type: Schema.Literal("session_outputs"),
+	session_id: SessionId,
+	turn: NonNegativeInt.annotate({
+		description: "The latest turn whose outputs were recorded, or 0 when none has been",
+	}),
+	status: Schema.Literals(["none", "saved", "skipped"]).annotate({
+		description:
+			"saved: the files are the outputs directory as that turn left it. skipped: that turn's outputs could not be read, and the files are those of the last turn that saved",
+	}),
+	reason: Schema.NullOr(Schema.String).annotate({
+		description: "Why the turn's outputs were skipped",
+	}),
+	files: Schema.Array(FileResource),
+	skipped: Schema.Array(Schema.Struct({ path: Schema.String, reason: Schema.String })).annotate({
+		description: "Files in the outputs directory that were not saved, and why",
+	}),
+	recorded_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type SessionOutputs = typeof SessionOutputsResource.Type
 
 export const FileDeleted = Schema.Struct({
 	id: Schema.String,
@@ -2343,13 +2378,13 @@ const Sessions = HttpApiGroup.make("sessions")
 	.add(
 		HttpApiEndpoint.get("getOutputs", "/v1/sessions/:session_id/outputs", {
 			params: sessionParams,
-			success: ArtifactResource,
+			success: SessionOutputsResource,
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Retrieve a session's outputs")
 			.annotate(
 				OpenApi.Description,
-				"Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version",
+				"Retrieve the files a session left in its outputs directory, as of the latest turn that recorded them. Each is a file that can be retrieved and downloaded on its own. After every reply the directory is saved file by file; a file that could not be saved is listed under skipped with the reason",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.outputs",
@@ -2357,7 +2392,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "getOutputs" },
 				"x-checkfu-mcp": { name: "sessions_getOutputs" },
 				"x-checkfu-cli": {
-					groupDescription: "Retrieve what a session published from its outputs directory",
+					groupDescription: "Retrieve the files a session saved from its outputs directory",
 				},
 			}),
 	)

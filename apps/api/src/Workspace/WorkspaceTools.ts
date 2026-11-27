@@ -20,7 +20,7 @@ const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 
 const MEBIBYTE = 1024 * 1024
 
-const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths, and the bash tool to run commands. Files you leave in ${SESSION_OUTPUTS_PATH} are published as this session's artifact after a completed turn. Put there what the user should keep. The directory holds at most ${MAX_OUTPUT_FILES} files, ${MAX_OUTPUT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_OUTPUT_TOTAL_BYTES / MEBIBYTE} MiB in total, and at most ${MAX_OUTPUT_ENTRIES} files and folders counted together; beyond that, nothing is published. An empty directory publishes nothing either, so the last version stays.`
+const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths, and the bash tool to run commands. Files you leave in ${SESSION_OUTPUTS_PATH} are saved for the user after each completed turn. Put there what the user should keep. A file over ${MAX_OUTPUT_FILE_BYTES / MEBIBYTE} MiB, or past ${MAX_OUTPUT_TOTAL_BYTES / MEBIBYTE} MiB in total, is not saved. With more than ${MAX_OUTPUT_FILES} files, or more than ${MAX_OUTPUT_ENTRIES} files and folders counted together, none are. A file you remove is no longer listed for the user.`
 
 export const BASH_SECONDS = 120
 export const MAX_BASH_SECONDS = 600

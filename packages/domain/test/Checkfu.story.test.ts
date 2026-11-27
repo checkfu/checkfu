@@ -2,10 +2,7 @@ import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../src/Mcp/McpServers.ts"
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { FileBytesKept } from "../src/File/FileBytes.external.ts"
-import {
-	SessionOutputs,
-	SessionOutputsUnpublished,
-} from "../src/Session/SessionOutputs.external.ts"
+import { OutputsSaver, OutputsUnsaved } from "../src/Session/OutputsSaver.external.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -72,7 +69,7 @@ import {
 
 const story = Story.make(Checkfu, {
 	layer: CheckfuHandlersLive.pipe(
-		Layer.provide([ArtifactBytesKept, FileBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
+		Layer.provide([ArtifactBytesKept, FileBytesKept, OutputsUnsaved, WebhookEventsNoop]),
 		Layer.provide(ListingStore.memory),
 	),
 	stub: [Harness],
@@ -102,12 +99,7 @@ describe("Checkfu unified hosted model stories", () => {
 			Layer.build(
 				Checkfu.layer(
 					CheckfuHandlersLive.pipe(
-						Layer.provide([
-							ArtifactBytesKept,
-							FileBytesKept,
-							SessionOutputsUnpublished,
-							WebhookEventsNoop,
-						]),
+						Layer.provide([ArtifactBytesKept, FileBytesKept, OutputsUnsaved, WebhookEventsNoop]),
 						Layer.provide([HarnessStubLayer, ListingStore.memory]),
 					),
 				),
@@ -500,11 +492,11 @@ describe("Checkfu unified hosted model stories", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
-				Story.call(SessionOutputs.publish, {
+				Story.call(OutputsSaver.save, {
 					session_id: sessionV1.id,
 					turn: 1,
 				}),
-				Story.returned(SessionOutputs.publish, undefined),
+				Story.returned(OutputsSaver.save, undefined),
 				Story.saga(RunTurn, turnKey(sessionV1.id, 1), {
 					_tag: "Completed",
 					result: { status: "completed" },

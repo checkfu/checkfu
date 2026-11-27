@@ -1,8 +1,7 @@
-import { MAX_ARTIFACT_NAME_LENGTH } from "@checkfu/domain/Artifact/ArtifactTypes"
 import { describe, expect, it } from "@effect/vitest"
-import { outputsArtifactName } from "../src/OutputsIdentity.ts"
 import {
 	MAX_OUTPUT_FILE_BYTES,
+	MAX_OUTPUT_FILES,
 	MAX_OUTPUT_TOTAL_BYTES,
 	makeSessionOutputs,
 } from "../src/Workspace/SessionOutputs.ts"
@@ -43,23 +42,72 @@ describe("A session's outputs reader", () => {
 		},
 	)
 
-	it("refuses unsupported directory entries before reading any regular files", async () => {
+	it("saves the regular files and skips, by name, what is not one or is not allowed", async () => {
 		const reads: Array<string> = []
 		const outputs = makeSessionOutputs({
 			list: async () => [
 				{ path: "report.md", type: "file" },
-				{ path: "unsupported", type: "other" },
+				{ path: "data", type: "dir" },
+				{ path: "link", type: "symlink" },
+				{ path: "bad\u0001name", type: "file" },
 			],
 			read: async (path) => {
 				reads.push(path)
-				return new Uint8Array(0)
+				return new Uint8Array(2)
 			},
 		})
 		expect(await outputs.list()).toEqual({
-			ok: false,
-			reason: 'Output "unsupported" must be a regular file or directory.',
+			ok: true,
+			files: [{ path: "report.md", size: 2, sha256: expect.any(String) }],
+			skipped: [
+				{ path: "link", reason: "Not a regular file." },
+				{ path: "bad\u0001name", reason: "This path is not allowed." },
+			],
 		})
-		expect(reads).toEqual([])
+		expect(reads).toEqual(["report.md"])
+	})
+
+	it("skips only the file over the limit, the one that changed, and those past the total", async () => {
+		const sizes = new Map(
+			Object.entries({
+				a: MAX_OUTPUT_FILE_BYTES,
+				b: MAX_OUTPUT_FILE_BYTES + 1,
+				c: MAX_OUTPUT_FILE_BYTES,
+				d: MAX_OUTPUT_FILE_BYTES,
+				e: MAX_OUTPUT_FILE_BYTES,
+				f: 1,
+				g: 0,
+			}),
+		)
+		const outputs = makeSessionOutputs({
+			list: async () => [...sizes.keys(), "gone"].map((path) => ({ path, type: "file" })),
+			read: async (path, limit) =>
+				path === "gone"
+					? Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }))
+					: new Uint8Array(Math.min(sizes.get(path) ?? 0, limit)),
+		})
+		const result = await outputs.list()
+		expect(result.ok && result.files.map(({ path }) => path)).toEqual(["a", "c", "d", "e", "g"])
+		expect(result.ok && result.skipped).toEqual([
+			{ path: "b", reason: `Larger than ${MAX_OUTPUT_FILE_BYTES} bytes.` },
+			{ path: "f", reason: `The outputs total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.` },
+			{ path: "gone", reason: "Changed while it was being read." },
+		])
+	})
+
+	it("refuses the whole directory only when it holds more files than a record can name", async () => {
+		const outputs = makeSessionOutputs({
+			list: async () =>
+				Array.from({ length: MAX_OUTPUT_FILES + 1 }, (_, index) => ({
+					path: `f${index}`,
+					type: "file",
+				})),
+			read: async () => new Uint8Array(0),
+		})
+		expect(await outputs.list()).toEqual({
+			ok: false,
+			reason: `${MAX_OUTPUT_FILES + 1} files; the limit is ${MAX_OUTPUT_FILES}.`,
+		})
 	})
 
 	it("allows the exact file and aggregate limits and requests only one detection byte", async () => {
@@ -90,13 +138,5 @@ describe("A session's outputs reader", () => {
 		})
 		expect(await outputs.read([{ path: "report.md", size: 3 }])).toEqual([])
 		expect(limits).toEqual([4])
-	})
-})
-
-describe("A session's outputs artifact name", () => {
-	it("keeps the fallback within the artifact name limit for the longest session id", () => {
-		const name = outputsArtifactName("s".repeat(256), null)
-		expect(Array.from(name)).toHaveLength(MAX_ARTIFACT_NAME_LENGTH)
-		expect(name.startsWith("Session s")).toBe(true)
 	})
 })

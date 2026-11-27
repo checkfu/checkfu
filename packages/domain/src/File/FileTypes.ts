@@ -1,4 +1,8 @@
-import { MAX_ARTIFACT_CONTENT_TYPE_LENGTH, MAX_FILE_NAME_LENGTH } from "@checkfu/sdk/Limits"
+import {
+	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
+	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_FILE_NAME_LENGTH,
+} from "@checkfu/sdk/Limits"
 import * as Schema from "effect/Schema"
 
 export { NonNegativeInt, PositiveInt } from "@checkfu/sdk/Schemas"
@@ -14,3 +18,7 @@ export const FileContentType = Schema.String.check(
 )
 
 export const FileSha256 = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
+
+export const OriginSessionId = Schema.String.check(Schema.isMaxLength(256))
+
+export const OriginPath = Schema.String.check(Schema.isMaxLength(MAX_ARTIFACT_PATH_LENGTH * 2))
