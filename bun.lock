@@ -95,7 +95,7 @@
     },
     "apps/cli": {
       "name": "@checkfu/cli",
-      "version": "0.0.1",
+      "version": "0.0.2",
       "dependencies": {
         "@alchemy.run/cloudflare": "catalog:",
         "@checkfu/authoring": "workspace:*",
@@ -243,9 +243,6 @@
         "vitest": "catalog:",
       },
     },
-  },
-  "patchedDependencies": {
-    "@alchemy.run/domain@https://pkg.alchemy.run/@alchemy.run/domain/-/d3c8dbf7b350aa08ddf41791ae5d834f2eb57f96df420795f5ec9a5db1b45b96.tgz": "patches/@alchemy.run%2Fdomain@https%3A%2F%2Fpkg.alchemy.run%2F@alchemy.run%2Fdomain%2F-%2Fd3c8dbf7b350aa08ddf41791ae5d834f2eb57f96df420795f5ec9a5db1b45b96.tgz.patch",
   },
   "overrides": {
     "effect": "4.1.5",

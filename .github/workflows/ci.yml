@@ -28,6 +28,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Reject dependency patches
+        run: |
+          test ! -d patches
+          if grep -q '"patchedDependencies"' package.json bun.lock; then
+            echo "Dependency patches are not allowed."
+            exit 1
+          fi
       - uses: ./.github/actions/setup
       # Each check runs even when one before it fails, so a run lists every failure.
       - run: bun run generate:check
