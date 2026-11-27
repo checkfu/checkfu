@@ -9,29 +9,18 @@
 [![CI](https://github.com/checkfu/checkfu/actions/workflows/ci.yml/badge.svg)](https://github.com/checkfu/checkfu/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Built on Cloudflare Workers, Durable Objects, [Pi Durable](https://github.com/earendil-works), [Alchemy](https://alchemy.run), and [Effect](https://effect.website), with one API across HTTP, TypeScript, CLI, MCP, and a web dashboard.
-
-## npm clients
-
-```sh
-npm install -g checkfu
-checkfu deploy
-```
-
-The npm CLI requires Node.js 22 or later. Install `@checkfu/sdk` for the JavaScript/TypeScript client. See the [CLI guide](apps/cli/README.md) and [SDK guide](packages/sdk/README.md).
+Built on Cloudflare Workers, Durable Objects, [Pi Durable](https://github.com/earendil-works), [Alchemy](https://alchemy.run), and [Effect](https://effect.website).
 
 ## Quickstart
 
 Requires Node.js 22+, a Cloudflare account (Workers Paid, R2 enabled), and a model provider API key.
 
-### Deploy
-
 ```sh
 npm install -g checkfu
 checkfu deploy
 ```
 
-Signs in to Cloudflare, prompts for a provider key, deploys the latest server and sandbox from `origin/main`, and saves the connection under `~/.config/checkfu`. Run `checkfu deploy` again to update the same deployment and keep its data. No source checkout or local Docker is required.
+Signs in to Cloudflare, prompts for a provider key, deploys the server from `origin/main`, and saves credentials in `~/.config/checkfu` (re-run `checkfu deploy` to update in place; see the [CLI guide](apps/cli/README.md)).
 
 ```sh
 checkfu agents create --name Assistant --model your-model-id
@@ -55,7 +44,7 @@ Answer support questions and cite the source you used.
 ```
 
 ```yaml
-# yaml-language-server: $schema=http://localhost:1337/schemas/apply/automation.json
+# yaml-language-server: $schema=https://your-api.workers.dev/schemas/apply/automation.json
 # automations/report.yaml
 name: Weekday report
 agent: ../agents/support.md
@@ -67,29 +56,17 @@ schedule: { type: cron, expression: "0 9 * * 1-5", timezone: America/New_York }
 ```
 
 ```sh
-bun checkfu apply . --dry-run
-bun checkfu apply . --yes
+checkfu apply . --dry-run
+checkfu apply . --yes
 ```
 
-### Local dev
-
-Set `CHECKFU_API_KEY` and your model provider credentials in `.env` (see [`.env.example`](.env.example)):
-
-```sh
-[ -f .env ] || cp .env.example .env
-bun install
-bun run dev
-```
-
-Starts the API (`http://localhost:1337`), MCP server (`http://localhost:1338`), and dashboard (`http://app-1340.localhost:1340`).
-
-### TypeScript ([`packages/sdk`](packages/sdk/README.md))
+### TypeScript ([`@checkfu/sdk`](packages/sdk/README.md))
 
 ```ts
 import Checkfu from "@checkfu/sdk"
 
 const client = new Checkfu({
-  baseUrl: "http://localhost:1337",
+  baseUrl: "https://your-api.workers.dev",
   apiKey: process.env.CHECKFU_API_KEY,
 })
 
@@ -115,12 +92,12 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 }
 ```
 
-## Stack
+## Architecture
 
-- **Pi (`@earendil-works/pi-ai`, `pi-durable`, `pi-codemode`, [`@checkfu/pi-providers`](packages/pi-providers/README.md)):** Runs each session in a `PiSession` Durable Object with SQLite history, context compaction, journaled `codemode` calls, and $0-compute turn pauses on approvals or custom tools. Supports Anthropic, OpenAI, OpenRouter, Cloudflare AI Gateway, Workers AI, and custom `CHECKFU_PROVIDERS`.
-- **Alchemy (`alchemy`, `@alchemy.run/cloudflare`, `@alchemy.run/domain`):** `alchemy.run.ts` declares Workers, Durable Objects, D1, R2, and domains in TypeScript with no `wrangler.toml`. `@alchemy.run/domain` runs event-sourced aggregates, cross-object decisions, sagas, and views on Durable Objects and proves invariants with **Z3**.
-- **Effect & Forge (`effect`, `@cloudflare/forge`):** `CheckfuApi` defines routes, events, and errors once with Effect `HttpApi` and `Schema`; `tools/forge` generates `openapi.json`, `@checkfu/sdk`, the CLI, and the MCP server.
-- **Cloudflare (`@cloudflare/computer`, Durable Objects, D1, R2):** `@cloudflare/computer` backs each session's `/workspace` filesystem and on-demand shell machine. Durable Objects isolate sessions, workspaces, credentials, and webhook delivery; D1 serves lists; R2 stores artifacts.
+- **Pi (`@earendil-works/pi-ai`, `pi-durable`, `pi-codemode`, [`@checkfu/pi-providers`](packages/pi-providers/README.md)):** Runs durable sessions in `PiSession` Durable Objects across Anthropic, OpenAI, OpenRouter, Cloudflare AI Gateway, Workers AI, and custom `CHECKFU_PROVIDERS`.
+- **Alchemy (`alchemy`, `@alchemy.run/cloudflare`, `@alchemy.run/domain`):** Declares all Cloudflare resources in `alchemy.run.ts` (no `wrangler.toml`) and runs event-sourced aggregates, decisions, sagas, and views proved with **Z3**.
+- **Effect & Forge (`effect`, `@cloudflare/forge`):** Defines routes, events, and errors once in `CheckfuApi` and generates `openapi.json`, `@checkfu/sdk`, the CLI, and the MCP server.
+- **Cloudflare (`@cloudflare/computer`, Durable Objects, D1, R2):** Isolates per-session filesystems, Linux shells, credentials, and webhook delivery in Durable Objects, with D1 for lists and R2 for artifacts.
 
 ```text
   Clients (SDK / CLI / curl)      MCP Clients       Browser (Admin)       Browser (Viewers)
@@ -151,33 +128,6 @@ for await (const event of await client.sessions.events.stream(session.id)) {
                                 └─────────────────────────┘
 ```
 
-### Layout
-
-- [`apps/api`](apps/api): HTTP/SSE API, domain host, Pi harness, workspaces, connections, webhooks, content Worker
-- [`apps/app`](apps/app): TanStack Router/Query web dashboard Worker
-- [`apps/cli`](apps/cli): `checkfu` CLI (`deploy`, `apply`, `login`, `destroy`, `sessions connect`, resource commands)
-- [`apps/mcp`](apps/mcp): Generated HTTP MCP Worker
-- [`packages/authoring`](packages/authoring): Markdown/YAML project parser, validator, and `checkfu-lock.json` codec
-- [`packages/domain`](packages/domain): Event-sourced aggregates, decisions, policies, sagas, views, and Z3 proofs
-- [`packages/pi-providers`](packages/pi-providers): Model catalog, custom provider manifests, and wire adapters
-- [`packages/sdk`](packages/sdk): Effect and Promise SDKs, plus `CheckfuApi`
-- [`packages/snapshots`](packages/snapshots): Versioned snapshot codecs
-- [`packages/ui`](packages/ui): Dashboard UI components
-- [`tools/forge`](tools/forge): OpenAPI, CLI, SDK, and MCP codegen
-
-## Capabilities
-
-| Resource | Endpoint | Purpose |
-| :--- | :--- | :--- |
-| **Agent** | `/v1/agents` | Model, system prompt, MCP servers, custom tools, and approval rules; edits mint immutable versions. |
-| **Environment** | `/v1/environments` | Sandbox networking policy (`unrestricted`, or `limited` host/MCP/package allowlists). |
-| **Session** | `/v1/sessions` | Stateful conversation, `/workspace` filesystem, and shell bound to an agent, environment, and mounts. |
-| **Memory store** | `/v1/memory_stores` | Cross-session UTF-8 files with SHA-256 preconditions, mounted at `/mnt/memory/<name>`. |
-| **Artifact** | `/v1/artifacts` | Versioned R2 file sets; mountable in sessions, shareable via signed links, or published as sandboxed sites. |
-| **Vault** | `/v1/vaults` | Credential store isolating each MCP bearer secret in its own `Connection` Durable Object. |
-| **Automation** | `/v1/automations` | Cron (with IANA timezone) or manual session triggers with pinned agent versions and run history. |
-| **Webhook** | `/v1/webhooks` | HMAC-signed event subscriptions with Durable Object fan-out, retries, and delivery history. |
-
 ```text
   Session (PiSession DO)
    ├── Filesystem (SessionWorkspace DO)
@@ -188,28 +138,61 @@ for await (const event of await client.sessions.events.stream(session.id)) {
    │    └── /mnt/session/outputs     ──► Saved as an Artifact version after each reply
    │
    └── Tool Execution
-        ├── File, git & bash tools   ──► SessionWorkspace DO + on-demand SessionSandbox machine
+        ├── File, git, bash & save   ──► SessionWorkspace DO + on-demand Linux machine + artifact_data
         ├── codemode (JS scripts)    ──► CodemodeSandboxWorker (QuickJS, no network/timers, journaled)
         ├── MCP tools                ──► Connection DO (attaches vault bearer token; enforces approvals)
         └── Custom tools             ──► Pauses session (requires_action, $0 compute) until app posts result
 ```
 
-## Interfaces
+## API & Clients
 
-- **SDK ([`packages/sdk`](packages/sdk/README.md)):** Effect (`CheckfuClient`) and Promise (`new Checkfu()`) clients with retries, idempotency, SSE, and pagination (`GET /openapi.json` for other languages).
-- **CLI (`checkfu`):** `bun checkfu --help` or standalone `bun run checkfu:build`, with `apply`, `--format`, and GJSON `--transform`.
-- **Dashboard:** Sign in with `CHECKFU_API_KEY` to edit resources (Form or YAML), inspect webhook deliveries, and stream live transcripts.
-- **MCP (`2026-07-28`):** Connect an HTTP MCP client to `https://<mcp-worker>.workers.dev/mcp` with `Authorization: Bearer $CHECKFU_API_KEY` (with `@modelcontextprotocol/client`, pass `{ versionNegotiation: { mode: "auto" } }`).
+| Resource | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| **Agent** | `/v1/agents` | Model, system prompt, MCP servers, custom tools, and approval rules; versioned on edit. |
+| **Environment** | `/v1/environments` | Sandbox networking policy (`unrestricted`, or `limited` host/MCP/package allowlists). |
+| **Session** | `/v1/sessions` | Conversation, `/workspace` filesystem, and shell bound to an agent, environment, and mounts. |
+| **Memory store** | `/v1/memory_stores` | Cross-session UTF-8 files with SHA-256 preconditions, mounted at `/mnt/memory/<name>`. |
+| **Artifact** | `/v1/artifacts` | Versioned R2 file sets and document collections, served via signed links or sandboxed sites. |
+| **Vault** | `/v1/vaults` | Credential store isolating each MCP bearer secret in its own `Connection` Durable Object. |
+| **Automation** | `/v1/automations` | Cron (with IANA timezone) or manual session triggers with pinned agent versions and run history. |
+| **Webhook** | `/v1/webhooks` | HMAC-signed event subscriptions with Durable Object fan-out, retries, and delivery history. |
+
+- **SDK ([`packages/sdk`](packages/sdk/README.md)):** `npm install @checkfu/sdk` for Effect (`CheckfuClient`) and Promise (`new Checkfu()`) clients (`GET /openapi.json` for other languages).
+- **CLI ([`apps/cli`](apps/cli/README.md)):** `npm install -g checkfu` for `deploy`, `apply`, `sessions connect`, `--format`, and GJSON `--transform`.
+- **Dashboard:** Sign in with `CHECKFU_API_KEY` to edit resources (Form or YAML), manage artifact grants, inspect webhooks, and stream transcripts.
+- **MCP (`2026-07-28`):** Connect an HTTP MCP client to `https://<mcp-worker>.workers.dev/mcp` with `Authorization: Bearer $CHECKFU_API_KEY` (`{ versionNegotiation: { mode: "auto" } }` in `@modelcontextprotocol/client`).
 
 ## Development
 
+Copy [`.env.example`](.env.example) to `.env`, set `CHECKFU_API_KEY` and a model provider key, then start the local runtime (`:1337` API, `:1338` MCP, `http://app-1340.localhost:1340` dashboard):
+
+```sh
+[ -f .env ] || cp .env.example .env
+bun install
+bun run dev
+```
+
 - `bun run generate`: Regenerate `openapi.json`, CLI, SDK, and MCP from `CheckfuApi`
-- `bun run check` verifies generated files, formatting, and directives, then reports lint and type errors in the files Oxlint checks. `bun run typecheck` runs the full package and Alchemy stack checks used in CI.
-- `bun run test`: Run unit tests (`CHECKFU_PROVE=1` includes the Z3 domain proofs run in CI)
+- `bun run check` / `bun run typecheck`: Lint, format, directive, and full TypeScript checks
+- `bun run test`: Unit tests (`CHECKFU_PROVE=1` includes the Z3 domain proofs run in CI)
 - `bun run test:bun` / `bun run test:workerd`: Bun and `workerd` integration tests
-- `bun run persisted:check`: Check stored-data compatibility against committed baselines
-- `bun run release:build --qualify PATH` / `--verify PATH`: Build and test exact npm tarballs, then verify their recorded digests
-- `bun run checkfu:build`: Build standalone binary at `apps/cli/dist/checkfu`
+- `bun run persisted:check`: Verify stored-data compatibility against committed baselines
+- `bun run release:build`: Build and qualify `checkfu` and `@checkfu/sdk` release tarballs
+
+### Layout
+
+- [`apps/api`](apps/api): HTTP/SSE API, domain host, Pi harness, workspaces, connections, webhooks, content Worker
+- [`apps/app`](apps/app): TanStack Router/Query web dashboard Worker
+- [`apps/cli`](apps/cli): `checkfu` CLI
+- [`apps/mcp`](apps/mcp): Generated HTTP MCP Worker
+- [`packages/authoring`](packages/authoring): Markdown/YAML project parser, validator, and `checkfu-lock.json` codec
+- [`packages/domain`](packages/domain): Event-sourced aggregates, decisions, policies, sagas, views, and Z3 proofs
+- [`packages/pi-providers`](packages/pi-providers): Model catalog, custom provider manifests, and wire adapters
+- [`packages/sdk`](packages/sdk): Effect and Promise SDKs, plus `CheckfuApi`
+- [`packages/snapshots`](packages/snapshots): Versioned snapshot codecs
+- [`packages/ui`](packages/ui): Dashboard UI components
+- [`tools/forge`](tools/forge): OpenAPI, CLI, SDK, and MCP codegen
+- [`tools/release`](tools/release): Release packaging and qualification
 
 ## License
 
