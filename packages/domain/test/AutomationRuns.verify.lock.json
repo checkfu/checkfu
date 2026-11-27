@@ -368,11 +368,11 @@
 			},
 			"AutomationRuns.AStartedRunIsReported": {
 				"kind": "sometimes",
-				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Automation.some((a) => a.state.reported >= 1),\n\t\t\t\tm.Session.some((s) => s.state._tag === \"Running\"),\n\t\t\t].every((ok) => ok)"
+				"source": "(m) =>\n\t\t\tm.Automation.some((automation) =>\n\t\t\t\tautomation.events.some(\n\t\t\t\t\t(report) =>\n\t\t\t\t\t\treport._tag === \"automation.run_started\" &&\n\t\t\t\t\t\tm.Session.some(\n\t\t\t\t\t\t\t(session) =>\n\t\t\t\t\t\t\t\tsession.id === report.session_id &&\n\t\t\t\t\t\t\t\tsession.events.some(\n\t\t\t\t\t\t\t\t\t(created) =>\n\t\t\t\t\t\t\t\t\t\tcreated._tag === \"session.created\" && created.automation_id === automation.id,\n\t\t\t\t\t\t\t\t),\n\t\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t)"
 			},
 			"AutomationRuns.AFailedRunPausesTheAutomation": {
 				"kind": "sometimes",
-				"source": "(m) =>\n\t\t\tm.Automation.some((a) =>\n\t\t\t\t[a.state.status === \"paused\", a.state.reported >= 1].every((ok) => ok),\n\t\t\t)"
+				"source": "(m) =>\n\t\t\tm.Automation.some((automation) =>\n\t\t\t\tautomation.events.some((report, index) => {\n\t\t\t\t\tconst next = automation.events[index + 1]\n\t\t\t\t\treturn (\n\t\t\t\t\t\treport._tag === \"automation.run_failed\" &&\n\t\t\t\t\t\tnext?._tag === \"automation.paused\" &&\n\t\t\t\t\t\tnext.reason === report.error.type\n\t\t\t\t\t)\n\t\t\t\t}),\n\t\t\t)"
 			},
 			"AutomationRuns.AnArchivedAutomationFreesItsSlot": {
 				"kind": "sometimes",
@@ -397,6 +397,10 @@
 			"OpenAutomationSession.AnAutomationSessionRecordsItsAutomation": {
 				"kind": "transition",
 				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" && event.automation_id === command.automation_id,\n\t\t\t)"
+			},
+			"AutomationRuns.EveryRunReportMatchesItsFiring": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.Automation.every((automation) =>\n\t\t\t\tautomation.events.every((report) => {\n\t\t\t\t\tif (report._tag !== \"automation.run_started\" && report._tag !== \"automation.run_failed\") {\n\t\t\t\t\t\treturn true\n\t\t\t\t\t}\n\t\t\t\t\treturn automation.events.some(\n\t\t\t\t\t\t(fired) =>\n\t\t\t\t\t\t\tfired._tag === \"automation.fired\" &&\n\t\t\t\t\t\t\tfired.run === report.run &&\n\t\t\t\t\t\t\tfired.trigger === report.trigger &&\n\t\t\t\t\t\t\tfired.scheduled_at === report.scheduled_at &&\n\t\t\t\t\t\t\t(report._tag !== \"automation.run_started\" || report.session_id === fired.session_id),\n\t\t\t\t\t)\n\t\t\t\t}),\n\t\t\t)"
 			}
 		}
 	}
