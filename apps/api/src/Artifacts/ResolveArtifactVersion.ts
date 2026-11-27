@@ -13,20 +13,25 @@ import { ArtifactReadWaitTimeout } from "../Http/ArtifactsHandlers.ts"
 const has = (state: ArtifactState, version: number) =>
 	state.status === "active" && version <= state.version
 
-export const ArtifactManifestAt = Effect.gen(function* () {
+export interface VersionAt {
+	readonly manifest: string
+	readonly capabilities: string
+}
+
+export const ArtifactVersionAt = Effect.gen(function* () {
 	const artifacts = yield* Artifact
 	const versionViews = yield* ArtifactVersionView
 	return (
 		id: ArtifactId,
 		state: ArtifactState,
 		version: number,
-	): Effect.Effect<string | null, ArtifactVersionNotReady> =>
+	): Effect.Effect<VersionAt | null, ArtifactVersionNotReady> =>
 		Effect.gen(function* () {
 			if (!has(state, version)) {
 				return null
 			}
 			if (version === state.version) {
-				return state.manifest
+				return { manifest: state.manifest, capabilities: state.capabilities }
 			}
 			const key = artifactVersionLookupKey(id, version)
 			const row =
@@ -35,13 +40,19 @@ export const ArtifactManifestAt = Effect.gen(function* () {
 					.waitFor(key, { version: { gte: 1 } }, { timeout: yield* ArtifactReadWaitTimeout })
 					.pipe(Effect.catchTag("WaitTimeout", () => Effect.succeed(null))))
 			if (row !== null) {
-				return row.manifest
+				return { manifest: row.manifest, capabilities: row.capabilities }
 			}
 			return has(yield* Effect.orDie(artifacts.get(id)), version)
 				? yield* new ArtifactVersionNotReady({ artifactId: id, version })
 				: null
 		})
 })
+
+export const ArtifactManifestAt = Effect.map(
+	ArtifactVersionAt,
+	(versionAt) => (id: ArtifactId, state: ArtifactState, version: number) =>
+		Effect.map(versionAt(id, state, version), (found) => found?.manifest ?? null),
+)
 
 export const ArtifactVersionResolver = Effect.gen(function* () {
 	const artifacts = yield* Artifact

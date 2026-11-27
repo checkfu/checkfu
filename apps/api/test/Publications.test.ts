@@ -11,6 +11,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import { ArtifactStore } from "../src/Artifacts/ArtifactStore.ts"
+import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "../src/Artifacts/ResolvePublication.ts"
 import { linkKey, parsePublicationAddress } from "../src/Content/ArtifactLink.ts"
@@ -128,6 +129,7 @@ const withPublishing = <A>(
 					served.push(publicationId)
 					return resolve(publicationId)
 				},
+				artifactData: yield* VisitorData,
 				scope: DEFAULT_STORAGE_SCOPE,
 				nowMillis: Clock.currentTimeMillis,
 			}

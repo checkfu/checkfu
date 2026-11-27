@@ -1,15 +1,25 @@
+import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
 import type * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-import type { ArtifactVersionNotReady, ResolvedPublication } from "../Api.ts"
+import * as Exit from "effect/Exit"
+import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
+import type {
+	ArtifactVersionNotReady,
+	DataAddress,
+	DataCall,
+	DataReply,
+	ResolvedPublication,
+} from "../Api.ts"
 import type { ArtifactManifest } from "../Artifacts/ArtifactFiles.ts"
 import type { ArtifactReaderService, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import {
 	CONTENT_PATH_PREFIX,
 	PUBLICATION_PATH_PREFIX,
 	isPublicationAddress,
+	parsePublicationAddress,
 	publicationOfHost,
 	verifyLink,
 } from "./ArtifactLink.ts"
@@ -40,6 +50,29 @@ const PREFLIGHT_HEADERS = {
 	"access-control-allow-methods": ALLOWED_METHODS,
 	"access-control-allow-headers": "*",
 	"access-control-max-age": "86400",
+}
+
+const RESERVED_PREFIX = "_/"
+const DATA_SEGMENT = "data"
+const MAX_DATA_BODY_BYTES = 128 * 1024
+const COLLECTION_METHODS = "GET, POST, OPTIONS"
+const DOCUMENT_METHODS = "GET, PUT, DELETE, OPTIONS"
+
+const dataRoute = (path: string) => {
+	const [, segment, collection = "", id = "", ...more] = path.split("/")
+	return segment !== DATA_SEGMENT || collection === "" || more.length > 0
+		? null
+		: { collection, id, isDocument: path.split("/").length === 4 }
+}
+
+const dataOperation = (method: string, isDocument: boolean): DataCall["operation"] | undefined => {
+	if (method === "GET") {
+		return isDocument ? "get" : "list"
+	}
+	if (isDocument) {
+		return method === "PUT" ? "put" : method === "DELETE" ? "delete" : undefined
+	}
+	return method === "POST" ? "add" : undefined
 }
 
 const INDEX_FILE = "index.html"
@@ -111,6 +144,7 @@ export interface ContentRequest {
 	readonly method: string
 	readonly url: string
 	readonly headers: HttpServerRequest.HttpServerRequest["headers"]
+	readonly text: Effect.Effect<string | null>
 }
 
 export type ContentAccessTarget =
@@ -129,6 +163,16 @@ export const contentRequestOf = (request: HttpServerRequest.HttpServerRequest): 
 	method: request.method,
 	url: request.originalUrl,
 	headers: request.headers,
+	text: Effect.map(
+		Effect.exit(
+			Effect.provideService(
+				request.text,
+				HttpIncomingMessage.MaxBodySize,
+				ByteSize.bytes(MAX_DATA_BODY_BYTES),
+			),
+		),
+		(read) => (Exit.isSuccess(read) ? read.value : null),
+	),
 })
 
 export const serveContent = (options: {
@@ -143,6 +187,10 @@ export const serveContent = (options: {
 	readonly resolvePublication: (
 		address: string,
 	) => Effect.Effect<ResolvedPublication | null, ArtifactStoreError | ArtifactVersionNotReady>
+	readonly artifactData: (
+		address: DataAddress,
+		call: DataCall,
+	) => Effect.Effect<DataReply, ArtifactStoreError | ArtifactVersionNotReady>
 	readonly scope: string
 	readonly publishDomain?: string | undefined
 	readonly nowMillis: Effect.Effect<number>
@@ -158,11 +206,128 @@ export const serveContent = (options: {
 		store,
 		resolveArtifactVersion,
 		resolvePublication,
+		artifactData,
 		scope,
 		publishDomain,
 		nowMillis,
 		authorize,
 	} = options
+
+	const locate = (url: URL) => {
+		const hosted = publicationOfHost(url.hostname, publishDomain)
+		const prefix =
+			hosted === undefined
+				? [CONTENT_PATH_PREFIX, PUBLICATION_PATH_PREFIX].find((candidate) =>
+						url.pathname.startsWith(candidate),
+					)
+				: PUBLICATION_PATH_PREFIX
+		if (prefix === undefined) {
+			return null
+		}
+		const rest =
+			hosted === undefined ? url.pathname.slice(prefix.length) : `${hosted}${url.pathname}`
+		const slash = rest.indexOf("/")
+		return {
+			prefix,
+			name: slash === -1 ? rest : rest.slice(0, slash),
+			path: slash === -1 ? null : decodePath(rest.slice(slash + 1)),
+			isFolder: slash !== -1,
+		}
+	}
+
+	const addressed = (prefix: string, name: string) =>
+		Effect.gen(function* () {
+			if (prefix === PUBLICATION_PATH_PREFIX) {
+				const parsed = parsePublicationAddress(name)
+				return parsed === null
+					? null
+					: {
+							address: { kind: "publication" as const, address: name },
+							access: {
+								kind: "publication" as const,
+								address: name,
+								artifactId: parsed.artifactId,
+							},
+						}
+			}
+			const claims = yield* verifyLink(mac, key, name, yield* nowMillis)
+			return claims === null || claims.scope !== scope
+				? null
+				: {
+						address: {
+							kind: "link" as const,
+							artifact_id: claims.artifactId,
+							version: claims.version,
+							access: claims.access,
+						},
+						access: {
+							kind: "artifact_link" as const,
+							artifactId: claims.artifactId,
+							version: claims.version,
+						},
+					}
+		})
+
+	const serveData = (
+		request: ContentRequest,
+		url: URL,
+		located: { readonly prefix: string; readonly name: string },
+		path: string,
+	) =>
+		Effect.gen(function* () {
+			const route = dataRoute(path)
+			if (route === null) {
+				return notFound
+			}
+			const methods = route.isDocument ? DOCUMENT_METHODS : COLLECTION_METHODS
+			if (request.method === "OPTIONS") {
+				return HttpServerResponse.empty({
+					status: 204,
+					headers: {
+						...CONTENT_HEADERS,
+						allow: methods,
+						"access-control-allow-methods": methods,
+						"access-control-allow-headers": "content-type, idempotency-key",
+						"access-control-max-age": "86400",
+					},
+				})
+			}
+			const operation = dataOperation(request.method, route.isDocument)
+			if (operation === undefined) {
+				return HttpServerResponse.text("Method not allowed.", {
+					status: 405,
+					headers: { ...CONTENT_HEADERS, allow: methods },
+				})
+			}
+			const found = yield* addressed(located.prefix, located.name)
+			if (found === null) {
+				return notFound
+			}
+			if (authorize !== undefined) {
+				const denied = yield* authorize(found.access, request)
+				if (denied !== null) {
+					return denied
+				}
+			}
+			const body = operation === "add" || operation === "put" ? yield* request.text : ""
+			if (body === null) {
+				return plain(413, `Send at most ${MAX_DATA_BODY_BYTES} bytes.`)
+			}
+			const reply = yield* artifactData(found.address, {
+				operation,
+				collection: route.collection,
+				id: route.id,
+				body,
+				page: url.searchParams.get("page") ?? "",
+				limit: url.searchParams.get("limit") ?? "",
+				idempotency_key: request.headers["idempotency-key"] ?? "",
+			})
+			return HttpServerResponse.text(reply.body, {
+				status: reply.status,
+				contentType: "application/json",
+				headers: CONTENT_HEADERS,
+			})
+		})
 
 	const target = (prefix: string, name: string) =>
 		Effect.gen(function* () {
@@ -201,6 +366,16 @@ export const serveContent = (options: {
 
 	return (request: ContentRequest): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
 		Effect.gen(function* () {
+			const url = URL.parse(request.url)
+			const located = url === null ? null : locate(url)
+			if (
+				url !== null &&
+				located !== null &&
+				located.path !== null &&
+				located.path.startsWith(RESERVED_PREFIX)
+			) {
+				return yield* serveData(request, url, located, located.path)
+			}
 			if (request.method === "OPTIONS") {
 				return HttpServerResponse.empty({ status: 204, headers: PREFLIGHT_HEADERS })
 			}
@@ -210,32 +385,18 @@ export const serveContent = (options: {
 					headers: { ...CONTENT_HEADERS, allow: ALLOWED_METHODS },
 				})
 			}
-			const url = URL.parse(request.url)
-			if (url === null) {
-				return notFound
-			}
-			const { pathname, search } = url
-			const hosted = publicationOfHost(url.hostname, publishDomain)
-			const prefix =
-				hosted === undefined
-					? [CONTENT_PATH_PREFIX, PUBLICATION_PATH_PREFIX].find((candidate) =>
-							pathname.startsWith(candidate),
-						)
-					: PUBLICATION_PATH_PREFIX
-			if (prefix === undefined) {
+			if (url === null || located === null) {
 				return notFound
 			}
 			const toFolder = HttpServerResponse.empty({
 				status: 308,
-				headers: { ...CONTENT_HEADERS, location: `${pathname}/${search}` },
+				headers: { ...CONTENT_HEADERS, location: `${url.pathname}/${url.search}` },
 			})
-			const rest = hosted === undefined ? pathname.slice(prefix.length) : `${hosted}${pathname}`
-			const slash = rest.indexOf("/")
-			if (slash === -1) {
-				return rest.length === 0 ? notFound : toFolder
+			if (!located.isFolder) {
+				return located.name.length === 0 ? notFound : toFolder
 			}
-			const found = yield* target(prefix, rest.slice(0, slash))
-			const requested = decodePath(rest.slice(slash + 1))
+			const found = yield* target(located.prefix, located.name)
+			const requested = located.path
 			if (found === null || requested === null) {
 				return notFound
 			}

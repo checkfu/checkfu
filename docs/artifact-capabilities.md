@@ -93,6 +93,10 @@ The first capability is a small database that belongs to the artifact.
 | `PUT _/data/{collection}/{id}` | Replace a document |
 | `DELETE _/data/{collection}/{id}` | Remove a document |
 
+A page sends and receives the same shapes as the management API: `{"data": …}` in, and a document resource or `{"data": [...], "next_page": …}` out. Listing takes `limit` and `page`. Adding accepts an `Idempotency-Key`, so a form sent twice is stored once. A call the address does not allow answers 403, and an address that does not resolve answers 404. A request body may be at most 128 KiB.
+
+The content Worker only routes the call: it checks the link's signature or the address's shape, then hands the call to the API Worker, which resolves the version, works out what the address allows, and runs the same document operations the management API uses.
+
 A page is untrusted and may be public, so it is not given a query language. Documents with fixed limits can be bounded and checked. A query that scans a table cannot.
 
 **What a visitor may do is set per collection**, by `visitors`:
@@ -171,7 +175,7 @@ These are to be proved or checked when each part is built, in the same way as th
 | A (built) | Read and check `artifact.json`; record capabilities on the version; reserve `_/` | |
 | B (built) | The artifact's database object and the owner's data API | A |
 | C1 (built) | Levels on viewing links and publications, and the grant a publication saves | A |
-| C2 | The page's `_/data` calls through the content Worker | B, C1 |
+| C2 (built) | The page's `_/data` calls through the content Worker | B, C1 |
 | C3 | Rate limits per address and per artifact | C2 |
 | D | A tool for the agent to write an artifact's data | B |
 | E | Types: marking an artifact as a type, making an artifact from one, serving the two together | A, C2 |

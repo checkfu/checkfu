@@ -15,6 +15,7 @@ import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { ArtifactStore } from "../src/Artifacts/ArtifactStore.ts"
+import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "../src/Artifacts/ResolvePublication.ts"
 import type { ArtifactLinkClaims } from "../src/Content/ArtifactLink.ts"
@@ -101,6 +102,7 @@ const withContent = <A>(
 			const store = yield* ArtifactStore
 			const resolveArtifactVersion = yield* ArtifactVersionResolver
 			const resolvePublication = yield* PublicationResolver
+			const artifactData = yield* VisitorData
 			const versionViews = yield* ArtifactVersionView
 			const laggingResolver = (lag: ViewLag) =>
 				ArtifactVersionResolver.pipe(
@@ -130,6 +132,7 @@ const withContent = <A>(
 					store,
 					resolveArtifactVersion: resolve,
 					resolvePublication,
+					artifactData,
 					scope,
 					nowMillis: Effect.map(Clock.currentTimeMillis, (millis) => now ?? millis),
 				})
@@ -148,7 +151,7 @@ const withContent = <A>(
 					Effect.map(serveWith(scope)(webRequest(url)), HttpServerResponse.toWeb),
 				openUrl: (url) =>
 					Effect.map(
-						serve({ method: "GET", url, headers: Headers.empty }),
+						serve({ method: "GET", url, headers: Headers.empty, text: Effect.succeed("") }),
 						HttpServerResponse.toWeb,
 					),
 				openLagging: (lag, url) =>
@@ -172,6 +175,7 @@ const withContent = <A>(
 						},
 						resolveArtifactVersion,
 						resolvePublication,
+						artifactData,
 						scope: DEFAULT_STORAGE_SCOPE,
 						nowMillis: Effect.map(Clock.currentTimeMillis, (millis) => now ?? millis),
 						authorize,
@@ -716,6 +720,7 @@ describe("Artifact viewing links", () => {
 					method: "HEAD",
 					url: "https://x.example/a/token/docs/a%20b.md?tab=2",
 					headers: { "if-none-match": '"tag"' },
+					text: expect.anything(),
 				})
 				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "home" }])
 				const link = yield* createLink(api, id)

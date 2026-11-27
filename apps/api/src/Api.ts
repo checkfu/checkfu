@@ -1,5 +1,6 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type * as Effect from "effect/Effect"
+import { ArtifactAccessLevel } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 import { SessionArtifactCalls } from "./Workspace/SessionArtifacts.ts"
 import { SessionArtifactToolCalls } from "./Workspace/SessionArtifactTool.ts"
@@ -16,6 +17,31 @@ export const ResolvedPublication = Schema.Struct({
 })
 export type ResolvedPublication = typeof ResolvedPublication.Type
 
+export const DataAddress = Schema.Union([
+	Schema.Struct({
+		kind: Schema.Literal("link"),
+		artifact_id: Schema.String,
+		version: Schema.Int,
+		access: ArtifactAccessLevel,
+	}),
+	Schema.Struct({ kind: Schema.Literal("publication"), address: Schema.String }),
+])
+export type DataAddress = typeof DataAddress.Type
+
+export const DataCall = Schema.Struct({
+	operation: Schema.Literals(["list", "get", "add", "put", "delete"]),
+	collection: Schema.String,
+	id: Schema.String,
+	body: Schema.String,
+	page: Schema.String,
+	limit: Schema.String,
+	idempotency_key: Schema.String,
+})
+export type DataCall = typeof DataCall.Type
+
+export const DataReply = Schema.Struct({ status: Schema.Int, body: Schema.String })
+export type DataReply = typeof DataReply.Type
+
 export const ApiCalls = {
 	resolveArtifactVersion: {
 		args: Schema.Tuple([Schema.String, Schema.Int]),
@@ -25,6 +51,11 @@ export const ApiCalls = {
 	resolvePublication: {
 		args: Schema.Tuple([Schema.String]),
 		result: Schema.NullOr(ResolvedPublication),
+		error: ArtifactVersionNotReady,
+	},
+	artifactData: {
+		args: Schema.Tuple([DataAddress, DataCall]),
+		result: DataReply,
 		error: ArtifactVersionNotReady,
 	},
 	...SessionMemoryCalls,

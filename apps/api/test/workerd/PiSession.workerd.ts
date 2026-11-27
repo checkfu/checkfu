@@ -50,6 +50,14 @@ import {
 	apiAt,
 } from "./WorkerdStack.ts"
 
+const sendData = (root: string, path: string, method = "GET", data?: unknown) =>
+	fetch(new URL(`_/data/${path}`, root), {
+		method,
+		...(data === undefined
+			? {}
+			: { headers: { "content-type": "application/json" }, body: JSON.stringify({ data }) }),
+	})
+
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
 	let fakeGitHub: FakeGitHubServer
@@ -3459,6 +3467,99 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect((await fetch(url)).status).toBe(404)
 		expect((await apiFetch(`/v1/artifacts/${id}`)).status).toBe(200)
 	}, 30_000)
+
+	it("lets a page read and write its artifact's data through its own address, as far as the address allows", async () => {
+		const created = await apiJson<{ readonly id: string }>("/v1/artifacts", {
+			method: "POST",
+			body: {
+				name: "Poll",
+				files: [
+					{ path: "index.html", content: "<h1>Poll</h1>" },
+					{
+						path: "artifact.json",
+						content: JSON.stringify({
+							capabilities: {
+								database: {
+									collections: { votes: { visitors: "add" }, tally: { visitors: "read" } },
+								},
+							},
+						}),
+					},
+				],
+			},
+		})
+		expect(created.status, JSON.stringify(created.body)).toBe(201)
+		const id = created.body.id
+		const seeded = await apiJson(`/v1/artifacts/${id}/data/tally/current`, {
+			method: "PUT",
+			body: { data: { yes: 3 } },
+		})
+		expect(seeded.status).toBe(200)
+
+		const linkFor = async (access: string) => {
+			const link = await apiJson<{ readonly url: string; readonly access: string }>(
+				`/v1/artifacts/${id}/versions/1/links`,
+				{ method: "POST", body: { access } },
+			)
+			expect(link.body.access).toBe(access)
+			return link.body.url
+		}
+		const viewer = await linkFor("view")
+		expect((await sendData(viewer, "tally")).status).toBe(403)
+		expect((await fetch(viewer)).status).toBe(200)
+
+		const reader = await linkFor("read")
+		const tally = await sendData(reader, "tally")
+		expect(tally.status).toBe(200)
+		expect(tally.headers.get("content-type")).toBe("application/json")
+		expect(tally.headers.get("cache-control")).toBe("private, no-store")
+		expect(tally.headers.get("access-control-allow-origin")).toBe("*")
+		expect(
+			((await tally.json()) as { data: ReadonlyArray<{ data: unknown }> }).data.map(
+				(document) => document.data,
+			),
+		).toEqual([{ yes: 3 }])
+		expect((await sendData(reader, "tally/current")).status).toBe(200)
+		expect((await sendData(reader, "votes", "POST", "yes")).status).toBe(403)
+		expect((await sendData(reader, "tally/current", "PUT", { yes: 99 })).status).toBe(403)
+
+		const writer = await linkFor("write")
+		const preflight = await sendData(writer, "votes", "OPTIONS")
+		expect(preflight.status).toBe(204)
+		expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS")
+		const vote = await sendData(writer, "votes", "POST", "yes")
+		expect(vote.status).toBe(201)
+		expect((await vote.json()) as { data: unknown }).toMatchObject({
+			collection: "votes",
+			data: "yes",
+		})
+		expect((await sendData(writer, "votes")).status).toBe(403)
+		expect((await sendData(writer, "tally/current", "PUT", { yes: 99 })).status).toBe(403)
+		expect((await sendData(writer, "unknown", "POST", 1)).status).toBe(403)
+		const held = await apiJson<{ readonly data: ReadonlyArray<{ readonly data: unknown }> }>(
+			`/v1/artifacts/${id}/data/votes`,
+		)
+		expect(held.body.data.map((document) => document.data)).toEqual(["yes"])
+
+		const published = await apiJson<{
+			readonly publication: { readonly url: string; readonly grants: unknown } | null
+		}>(`/v1/artifacts/${id}/publication`, { method: "POST", body: { access: "write" } })
+		expect(published.body.publication?.grants).toEqual({ tally: "read", votes: "add" })
+		const address = published.body.publication?.url ?? ""
+		expect((await sendData(address, "votes", "POST", "no")).status).toBe(201)
+		expect((await sendData(address, "tally/current")).status).toBe(200)
+		expect((await sendData(address, "votes")).status).toBe(403)
+		const narrowed = await apiFetch(`/v1/artifacts/${id}/publication`, {
+			method: "POST",
+			body: { access: "view" },
+		})
+		expect(narrowed.status).toBe(200)
+		expect((await sendData(address, "votes", "POST", "late")).status).toBe(403)
+
+		expect((await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })).status).toBe(200)
+		expect((await sendData(writer, "votes", "POST", "gone")).status).toBe(404)
+		expect((await sendData(address, "tally/current")).status).toBe(404)
+	}, 60_000)
 
 	it("manages webhooks, rotates signing secrets, records deliveries in Durable Object SQLite, and fans out lifecycle events", async () => {
 		interface WebhookBody {
