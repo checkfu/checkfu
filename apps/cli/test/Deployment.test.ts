@@ -307,114 +307,25 @@ describe("managed deployment lifecycle", () => {
 })
 
 describe("deployment downloads", () => {
-	it("pins the main commit before checking CI and refuses failed or unrelated CI", async () => {
-		for (const run of [
-			{ head_sha: first, status: "completed", conclusion: "failure" },
-			{ head_sha: second, status: "completed", conclusion: "success" },
-			{ head_sha: first, status: "completed", conclusion: "success" },
-		]) {
-			const calls: Array<string> = []
-			const distribution = makeGithubDistribution(async (input) => {
-				const url = String(input)
-				calls.push(url)
-				return Response.json(
-					url.endsWith("commits/main")
-						? { sha: first }
-						: { workflow_runs: run === undefined ? [] : [run] },
-				)
-			})
-			if (run?.head_sha === first && run.conclusion === "success") {
-				await expect(distribution.latest(signal())).resolves.toBe(first)
-			} else {
-				await expect(distribution.latest(signal())).rejects.toThrow("has not passed CI")
-			}
-			expect(calls).toHaveLength(2)
-			expect(calls[1]).toContain(`head_sha=${first}`)
-		}
+	it("fetches the latest main commit once per deployment without consulting or waiting for CI", async () => {
+		const calls: Array<string> = []
+		const distribution = makeGithubDistribution(async (input) => {
+			const url = String(input)
+			calls.push(url)
+			expect(url).toBe("https://api.github.com/repos/checkfu/checkfu/commits/main")
+			return Response.json({ sha: calls.length === 1 ? first : second })
+		})
+		await expect(distribution.latest(signal())).resolves.toBe(first)
+		await expect(distribution.latest(signal())).resolves.toBe(second)
+		expect(calls).toHaveLength(2)
+	})
+	it("refuses an invalid revision or a failed source lookup before downloading code", async () => {
+		await expect(
+			makeGithubDistribution(async () => Response.json({ sha: "not-a-commit" })).latest(signal()),
+		).rejects.toThrow("invalid main revision")
 		await expect(
 			makeGithubDistribution(async () => new Response(null, { status: 403 })).latest(signal()),
 		).rejects.toThrow("GitHub HTTP 403")
-	})
-	it.each(["success", "failure"])(
-		"waits for the selected revision while main moves (%s)",
-		async (conclusion) => {
-			const calls: Array<string> = []
-			let checks = 0
-			let pauses = 0
-			const distribution = makeGithubDistribution(
-				async (input) => {
-					const url = String(input)
-					calls.push(url)
-					return Response.json(
-						url.endsWith("commits/main")
-							? { sha: calls.length === 1 ? first : second }
-							: {
-									workflow_runs: [
-										{
-											head_sha: first,
-											status: ++checks < 3 ? "in_progress" : "completed",
-											conclusion: checks < 3 ? null : conclusion,
-										},
-									],
-								},
-					)
-				},
-				{ pause: async () => void pauses++ },
-			)
-			if (conclusion === "success") {
-				await expect(distribution.latest(signal())).resolves.toBe(first)
-			} else {
-				await expect(distribution.latest(signal())).rejects.toThrow("has not passed CI")
-			}
-			expect(pauses).toBe(2)
-			expect(calls.filter((url) => url.endsWith("commits/main"))).toHaveLength(1)
-			expect(calls.slice(1).every((url) => url.includes(`head_sha=${first}`))).toBe(true)
-		},
-	)
-	it.each(["queued", "missing"])(
-		"bounds CI polling and never returns an unqualified revision (%s)",
-		async (status) => {
-			let pauses = 0
-			const distribution = makeGithubDistribution(
-				async (input) =>
-					Response.json(
-						String(input).endsWith("commits/main")
-							? { sha: first }
-							: {
-									workflow_runs:
-										status === "missing" ? [] : [{ head_sha: first, status, conclusion: null }],
-								},
-					),
-				{ pause: async () => void pauses++ },
-			)
-			await expect(distribution.latest(signal())).rejects.toThrow("Timed out waiting for CI")
-			expect(pauses).toBe(30)
-		},
-	)
-	it("cancels the real polling timer without another GitHub request", async () => {
-		const controller = new AbortController()
-		let waiting!: () => void
-		const ready = new Promise<void>((resolve) => {
-			waiting = resolve
-		})
-		let requests = 0
-		const distribution = makeGithubDistribution(
-			async (input) => {
-				requests++
-				return Response.json(
-					String(input).endsWith("commits/main")
-						? { sha: first }
-						: { workflow_runs: [{ head_sha: first, status: "in_progress", conclusion: null }] },
-				)
-			},
-			{ announce: waiting },
-		)
-		const pending = distribution.latest(controller.signal)
-		const cancelled = expect(pending).rejects.toMatchObject({ name: "AbortError" })
-		await ready
-		controller.abort()
-		await cancelled
-		expect(requests).toBe(2)
 	})
 	it("verifies runtime integrity before executing, detects cache corruption and can retry", async () => {
 		const directory = await temporary()

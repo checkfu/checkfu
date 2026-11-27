@@ -215,7 +215,7 @@ export const prepareManaged = async (
 			throw error
 		}
 	} else {
-		options.announce("Checking origin/main and its CI results…")
+		options.announce("Fetching the latest origin/main commit…")
 		revision = await options.distribution.latest(signal)
 	}
 	if (!REVISION.test(revision)) {

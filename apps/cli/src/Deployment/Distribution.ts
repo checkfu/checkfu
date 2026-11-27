@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { setTimeout as delay } from "node:timers/promises"
 import { unpackTar } from "modern-tar"
 import * as Schema from "effect/Schema"
 
@@ -9,17 +8,6 @@ export const REVISION = /^[a-f0-9]{40}$/
 export const STAGE = /^[a-z0-9]+[-_a-z0-9]*$/i
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 const decodeCommit = Schema.decodeUnknownSync(Schema.Struct({ sha: Schema.String }))
-const decodeRuns = Schema.decodeUnknownSync(
-	Schema.Struct({
-		workflow_runs: Schema.Array(
-			Schema.Struct({
-				head_sha: Schema.String,
-				status: Schema.String,
-				conclusion: Schema.NullOr(Schema.String),
-			}),
-		),
-	}),
-)
 
 export interface Distribution {
 	readonly latest: (signal: AbortSignal) => Promise<string>
@@ -63,14 +51,7 @@ const bytes = async (response: Response, limit: number): Promise<Uint8Array> => 
 	return result
 }
 
-export const makeGithubDistribution = (
-	request: typeof fetch = fetch,
-	options: {
-		readonly pause?: (signal: AbortSignal) => Promise<void>
-		readonly announce?: (message: string) => void
-	} = {},
-): Distribution => {
-	const pause = options.pause ?? ((signal) => delay(60_000, undefined, { signal }))
+export const makeGithubDistribution = (request: typeof fetch = fetch): Distribution => {
 	const download: Distribution["download"] = async (url, signal) =>
 		bytes(
 			await request(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(180_000)]) }),
@@ -85,7 +66,7 @@ export const makeGithubDistribution = (
 				})
 				if (!response.ok) {
 					throw new Error(
-						`Could not check origin/main (GitHub HTTP ${response.status}). Nothing was deployed; retry later.`,
+						`Could not fetch origin/main (GitHub HTTP ${response.status}). Nothing was deployed; retry later.`,
 					)
 				}
 				return decode(await response.json())
@@ -94,31 +75,7 @@ export const makeGithubDistribution = (
 			if (!REVISION.test(sha)) {
 				throw new Error("GitHub returned an invalid main revision.")
 			}
-			for (let attempt = 0; ; attempt++) {
-				signal.throwIfAborted()
-				const { workflow_runs: runs } = await get(
-					`actions/workflows/ci.yml/runs?event=push&head_sha=${sha}&per_page=1`,
-					decodeRuns,
-				)
-				const run = runs[0]
-				if (run !== undefined && (run.head_sha !== sha || run.status === "completed")) {
-					if (run?.head_sha === sha && run.conclusion === "success") {
-						return sha
-					}
-					throw new Error(
-						`origin/main (${sha.slice(0, 12)}) has not passed CI. Nothing was deployed. Check CI and run checkfu deploy again after it passes.`,
-					)
-				}
-				if (attempt === 30) {
-					throw new Error(
-						`Timed out waiting for CI on ${sha.slice(0, 12)}. Nothing was deployed. Run checkfu deploy again when CI passes.`,
-					)
-				}
-				options.announce?.(
-					`Waiting for CI on ${sha.slice(0, 12)} (${run?.status ?? "not started"}); no cloud changes yet. Ctrl-C cancels.`,
-				)
-				await pause(signal)
-			}
+			return sha
 		},
 		source: (revision, signal) =>
 			download(`https://codeload.github.com/checkfu/checkfu/tar.gz/${revision}`, signal),
@@ -126,9 +83,7 @@ export const makeGithubDistribution = (
 	}
 }
 
-export const githubDistribution = makeGithubDistribution(fetch, {
-	announce: (message) => process.stderr.write(`${message}\n`),
-})
+export const githubDistribution = makeGithubDistribution()
 
 /** No links, absolute paths, traversal, device entries, or executable archive modes. */
 export const extract = async (archive: Uint8Array, directory: string): Promise<void> => {

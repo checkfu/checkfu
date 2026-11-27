@@ -31,7 +31,7 @@ npm install -g checkfu
 checkfu deploy
 ```
 
-Signs in to Cloudflare, prompts for a provider key, deploys the CI-approved server and sandbox from `origin/main`, and saves the connection under `~/.config/checkfu`. Run `checkfu deploy` again to update the same deployment and keep its data. No source checkout or local Docker is required.
+Signs in to Cloudflare, prompts for a provider key, deploys the latest server and sandbox from `origin/main`, and saves the connection under `~/.config/checkfu`. Run `checkfu deploy` again to update the same deployment and keep its data. No source checkout or local Docker is required.
 
 ```sh
 checkfu agents create --name Assistant --model your-model-id
