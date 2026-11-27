@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto"
+import { SessionOutputs } from "@checkfu/domain/Outputs/SessionOutputs.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { describe, expect, it } from "@effect/vitest"
 import type * as Duration from "effect/Duration"
 import type { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import { FileStoreError } from "../src/Files/FileStore.ts"
-import { OutputsSaveTimeout } from "../src/Files/OutputsSaverLive.ts"
+import { OutputsSaveTimeout, makeOutputsSaver } from "../src/Files/OutputsSaverLive.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	MAX_OUTPUT_FILES,
@@ -90,6 +92,7 @@ const withSessions = async (
 		apiFetch: ApiFetch,
 		world: Pick<
 			World,
+			| "executorLayer"
 			| "workspaceFiles"
 			| "fileStore"
 			| "outputReads"
@@ -110,7 +113,7 @@ const withSessions = async (
 			readonly replies: (sessionId: string) => Effect.Effect<ReadonlyArray<string>>
 			readonly textOf: (fileId: string) => Effect.Effect<string>
 		},
-	) => Effect.Effect<void, never, RuntimeContext>,
+	) => Effect.Effect<void, never, RuntimeContext | Layer.Success<World["layer"]>>,
 	saveTimeout: Duration.Input = "30 seconds",
 ) => {
 	let edit: Edit = () => undefined
@@ -326,6 +329,92 @@ describe("A session's outputs", () => {
 					},
 				])
 			}),
+		))
+
+	it("retries the same captured output record and leaves exhausted writes to the policy", () =>
+		withSessions(
+			(_apiFetch, { createSession, executorLayer, workspaceFiles, outputWalks, outputs, textOf }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession
+					const args = { session_id: SessionId.make(session.id), turn: 1 }
+					const files = workspaceFiles(session.id)
+					files.set(`${OUTPUTS}/note.txt`, "before retry")
+					const store = yield* SessionOutputs
+					const recorded: Array<object> = []
+					let permanentlyUnavailable = false
+					const saver = yield* makeOutputsSaver.pipe(
+						Effect.provide(executorLayer),
+						Effect.provideService(SessionOutputs, {
+							...store,
+							send: (command, options) =>
+								Effect.suspend(() => {
+									recorded.push(command)
+									if (recorded.length === 1 || permanentlyUnavailable) {
+										files.set(`${OUTPUTS}/note.txt`, "after retry")
+										return Effect.die(
+											new Error("The outputs record store is temporarily unavailable"),
+										)
+									}
+									return store.send(command, options)
+								}),
+						}),
+					)
+					yield* saver.save(args)
+					expect(outputWalks).toHaveLength(1)
+					expect(recorded).toHaveLength(2)
+					expect(recorded[0]).toBe(recorded[1])
+					const saved = yield* outputs(session.id)
+					expect(saved).toMatchObject({ turn: 1, status: "saved" })
+					const file = saved.files[0]
+					if (file === undefined) {
+						return yield* Effect.die(new Error("Expected a saved output"))
+					}
+					expect(yield* textOf(file.id)).toBe("before retry")
+
+					permanentlyUnavailable = true
+					expect(Exit.isFailure(yield* Effect.exit(saver.save({ ...args, turn: 2 })))).toBe(true)
+					expect(recorded.slice(2)).toMatchObject([
+						{ _tag: "RecordSessionOutputs" },
+						{ _tag: "RecordSessionOutputs" },
+					])
+					expect((yield* store.get(args.session_id)).turn).toBe(1)
+				}),
+		))
+
+	it("checks the final skip count before storing any files", () =>
+		withSessions(
+			(
+				_apiFetch,
+				{
+					replyAndSave,
+					workspaceFiles,
+					onTurn,
+					createSession,
+					outputs,
+					setBeforeOutputsRead,
+					fileStore,
+				},
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession
+					const files = workspaceFiles(session.id)
+					onTurn(() => {
+						for (let index = 0; index < MAX_OUTPUT_FILES; index += 1) {
+							files.set(`${OUTPUTS}/invalid\u0001-${index}.txt`, "ignore")
+						}
+						files.set(`${OUTPUTS}/first.txt`, "keep")
+						files.set(`${OUTPUTS}/last.txt`, "old")
+					})
+					setBeforeOutputsRead(() => void files.set(`${OUTPUTS}/last.txt`, "changed size"))
+					yield* replyAndSave(session.id, ["Write the outputs."], 1)
+					expect(yield* outputs(session.id)).toMatchObject({
+						turn: 1,
+						status: "skipped",
+						reason: `${MAX_OUTPUT_FILES + 1} outputs could not be saved.`,
+						files: [],
+					})
+					expect(fileStore.writes()).toBe(0)
+				}),
 		))
 
 	it("skips the turn and says why, keeping the files saved before, when the directory cannot be read as one", () =>

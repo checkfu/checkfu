@@ -895,6 +895,7 @@ export const makePiDurableTestLayer = (
 
 	return {
 		layer,
+		executorLayer,
 		closeAll,
 		restartPi,
 		requests,

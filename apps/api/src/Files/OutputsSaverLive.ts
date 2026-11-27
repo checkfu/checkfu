@@ -40,6 +40,8 @@ const TIMED_OUT = "Saving the outputs took too long."
 const FAILED = "The outputs could not be saved."
 const CHANGED = "Changed while it was being read."
 
+const skippedTurn = (reason: string) => ({ status: "skipped" as const, reason })
+
 class OutputsSuperseded extends Schema.TaggedError<
 	OutputsSuperseded,
 	{ readonly brand: unique symbol }
@@ -112,23 +114,16 @@ export const makeOutputsSaver = Effect.gen(function* () {
 			return read
 		})
 
-	const saveOnce = Effect.fn("SessionOutputs.save")(function* (sessionId: SessionId, turn: number) {
-		if ((yield* outputs.get(sessionId)).turn >= turn) {
-			return
-		}
+	const capture = Effect.fn("SessionOutputs.capture")(function* (
+		sessionId: SessionId,
+		turn: number,
+	) {
 		const listing = yield* executor.listOutputs(sessionId, turn)
 		if (listing === null) {
 			return yield* new OutputsSuperseded()
 		}
 		if (!listing.ok) {
-			yield* outputs.send(
-				new SkipSessionOutputs({
-					session_id: sessionId,
-					turn,
-					reason: listing.reason.slice(0, MAX_OUTPUT_REASON_LENGTH),
-				}),
-			)
-			return
+			return skippedTurn(listing.reason.slice(0, MAX_OUTPUT_REASON_LENGTH))
 		}
 		const saved: Array<SavedOutput> = []
 		const skipped: Array<SkippedOutput> = [...listing.skipped]
@@ -155,13 +150,8 @@ export const makeOutputsSaver = Effect.gen(function* () {
 				wanted.push({ ...file, id })
 			}
 		}
-		const skip = (reason: string) =>
-			outputs.send(new SkipSessionOutputs({ session_id: sessionId, turn, reason }))
-		const tooManySkipped = Effect.suspend(() =>
-			skip(`${skipped.length} outputs could not be saved.`),
-		)
 		if (skipped.length > MAX_OUTPUT_FILES) {
-			return yield* tooManySkipped
+			return skippedTurn(`${skipped.length} outputs could not be saved.`)
 		}
 		const read = yield* readBytes(sessionId, turn, wanted)
 		for (const file of wanted) {
@@ -171,7 +161,16 @@ export const makeOutputsSaver = Effect.gen(function* () {
 				bytes.byteLength !== file.size ||
 				(yield* digest.digestHex(Digest.sha256, bytes)) !== file.sha256
 			) {
+				read.delete(file.path)
 				skipped.push({ path: file.path, reason: CHANGED })
+			}
+		}
+		if (skipped.length > MAX_OUTPUT_FILES) {
+			return skippedTurn(`${skipped.length} outputs could not be saved.`)
+		}
+		for (const file of wanted) {
+			const bytes = read.get(file.path)
+			if (bytes === undefined) {
 				continue
 			}
 			const content_type = Option.getOrElse(
@@ -197,49 +196,64 @@ export const makeOutputsSaver = Effect.gen(function* () {
 				content_type,
 			})
 		}
-		if (skipped.length > MAX_OUTPUT_FILES) {
-			return yield* tooManySkipped
-		}
 		const filesText = encodeSavedOutputs(saved.toSorted(byPath))
 		const skippedText = encodeSkippedOutputs(skipped.toSorted(byPath))
 		if (filesText === undefined || skippedText === undefined) {
-			return yield* skip("The outputs are too many to record.")
+			return skippedTurn("The outputs are too many to record.")
 		}
-		yield* outputs.send(
-			new RecordSessionOutputs({
-				session_id: sessionId,
-				turn,
-				files: filesText,
-				skipped: skippedText,
-			}),
-		)
+		return { status: "saved" as const, files: filesText, skipped: skippedText }
 	})
 
 	return {
 		save: ({ session_id, turn }: { readonly session_id: SessionId; readonly turn: number }) =>
 			Effect.gen(function* () {
+				if ((yield* outputs.get(session_id)).turn >= turn) {
+					return
+				}
 				const { attempts, baseDelay } = yield* HarnessLimits
-				const skip = (reason: string) =>
-					outputs.send(new SkipSessionOutputs({ session_id, turn, reason }))
-				yield* saveOnce(session_id, turn).pipe(
+				const retry = {
+					times: attempts - 1,
+					schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
+				}
+				const outcome = yield* capture(session_id, turn).pipe(
 					Effect.retry({
 						while: (error) => error._tag !== "OutputsSuperseded",
-						times: attempts - 1,
-						schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
+						...retry,
 					}),
-					Effect.catchTag("OutputsSuperseded", () => skip(SUPERSEDED)),
+					Effect.catchTag("OutputsSuperseded", () => Effect.succeed(skippedTurn(SUPERSEDED))),
 					Effect.timeoutOrElse({
 						duration: yield* OutputsSaveTimeout,
-						orElse: () => skip(TIMED_OUT),
+						orElse: () => Effect.succeed(skippedTurn(TIMED_OUT)),
 					}),
 					Effect.catchCause((cause) =>
 						Cause.hasInterrupts(cause)
 							? Effect.interrupt
-							: Effect.andThen(Effect.logError("Outputs not saved", cause), skip(FAILED)),
+							: Effect.andThen(
+									Effect.logError("Outputs not saved", cause),
+									Effect.succeed(skippedTurn(FAILED)),
+								),
 					),
-					Effect.annotateLogs({ sessionId: session_id, turn }),
 				)
-			}),
+				const record =
+					outcome.status === "saved"
+						? outputs.send(
+								new RecordSessionOutputs({
+									session_id,
+									turn,
+									files: outcome.files,
+									skipped: outcome.skipped,
+								}),
+							)
+						: outputs.send(new SkipSessionOutputs({ session_id, turn, reason: outcome.reason }))
+				yield* record.pipe(Effect.catchDefect(Effect.fail), Effect.retry(retry), Effect.orDie)
+			}).pipe(
+				Effect.tapCause((cause) =>
+					Cause.hasInterrupts(cause)
+						? Effect.void
+						: Effect.logError("Outputs outcome not recorded", cause),
+				),
+				Effect.annotateLogs({ sessionId: session_id, turn }),
+			),
 	}
 })
 
