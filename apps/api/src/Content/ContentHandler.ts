@@ -23,6 +23,7 @@ import {
 	publicationOfHost,
 	verifyLink,
 } from "./ArtifactLink.ts"
+import { DATA_HELPER, DATA_HELPER_PATH } from "./DataHelper.ts"
 
 export const CONTENT_SECURITY_POLICY = [
 	"sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock",
@@ -74,6 +75,44 @@ const dataOperation = (method: string, isDocument: boolean): DataCall["operation
 		return method === "PUT" ? "put" : method === "DELETE" ? "delete" : undefined
 	}
 	return method === "POST" ? "add" : undefined
+}
+
+const HELPER_METHODS = "GET, HEAD, OPTIONS"
+const HELPER_TYPE = "text/javascript; charset=utf-8"
+const helperBytes = new TextEncoder().encode(DATA_HELPER)
+
+const helperResponse = (method: string) => {
+	if (method === "GET") {
+		return HttpServerResponse.uint8Array(helperBytes, {
+			status: 200,
+			contentType: HELPER_TYPE,
+			headers: CONTENT_HEADERS,
+		})
+	}
+	if (method === "HEAD") {
+		return HttpServerResponse.empty({
+			status: 200,
+			headers: {
+				...CONTENT_HEADERS,
+				"content-type": HELPER_TYPE,
+				"content-length": String(helperBytes.byteLength),
+			},
+		})
+	}
+	return method === "OPTIONS"
+		? HttpServerResponse.empty({
+				status: 204,
+				headers: {
+					...CONTENT_HEADERS,
+					allow: HELPER_METHODS,
+					"access-control-allow-methods": HELPER_METHODS,
+					"access-control-max-age": "86400",
+				},
+			})
+		: HttpServerResponse.text("Method not allowed.", {
+				status: 405,
+				headers: { ...CONTENT_HEADERS, allow: HELPER_METHODS },
+			})
 }
 
 const INDEX_FILE = "index.html"
@@ -271,6 +310,9 @@ export const serveContent = (options: {
 		path: string,
 	) =>
 		Effect.gen(function* () {
+			if (path === DATA_HELPER_PATH) {
+				return helperResponse(request.method)
+			}
 			const route = dataRoute(path)
 			if (route === null) {
 				return notFound

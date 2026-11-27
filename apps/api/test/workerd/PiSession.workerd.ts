@@ -3507,6 +3507,10 @@ describe("PiSession real Durable Object under workerd", () => {
 		const viewer = await linkFor("view")
 		expect((await sendData(viewer, "tally")).status).toBe(403)
 		expect((await fetch(viewer)).status).toBe(200)
+		const helper = await fetch(new URL("_/data.js", viewer))
+		expect(helper.status).toBe(200)
+		expect(helper.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
+		expect(await helper.text()).toContain("globalThis.artifactData")
 
 		const reader = await linkFor("read")
 		const tally = await sendData(reader, "tally")
