@@ -280,8 +280,9 @@ export const checkfu = {
 			),
 		run: async (
 			automation_id: string,
+			idempotencyKey: string,
 		): Promise<{ readonly run: number; readonly listed: JsonAutomationRun | null }> => {
-			const queued = await request("automations.run", { path: { automation_id } })
+			const queued = await request("automations.run", { path: { automation_id }, idempotencyKey })
 			const listed = await settled(
 				(run) =>
 					request("automations.runs.retrieve", { path: { automation_id, run: Number(run) } }),
