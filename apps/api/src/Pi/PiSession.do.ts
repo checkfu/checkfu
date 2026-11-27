@@ -291,14 +291,16 @@ export const PiSessionLive = PiSession.make(
 					}),
 				)
 
-				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal, taskId) =>
-					runPromise(
-						workspace()
-							.runTool(call, { turn: admittedTurn() }, taskId)
-							.pipe(Effect.onInterrupt(() => Effect.ignore(workspace().stopCall(call.id)))),
+				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal, taskId) => {
+					const token = { turn: admittedTurn() }
+					const owner = workspace()
+					return runPromise(
+						owner
+							.runTool(call, token, taskId)
+							.pipe(Effect.onInterrupt(() => Effect.ignore(owner.stopTask(token, taskId)))),
 						signal === undefined ? undefined : { signal },
-					),
-				)
+					)
+				})
 				let registry = createCheckfuRegistry()
 				const installTools = () => {
 					for (const extension of withToolSurface(sandbox, [

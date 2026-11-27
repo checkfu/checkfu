@@ -113,7 +113,7 @@ export interface SessionWorkspaceShape {
 		token: TurnToken,
 		taskId: number,
 	) => Effect.Effect<WorkspaceToolResult>
-	readonly stopCall: (callId: string) => Effect.Effect<void>
+	readonly stopTask: (token: TurnToken, taskId: number) => Effect.Effect<void>
 	readonly listOutputs: (turn: number) => Effect.Effect<OutputsListing | null>
 	readonly readOutputs: (
 		turn: number,
@@ -308,7 +308,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						fetch: (request) => fetch(request),
 					}),
 				})
-				const fence = makeTurnFence({
+				const fence = makeTurnFence<WorkspaceToolResult>({
 					get: () => storage.kv.get<FencedTurn>(NEWEST_TURN),
 					put: (fenced) => storage.kv.put(NEWEST_TURN, fenced),
 				})
@@ -482,11 +482,6 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					)
 				}
 
-				const underWay = new Map<
-					string,
-					{ readonly stop: () => void; readonly ended: Promise<unknown> }
-				>()
-
 				const runtime = yield* RuntimeContext
 				const stayAwake: Effect.Effect<void> = Effect.suspend(() =>
 					idle
@@ -542,22 +537,13 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 							if (storage.kv.get(DISCARDED) === true) {
 								return failed("The session has ended and its workspace was discarded.")
 							}
-							const stopping = new AbortController()
-							interrupted.addEventListener("abort", () => stopping.abort(), { once: true })
-							const ended = fence
-								.run(token, async (turn): Promise<WorkspaceToolResult> => {
-									const signal = AbortSignal.any([stopping.signal, turn])
-									await initialize((await workspace()).fs)
-									const { content, isError } = await answer(call, signal, token.turn, taskId)
-									return boundWorkspaceResult(call.name, { content, isError })
-								})
-								.finally(() => {
-									underWay.delete(call.id)
-								})
-							underWay.set(call.id, { stop: () => stopping.abort(), ended })
+							const ended = await fence.runTask(token, taskId, interrupted, async (signal) => {
+								await initialize((await workspace()).fs)
+								const { content, isError } = await answer(call, signal, token.turn, taskId)
+								return boundWorkspaceResult(call.name, { content, isError })
+							})
 							return (
-								(await ended) ??
-								failed("This turn has ended; the workspace no longer accepts its calls.")
+								ended ?? failed("This turn has ended; the workspace no longer accepts its calls.")
 							)
 						}),
 					writeScriptOutput: (
@@ -596,12 +582,8 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								: ((await fence.run({ turn }, () => onActive((on) => on.outputs.read(files)))) ??
 									null),
 						),
-					stopCall: (callId: string) =>
-						Effect.promise(async () => {
-							const call = underWay.get(callId)
-							call?.stop()
-							await call?.ended.catch(() => undefined)
-						}),
+					stopTask: (token: TurnToken, taskId: number) =>
+						Effect.promise(() => fence.stopTask(token, taskId)),
 					prepare: (
 						token: TurnToken,
 						repositories: ReadonlyArray<RepositoryMount>,

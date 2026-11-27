@@ -44,7 +44,7 @@ const PlannedWorkspace = SessionWorkspace.make(
 			enter: planOnly,
 			interrupt: planOnly,
 			runTool: planOnly,
-			stopCall: planOnly,
+			stopTask: planOnly,
 			listOutputs: planOnly,
 			readOutputs: planOnly,
 			writeScriptOutput: planOnly,
