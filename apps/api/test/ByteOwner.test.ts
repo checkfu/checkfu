@@ -1,14 +1,15 @@
+import { initialOwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
-import { UNMARKED, makeByteOwner } from "../src/Files/ByteOwner.ts"
-import type { OwnerMarks } from "../src/Files/ByteOwner.ts"
+import { makeByteOwner } from "../src/Files/ByteOwner.ts"
 
 const makeOwner = () => {
 	const objects = new Set<string>()
-	let marks: OwnerMarks = UNMARKED
+	let marks: OwnerMarks = initialOwnerMarks
 	const owner = makeByteOwner({
 		marks: Effect.sync(() => marks),
 		saveMarks: (next) =>
@@ -52,6 +53,62 @@ describe("byte owner", () => {
 			yield* owner.release(2)
 			expect([...objects]).toEqual(["third"])
 			expect(marks()).toEqual({ purged: false, staged: 3, released: 2 })
+		}),
+	)
+
+	it.effect("redrives cleanup after a partial deletion or an interrupted marker write", () =>
+		Effect.gen(function* () {
+			let marks = initialOwnerMarks
+			let fault: "before-mark" | "after-mark" | "remove" | null = null
+			const objects = new Set(["first", "second"])
+			const restart = () =>
+				makeByteOwner({
+					marks: Effect.sync(() => marks),
+					saveMarks: (next) =>
+						Effect.sync(() => {
+							if (fault === "before-mark") {
+								throw new Error("before marker commit")
+							}
+							marks = next
+							if (fault === "after-mark") {
+								throw new Error("after marker commit")
+							}
+						}),
+					removeAll: Effect.sync(() => {
+						for (const key of objects) {
+							objects.delete(key)
+							if (fault === "remove") {
+								throw new Error("partial remove")
+							}
+						}
+					}),
+				})
+			fault = "before-mark"
+			expect(Exit.isFailure(yield* Effect.exit(restart().purge))).toBe(true)
+			expect(marks.purged).toBe(false)
+			expect([...objects]).toEqual(["first", "second"])
+			fault = "remove"
+			expect(Exit.isFailure(yield* Effect.exit(restart().release(2)))).toBe(true)
+			expect(marks.released).toBe(0)
+			expect([...objects]).toEqual(["second"])
+			fault = null
+			yield* restart().release(2)
+			expect(objects.size).toBe(0)
+			expect(marks.released).toBe(2)
+			yield* restart().writeAlone(
+				3,
+				Effect.sync(() => objects.add("new")),
+			)
+			fault = "after-mark"
+			expect(Exit.isFailure(yield* Effect.exit(restart().purge))).toBe(true)
+			expect(marks.purged).toBe(true)
+			expect([...objects]).toEqual(["new"])
+			expect(isFailure(yield* Effect.exit(restart().write(null, Effect.void)), "BytesPurged")).toBe(
+				true,
+			)
+			fault = null
+			yield* restart().purge
+			expect(objects.size).toBe(0)
 		}),
 	)
 

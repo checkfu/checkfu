@@ -1,3 +1,5 @@
+import { initialOwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Digest from "effect/crypto/Digest"
@@ -6,8 +8,8 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import { buildArtifactVersion } from "../src/Artifacts/ArtifactFiles.ts"
 import type { ArtifactFileInput } from "../src/Artifacts/ArtifactFiles.ts"
-import { UNMARKED, makeArtifactOwner } from "../src/Artifacts/ArtifactOwnership.ts"
-import type { ArtifactBucketWriter, ArtifactMarks } from "../src/Artifacts/ArtifactOwnership.ts"
+import { makeArtifactOwner } from "../src/Artifacts/ArtifactOwnership.ts"
+import type { ArtifactBucketWriter } from "../src/Artifacts/ArtifactOwnership.ts"
 import { artifactBlobKey, artifactManifestKey } from "../src/Artifacts/ArtifactStore.ts"
 
 const SCOPE = "test"
@@ -16,7 +18,7 @@ const ID = "art_owner"
 const makeOwner = () => {
 	const objects = new Map<string, Uint8Array | string>()
 	const puts: Array<string> = []
-	let marks: ArtifactMarks = UNMARKED
+	let marks: OwnerMarks = initialOwnerMarks
 	let beforeList: Effect.Effect<void> = Effect.void
 	let duringUpload: Effect.Effect<void> = Effect.void
 	const bucket: ArtifactBucketWriter<never> = {
@@ -53,17 +55,19 @@ const makeOwner = () => {
 				Effect.sync(() => [...objects.keys()].filter((key) => key.startsWith(prefix))),
 			),
 	}
-	const owner = makeArtifactOwner({
-		scope: SCOPE,
-		bucket,
-		marks: Effect.sync(() => marks),
-		saveMarks: (next) =>
-			Effect.sync(() => {
-				marks = next
-			}),
-	})
+	const restart = () =>
+		makeArtifactOwner({
+			scope: SCOPE,
+			bucket,
+			marks: Effect.sync(() => marks),
+			saveMarks: (next) =>
+				Effect.sync(() => {
+					marks = next
+				}),
+		})
 	return {
-		owner,
+		owner: restart(),
+		restart,
 		objects,
 		puts,
 		marks: () => marks,
@@ -141,6 +145,45 @@ describe("artifact owner", () => {
 			yield* owner.release(ID, 2)
 			expect(objects.size).toBe(2)
 		}),
+	)
+
+	it.effect(
+		"restarts a fenced purge after partial R2 cleanup and redrives an unrecorded release",
+		() =>
+			Effect.gen(function* () {
+				const { owner, restart, marks, objects, setBeforeList } = makeOwner()
+				const built = yield* build([
+					{ path: "first.txt", content: "a" },
+					{ path: "second.txt", content: "b" },
+				])
+				yield* owner.stage(ID, built, 1)
+				const failAfterRemoval = Effect.sync(() => {
+					for (const key of objects.keys()) {
+						objects.delete(key)
+						break
+					}
+					throw new Error("interrupted prefix removal")
+				})
+				setBeforeList(failAfterRemoval)
+				expect(Exit.isFailure(yield* Effect.exit(owner.release(ID, 1)))).toBe(true)
+				expect(marks().released).toBe(0)
+				expect(objects.size).toBe(2)
+				setBeforeList(Effect.void)
+				yield* restart().release(ID, 1)
+				expect(marks().released).toBe(1)
+				expect(objects.size).toBe(0)
+				yield* restart().stage(ID, built, 2)
+				setBeforeList(failAfterRemoval)
+				expect(Exit.isFailure(yield* Effect.exit(restart().purge(ID)))).toBe(true)
+				expect(marks().purged).toBe(true)
+				expect(objects.size).toBe(2)
+				expect(isFailure(yield* Effect.exit(restart().stage(ID, built, 3)), "ArtifactPurged")).toBe(
+					true,
+				)
+				setBeforeList(Effect.void)
+				yield* restart().purge(ID)
+				expect(objects.size).toBe(0)
+			}),
 	)
 
 	it.effect("purges everything, for good, and refuses files staged after", () =>

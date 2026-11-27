@@ -1,3 +1,5 @@
+import { initialOwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
@@ -7,13 +9,8 @@ import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { placedStub, placement, storageScope, storageScopeOf } from "../Placement.ts"
 import type { BuiltArtifactVersion } from "./ArtifactFiles.ts"
-import {
-	ArtifactPurged,
-	ArtifactReservationStale,
-	UNMARKED,
-	makeArtifactOwner,
-} from "./ArtifactOwnership.ts"
-import type { ArtifactBucketWriter, ArtifactMarks } from "./ArtifactOwnership.ts"
+import { ArtifactPurged, ArtifactReservationStale, makeArtifactOwner } from "./ArtifactOwnership.ts"
+import type { ArtifactBucketWriter } from "./ArtifactOwnership.ts"
 import {
 	ArtifactBucket,
 	ArtifactStore,
@@ -138,9 +135,9 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 				const owner = makeArtifactOwner({
 					scope,
 					bucket: makeWriter(bucket),
-					marks: state.storage.get<ArtifactMarks>(MARKS_KEY).pipe(
+					marks: state.storage.get<OwnerMarks>(MARKS_KEY).pipe(
 						Effect.mapBoth({
-							onSuccess: (marks) => marks ?? UNMARKED,
+							onSuccess: (marks) => marks ?? initialOwnerMarks,
 							onFailure: storeError,
 						}),
 					),

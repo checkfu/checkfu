@@ -1,3 +1,5 @@
+import { initialOwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -5,8 +7,8 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { DEFAULT_STORAGE_SCOPE } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
-import { UNMARKED, makeArtifactOwner } from "./ArtifactOwnership.ts"
-import type { ArtifactBucketWriter, ArtifactMarks, ArtifactOwner } from "./ArtifactOwnership.ts"
+import { makeArtifactOwner } from "./ArtifactOwnership.ts"
+import type { ArtifactBucketWriter, ArtifactOwner } from "./ArtifactOwnership.ts"
 import {
 	ArtifactStore,
 	ArtifactStoreError,
@@ -25,7 +27,7 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 	const objects = new Map<string, Uint8Array>()
 	const puts = new Map<string, number>()
 	const owners = new Map<string, ArtifactOwner<never>>()
-	const marks = new Map<string, ArtifactMarks>()
+	const marks = new Map<string, OwnerMarks>()
 	const encoder = new TextEncoder()
 	const decoder = new TextDecoder()
 	let failing = false
@@ -125,7 +127,7 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 		const owner = makeArtifactOwner({
 			scope,
 			bucket,
-			marks: Effect.sync(() => marks.get(owned) ?? UNMARKED),
+			marks: Effect.sync(() => marks.get(owned) ?? initialOwnerMarks),
 			saveMarks: (next) =>
 				Effect.andThen(
 					online,

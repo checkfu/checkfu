@@ -1,0 +1,43 @@
+{
+	"version": 1,
+	"rules": {
+		"ByteOwnership": {
+			"PurgeIsTerminal": {
+				"kind": "transition",
+				"source": "({ before, after }) => !before.purged || after.purged"
+			},
+			"PurgedOwnersRefuseWrites": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (!before.purged || command.operation === \"release\" || command.operation === \"purge\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn after.action === \"purged\"\n\t\t}"
+			},
+			"WatermarksNeverDecrease": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[after.staged >= before.staged, after.released >= before.released].every((ok) => ok)"
+			},
+			"CheckOnlyLeavesTheStageFence": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tcommand.operation !== \"check\" || after.staged === before.staged"
+			},
+			"StaleReservationsCannotWrite": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (before.purged || command.operation === \"release\" || command.operation === \"purge\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (command.reservation > before.released && command.reservation >= before.staged) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn after.action === \"stale\"\n\t\t}"
+			},
+			"LateReleaseKeepsNewerBytes": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (\n\t\t\t\tbefore.purged ||\n\t\t\t\tcommand.operation !== \"release\" ||\n\t\t\t\tcommand.reservation <= before.released ||\n\t\t\t\tcommand.reservation >= before.staged\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [after.action === \"release\", after.released === command.reservation].every((ok) => ok)\n\t\t}"
+			},
+			"CurrentReleaseRemovesBytes": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (\n\t\t\t\tbefore.purged ||\n\t\t\t\tcommand.operation !== \"release\" ||\n\t\t\t\tcommand.reservation <= before.released ||\n\t\t\t\tcommand.reservation < before.staged\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [after.action === \"removeThenRelease\", after.released === command.reservation].every(\n\t\t\t\t(ok) => ok,\n\t\t\t)\n\t\t}"
+			},
+			"PurgeAlwaysCleansUp": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command.operation !== \"purge\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.purged,\n\t\t\t\tafter.action === (before.purged ? \"removeAgain\" : \"markThenRemove\"),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"NewStageAdvancesItsFence": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (\n\t\t\t\tbefore.purged ||\n\t\t\t\tcommand.operation !== \"stage\" ||\n\t\t\t\tcommand.reservation <= before.staged ||\n\t\t\t\tcommand.reservation <= before.released\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [after.action === \"stage\", after.staged === command.reservation].every((ok) => ok)\n\t\t}"
+			}
+		}
+	}
+}

@@ -1,10 +1,11 @@
+import { initialOwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { DEFAULT_STORAGE_SCOPE } from "../Placement.ts"
-import { UNMARKED, makeByteOwner } from "./ByteOwner.ts"
-import type { OwnerMarks } from "./ByteOwner.ts"
+import { makeByteOwner } from "./ByteOwner.ts"
 import {
 	FileSizeMismatch,
 	FileStore,
@@ -47,7 +48,7 @@ export const makeFileStoreMemory = (options?: { readonly scope?: string }) => {
 
 	const ownerOf = (fileId: string) =>
 		makeByteOwner({
-			marks: Effect.sync(() => marks.get(fileId) ?? UNMARKED),
+			marks: Effect.sync(() => marks.get(fileId) ?? initialOwnerMarks),
 			saveMarks: (next) =>
 				Effect.andThen(
 					online,

@@ -1,3 +1,5 @@
+import { ownerTransition } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
@@ -14,15 +16,6 @@ export class ReservationStale extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("ReservationStale", { reservation: Schema.Int }) {}
 
-export const OwnerMarks = Schema.Struct({
-	purged: Schema.Boolean,
-	staged: Schema.Int,
-	released: Schema.Int,
-})
-export type OwnerMarks = typeof OwnerMarks.Type
-
-export const UNMARKED: OwnerMarks = { purged: false, staged: 0, released: 0 }
-
 export interface ByteOwnerPorts<E, R> {
 	readonly marks: Effect.Effect<OwnerMarks, E, R>
 	readonly saveMarks: (marks: OwnerMarks) => Effect.Effect<void, E, R>
@@ -38,18 +31,15 @@ export const makeByteOwner = <E, R>(ports: ByteOwnerPorts<E, R>) => {
 	const admit = (reservation: number | null) =>
 		lock.withPermit(
 			Effect.gen(function* () {
-				const marks = yield* ports.marks
-				if (marks.purged) {
+				const decision = ownerTransition(yield* ports.marks, "stage", reservation)
+				if (decision.action === "purged") {
 					return yield* new BytesPurged()
 				}
-				if (reservation === null) {
-					return
+				if (decision.action === "stale") {
+					return yield* new ReservationStale({ reservation: decision.reservation })
 				}
-				if (reservation <= marks.released || reservation < marks.staged) {
-					return yield* new ReservationStale({ reservation })
-				}
-				if (reservation > marks.staged) {
-					yield* ports.saveMarks({ ...marks, staged: reservation })
+				if (decision.action === "stage") {
+					yield* ports.saveMarks(decision.marks)
 				}
 			}),
 		)
@@ -63,22 +53,22 @@ export const makeByteOwner = <E, R>(ports: ByteOwnerPorts<E, R>) => {
 	const release = (reservation: number) =>
 		exclusive(
 			Effect.gen(function* () {
-				const marks = yield* ports.marks
-				if (marks.purged || reservation <= marks.released) {
+				const decision = ownerTransition(yield* ports.marks, "release", reservation)
+				if (decision.action === "keep") {
 					return
 				}
-				if (marks.staged <= reservation) {
+				if (decision.action === "removeThenRelease") {
 					yield* ports.removeAll
 				}
-				yield* ports.saveMarks({ ...marks, released: reservation })
+				yield* ports.saveMarks(decision.marks)
 			}),
 		)
 
 	const purge = exclusive(
 		Effect.gen(function* () {
-			const marks = yield* ports.marks
-			if (!marks.purged) {
-				yield* ports.saveMarks({ ...marks, purged: true })
+			const decision = ownerTransition(yield* ports.marks, "purge", null)
+			if (decision.action === "markThenRemove") {
+				yield* ports.saveMarks(decision.marks)
 			}
 			yield* ports.removeAll
 		}),

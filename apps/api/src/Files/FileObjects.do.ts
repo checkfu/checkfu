@@ -1,3 +1,5 @@
+import { initialOwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
+import type { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
@@ -7,8 +9,7 @@ import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { ArtifactBucket, deleteUntilEmpty } from "../Artifacts/ArtifactStore.ts"
 import { placedStub, placement, storageScope, storageScopeOf } from "../Placement.ts"
-import { BytesPurged, ReservationStale, UNMARKED, makeByteOwner } from "./ByteOwner.ts"
-import type { OwnerMarks } from "./ByteOwner.ts"
+import { BytesPurged, ReservationStale, makeByteOwner } from "./ByteOwner.ts"
 import {
 	FileSizeMismatch,
 	FileStore,
@@ -105,11 +106,12 @@ export const FileObjectsLive = FileObjects.make(
 		({ state, bucket, scope }) => {
 			const ownerOf = (fileId: string) =>
 				makeByteOwner({
-					marks: state.storage
-						.get<OwnerMarks>(MARKS_KEY)
-						.pipe(
-							Effect.mapBoth({ onSuccess: (marks) => marks ?? UNMARKED, onFailure: storeError }),
-						),
+					marks: state.storage.get<OwnerMarks>(MARKS_KEY).pipe(
+						Effect.mapBoth({
+							onSuccess: (marks) => marks ?? initialOwnerMarks,
+							onFailure: storeError,
+						}),
+					),
 					saveMarks: (marks) =>
 						state.storage.put(MARKS_KEY, marks).pipe(Effect.mapError(storeError)),
 					removeAll: deleteUntilEmpty(

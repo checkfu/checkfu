@@ -10,8 +10,7 @@ import { ApiCalls } from "../../src/Api.ts"
 import { DOCUMENT_TABLES } from "../../src/ArtifactData/ArtifactDocuments.ts"
 import { CUSTODY_TABLES } from "../../src/Connection/SecretCustody.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
-import { ArtifactMarks } from "../../src/Artifacts/ArtifactOwnership.ts"
-import { OwnerMarks } from "../../src/Files/ByteOwner.ts"
+import { OwnerMarks } from "@checkfu/domain/Bytes/ByteOwnership"
 import { ArtifactLinkClaims } from "../../src/Content/ArtifactLink.ts"
 import { Vaults } from "@checkfu/domain/Vaults.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
@@ -415,7 +414,7 @@ const ARTIFACT_OBJECTS: ReadonlyArray<PersistedShape> = [
 ]
 
 const ARTIFACT_MARKS: ReadonlyArray<PersistedShape> = [
-	{ id: "artifact-marks:ArtifactObjects/marks", kind: "artifact-marks", schema: ArtifactMarks },
+	{ id: "artifact-marks:ArtifactObjects/marks", kind: "artifact-marks", schema: OwnerMarks },
 	{ id: "artifact-marks:FileObjects/marks", kind: "artifact-marks", schema: OwnerMarks },
 ]
 
