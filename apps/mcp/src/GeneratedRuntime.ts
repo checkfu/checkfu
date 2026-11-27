@@ -69,6 +69,18 @@ const Envelope = Schema.Struct({
 	idempotency_key: Schema.optionalKey(Schema.String),
 })
 
+const MAX_TOOL_RESULT_CHARACTERS = 200_000
+
+const hasLimitQuery = Schema.is(
+	Schema.Struct({
+		properties: Schema.Struct({
+			query: Schema.Struct({
+				properties: Schema.Struct({ limit: Schema.Record(Schema.String, Schema.Unknown) }),
+			}),
+		}),
+	}),
+)
+
 const decodeEnvelope = Schema.decodeUnknownEffect(Envelope)
 
 const decodeJsonObject = Schema.decodeUnknownOption(
@@ -102,6 +114,11 @@ const callerCredentials = Effect.map(
 
 export const makeToolHandler = (client: HttpClient.HttpClient, tool: GeneratedToolDescriptor) => {
 	const decodePublished = Schema.decodeUnknownEffect(importInputSchema(tool.inputSchema))
+	const sizeHint = !tool.readOnly
+		? "The API accepted the request. Read the resource to confirm the result before retrying."
+		: hasLimitQuery(tool.inputSchema)
+			? "Call again with a smaller limit."
+			: "Use a narrower request."
 	return (input: unknown): Effect.Effect<Schema.JsonObject, Schema.Json> =>
 		Effect.gen(function* () {
 			const args = yield* decodePublished(input, { onExcessProperty: "error" }).pipe(
@@ -126,11 +143,18 @@ export const makeToolHandler = (client: HttpClient.HttpClient, tool: GeneratedTo
 				args.body === undefined ? (self) => self : HttpClientRequest.bodyJsonUnsafe(args.body),
 			)
 			const response = yield* Effect.mapError(client.execute(request), () => noUsableReply(tool))
-			const body = yield* response.text.pipe(
-				Effect.map((text) => Option.getOrUndefined(decodeJsonObject(text))),
-				Effect.orElseSucceed(() => undefined),
-			)
-			if (body !== undefined && response.status >= 200 && response.status < 300) {
+			const text = yield* response.text.pipe(Effect.orElseSucceed(() => undefined))
+			const successful = response.status >= 200 && response.status < 300
+			if (successful && text !== undefined && text.length > MAX_TOOL_RESULT_CHARACTERS) {
+				return yield* Effect.fail(
+					toolError(
+						tool.readOnly ? "invalid_request_error" : "response_too_large",
+						`The result is ${text.length} characters, more than the ${MAX_TOOL_RESULT_CHARACTERS} a tool result can carry. ${sizeHint}`,
+					),
+				)
+			}
+			const body = text === undefined ? undefined : Option.getOrUndefined(decodeJsonObject(text))
+			if (successful && body !== undefined) {
 				return body
 			}
 			return yield* Effect.fail(isApiError(body) ? body : noUsableReply(tool))

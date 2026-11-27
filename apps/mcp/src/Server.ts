@@ -31,6 +31,7 @@ const INSTRUCTIONS = [
 	"Create an agent and an environment, then create a session that references both.",
 	"Send a user.message event to start or resume work and list session events to read the agent's responses.",
 	"Use an automation to run an agent on a cron schedule. Each tool calls a Checkfu API operation and returns its JSON response.",
+	"A result with pending: true means the change is recorded and may still be settling. Read the resource again to confirm the change before relying on it.",
 ].join(" ")
 
 const toTool = (descriptor: GeneratedToolDescriptor) =>

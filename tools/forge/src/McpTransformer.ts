@@ -8,7 +8,9 @@ import * as Schema from "effect/Schema"
 import { buildSurfaceCatalog, isJsonArray } from "./SurfaceCatalog.ts"
 import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
-const PLAIN_KEYS: ReadonlySet<string> = new Set(["type", "pattern", "description"])
+const DECIMAL_KEYS: ReadonlySet<string> = new Set(["type", "pattern", "description"])
+const BOOLEAN_KEYS: ReadonlySet<string> = new Set(["type", "enum", "description"])
+const LIST_LIMIT_PATTERN = String.raw`^(?:[1-9]\d?|100)$`
 
 const POSITIVE_DECIMAL = /^\^\[1-9\]\\d\{0,(\d{1,2})\}\$$/u
 
@@ -176,6 +178,45 @@ interface Parameter {
 	readonly schema: JsonRecord
 }
 
+const integerParameter = (parameter: Parameter): Parameter | undefined => {
+	const { type, pattern, description } = parameter.schema
+	if (type !== "string" || !Object.keys(parameter.schema).every((key) => DECIMAL_KEYS.has(key))) {
+		return undefined
+	}
+	const bounds =
+		parameter.in === "query" && parameter.name === "limit" && pattern === LIST_LIMIT_PATTERN
+			? { minimum: 1, maximum: 100 }
+			: positiveDecimal(pattern)
+	return bounds === undefined
+		? undefined
+		: {
+				...parameter,
+				schema: {
+					type: "integer",
+					...bounds,
+					...(description === undefined ? {} : { description }),
+				},
+			}
+}
+
+const queryParameter = (parameter: Parameter): Parameter => {
+	const { type, enum: values, description } = parameter.schema
+	if (
+		type === "string" &&
+		isJsonArray(values) &&
+		values.length === 2 &&
+		values.includes("true") &&
+		values.includes("false") &&
+		Object.keys(parameter.schema).every((key) => BOOLEAN_KEYS.has(key))
+	) {
+		return {
+			...parameter,
+			schema: { type: "boolean", ...(description === undefined ? {} : { description }) },
+		}
+	}
+	return integerParameter(parameter) ?? parameter
+}
+
 const readParameters = (
 	pathItem: JsonRecord,
 	operation: JsonRecord,
@@ -308,19 +349,9 @@ const projectOperation = (
 			pathParameters.map((parameter) => {
 				const own = parameter.schema["pattern"]
 				const clauses = parameter.schema["allOf"]
-				const integer = Object.keys(parameter.schema).every((key) => PLAIN_KEYS.has(key))
-					? positiveDecimal(own)
-					: undefined
+				const integer = integerParameter(parameter)
 				if (integer !== undefined) {
-					const description = parameter.schema["description"]
-					return {
-						...parameter,
-						schema: {
-							type: "integer",
-							...integer,
-							...(description === undefined ? {} : { description }),
-						},
-					}
+					return integer
 				}
 				return {
 					...parameter,
@@ -337,7 +368,7 @@ const projectOperation = (
 		required.push("path")
 	}
 	if (queryParameters.length > 0) {
-		properties["query"] = parameterObject(queryParameters)
+		properties["query"] = parameterObject(queryParameters.map(queryParameter))
 		if (queryParameters.some((parameter) => parameter.required)) {
 			required.push("query")
 		}

@@ -398,6 +398,53 @@ describe("MCP tool projection", () => {
 		})
 	})
 
+	it("publishes bounded numeric and boolean queries while retaining string filters", () => {
+		const tool = project(
+			withOperation("/v1/agents", "get", {
+				...searchAgents,
+				"x-checkfu-mcp": { name: "agents_searchAgents" },
+				parameters: [
+					{
+						name: "limit",
+						in: "query",
+						schema: { type: "string", pattern: String.raw`^(?:[1-9]\d?|100)$` },
+					},
+					{
+						name: "version",
+						in: "query",
+						schema: { type: "string", pattern: String.raw`^[1-9]\d{0,2}$` },
+					},
+					{
+						name: "include_archived",
+						in: "query",
+						description: "Include archived results",
+						schema: { type: "string", enum: ["false", "true"] },
+					},
+					{ name: "name", in: "query", schema: { type: "string" } },
+					{
+						name: "page",
+						in: "query",
+						schema: { type: "string", pattern: String.raw`^\d{1,15}$` },
+					},
+				],
+			}),
+		).find((candidate) => candidate.name === "agents_searchAgents")
+		expect(tool?.inputSchema["properties"]).toEqual({
+			query: {
+				type: "object",
+				properties: {
+					limit: { type: "integer", minimum: 1, maximum: 100 },
+					version: { type: "integer", minimum: 1, maximum: 999 },
+					include_archived: { type: "boolean", description: "Include archived results" },
+					name: { type: "string" },
+					page: { type: "string", pattern: String.raw`^\d{1,15}$` },
+				},
+				required: [],
+				additionalProperties: false,
+			},
+		})
+	})
+
 	it("refuses a request body on GET", () => {
 		expect(() =>
 			project(

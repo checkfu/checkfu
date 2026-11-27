@@ -34,8 +34,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						version: {
-							type: "string",
-							pattern: "^[1-9]\\d{0,14}$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999999999,
 							description:
 								"Expected version. The archive is refused if the resource changed or a live automation uses it.",
 						},
@@ -285,8 +286,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						version: {
-							type: "string",
-							pattern: "^[1-9]\\d{0,14}$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999999999,
 							description: "Agent version. Omit to retrieve the latest version.",
 						},
 					},
@@ -320,8 +322,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -330,8 +333,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 					},
@@ -378,8 +380,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque cursor returned by the previous page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 					},
@@ -1024,8 +1027,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -1201,8 +1205,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						revision: {
-							type: "string",
-							pattern: "^[1-9]\\d{0,14}$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999999999,
 							description: "Expected revision. The archive is refused if the automation changed.",
 						},
 					},
@@ -1454,8 +1459,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -1464,8 +1470,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 						agent_id: {
@@ -1519,8 +1524,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of events to return (1-100)",
 						},
 						order: {
@@ -1830,8 +1836,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					type: "object",
 					properties: {
 						version: {
-							type: "string",
-							pattern: "^[1-9]\\d{0,14}$",
+							type: "integer",
+							minimum: 1,
+							maximum: 999999999999999,
 							description:
 								"Expected version. The archive is refused if the resource changed or a live automation uses it.",
 						},
@@ -2032,8 +2039,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -2042,8 +2050,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 					},
@@ -2255,8 +2262,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -2621,8 +2629,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -2631,8 +2640,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 					},
@@ -3244,8 +3252,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of events to return (1-100)",
 						},
 						types: {
@@ -3343,8 +3352,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -3353,8 +3363,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 						agent_id: {
@@ -3600,7 +3609,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "vaults_archiveCredential",
 		title: "Archive a credential",
 		description:
-			"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
+			"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the credential again until archived_at is set and custody is erased.",
 		method: "POST",
 		path: "/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
 		readOnly: false,
@@ -3637,7 +3646,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "vaults_archiveVault",
 		title: "Archive a vault",
 		description:
-			"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
+			"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0.",
 		method: "POST",
 		path: "/v1/vaults/{vault_id}/archive",
 		readOnly: false,
@@ -3871,8 +3880,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -3881,8 +3891,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 					},
@@ -3916,8 +3925,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
@@ -3926,8 +3936,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Sort order by creation: asc (oldest first, the default) or desc",
 						},
 						include_archived: {
-							type: "string",
-							enum: ["true", "false"],
+							type: "boolean",
 							description: "Include archived results: true or false (default false)",
 						},
 					},
@@ -4215,8 +4224,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 					},
@@ -4250,8 +4260,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
-							type: "string",
-							pattern: "^(?:[1-9]\\d?|100)$",
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
 							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {

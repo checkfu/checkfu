@@ -3282,7 +3282,7 @@ const vaultsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
+		"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the vault again until archived_at is set and every custody count is 0.",
 	),
 )
 
@@ -3530,7 +3530,7 @@ const vaultsCredentialsArchiveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(vaultsCredentialsArchiveCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
+		"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Read the credential again until archived_at is set and custody is erased.",
 	),
 )
 

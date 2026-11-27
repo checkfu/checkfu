@@ -383,7 +383,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 			})
 			const events = yield* callOk(client, "sessions_listEvents", {
 				path,
-				query: { limit: "50", order: "asc" },
+				query: { limit: 50, order: "asc" },
 			}).pipe(
 				Effect.filterOrFail(
 					(page) => JSON.stringify(page["data"]).includes("Echo: Hello Checkfu!"),
@@ -391,6 +391,13 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				),
 				Effect.retry(Schedule.max([Schedule.spaced("20 millis"), Schedule.recurs(200)])),
 			)
+			expect(new URL(server.apiRequests.at(-1)?.url ?? MCP_ORIGIN).searchParams.get("limit")).toBe(
+				"50",
+			)
+			yield* callOk(client, "agents_listAgents", { query: { include_archived: true } })
+			expect(
+				new URL(server.apiRequests.at(-1)?.url ?? MCP_ORIGIN).searchParams.get("include_archived"),
+			).toBe("true")
 			expect(events["next_page"]).toBeNull()
 			const filtered = yield* callOk(client, "sessions_listEvents", {
 				path,
@@ -464,7 +471,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				["agents_getAgent", { path: { agent_id: "a" }, body: {} }, '["body"]'],
 				[
 					"agents_getAgent",
-					{ path: { agent_id: "a" }, query: { version: "0" } },
+					{ path: { agent_id: "a" }, query: { version: 0 } },
 					'["query"]["version"]',
 				],
 				[
@@ -473,8 +480,13 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					'["idempotency_key"]',
 				],
 				["sessions_listEvents", { path: session, query: { limt: "5" } }, '["query"]["limt"]'],
-				["sessions_listEvents", { path: session, query: { limit: 50 } }, '["query"]["limit"]'],
-				["sessions_listEvents", { path: session, query: { limit: "500" } }, '["query"]["limit"]'],
+				["sessions_listEvents", { path: session, query: { limit: "50" } }, '["query"]["limit"]'],
+				["sessions_listEvents", { path: session, query: { limit: 101 } }, '["query"]["limit"]'],
+				[
+					"agents_listAgents",
+					{ query: { include_archived: "true" } },
+					'["query"]["include_archived"]',
+				],
 				["sessions_listEvents", { path: session, query: { order: "up" } }, '["query"]["order"]'],
 			]
 			for (const [name, args, location] of cases) {
@@ -513,8 +525,8 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					agents_archiveAgent: agent,
 					agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
 					agents_getAgent: agent,
-					agents_listAgents: { query: { limit: "5", include_archived: "true" } },
-					agents_listVersions: { ...agent, query: { limit: "2" } },
+					agents_listAgents: { query: { limit: 5, include_archived: true } },
+					agents_listVersions: { ...agent, query: { limit: 2 } },
 					agents_updateAgent: { ...agent, body: { version: 1, model } },
 					artifacts_createArtifact: { body: { name: "Report", files } },
 					artifacts_createArtifactLink: { ...artifactVersion, body: { expires_in: 600 } },
@@ -523,7 +535,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					artifacts_getArtifact: artifact,
 					artifacts_getArtifactFile: { ...artifactVersion, query: { file: "index.html" } },
 					artifacts_getArtifactVersion: artifactVersion,
-					artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
+					artifacts_listArtifacts: { query: { limit: 5, order: "desc" } },
 					artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
 					artifacts_unpublishArtifact: artifact,
 					automationRuns_retrieve: { path: { automation_run_id: "arun_auto_1_1" } },
@@ -542,8 +554,8 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					},
 					automations_getAutomation: automation,
 					automations_getRun: { path: { automation_id: "auto_1", run: 1 } },
-					automations_listAutomations: { query: { limit: "5" } },
-					automations_listRuns: { ...automation, query: { limit: "5" } },
+					automations_listAutomations: { query: { limit: 5 } },
+					automations_listRuns: { ...automation, query: { limit: 5 } },
 					automations_pauseAutomation: automation,
 					automations_runAutomation: automation,
 					automations_unpauseAutomation: automation,
@@ -556,7 +568,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					environments_updateEnvironment: { ...environment, body: { version: 1, config } },
 					files_deleteFile: file,
 					files_getFile: file,
-					files_listFiles: { query: { limit: "5", order: "desc" } },
+					files_listFiles: { query: { limit: 5, order: "desc" } },
 					memoryStores_archiveMemoryStore: store,
 					memoryStores_createMemory: {
 						...store,
@@ -568,7 +580,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					memoryStores_getMemory: memory,
 					memoryStores_getMemoryStore: store,
 					memoryStores_listMemories: { ...store, query: { path_prefix: "/notes/" } },
-					memoryStores_listMemoryStores: { query: { include_archived: "true" } },
+					memoryStores_listMemoryStores: { query: { include_archived: true } },
 					memoryStores_updateMemory: {
 						...memory,
 						body: {
@@ -595,7 +607,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					sessions_getOutputs: session,
 					sessions_getResource: { path: { session_id: "sess_1", resource_id: "sesrsc_1" } },
 					sessions_getSession: session,
-					sessions_listEvents: { ...session, query: { limit: "5" } },
+					sessions_listEvents: { ...session, query: { limit: 5 } },
 					sessions_listResources: session,
 					sessions_listSessions: { query: { agent_id: "agent_1", page: "3:sess_1" } },
 					sessions_sendSessionEvents: {
@@ -612,7 +624,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					vaults_getCredential: credential,
 					vaults_getVault: vault,
 					vaults_listCredentials: vault,
-					vaults_listVaults: { query: { limit: "5", include_archived: "true" } },
+					vaults_listVaults: { query: { limit: 5, include_archived: true } },
 					vaults_updateVault: { ...vault, body: { display_name: "Team" } },
 					webhooks_createWebhook: {
 						body: { url: "https://hooks.example.com/events", event_types: ["*"] },
@@ -620,8 +632,8 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					webhooks_deleteWebhook: webhook,
 					webhooks_getDelivery: webhookDelivery,
 					webhooks_getWebhook: webhook,
-					webhooks_listDeliveries: { ...webhook, query: { limit: "5" } },
-					webhooks_listWebhooks: { query: { limit: "5", order: "desc" } },
+					webhooks_listDeliveries: { ...webhook, query: { limit: 5 } },
+					webhooks_listWebhooks: { query: { limit: 5, order: "desc" } },
 					webhooks_pauseWebhook: webhook,
 					webhooks_redeliver: webhookDelivery,
 					webhooks_resumeWebhook: webhook,
@@ -1120,6 +1132,59 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				expect(read.slice(0, 2)).toEqual([label, true])
 				expect(read[2]).toContain("Retrying is safe")
 			}
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("rejects oversized results with a hint tailored to the tool", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const headers = { authorization: `Bearer ${TEST_API_KEY}` }
+			const result = (name: string, args: Argument, payload: string, status = 200) =>
+				server
+					.fetch(
+						callToolRequest(name, args, headers),
+						afterCredentialCheck(() =>
+							Promise.resolve(Response.json({ data: [payload] }, { status })),
+						),
+					)
+					.pipe(Effect.flatMap((response) => Effect.promise(() => response.text())))
+
+			const large = "x".repeat(250_000)
+			const list = yield* result("sessions_listEvents", { path: { session_id: "sess_1" } }, large)
+			expect(list).toContain('"isError":true')
+			expect(list).toContain("invalid_request_error")
+			expect(list).toContain("Call again with a smaller limit.")
+			expect(list).not.toContain(large)
+
+			const narrow = yield* result(
+				"environments_getEnvironment",
+				{ path: { environment_id: "env_1" } },
+				large,
+			)
+			expect(narrow).toContain('"isError":true')
+			expect(narrow).toContain("Use a narrower request.")
+
+			const write = yield* result(
+				"environments_createEnvironment",
+				{ body: { name: "default" } },
+				large,
+				201,
+			)
+			expect(write).toContain('"isError":true')
+			expect(write).toContain("response_too_large")
+			expect(write).toContain(
+				"The API accepted the request. Read the resource to confirm the result before retrying.",
+			)
+			expect(write).not.toContain("Use a narrower request.")
+
+			const small = "y".repeat(150_000)
+			const success = yield* result(
+				"sessions_listEvents",
+				{ path: { session_id: "sess_1" } },
+				small,
+			)
+			expect(success).not.toContain('"isError":true')
+			expect(success).toContain(small)
 		}).pipe(Effect.scoped),
 	)
 
