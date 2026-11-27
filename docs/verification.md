@@ -33,7 +33,11 @@ Aggregate and cross-aggregate transition rules state the invariants independentl
 
 Shared decisions appear in both the `Checkfu` and `Sessions` verifiers. When their rules change, run both model verifiers, regenerate both source locks, and align both standing declarations with the required evidence. Updating only the unified model leaves the Sessions proof and replay gates incomplete.
 
-`apps/api/test/persisted/Persisted.lock.json` records release samples and schema fingerprints. The maintained compatibility test requires current readers to accept the recorded JSON; changed fingerprints require review, and incompatible changes need working migrations. CI and production deployment run `bun run persisted:check` against the committed baseline. `bun run persisted:cut` appends a baseline while preserving the earlier history.
+`apps/api/test/persisted/Persisted.lock.json` records sample JSON and schema fingerprints for persisted shapes. CI and production deployment run `bun run persisted:check` against the committed baseline.
+
+Before the first deployment whose data will be kept, keep one baseline. If a storage change makes the earlier samples unreadable, run `bun run persisted:cut --replace <label>` and commit the new baseline with the change.
+
+Once a deployment's data will be kept, remove `--replace` and append baselines with `bun run persisted:cut`. Current readers must accept every recorded sample. Changed fingerprints require review, and incompatible changes need a working migration.
 
 Z3 transition proofs, bounded exploration, replay and runtime tests provide different evidence. Keep their distinctions explicit. A successful bounded check must not be relabelled an unbounded proof. Do not relax requirements, exploration budgets, standing locks or assertions to make a refactor pass.
 

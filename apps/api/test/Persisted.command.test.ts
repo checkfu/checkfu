@@ -103,6 +103,57 @@ describe("persisted command", () => {
 		}),
 	)
 
+	it.effect("replaces every baseline with one fresh one", () =>
+		Effect.gen(function* () {
+			const lock = makeLockFile()
+			expect(Exit.isSuccess(yield* lock.run("cut", "first"))).toBe(true)
+			const previous = lock.read()
+			const [baseline] = previous.baselines
+			const [shape] = Object.keys(baseline?.schemas ?? {})
+			if (baseline === undefined || shape === undefined) {
+				return expect.unreachable("the cut wrote no shapes")
+			}
+			lock.write({
+				...previous,
+				baselines: [
+					{ ...baseline, schemas: { ...baseline.schemas, [shape]: "0".repeat(64) } },
+					{ ...baseline, label: "second" },
+				],
+			})
+			expect(Exit.isFailure(yield* lock.run("cut", "fresh"))).toBe(true)
+			expect(lock.writes()).toBe(1)
+
+			expect(Exit.isSuccess(yield* lock.run("cut", "--replace", "fresh"))).toBe(true)
+			expect(lock.read().baselines.map(({ label }) => label)).toEqual(["fresh"])
+			expect(Exit.isSuccess(yield* lock.run("cut", "--check"))).toBe(true)
+			expect(lock.writes()).toBe(2)
+		}),
+	)
+
+	it.effect("replace clears retired and reviewed entries", () =>
+		Effect.gen(function* () {
+			const lock = makeLockFile({
+				...EMPTY,
+				retired: { "event:retired": "This shape was removed." },
+				reviewed: { "event:reviewed": { schema: "0".repeat(64), reason: "Checked in a test." } },
+			})
+			expect(Exit.isSuccess(yield* lock.run("cut", "--replace", "only"))).toBe(true)
+			expect(lock.read().retired).toEqual({})
+			expect(lock.read().reviewed).toEqual({})
+		}),
+	)
+
+	it.effect("refuses --replace together with --check and writes nothing", () =>
+		Effect.gen(function* () {
+			const lock = makeLockFile()
+			expect(Exit.isFailure(yield* lock.run("cut", "--replace", "--check"))).toBe(true)
+			expect(printed(yield* TestConsole.errorLines)).toContain(
+				"--replace cannot be combined with --check.",
+			)
+			expect(lock.writes()).toBe(0)
+		}),
+	)
+
 	it.effect(
 		"prints a refusal once and leaves an unexpected failure for the runtime to report",
 		() =>

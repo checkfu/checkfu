@@ -29,6 +29,12 @@ const cut = Command.make(
 			Flag.withDefault(false),
 			Flag.withDescription("Report whether a new baseline is needed without writing one"),
 		),
+		replace: Flag.Boolean("replace").pipe(
+			Flag.withDefault(false),
+			Flag.withDescription(
+				"Discard every existing baseline and cut one fresh one. Only before the first deployment that is meant to be kept.",
+			),
+		),
 		label: Argument.String("label").pipe(
 			Argument.withDescription("Name of the baseline (defaults to the current UTC time)"),
 			Argument.optional,
@@ -51,8 +57,21 @@ const cut = Command.make(
 					message: `The persisted-shape registry is broken:\n${bullets(registry)}`,
 				})
 			}
+			if (input.replace && input.check) {
+				return yield* new PersistedLockError({
+					message: "--replace cannot be combined with --check.",
+				})
+			}
 
 			const lock = yield* readLockFile
+			if (input.replace) {
+				const baseline = yield* cutBaseline(label, nowIso)
+				yield* writeLockFile({ ...lock, retired: {}, reviewed: {}, baselines: [baseline] })
+				yield* Console.log(
+					`Replaced ${lock.baselines.length} baseline(s) with "${label}": ${Object.keys(baseline.shapes).length} persisted shapes locked.`,
+				)
+				return
+			}
 			const blockers = yield* shipBlockers(lock)
 			const latest = lock.baselines.at(-1)
 			if (latest !== undefined && blockers.length === 0) {
@@ -75,7 +94,7 @@ const cut = Command.make(
 
 			if (lock.baselines.some((existing) => existing.label === label)) {
 				return yield* new PersistedLockError({
-					message: `A baseline labelled "${label}" already exists. Baselines are never rewritten.`,
+					message: `A baseline labelled "${label}" already exists. Baselines are not rewritten once a deployment is kept. Before that, use --replace.`,
 				})
 			}
 
