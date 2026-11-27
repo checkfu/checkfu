@@ -24,6 +24,7 @@ import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { decodeMcpServerCredentials } from "../Mcp/McpServers.ts"
 import { Session } from "./Session.aggregate.ts"
+import { addModelUsage } from "./SessionTypes.ts"
 
 export { SessionSnapshot }
 
@@ -119,10 +120,7 @@ export class SessionView extends Domain.View("SessionView", {
 				? null
 				: {
 						...state,
-						usage: {
-							input_tokens: state.usage.input_tokens + e.model_usage.input_tokens,
-							output_tokens: state.usage.output_tokens + e.model_usage.output_tokens,
-						},
+						usage: addModelUsage(state.usage, e.model_usage),
 						updated_at: ctx.at,
 					},
 		"session.status_idle": (state, _e, ctx) =>

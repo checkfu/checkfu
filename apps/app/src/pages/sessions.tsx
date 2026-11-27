@@ -395,7 +395,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 						>
 							Environment
 						</Link>
-						{` · ${session.usage.input_tokens + session.usage.output_tokens} tokens`}
+						{` · ${session.usage.input_tokens + (session.usage.cache_read_input_tokens ?? 0) + (session.usage.cache_creation_input_tokens ?? 0) + session.usage.output_tokens} tokens`}
 					</>
 				}
 				actions={

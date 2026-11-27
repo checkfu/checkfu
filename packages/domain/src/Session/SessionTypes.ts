@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 
 export {
+	CacheCreationUsage,
 	DenyMessage,
 	ErrorMessage,
 	EvaluatedPermission,
@@ -35,6 +36,8 @@ export {
 	TextBlocks,
 	ThinkingText,
 	ToolConfirmationResult,
+	addModelUsage,
+	totalModelTokens,
 } from "@checkfu/sdk/Schemas"
 
 export const MAX_TOOL_INPUT_JSON_LENGTH = 16_384

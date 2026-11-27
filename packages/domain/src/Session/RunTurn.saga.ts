@@ -122,6 +122,15 @@ export const RunTurnLive = RunTurn.toLayer(
 							truncated: reply.truncated,
 							input_tokens: reply.input_tokens,
 							output_tokens: reply.output_tokens,
+							...(reply.cache_read_input_tokens === undefined
+								? {}
+								: { cache_read_input_tokens: reply.cache_read_input_tokens }),
+							...(reply.cache_creation_input_tokens === undefined
+								? {}
+								: { cache_creation_input_tokens: reply.cache_creation_input_tokens }),
+							...(reply.cache_creation === undefined
+								? {}
+								: { cache_creation: reply.cache_creation }),
 							stop_reason: reply.stop_reason,
 						})),
 						Effect.catchTag(
@@ -264,6 +273,15 @@ export const RunTurnLive = RunTurn.toLayer(
 							model_usage: {
 								input_tokens: generated.input_tokens,
 								output_tokens: generated.output_tokens,
+								...(generated.cache_read_input_tokens === undefined
+									? {}
+									: { cache_read_input_tokens: generated.cache_read_input_tokens }),
+								...(generated.cache_creation_input_tokens === undefined
+									? {}
+									: { cache_creation_input_tokens: generated.cache_creation_input_tokens }),
+								...(generated.cache_creation === undefined
+									? {}
+									: { cache_creation: generated.cache_creation }),
 							},
 							stop_reason: generated.stop_reason,
 						}),

@@ -1047,7 +1047,19 @@ describe("turn engine", () => {
 			const second = await Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "Second")))
 			expect(summaries).toBe(1)
 			expect(attempts).toBe(2)
-			expect(second).toMatchObject({ ok: true, reply: { input_tokens: 29, output_tokens: 6 } })
+			expect(second).toMatchObject({
+				ok: true,
+				reply: {
+					input_tokens: 22,
+					output_tokens: 6,
+					cache_read_input_tokens: 5,
+					cache_creation_input_tokens: 2,
+					cache_creation: {
+						ephemeral_5m_input_tokens: 2,
+						ephemeral_1h_input_tokens: 0,
+					},
+				},
+			})
 			expect(
 				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(3, "Third"))),
 			).toMatchObject({
@@ -1061,6 +1073,71 @@ describe("turn engine", () => {
 				first,
 			)
 			expect(attempts).toBe(2)
+		} finally {
+			await backend.close()
+		}
+	})
+
+	it("tracks disjoint prompt-cache read, 5m write, and 1h write tokens across turns", async () => {
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				if (prompt === "First") {
+					const reply = makeAssistantReply(model, null, "Cached write", 100, 40)
+					return {
+						...reply,
+						usage: {
+							...reply.usage,
+							cacheRead: 250,
+							cacheWrite: 80,
+							cacheWrite1h: 30,
+							totalTokens: 470,
+						},
+					}
+				}
+				const reply = makeAssistantReply(model, null, "Cached hit", 15, 25)
+				return {
+					...reply,
+					usage: {
+						...reply.usage,
+						cacheRead: 500,
+						cacheWrite: 0,
+						totalTokens: 540,
+					},
+				}
+			}),
+		)
+		try {
+			const first = await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "First")))
+			expect(first).toMatchObject({
+				ok: true,
+				reply: {
+					input_tokens: 100,
+					output_tokens: 40,
+					cache_read_input_tokens: 250,
+					cache_creation_input_tokens: 80,
+					cache_creation: {
+						ephemeral_5m_input_tokens: 50,
+						ephemeral_1h_input_tokens: 30,
+					},
+				},
+			})
+			const second = await Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "Second")))
+			expect(second).toMatchObject({
+				ok: true,
+				reply: {
+					input_tokens: 15,
+					output_tokens: 25,
+					cache_read_input_tokens: 500,
+				},
+			})
+			if (second.ok === true) {
+				expect(second.reply.cache_creation_input_tokens).toBeUndefined()
+				expect(second.reply.cache_creation).toBeUndefined()
+			}
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "First")))).toEqual(
+				first,
+			)
 		} finally {
 			await backend.close()
 		}

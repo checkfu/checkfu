@@ -29,6 +29,10 @@ export const ActiveUsageState = Schema.Struct({
 	turn: NonNegativeInt,
 	input_tokens: NonNegativeInt,
 	output_tokens: NonNegativeInt,
+	cache_read_input_tokens: NonNegativeInt,
+	cache_creation_input_tokens: NonNegativeInt,
+	cache_creation_5m_input_tokens: NonNegativeInt,
+	cache_creation_1h_input_tokens: NonNegativeInt,
 })
 export type ActiveUsageState = typeof ActiveUsageState.Type
 
@@ -46,6 +50,10 @@ export const ActiveUsage = defineDoc<ActiveUsageState>({
 		turn: 0,
 		input_tokens: 0,
 		output_tokens: 0,
+		cache_read_input_tokens: 0,
+		cache_creation_input_tokens: 0,
+		cache_creation_5m_input_tokens: 0,
+		cache_creation_1h_input_tokens: 0,
 	}),
 })
 

@@ -324,11 +324,62 @@ export const SessionErrorBody = Schema.Struct({
 })
 export type SessionErrorBody = typeof SessionErrorBody.Type
 
+export const CacheCreationUsage = Schema.Struct({
+	ephemeral_5m_input_tokens: NonNegativeInt,
+	ephemeral_1h_input_tokens: NonNegativeInt,
+})
+export type CacheCreationUsage = typeof CacheCreationUsage.Type
+
 export const ModelUsage = Schema.Struct({
 	input_tokens: NonNegativeInt,
 	output_tokens: NonNegativeInt,
+	cache_read_input_tokens: Schema.optionalKey(NonNegativeInt),
+	cache_creation_input_tokens: Schema.optionalKey(NonNegativeInt),
+	cache_creation: Schema.optionalKey(CacheCreationUsage),
 })
 export type ModelUsage = typeof ModelUsage.Type
+
+const cacheCreationCounts = (usage: ModelUsage): CacheCreationUsage => {
+	if (usage.cache_creation !== undefined) {
+		return usage.cache_creation
+	}
+	return {
+		ephemeral_5m_input_tokens: usage.cache_creation_input_tokens ?? 0,
+		ephemeral_1h_input_tokens: 0,
+	}
+}
+
+export const addModelUsage = (a: ModelUsage, b: ModelUsage): ModelUsage => {
+	const cacheRead = (a.cache_read_input_tokens ?? 0) + (b.cache_read_input_tokens ?? 0)
+	const cacheCreation = (a.cache_creation_input_tokens ?? 0) + (b.cache_creation_input_tokens ?? 0)
+	const hasBreakdown = a.cache_creation !== undefined || b.cache_creation !== undefined
+	const breakdown =
+		hasBreakdown && cacheCreation > 0
+			? (() => {
+					const left = cacheCreationCounts(a)
+					const right = cacheCreationCounts(b)
+					return {
+						ephemeral_5m_input_tokens:
+							left.ephemeral_5m_input_tokens + right.ephemeral_5m_input_tokens,
+						ephemeral_1h_input_tokens:
+							left.ephemeral_1h_input_tokens + right.ephemeral_1h_input_tokens,
+					}
+				})()
+			: undefined
+	return {
+		input_tokens: a.input_tokens + b.input_tokens,
+		output_tokens: a.output_tokens + b.output_tokens,
+		...(cacheRead > 0 ? { cache_read_input_tokens: cacheRead } : {}),
+		...(cacheCreation > 0 ? { cache_creation_input_tokens: cacheCreation } : {}),
+		...(breakdown !== undefined ? { cache_creation: breakdown } : {}),
+	}
+}
+
+export const totalModelTokens = (usage: ModelUsage): number =>
+	usage.input_tokens +
+	(usage.cache_read_input_tokens ?? 0) +
+	(usage.cache_creation_input_tokens ?? 0) +
+	usage.output_tokens
 
 export const SessionStatus = Schema.Literals(["idle", "running", "terminated"])
 export type SessionStatus = typeof SessionStatus.Type

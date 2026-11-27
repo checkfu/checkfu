@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "prerelease-artifact-lineage",
-			"cut_at": "2026-11-27T19:16:00.188Z",
+			"label": "disjoint-cache-usage",
+			"cut_at": "2026-11-27T20:00:09.816Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -32,7 +32,7 @@
 				"event:Checkfu.Session/agent.tool_result": "7e3c9288f82821b8b2a91c035086066961924a4b230aa33393db31fc6c20d2c6",
 				"event:Checkfu.Session/agent.mcp_tool_use": "3d119056282a0a8727b2c6733c71bb839f8256705e4e0cb3f08430ef3a981a91",
 				"event:Checkfu.Session/agent.mcp_tool_result": "d12183a3fb5184e4e56c84b7274c84e51b851ab416a3efcb05140531a8dc3157",
-				"event:Checkfu.Session/span.model_request_end": "4d5623dbf982bc789bc706d537b36846bd137e05ccf1d0142942d053091b01f2",
+				"event:Checkfu.Session/span.model_request_end": "0722c2196cf48f9d5a51cd842d750117f5be62e6b6306e20eb1108251dd26839",
 				"event:Checkfu.Session/turn.awaiting": "16434571a2cc01fae833c2b4e2df43252564a8918fa125102daf59ad104e3392",
 				"event:Checkfu.Session/turn.continued": "51e7a4dc5245192dccb0de41c3f261d99bc0054871f89c032bc926ca832271dd",
 				"event:Checkfu.Session/session.error": "50c5c48d3b5d01061eb64aaf029550a908c051fe1ef28e62017454a10189179a",
@@ -163,7 +163,7 @@
 				"view:Checkfu.AgentView@v3": "118a2b6d8066032e89c7e47e1fc19a8e83c089f39cd5b063d9f682491f82329f",
 				"view:Checkfu.AgentVersionByNumberView@v4": "c0116151c98a3a04e724bac074a1757ca57cdaecba68f2439156c7fb54d06bf5",
 				"view:Checkfu.EnvironmentView@v0": "0347b87a4b5a89e6dbaad3339fa6322eabc86ad4d28ba6f48721955efd8d58b7",
-				"view:Checkfu.SessionView@v6": "9c10740bc8e34bb3a295b3e013e6ce2126f162cbb3b2b92008613dc75d772701",
+				"view:Checkfu.SessionView@v6": "dff0c79e18e1323cf00a7df5a4caac8342bede966889cad429bee66f99afdecb",
 				"view:Checkfu.SessionTurnCompletion@v1": "3a099aa5798d9f987870bee4fdaa5de55fee061c26b6722198e7aea42e3f5331",
 				"view:Checkfu.TurnInput@v6": "e4b190fb3bc4618a8a24363434ddf5cb6b65ce720974f8ccbfd873878e62413a",
 				"view:Checkfu.AutomationView@v5": "1615d63f86c9d4f7a474cdefe813816bae6e39f3c92fea883c306c75fc1c4156",
@@ -267,18 +267,18 @@
 				"policy-delivery:Vaults.PublishVaultWebhookEvents/Vault": "c63218df1b0a30b459b85e90ddbb989fda7fbd4aab437590b3ae12a5bbca73c7",
 				"policy-delivery:Vaults.PublishVaultWebhookEvents/Credential": "c63218df1b0a30b459b85e90ddbb989fda7fbd4aab437590b3ae12a5bbca73c7",
 				"saga-step:Checkfu.RunTurn/start-model-request": "ff3c38d848945e78f6c08ee43fc0abab0a91803cc94c0584fd95bf0c9b614302",
-				"saga-step:Checkfu.RunTurn/run-harness-turn": "b65489dd3f0930c1de7663fe2aa2d1bda3f39309bf20e8a5867f50352890d137",
+				"saga-step:Checkfu.RunTurn/run-harness-turn": "184d6620c94c042813851355498570b07c85cfa5290adbf35e4f253d6f56ab4f",
 				"saga-step:Checkfu.RunTurn/pause-turn": "ff3c38d848945e78f6c08ee43fc0abab0a91803cc94c0584fd95bf0c9b614302",
 				"saga-step:Checkfu.RunTurn/interrupt-model-request": "ff3c38d848945e78f6c08ee43fc0abab0a91803cc94c0584fd95bf0c9b614302",
 				"saga-step:Checkfu.RunTurn/fail-model-request": "ff3c38d848945e78f6c08ee43fc0abab0a91803cc94c0584fd95bf0c9b614302",
 				"saga-step:Checkfu.RunTurn/commit-model-reply": "ff3c38d848945e78f6c08ee43fc0abab0a91803cc94c0584fd95bf0c9b614302",
-				"pi-doc:checkfu.active-usage": "e737878a5c4d84ebb12c2ab9a4e9baec8484df5bfadde44f0238453ed3ea4e18",
-				"pi-doc:checkfu.settled-usage": "9f0b6696395df86dc44eb05be591c746346ef7c905ad243d98d7a169535d5515",
+				"pi-doc:checkfu.active-usage": "750624acb0f9870650162b438813c95b91c4a6647df6599b09f85d4140dd5479",
+				"pi-doc:checkfu.settled-usage": "83c18d851c10b8c7b0262cc04373e6d8735c781cd0fe85e60cbfcb9b7fed3153",
 				"pi-doc:checkfu.session-system-context": "f45e9316164abe2de7d601016d6598c9bd2696418fbe3c860823b553f53d8550",
 				"harness-call:PiHarness.recoverTurn/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
-				"harness-call:PiHarness.recoverTurn/result": "ab844d9e009da845d9d0a1d6507dadc10077b79298a8d9db17917332a40ac07f",
+				"harness-call:PiHarness.recoverTurn/result": "cb527be74d5bd322be0d653824ac33a44cfb3ec12edf377a29027e717835cdec",
 				"harness-call:PiHarness.runTurn/args": "d287112b1279668cdf402a487e68ecc26df3934775916789408b08e6cc2ef9ab",
-				"harness-call:PiHarness.runTurn/result": "c16e1594beeaa496667d318536709cc438f34cc4140790b826073f1fbca64c43",
+				"harness-call:PiHarness.runTurn/result": "453d14aeeca627ab462af10246652c016b4a100b9e77d8157d64aac2d9146839",
 				"harness-call:PiHarness.abortTurn/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
 				"harness-call:PiHarness.abortTurn/result": "b1d9840fedc4cbfc93f17bd28b384777654f2b7afdb086f525bed2b01533da3f",
 				"harness-call:PiHarness.listOutputs/args": "42aedf4c2a50de3a59ca84dc04fdea89bd158d6447ecdd0422886a87a283944b",
@@ -286,7 +286,7 @@
 				"harness-call:PiHarness.readOutputs/args": "4b00d878f038fd0b4b73d5a594bb9785d28590fe4fe1719e6b6b2fc5e9dd0312",
 				"harness-call:PiHarness.readOutputs/result": "ee20dfa5ed377d1219a6f252508ab62e311b347397e281d8d8160f7af2a32114",
 				"harness-call:PiHarness.pauseUsage/args": "76c19a333893f8313f2913195317f2513df7c51761ce29f4a586c304a1241dd9",
-				"harness-call:PiHarness.pauseUsage/result": "d159be54f464b86c7215538190f281165a78096ba84543de6b2730ed4d3f63e9",
+				"harness-call:PiHarness.pauseUsage/result": "205d233c1096bb94723c9657f0179524959c8e37bf859b0ade85b09c189bdde1",
 				"harness-call:PiHarness.answerCall/args": "a6da3f3f3eea837eedb701d5f270cbb69d2887761d07ea8d6f0dbff03940bc26",
 				"harness-call:PiHarness.answerCall/result": "683129e640251205e556de4ce65bbc46fff03eecdb520b1673343bc07827f208",
 				"harness-call:PiHarness.customToolFaults/args": "b53afccf23cb5f4307879674a3000966d018f6290ee0196472b0f05125c8cada",
@@ -2355,44 +2355,69 @@
 						"_tag": "span.model_request_end",
 						"model_request_start_id": "prototype",
 						"model_usage": {
-							"input_tokens": 1,
-							"output_tokens": 97
-						},
-						"is_error": true
-					},
-					{
-						"_tag": "span.model_request_end",
-						"model_request_start_id": "prototype",
-						"model_usage": {
-							"input_tokens": 32,
-							"output_tokens": 61
+							"input_tokens": 97,
+							"output_tokens": 3,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 2,
+								"ephemeral_1h_input_tokens": 0
+							}
 						},
 						"is_error": null
 					},
 					{
 						"_tag": "span.model_request_end",
-						"model_request_start_id": "RXg}Mgc2",
+						"model_request_start_id": "prototype",
 						"model_usage": {
-							"input_tokens": 39,
-							"output_tokens": 91
+							"input_tokens": 52,
+							"output_tokens": 96,
+							"cache_read_input_tokens": 94,
+							"cache_creation_input_tokens": 6,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 48,
+								"ephemeral_1h_input_tokens": 40
+							}
 						},
 						"is_error": false
+					},
+					{
+						"_tag": "span.model_request_end",
+						"model_request_start_id": "RXg}Mgc2",
+						"model_usage": {
+							"input_tokens": 18,
+							"output_tokens": 100,
+							"cache_read_input_tokens": 98,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 57,
+								"ephemeral_1h_input_tokens": 20
+							}
+						},
+						"is_error": null
 					},
 					{
 						"_tag": "span.model_request_end",
 						"model_request_start_id": "\"?Z;xB`l_z",
 						"model_usage": {
-							"input_tokens": 52,
-							"output_tokens": 6
+							"input_tokens": 88,
+							"output_tokens": 1,
+							"cache_read_input_tokens": 25,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 70,
+								"ephemeral_1h_input_tokens": 6
+							}
 						},
-						"is_error": false
+						"is_error": true
 					},
 					{
 						"_tag": "span.model_request_end",
 						"model_request_start_id": "\u0000",
 						"model_usage": {
-							"input_tokens": 47,
-							"output_tokens": 96
+							"input_tokens": 37,
+							"output_tokens": 31,
+							"cache_read_input_tokens": 1,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 3,
+								"ephemeral_1h_input_tokens": 24
+							}
 						},
 						"is_error": null
 					},
@@ -2400,16 +2425,16 @@
 						"_tag": "span.model_request_end",
 						"model_request_start_id": "x{s:x`Y",
 						"model_usage": {
-							"input_tokens": 1,
-							"output_tokens": 84
+							"input_tokens": 3,
+							"output_tokens": 6
 						},
-						"is_error": false
+						"is_error": null
 					},
 					{
 						"_tag": "span.model_request_end",
 						"model_request_start_id": "prototype",
 						"model_usage": {
-							"input_tokens": 1,
+							"input_tokens": 24,
 							"output_tokens": 5
 						},
 						"is_error": null
@@ -2418,8 +2443,8 @@
 						"_tag": "span.model_request_end",
 						"model_request_start_id": "prototype",
 						"model_usage": {
-							"input_tokens": 0,
-							"output_tokens": 35
+							"input_tokens": 4,
+							"output_tokens": 3
 						},
 						"is_error": null
 					}
@@ -8509,57 +8534,18 @@
 						"resources": [],
 						"turn": 35,
 						"usage": {
-							"input_tokens": 93,
-							"output_tokens": 67
-						},
-						"mcp_server_credentials": [
-							{
-								"mcp_server_name": "EDCbE_q_Za",
-								"credential_id": "TqO}=Z",
-								"vault_id": "<"
-							},
-							{
-								"mcp_server_name": "s_F_1",
-								"credential_id": ",54L?0:",
-								"vault_id": "😀"
-							},
-							{
-								"mcp_server_name": "p-ORq_39_d",
-								"credential_id": "__proto__",
-								"vault_id": "4294967295"
-							},
-							{
-								"mcp_server_name": "J86U23_CnO",
-								"credential_id": "\t",
-								"vault_id": "\t"
-							},
-							{
-								"mcp_server_name": "y",
-								"credential_id": "\t"
-							},
-							{
-								"mcp_server_name": "7",
-								"credential_id": "\n"
-							},
-							{
-								"mcp_server_name": "rwqS5q_pK1",
-								"credential_id": "__proto__"
-							},
-							{
-								"mcp_server_name": "6zm_n",
-								"credential_id": "riBrk||B{z"
-							},
-							{
-								"mcp_server_name": "7n_A",
-								"credential_id": "03.->(0g&"
-							},
-							{
-								"mcp_server_name": "L4_fV",
-								"credential_id": "prototype"
+							"input_tokens": 15,
+							"output_tokens": 93,
+							"cache_read_input_tokens": 92,
+							"cache_creation_input_tokens": 18,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 95,
+								"ephemeral_1h_input_tokens": 22
 							}
-						],
-						"created_at": "1970-01-01T00:00:00.044Z",
-						"updated_at": "-047396-07-20T06:59:24.641Z",
+						},
+						"mcp_server_credentials": [],
+						"created_at": "-131247-02-24T09:52:36.147Z",
+						"updated_at": "1970-01-01T00:00:00.037Z",
 						"archived_at": null
 					},
 					null,
@@ -8574,13 +8560,25 @@
 						"resources": [],
 						"turn": 24,
 						"usage": {
-							"input_tokens": 96,
-							"output_tokens": 84
+							"input_tokens": 36,
+							"output_tokens": 1,
+							"cache_read_input_tokens": 100,
+							"cache_creation_input_tokens": 59
 						},
-						"mcp_server_credentials": [],
-						"created_at": "-157804-07-18T10:44:40.874Z",
-						"updated_at": "+260031-07-26T04:23:00.762Z",
-						"archived_at": null
+						"mcp_server_credentials": [
+							{
+								"mcp_server_name": "u",
+								"credential_id": "\ud800"
+							},
+							{
+								"mcp_server_name": "N",
+								"credential_id": ")03;.\\,;nV",
+								"vault_id": "1|bS\"b7MN"
+							}
+						],
+						"created_at": "1970-01-01T00:00:00.033Z",
+						"updated_at": "1970-01-01T00:00:00.029Z",
+						"archived_at": "+053208-09-02T04:38:31.586Z"
 					},
 					null,
 					null,
@@ -8597,26 +8595,64 @@
 						"resources": [],
 						"turn": 3,
 						"usage": {
-							"input_tokens": 16,
-							"output_tokens": 59
+							"input_tokens": 98,
+							"output_tokens": 99,
+							"cache_read_input_tokens": 98,
+							"cache_creation_input_tokens": 54,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 100,
+								"ephemeral_1h_input_tokens": 89
+							}
 						},
 						"mcp_server_credentials": [
 							{
-								"mcp_server_name": "kXD_e",
-								"credential_id": "\u0000",
-								"vault_id": "}Hq}gqYZqG"
+								"mcp_server_name": "qkbqJ4aL9z",
+								"credential_id": "-1",
+								"vault_id": "\ud800"
 							},
 							{
-								"mcp_server_name": "a",
-								"credential_id": "0"
+								"mcp_server_name": "wrP",
+								"credential_id": "\n"
 							},
 							{
-								"mcp_server_name": "9",
-								"credential_id": "\t"
+								"mcp_server_name": "BCz_jG",
+								"credential_id": "__proto__",
+								"vault_id": "gN"
+							},
+							{
+								"mcp_server_name": "k",
+								"credential_id": "\"oPa~}lW{W"
+							},
+							{
+								"mcp_server_name": "X_RiI",
+								"credential_id": "G(dPy{[|;_",
+								"vault_id": "&vMPJ(tYG\\"
+							},
+							{
+								"mcp_server_name": "yr5_v",
+								"credential_id": "\ud800",
+								"vault_id": "9S93X>!8z:"
+							},
+							{
+								"mcp_server_name": "E",
+								"credential_id": "V.'li\\x|lv"
+							},
+							{
+								"mcp_server_name": "q",
+								"credential_id": "\ud800"
+							},
+							{
+								"mcp_server_name": "d_x",
+								"credential_id": "sp(2%\"c\"(.",
+								"vault_id": "😀"
+							},
+							{
+								"mcp_server_name": "cw",
+								"credential_id": "L7|"
 							}
 						],
-						"created_at": "-014790-05-20T19:04:54.962Z",
-						"updated_at": "-271821-04-20T00:00:00.005Z",
+						"created_at": "+242690-08-20T18:36:22.323Z",
+						"updated_at": "+024548-09-14T18:38:14.199Z",
 						"archived_at": null
 					}
 				],
@@ -13304,27 +13340,38 @@
 					{
 						"ok": "paused",
 						"model_usage": {
-							"input_tokens": 4,
-							"output_tokens": 94
+							"input_tokens": 2,
+							"output_tokens": 0
 						}
 					},
 					{
 						"ok": "paused",
 						"model_usage": {
-							"input_tokens": 98,
-							"output_tokens": 94
+							"input_tokens": 4,
+							"output_tokens": 60,
+							"cache_read_input_tokens": 89,
+							"cache_creation_input_tokens": 89,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 20,
+								"ephemeral_1h_input_tokens": 5
+							}
 						}
 					},
 					{
 						"ok": true,
-						"response_started_at": 41,
-						"thinking": "NtL7:l,H|f",
-						"text": "\n",
+						"response_started_at": 67,
+						"thinking": "\udc00",
+						"text": "\u0000",
 						"truncated": true,
-						"input_tokens": 4,
-						"output_tokens": 73,
+						"input_tokens": 94,
+						"output_tokens": 99,
+						"cache_creation_input_tokens": 2,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 95,
+							"ephemeral_1h_input_tokens": 41
+						},
 						"stop_reason": {
-							"type": "refusal"
+							"type": "budget_reached"
 						}
 					},
 					{
@@ -13341,33 +13388,48 @@
 						"ok": false,
 						"interrupted": false,
 						"model_usage": {
-							"input_tokens": 62,
-							"output_tokens": 65
+							"input_tokens": 4,
+							"output_tokens": 2,
+							"cache_read_input_tokens": 6,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 0,
+								"ephemeral_1h_input_tokens": 86
+							}
 						},
-						"error_type": "\t",
-						"message": "0",
+						"error_type": "\ud800",
+						"message": "\n",
 						"disposition": "exhausted"
 					},
 					{
 						"ok": true,
 						"response_started_at": 0,
 						"thinking": null,
-						"text": "\n",
+						"text": "&\"-2\"gjhPs",
 						"truncated": null,
-						"input_tokens": 80,
-						"output_tokens": 0,
+						"input_tokens": 96,
+						"output_tokens": 3,
+						"cache_creation_input_tokens": 100,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 37,
+							"ephemeral_1h_input_tokens": 47
+						},
 						"stop_reason": {
 							"type": "end_turn"
 						}
 					},
 					{
 						"ok": true,
-						"response_started_at": 0,
-						"thinking": null,
-						"text": ":=",
-						"truncated": true,
-						"input_tokens": 4,
+						"response_started_at": 99,
+						"thinking": "0",
+						"text": "\t",
+						"truncated": null,
+						"input_tokens": 83,
 						"output_tokens": 5,
+						"cache_read_input_tokens": 51,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 47,
+							"ephemeral_1h_input_tokens": 98
+						},
 						"stop_reason": {
 							"type": "end_turn"
 						}
@@ -13375,8 +13437,13 @@
 					{
 						"ok": "paused",
 						"model_usage": {
-							"input_tokens": 40,
-							"output_tokens": 3
+							"input_tokens": 2,
+							"output_tokens": 4,
+							"cache_read_input_tokens": 80,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 100,
+								"ephemeral_1h_input_tokens": 3
+							}
 						}
 					}
 				],
@@ -13493,7 +13560,11 @@
 							"operation": "*Y",
 							"turn": 34,
 							"input_tokens": 95,
-							"output_tokens": 1
+							"output_tokens": 1,
+							"cache_read_input_tokens": 4,
+							"cache_creation_input_tokens": 84,
+							"cache_creation_5m_input_tokens": 0,
+							"cache_creation_1h_input_tokens": 97
 						}
 					},
 					{
@@ -13504,7 +13575,11 @@
 							"operation": "-1",
 							"turn": 99,
 							"input_tokens": 1,
-							"output_tokens": 94
+							"output_tokens": 94,
+							"cache_read_input_tokens": 63,
+							"cache_creation_input_tokens": 98,
+							"cache_creation_5m_input_tokens": 3,
+							"cache_creation_1h_input_tokens": 100
 						}
 					},
 					{
@@ -13515,7 +13590,11 @@
 							"operation": null,
 							"turn": 6,
 							"input_tokens": 6,
-							"output_tokens": 5
+							"output_tokens": 5,
+							"cache_read_input_tokens": 33,
+							"cache_creation_input_tokens": 0,
+							"cache_creation_5m_input_tokens": 99,
+							"cache_creation_1h_input_tokens": 78
 						}
 					},
 					{
@@ -13526,7 +13605,11 @@
 							"operation": "-1",
 							"turn": 100,
 							"input_tokens": 60,
-							"output_tokens": 4
+							"output_tokens": 4,
+							"cache_read_input_tokens": 41,
+							"cache_creation_input_tokens": 0,
+							"cache_creation_5m_input_tokens": 40,
+							"cache_creation_1h_input_tokens": 74
 						}
 					},
 					{
@@ -13537,7 +13620,11 @@
 							"operation": "l0Ooa{naCX",
 							"turn": 87,
 							"input_tokens": 73,
-							"output_tokens": 56
+							"output_tokens": 56,
+							"cache_read_input_tokens": 94,
+							"cache_creation_input_tokens": 0,
+							"cache_creation_5m_input_tokens": 6,
+							"cache_creation_1h_input_tokens": 1
 						}
 					},
 					{
@@ -13548,7 +13635,11 @@
 							"operation": "",
 							"turn": 58,
 							"input_tokens": 1,
-							"output_tokens": 6
+							"output_tokens": 6,
+							"cache_read_input_tokens": 3,
+							"cache_creation_input_tokens": 71,
+							"cache_creation_5m_input_tokens": 17,
+							"cache_creation_1h_input_tokens": 52
 						}
 					},
 					{
@@ -13559,7 +13650,11 @@
 							"operation": null,
 							"turn": 31,
 							"input_tokens": 46,
-							"output_tokens": 15
+							"output_tokens": 15,
+							"cache_read_input_tokens": 2,
+							"cache_creation_input_tokens": 20,
+							"cache_creation_5m_input_tokens": 36,
+							"cache_creation_1h_input_tokens": 28
 						}
 					},
 					{
@@ -13570,7 +13665,11 @@
 							"operation": null,
 							"turn": 58,
 							"input_tokens": 99,
-							"output_tokens": 42
+							"output_tokens": 42,
+							"cache_read_input_tokens": 0,
+							"cache_creation_input_tokens": 0,
+							"cache_creation_5m_input_tokens": 4,
+							"cache_creation_1h_input_tokens": 15
 						}
 					}
 				],
@@ -13580,44 +13679,9 @@
 						"scope": "session",
 						"family": true,
 						"value": {
-							"input_tokens": 6,
-							"output_tokens": 99
-						}
-					},
-					{
-						"version": 1,
-						"scope": "session",
-						"family": true,
-						"value": {
-							"input_tokens": 43,
-							"output_tokens": 5
-						}
-					},
-					{
-						"version": 1,
-						"scope": "session",
-						"family": true,
-						"value": {
-							"input_tokens": 0,
-							"output_tokens": 4
-						}
-					},
-					{
-						"version": 1,
-						"scope": "session",
-						"family": true,
-						"value": {
 							"input_tokens": 99,
-							"output_tokens": 56
-						}
-					},
-					{
-						"version": 1,
-						"scope": "session",
-						"family": true,
-						"value": {
-							"input_tokens": 0,
-							"output_tokens": 40
+							"output_tokens": 92,
+							"cache_read_input_tokens": 96
 						}
 					},
 					{
@@ -13626,6 +13690,58 @@
 						"family": true,
 						"value": {
 							"input_tokens": 97,
+							"output_tokens": 4,
+							"cache_read_input_tokens": 81,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 98,
+								"ephemeral_1h_input_tokens": 21
+							}
+						}
+					},
+					{
+						"version": 1,
+						"scope": "session",
+						"family": true,
+						"value": {
+							"input_tokens": 1,
+							"output_tokens": 4,
+							"cache_read_input_tokens": 95,
+							"cache_creation_input_tokens": 5,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 1,
+								"ephemeral_1h_input_tokens": 98
+							}
+						}
+					},
+					{
+						"version": 1,
+						"scope": "session",
+						"family": true,
+						"value": {
+							"input_tokens": 56,
+							"output_tokens": 98,
+							"cache_read_input_tokens": 6
+						}
+					},
+					{
+						"version": 1,
+						"scope": "session",
+						"family": true,
+						"value": {
+							"input_tokens": 40,
+							"output_tokens": 93,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 1,
+								"ephemeral_1h_input_tokens": 5
+							}
+						}
+					},
+					{
+						"version": 1,
+						"scope": "session",
+						"family": true,
+						"value": {
+							"input_tokens": 54,
 							"output_tokens": 84
 						}
 					},
@@ -13634,8 +13750,9 @@
 						"scope": "session",
 						"family": true,
 						"value": {
-							"input_tokens": 98,
-							"output_tokens": 5
+							"input_tokens": 5,
+							"output_tokens": 95,
+							"cache_read_input_tokens": 4
 						}
 					},
 					{
@@ -13643,8 +13760,14 @@
 						"scope": "session",
 						"family": true,
 						"value": {
-							"input_tokens": 57,
-							"output_tokens": 42
+							"input_tokens": 2,
+							"output_tokens": 91,
+							"cache_read_input_tokens": 2,
+							"cache_creation_input_tokens": 83,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 3,
+								"ephemeral_1h_input_tokens": 58
+							}
 						}
 					}
 				],
@@ -13765,7 +13888,7 @@
 							"message": "1xd",
 							"terminal": true,
 							"model_usage": {
-								"input_tokens": 5,
+								"input_tokens": 79,
 								"output_tokens": 100
 							}
 						},
@@ -13791,11 +13914,17 @@
 					{
 						"ok": true,
 						"reply": {
-							"response_started_at": -97,
+							"response_started_at": 4,
 							"thinking": null,
-							"text": ";Z{=8Lv",
-							"input_tokens": 1.814118423338378e+216,
-							"output_tokens": 7.322601601751347e+87,
+							"text": "__proto__",
+							"input_tokens": -3.9585206269451144e-69,
+							"output_tokens": -1.797693134862312e+308,
+							"cache_read_input_tokens": 99,
+							"cache_creation_input_tokens": 93,
+							"cache_creation": {
+								"ephemeral_5m_input_tokens": 77,
+								"ephemeral_1h_input_tokens": 97
+							},
 							"stop_reason": {
 								"type": "refusal"
 							}
@@ -13804,164 +13933,23 @@
 					{
 						"ok": true,
 						"reply": {
-							"thinking": "&wH!57X+D(",
-							"text": " ",
-							"input_tokens": -8.296127741607401e+140,
-							"output_tokens": 5.86550116048886e-86,
+							"thinking": null,
+							"text": "\udc00",
+							"input_tokens": -2e-323,
+							"output_tokens": -5.4e-323,
+							"cache_creation_input_tokens": 0,
 							"stop_reason": {
-								"type": "end_turn"
+								"type": "budget_reached"
 							}
 						},
 						"tool_events": [
 							{
-								"type": "tool_result",
-								"tool_use_id": "\u0000",
-								"content": [
-									{
-										"type": "text",
-										"text": "w#P~m<Js2y"
-									},
-									{
-										"type": "text",
-										"text": "\ud800"
-									},
-									{
-										"type": "text",
-										"text": "z'\\Q"
-									},
-									{
-										"type": "text",
-										"text": ""
-									},
-									{
-										"type": "text",
-										"text": "6Q,Te^OyL"
-									},
-									{
-										"type": "text",
-										"text": "-1"
-									}
-								],
-								"is_error": true
-							},
-							{
-								"type": "tool_result",
-								"tool_use_id": "prototype",
-								"content": [
-									{
-										"type": "text",
-										"text": "rD%HvQU;J)"
-									},
-									{
-										"type": "text",
-										"text": ""
-									},
-									{
-										"type": "text",
-										"text": "-1"
-									},
-									{
-										"type": "text",
-										"text": ",}x+~"
-									},
-									{
-										"type": "text",
-										"text": "😀"
-									},
-									{
-										"type": "text",
-										"text": " N"
-									},
-									{
-										"type": "text",
-										"text": "XuaY6K|"
-									}
-								],
-								"is_error": true,
-								"truncated": true
-							},
-							{
-								"type": "tool_use",
-								"tool_use_id": "4",
-								"name": "n",
-								"input": "{\"toString\":{},\"\":null,\" \":{},\"-1\":[],\"\\udc00\":6.530114417498283e-62}",
-								"evaluated_permission": "allow"
-							},
-							{
-								"type": "tool_use",
-								"tool_use_id": " ",
-								"name": ")",
-								"input": "{\"\\t\":{\"__proto__\":false,\"\":[\"g\\\\K\",{},null,1.663731844356021e+207,false],\"]Dl@_+=3^d\":false,\"prototype\":null,\"/]e]AR';\":{}},\"__proto__\":[],\"G{`H$3T-\":false,\"😀\":\"(1| f\",\"L=j?\":null}"
-							},
-							{
-								"type": "tool_use",
-								"tool_use_id": "f",
-								"name": "\ud800",
-								"input": "{\"y-4N9lY9*=\":\"😀\"}",
-								"truncated": true,
-								"mcp_server_name": "W"
-							},
-							{
 								"type": "tool_use",
 								"tool_use_id": "\t",
-								"name": "\u0000",
+								"name": "\n",
 								"input": "{}",
 								"truncated": true,
-								"mcp_server_name": "1Lytpd_HPP"
-							},
-							{
-								"type": "tool_use",
-								"tool_use_id": "\u0000",
-								"name": "s",
-								"input": "{\"<l-[S\\\\\":false,\"0gcJ\":{}}",
-								"truncated": true,
-								"evaluated_permission": "allow"
-							},
-							{
-								"type": "tool_result",
-								"tool_use_id": "0",
-								"content": [
-									{
-										"type": "text",
-										"text": "\t"
-									},
-									{
-										"type": "text",
-										"text": "y!h$qWXO$"
-									},
-									{
-										"type": "text",
-										"text": " "
-									},
-									{
-										"type": "text",
-										"text": ""
-									},
-									{
-										"type": "text",
-										"text": "0"
-									}
-								],
-								"is_error": false,
-								"truncated": true,
-								"mcp": true
-							},
-							{
-								"type": "tool_result",
-								"tool_use_id": "4294967295",
-								"content": [],
-								"is_error": true,
-								"truncated": true,
-								"rejected": "unavailable",
-								"mcp": true
-							},
-							{
-								"type": "tool_use",
-								"tool_use_id": "😀",
-								"name": "\ud800",
-								"input": "{\"\\udc00\":null,\"\\u0000\":-5.300628113788057e+160,\"\":null,\" \":2.2127395794974648e-67}",
-								"truncated": true,
-								"mcp_server_name": "gZ5PGR_L_K",
+								"mcp_server_name": "F60yeX4qVZ",
 								"evaluated_permission": "allow"
 							}
 						]
@@ -14237,7 +14225,7 @@
 							"message": " ",
 							"terminal": false,
 							"model_usage": {
-								"input_tokens": 95,
+								"input_tokens": 22,
 								"output_tokens": 6
 							}
 						},
@@ -14483,7 +14471,7 @@
 						"error": {
 							"_tag": "TurnInterrupted",
 							"model_usage": {
-								"input_tokens": 99,
+								"input_tokens": 79,
 								"output_tokens": 2
 							}
 						},
@@ -14796,8 +14784,12 @@
 						"error": {
 							"_tag": "TurnInterrupted",
 							"model_usage": {
-								"input_tokens": 4,
-								"output_tokens": 2
+								"input_tokens": 2,
+								"output_tokens": 17,
+								"cache_creation": {
+									"ephemeral_5m_input_tokens": 32,
+									"ephemeral_1h_input_tokens": 98
+								}
 							}
 						}
 					},
@@ -15514,36 +15506,57 @@
 				],
 				"harness-call:PiHarness.pauseUsage/result": [
 					{
-						"input_tokens": 4,
-						"output_tokens": 66
+						"input_tokens": 66,
+						"output_tokens": 97,
+						"cache_read_input_tokens": 6
 					},
 					{
-						"input_tokens": 0,
-						"output_tokens": 95
+						"input_tokens": 14,
+						"output_tokens": 62,
+						"cache_creation_input_tokens": 1,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 0,
+							"ephemeral_1h_input_tokens": 0
+						}
 					},
 					{
-						"input_tokens": 15,
-						"output_tokens": 2
+						"input_tokens": 1,
+						"output_tokens": 5,
+						"cache_read_input_tokens": 94,
+						"cache_creation_input_tokens": 0,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 1,
+							"ephemeral_1h_input_tokens": 97
+						}
 					},
 					{
-						"input_tokens": 46,
-						"output_tokens": 72
+						"input_tokens": 22,
+						"output_tokens": 94,
+						"cache_read_input_tokens": 38,
+						"cache_creation_input_tokens": 52,
+						"cache_creation": {
+							"ephemeral_5m_input_tokens": 5,
+							"ephemeral_1h_input_tokens": 91
+						}
 					},
 					{
-						"input_tokens": 3,
-						"output_tokens": 24
+						"input_tokens": 24,
+						"output_tokens": 1,
+						"cache_read_input_tokens": 100
 					},
 					{
 						"input_tokens": 5,
-						"output_tokens": 5
+						"output_tokens": 4,
+						"cache_read_input_tokens": 80
 					},
 					{
-						"input_tokens": 5,
-						"output_tokens": 8
+						"input_tokens": 100,
+						"output_tokens": 1
 					},
 					{
 						"input_tokens": 4,
-						"output_tokens": 4
+						"output_tokens": 97,
+						"cache_read_input_tokens": 95
 					}
 				],
 				"harness-call:PiHarness.answerCall/args": [

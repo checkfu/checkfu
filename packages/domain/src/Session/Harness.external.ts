@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 import { SessionId } from "./Session.id.ts"
 import { RepositoryToken, SessionResourceId, SessionResources } from "./SessionResource.ts"
 import {
+	CacheCreationUsage,
 	ErrorMessage,
 	ErrorType,
 	MAX_ERROR_MESSAGE_LENGTH,
@@ -75,6 +76,9 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			truncated: Schema.optional(Schema.Literal(true)),
 			input_tokens: NonNegativeInt,
 			output_tokens: NonNegativeInt,
+			cache_read_input_tokens: Schema.optionalKey(NonNegativeInt),
+			cache_creation_input_tokens: Schema.optionalKey(NonNegativeInt),
+			cache_creation: Schema.optionalKey(CacheCreationUsage),
 			stop_reason: ModelStopReason,
 		},
 		error: [TurnFailed, TurnInterrupted, TurnPaused, HarnessUnavailable],
@@ -115,6 +119,9 @@ export interface HarnessReply {
 	readonly text: string
 	readonly input_tokens: number
 	readonly output_tokens: number
+	readonly cache_read_input_tokens?: number
+	readonly cache_creation_input_tokens?: number
+	readonly cache_creation?: CacheCreationUsage
 	readonly stop_reason: ModelStopReason
 }
 
@@ -131,7 +138,17 @@ export const clampHarnessReply = (
 	if (reply.text.length === 0) {
 		return Effect.fail({
 			...EMPTY_REPLY_ERROR,
-			model_usage: { input_tokens: reply.input_tokens, output_tokens: reply.output_tokens },
+			model_usage: {
+				input_tokens: reply.input_tokens,
+				output_tokens: reply.output_tokens,
+				...(reply.cache_read_input_tokens === undefined
+					? {}
+					: { cache_read_input_tokens: reply.cache_read_input_tokens }),
+				...(reply.cache_creation_input_tokens === undefined
+					? {}
+					: { cache_creation_input_tokens: reply.cache_creation_input_tokens }),
+				...(reply.cache_creation === undefined ? {} : { cache_creation: reply.cache_creation }),
+			},
 		})
 	}
 	const truncated = reply.text.length > MAX_MESSAGE_TEXT_LENGTH
