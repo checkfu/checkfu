@@ -75,7 +75,7 @@ jobs:
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
 
-  # Long Z3 proofs get their own runners. The other domain files run serially on one runner.
+  # Long Z3 proofs get their own runners. The other domain files share one, in parallel.
   domain-proofs:
     name: domain (${{ matrix.shard.name }})
     runs-on: ubuntu-latest
@@ -85,7 +85,7 @@ jobs:
       matrix:
         shard:
           - name: rest
-            args: --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --exclude test/AutomationRuns.verify.test.ts --no-file-parallelism
+            args: --exclude test/Checkfu.verify.test.ts --exclude test/Sessions.verify.test.ts --exclude test/Sessions.replay.verify.test.ts --exclude test/AutomationRuns.verify.test.ts
           - name: sessions
             args: test/Sessions.verify.test.ts
           - name: sessions-replay
