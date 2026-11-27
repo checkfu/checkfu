@@ -12,6 +12,8 @@ import * as Layer from "effect/Layer"
 import {
 	DATA_CALLS_PER_MINUTE_PER_ARTIFACT,
 	DATA_CALLS_PER_MINUTE_PER_CALLER,
+	callerKey,
+	callerNetwork,
 } from "../src/ArtifactData/DataThrottle.ts"
 import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
@@ -205,6 +207,21 @@ const attempt = (
 	}
 }
 
+describe("A caller's network", () => {
+	it("is the whole IPv4 address, or the first half of an IPv6 address however it is written", () => {
+		expect(callerNetwork("203.0.113.7")).toBe("203.0.113.7")
+		expect(callerNetwork("")).toBe("")
+		expect(callerNetwork("2001:db8:0:1:aaaa:bbbb:cccc:dddd")).toBe("2001:db8:0:1")
+		expect(callerNetwork("2001:0DB8:0000:0001::1")).toBe("2001:db8:0:1")
+		expect(callerNetwork("2001:db8::1")).toBe("2001:db8:0:0")
+		expect(callerNetwork("::1")).toBe("0:0:0:0")
+		expect(callerNetwork("2001:db8:0:1::")).toBe("2001:db8:0:1")
+		expect(callerNetwork("fe80::1:2:3:4:5")).toBe("fe80:0:0:1")
+		expect(callerNetwork("::ffff:203.0.113.7")).toBe("0:0:0:0")
+		expect(callerKey("art_1", "2001:db8:0:1::9")).toBe("art_1:2001:db8:0:1")
+	})
+})
+
 describe("A page reaching its artifact's data", () => {
 	it("is allowed exactly what its link's level and the collection's visitors setting allow", () =>
 		withPages(({ api, page, artifact, link }) =>
@@ -397,6 +414,7 @@ describe("A page reaching its artifact's data", () => {
 				const slowed = yield* from("203.0.113.1")
 				expect(slowed.status).toBe(429)
 				expect(slowed.headers.get("retry-after")).toBe("60")
+				expect(slowed.headers.get("access-control-expose-headers")).toBe("retry-after")
 				expect(slowed.headers.get("content-type")).toBe("application/json")
 				expect(yield* json(slowed)).toEqual({
 					error: { message: "Too many requests. Try again in a minute." },
@@ -427,6 +445,19 @@ describe("A page reaching its artifact's data", () => {
 
 				const other = yield* artifact(COLLECTIONS)
 				const elsewhere = yield* link(other, "write")
+				const fromNetwork = (host: string) =>
+					page(`${elsewhere}_/data/board`, {
+						headers: { "cf-connecting-ip": `2001:db8:0:1:${host}` },
+					})
+				for (let call = 0; call < DATA_CALLS_PER_MINUTE_PER_CALLER; call += 1) {
+					expect((yield* fromNetwork(`0:0:0:${(call + 1).toString(16)}`)).status).toBe(200)
+				}
+				expect((yield* fromNetwork("ffff:ffff:ffff:ffff")).status).toBe(429)
+				expect(
+					(yield* page(`${elsewhere}_/data/board`, {
+						headers: { "cf-connecting-ip": "2001:db8:0:2::1" },
+					})).status,
+				).toBe(200)
 				expect(
 					(yield* page(`${elsewhere}_/data/board`, {
 						headers: { "cf-connecting-ip": "203.0.113.1" },

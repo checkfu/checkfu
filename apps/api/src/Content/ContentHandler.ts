@@ -324,7 +324,11 @@ export const serveContent = (options: {
 				contentType: "application/json",
 				headers:
 					reply.status === 429
-						? { ...CONTENT_HEADERS, "retry-after": RETRY_AFTER_SECONDS }
+						? {
+								...CONTENT_HEADERS,
+								"retry-after": RETRY_AFTER_SECONDS,
+								"access-control-expose-headers": "retry-after",
+							}
 						: CONTENT_HEADERS,
 			})
 		})

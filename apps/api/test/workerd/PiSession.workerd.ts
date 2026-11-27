@@ -3596,7 +3596,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			}
 		}
 		expect(statuses.filter((status) => status !== 200 && status !== 429)).toEqual([])
-		expect(statuses.filter((status) => status === 200).length).toBeGreaterThanOrEqual(120)
+		expect(statuses.filter((status) => status === 200).length).toBe(120)
 		expect(statuses).toContain(429)
 		expect(slowed?.headers.get("retry-after")).toBe("60")
 		expect((await fetch(link.body.url)).status).toBe(200)

@@ -172,8 +172,8 @@ export const measureBundle = async (
 }
 
 export const API_WORKER_BUDGET = {
-	eagerBytes: 1_734_000,
-	totalBytes: 1_775_000,
+	eagerBytes: 1_737_000,
+	totalBytes: 1_778_000,
 	startupCpuMs: 500,
 } as const
 
