@@ -11,16 +11,16 @@ import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
-import { checkfu, errorMessage, isSignedOut } from "../api.ts"
-import type { JsonAutomationRun } from "../api.ts"
+import { checkfu, errorMessage, isSignedOut, saveAutomationEdit } from "../api.ts"
+import type { AutomationEditReview, JsonAutomationRun } from "../api.ts"
 import {
-	changesOf,
 	createBodyOf,
 	draftOf,
 	emptyDraft,
 	firingLabel,
 	localTimezone,
 	messageOf,
+	rebaseDraft,
 } from "../automation-draft.ts"
 import type { AutomationDraft } from "../automation-draft.ts"
 import { choicesOf, OptionPicker } from "../option-picker.tsx"
@@ -330,17 +330,79 @@ export function AutomationPage(): React.JSX.Element {
 }
 
 interface Edit {
-	readonly base: AutomationDraft
+	readonly base: JsonAutomation
 	readonly draft: AutomationDraft
+	readonly review?: AutomationEditReview
 }
 
-function AutomationView({
+const invalidates = [["automations"]] as const
+
+function AutomationEditor({
+	initial,
+	onClose,
+}: {
+	readonly initial: JsonAutomation
+	readonly onClose: () => void
+}): React.JSX.Element {
+	const [edit, setEdit] = useState<Edit>(() => ({ base: initial, draft: draftOf(initial) }))
+	const save = useAction(saveAutomationEdit, {
+		invalidates,
+		then: (review, base, submitted) => {
+			if (review === undefined) {
+				onClose()
+				return
+			}
+			setEdit({
+				base: review.latest,
+				draft: rebaseDraft(draftOf(base), submitted, draftOf(review.latest)),
+				review,
+			})
+		},
+	})
+	return (
+		<>
+			{edit.review === undefined ? null : (
+				<Callout tone="error" className="mb-4 max-w-2xl">
+					{edit.review.conflicts.length === 0 ? (
+						<p>The automation changed again while saving. Your edits are still here.</p>
+					) : (
+						<>
+							<p>
+								These fields changed while you were editing. Review the latest values before saving
+								your edits.
+							</p>
+							<ul className="mt-2 space-y-1">
+								{edit.review.conflicts.map(({ label, value }) => (
+									<li key={label} className="break-words">
+										<strong>{label}</strong>{" "}
+										<span className="whitespace-pre-wrap">{value || "None"}</span>
+									</li>
+								))}
+							</ul>
+						</>
+					)}
+				</Callout>
+			)}
+			<AutomationForm
+				saved={{ agentId: edit.base.agent.id, environmentId: edit.base.environment_id }}
+				draft={edit.draft}
+				onChange={(draft) => setEdit({ ...edit, draft })}
+				submitLabel={edit.review === undefined ? "Save" : "Save my edits"}
+				pending={save.pending}
+				error={save.error}
+				onSubmit={(submitted) => save.run(edit.base, submitted)}
+				onCancel={onClose}
+			/>
+		</>
+	)
+}
+
+export function AutomationView({
 	automation,
 }: {
 	readonly automation: JsonAutomation
 }): React.JSX.Element {
-	const [edit, setEdit] = useState<Edit | null>(null)
-	const invalidates = [["automations"]] as const
+	const [editBase, setEditBase] = useState<JsonAutomation | null>(null)
 	const [queuedRun, setQueuedRun] = useState<number | null>(null)
 	const runNow = useAction(() => checkfu.automations.run(automation.id), {
 		invalidates,
@@ -349,18 +411,6 @@ function AutomationView({
 	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
 	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
 	const archive = useAction(() => checkfu.automations.archive(automation.id), { invalidates })
-	const save = useAction(
-		async (submitted: AutomationDraft) => {
-			if (edit === null) {
-				return
-			}
-			const changes = changesOf(edit.base, submitted)
-			if (Object.keys(changes).length > 0) {
-				await checkfu.automations.update(automation.id, changes)
-			}
-		},
-		{ invalidates, then: () => setEdit(null) },
-	)
 	const archived = automation.status === "archived"
 	const busy = runNow.pending || pause.pending || unpause.pending || archive.pending
 	const error = runNow.error ?? pause.error ?? unpause.error ?? archive.error
@@ -373,7 +423,7 @@ function AutomationView({
 				accessory={<Status status={automation.status} />}
 				description={automation.description ?? undefined}
 				actions={
-					archived || edit !== null ? undefined : (
+					archived || editBase !== null ? undefined : (
 						<>
 							<Button size="sm" disabled={busy} onClick={() => runNow.run()}>
 								Run now
@@ -387,11 +437,7 @@ function AutomationView({
 									Pause
 								</Button>
 							)}
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => setEdit({ base: draftOf(automation), draft: draftOf(automation) })}
-							>
+							<Button variant="outline" size="sm" onClick={() => setEditBase(automation)}>
 								Edit
 							</Button>
 							<Button variant="destructive" size="sm" disabled={busy} onClick={() => archive.run()}>
@@ -408,22 +454,13 @@ function AutomationView({
 					reload to check rather than running it again.
 				</Callout>
 			)}
-			{edit === null ? (
+			{editBase === null ? (
 				<>
 					<AutomationDetails automation={automation} />
 					<AutomationRuns automation={automation} />
 				</>
 			) : (
-				<AutomationForm
-					saved={{ agentId: edit.base.agentId, environmentId: edit.base.environmentId }}
-					draft={edit.draft}
-					onChange={(draft) => setEdit({ ...edit, draft })}
-					submitLabel="Save"
-					pending={save.pending}
-					error={save.error}
-					onSubmit={(submitted) => save.run(submitted)}
-					onCancel={() => setEdit(null)}
-				/>
+				<AutomationEditor initial={editBase} onClose={() => setEditBase(null)} />
 			)}
 		</>
 	)

@@ -2,9 +2,11 @@ import type { JsonAutomation } from "@checkfu/sdk/client"
 import { describe, expect, it } from "vitest"
 import {
 	changesOf,
+	conflictsOf,
 	createBodyOf,
 	draftOf,
 	firingLabel,
+	rebaseDraft,
 	showsChanges,
 } from "../src/automation-draft.ts"
 
@@ -35,6 +37,14 @@ describe("editing an automation", () => {
 		expect(changesOf(draftOf(automation), draftOf(automation))).toEqual({})
 	})
 
+	it("does not turn surrounding whitespace into an edit during a rebase", () => {
+		const opened = draftOf(automation)
+		const submitted = { ...opened, name: " Morning report ", timezone: " America/New_York " }
+		const refreshed = { ...opened, name: "Server name", timezone: "Asia/Tokyo" }
+		expect(changesOf(opened, submitted)).toEqual({})
+		expect(rebaseDraft(opened, submitted, refreshed)).toEqual(refreshed)
+	})
+
 	it("sends only the fields the edit changed", () => {
 		const draft = { ...draftOf(automation), name: " Noon report ", expression: "0 12 * * *" }
 		expect(changesOf(draftOf(automation), draft)).toEqual({
@@ -59,6 +69,50 @@ describe("editing an automation", () => {
 })
 
 describe("editing against the snapshot the editor opened", () => {
+	it("compares each edited field with the newest snapshot, including the effective agent pin", () => {
+		const latest = {
+			...automation,
+			name: "Server name",
+			agent: { ...automation.agent, version: 3 },
+			schedule: { ...automation.schedule, timezone: "Asia/Tokyo" },
+			revision: 2,
+		}
+		const opened = draftOf(automation)
+		const edited = { ...opened, name: "My name", agentId: "agent_2", expression: "0 11 * * *" }
+		expect(conflictsOf(automation, latest, changesOf(opened, edited))).toEqual([
+			{ label: "Name", value: "Server name" },
+			{ label: "Agent", value: "agent_1 (version 3)" },
+		])
+		expect(conflictsOf(automation, latest, changesOf(opened, opened))).toEqual([])
+		const rebased = rebaseDraft(opened, edited, draftOf(latest))
+		expect(rebased).toMatchObject({
+			name: "My name",
+			agentId: "agent_2",
+			expression: "0 11 * * *",
+			timezone: "Asia/Tokyo",
+		})
+		expect(changesOf(draftOf(latest), rebased)).toEqual({
+			name: "My name",
+			agent: "agent_2",
+			schedule: { expression: "0 11 * * *" },
+		})
+	})
+
+	it("leaves a refreshed agent pin and schedule fields the user did not edit alone", () => {
+		const latest = {
+			...automation,
+			agent: { ...automation.agent, version: 3 },
+			schedule: { ...automation.schedule, expression: "0 18 * * *" },
+			revision: 2,
+		}
+		const opened = draftOf(automation)
+		const edited = { ...opened, timezone: "Asia/Tokyo" }
+		expect(conflictsOf(automation, latest, changesOf(opened, edited))).toEqual([])
+		expect(changesOf(draftOf(latest), rebaseDraft(opened, edited, draftOf(latest)))).toEqual({
+			schedule: { timezone: "Asia/Tokyo" },
+		})
+	})
+
 	it("leaves another editor's newer schedule alone when only the name was edited", () => {
 		const opened = draftOf(automation)
 		const draft = { ...opened, name: "Renamed" }

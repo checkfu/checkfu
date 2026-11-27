@@ -61,9 +61,15 @@ export const createBodyOf = (draft: AutomationDraft): CreateAutomationBody => ({
 	schedule: schedule(draft),
 })
 
+const fieldEdited = (
+	base: AutomationDraft,
+	draft: AutomationDraft,
+	field: keyof AutomationDraft,
+): boolean => draft[field] !== base[field] && draft[field].trim() !== base[field]
+
 export const changesOf = (base: AutomationDraft, draft: AutomationDraft): UpdateAutomationBody => {
 	const next = createBodyOf(draft)
-	const edited = (field: keyof AutomationDraft) => draft[field] !== base[field]
+	const edited = (field: keyof AutomationDraft) => fieldEdited(base, draft, field)
 	return {
 		...(edited("name") ? { name: next.name } : {}),
 		...(edited("description") ? { description: next.description ?? null } : {}),
@@ -78,6 +84,50 @@ export const changesOf = (base: AutomationDraft, draft: AutomationDraft): Update
 					},
 				}
 			: {}),
+	}
+}
+
+const agentPin = ({ agent }: JsonAutomation) => `${agent.id} (version ${agent.version})`
+
+export const conflictsOf = (
+	base: JsonAutomation,
+	current: JsonAutomation,
+	changes: UpdateAutomationBody,
+) => {
+	const fields = [
+		["Name", changes.name, base.name, current.name],
+		["Description", changes.description, base.description, current.description],
+		["Agent", changes.agent, agentPin(base), agentPin(current)],
+		["Environment", changes.environment_id, base.environment_id, current.environment_id],
+		["Message", changes.initial_events, messageOf(base), messageOf(current)],
+		[
+			"Schedule",
+			changes.schedule?.expression,
+			base.schedule.expression,
+			current.schedule.expression,
+		],
+		["Timezone", changes.schedule?.timezone, base.schedule.timezone, current.schedule.timezone],
+	] as const
+	return fields.flatMap(([label, edit, opened, newest]) =>
+		edit !== undefined && opened !== newest ? [{ label, value: newest }] : [],
+	)
+}
+
+export const rebaseDraft = (
+	base: AutomationDraft,
+	draft: AutomationDraft,
+	latest: AutomationDraft,
+): AutomationDraft => {
+	const valueOf = (field: keyof AutomationDraft) =>
+		fieldEdited(base, draft, field) ? draft[field] : latest[field]
+	return {
+		name: valueOf("name"),
+		description: valueOf("description"),
+		agentId: valueOf("agentId"),
+		environmentId: valueOf("environmentId"),
+		message: valueOf("message"),
+		expression: valueOf("expression"),
+		timezone: valueOf("timezone"),
 	}
 }
 

@@ -14,7 +14,8 @@ import type {
 	UpdateAutomationBody,
 	UpdateMemoryBody,
 } from "@checkfu/sdk/Api"
-import { showsChanges } from "./automation-draft.ts"
+import { changesOf, conflictsOf, draftOf, showsChanges } from "./automation-draft.ts"
+import type { AutomationDraft } from "./automation-draft.ts"
 import type {
 	JsonAgent,
 	JsonArtifact,
@@ -88,6 +89,15 @@ const versionOf = (value: unknown): number =>
 	typeof value.version === "number"
 		? value.version
 		: 0
+
+const requireAutomationRevision = (revision: number): number => {
+	if (!Number.isSafeInteger(revision) || revision < 1) {
+		throw new Error(
+			"The API did not return a usable automation revision. Your edits are still here.",
+		)
+	}
+	return revision
+}
 
 const isArchived = (value: unknown): boolean =>
 	typeof value === "object" &&
@@ -237,12 +247,17 @@ export const checkfu = {
 		retrieve: retrieveAutomation,
 		create: async (body: CreateAutomationBody, idempotencyKey: string) =>
 			settled(retrieveAutomation, await request("automations.create", { body, idempotencyKey })),
-		update: async (automation_id: string, body: UpdateAutomationBody) =>
-			settled(
+		update: async (
+			automation_id: string,
+			body: UpdateAutomationBody & { readonly revision: number },
+		) => {
+			requireAutomationRevision(body.revision)
+			return settled(
 				retrieveAutomation,
 				await request("automations.update", { path: { automation_id }, body }),
 				(saved) => showsChanges(saved, body),
-			),
+			)
+		},
 		pause: async (automation_id: string) =>
 			settled(
 				retrieveAutomation,
@@ -384,6 +399,57 @@ export const checkfu = {
 			request("artifacts.unpublish", { path: { artifact_id }, idempotencyKey }),
 		delete: (artifact_id: string) => request("artifacts.delete", { path: { artifact_id } }),
 	},
+}
+
+export interface AutomationEditReview {
+	readonly latest: JsonAutomation
+	readonly conflicts: ReadonlyArray<ReturnType<typeof conflictsOf>[number]>
+}
+
+const refreshAutomationAfterConflict = async (
+	current: JsonAutomation,
+	error: CheckfuFetchError,
+) => {
+	for (let attempt = 0; attempt <= 2; attempt++) {
+		const latest = await retrieveAutomation(current.id)
+		if (latest.status === "archived") {
+			break
+		}
+		if (requireAutomationRevision(latest.revision) > current.revision) {
+			return latest
+		}
+		if (attempt < 2) {
+			await pause()
+		}
+	}
+	throw error
+}
+
+export const saveAutomationEdit = async (
+	base: JsonAutomation,
+	draft: AutomationDraft,
+): Promise<AutomationEditReview | undefined> => {
+	const changes = changesOf(draftOf(base), draft)
+	if (Object.keys(changes).length === 0) {
+		return undefined
+	}
+	let current = base
+	for (let attempt = 0; ; attempt++) {
+		try {
+			await checkfu.automations.update(base.id, { ...changes, revision: current.revision })
+			return undefined
+		} catch (error) {
+			if (!(error instanceof CheckfuFetchError) || error.status !== 409) {
+				throw error
+			}
+			const latest = await refreshAutomationAfterConflict(current, error)
+			const conflicts = conflictsOf(base, latest, changes)
+			if (conflicts.length > 0 || attempt === 1) {
+				return { latest, conflicts }
+			}
+			current = latest
+		}
+	}
 }
 
 export const errorMessage = (error: unknown): string =>
