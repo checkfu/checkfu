@@ -9,7 +9,7 @@ import {
 import type { ToolRecord, TurnCalls } from "@checkfu/domain/Session/RecordToolEvents"
 import { MAX_TOOL_CALLS_PER_TURN } from "@checkfu/domain/Session/SessionTypes"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
-import { toolUseId } from "@checkfu/domain/Session/ToolEventBounds"
+import { toolUseId, turnCalls } from "@checkfu/domain/Session/ToolEventBounds"
 import { emptySessionFold, foldSessionEvents } from "@checkfu/sdk"
 import type { SessionFoldEvent } from "@checkfu/sdk"
 import * as Effect from "effect/Effect"
@@ -26,9 +26,8 @@ import { turnCallLog } from "../src/Pi/PiTurnCalls.ts"
 import { makeAssistantReply, makeScriptedPiModels } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
-const sqlLog = () => {
-	const db = new DatabaseSync(":memory:")
-	return turnCallLog({
+const sqlLog = (db = new DatabaseSync(":memory:")) =>
+	turnCallLog({
 		exec: (query, ...bindings) => {
 			const statement = db.prepare(query)
 			const values = bindings as ReadonlyArray<SQLInputValue>
@@ -39,9 +38,34 @@ const sqlLog = () => {
 			return []
 		},
 	})
-}
 
 describe("The calls a turn publishes", () => {
+	it("admits the same task ids in the durable and in-memory logs", () => {
+		const atCapacity = Array.from(
+			{ length: MAX_TOOL_CALLS_PER_TURN + 1 },
+			(_, index) => MAX_TOOL_CALLS_PER_TURN - index,
+		)
+		fc.assert(
+			fc.property(
+				fc.array(fc.nat(2 * MAX_TOOL_CALLS_PER_TURN), { minLength: 1, maxLength: 300 }),
+				(ids) => {
+					using db = new DatabaseSync(":memory:")
+					const durable = sqlLog(db)(1)
+					const memory = turnCalls()
+
+					for (const id of ids) {
+						expect(durable.admit(id), `task ${id}`).toBe(memory.admit(id))
+					}
+					expect(durable.admitted()).toEqual(memory.admitted().toSorted((a, b) => a - b))
+					expect(durable.admitted()).toHaveLength(
+						Math.min(new Set(ids).size, MAX_TOOL_CALLS_PER_TURN),
+					)
+				},
+			),
+			{ numRuns: 200, examples: [[atCapacity.concat(atCapacity.toReversed())]] },
+		)
+	})
+
 	it("gives a call its place once, and no more places than a turn's limit", () => {
 		const log = sqlLog()
 		const calls = log(1)
