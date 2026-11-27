@@ -706,6 +706,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 			"artifacts_publishArtifact",
 			"artifacts_unpublishArtifact",
 			"automations_createAutomation",
+			"automations_runAutomation",
 			"environments_createEnvironment",
 			"memoryStores_createMemoryStore",
 			"sessions_createSession",

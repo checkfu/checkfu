@@ -294,7 +294,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			const page = {
 				event: {
 					event_id: "evt_automation_run_arun_fixture_1",
-					event_type: "automation_run.succeeded",
+					event_type: "automation_run.started",
 					resource_type: "automation_run",
 					resource_id: "arun_fixture",
 					occurred_at: 1_764_000_000_000,

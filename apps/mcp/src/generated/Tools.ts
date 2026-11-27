@@ -1573,7 +1573,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_runAutomation",
 		title: "Run an automation now",
 		description:
-			"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
+			"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run.",
 		method: "POST",
 		path: "/v1/automations/{automation_id}/run",
 		readOnly: false,
@@ -1595,6 +1595,14 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					},
 					required: ["automation_id"],
 					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
 				},
 			},
 			required: ["path"],
@@ -4023,8 +4031,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									"automation.paused",
 									"automation.unpaused",
 									"automation.archived",
+									"automation_run.queued",
 									"automation_run.started",
-									"automation_run.succeeded",
 									"automation_run.failed",
 									"artifact.created",
 									"artifact.version_added",
@@ -4045,7 +4053,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							minItems: 1,
 							maxItems: 64,
-							description: 'Subscribed event types (or ["*"] to subscribe to all events)',
+							description:
+								'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running.',
 						},
 					},
 					required: ["url", "event_types"],
@@ -4493,8 +4502,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									"automation.paused",
 									"automation.unpaused",
 									"automation.archived",
+									"automation_run.queued",
 									"automation_run.started",
-									"automation_run.succeeded",
 									"automation_run.failed",
 									"artifact.created",
 									"artifact.version_added",
@@ -4515,7 +4524,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							minItems: 1,
 							maxItems: 64,
-							description: 'Subscribed event types (or ["*"] to subscribe to all events)',
+							description:
+								'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running.',
 						},
 						reactivate: {
 							type: "boolean",

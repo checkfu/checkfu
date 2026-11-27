@@ -1953,7 +1953,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails. */
+	/** Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run. */
 	run(
 		automationId: PathParam<"automations", "run", "automation_id">,
 		options: WithResponseRequestOptions,
@@ -1973,16 +1973,19 @@ export class EffectAutomationsResource {
 			EffectFlatMap(
 				decodeEndpointParams("automations", "run", { automation_id: automationId }),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.automations.run",
-						"pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.automations.run({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.run",
+							key !== undefined ? "idempotent" : "pre-commit-only",
+							withResolvedIdempotencyKey(options, key),
+							() =>
+								this.#runtime.raw.automations.run({
+									params: pathParams,
+									headers: key === undefined ? {} : { "idempotency-key": key },
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -5206,7 +5209,7 @@ export class AutomationsResource {
 		)
 	}
 
-	/** Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails. */
+	/** Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run. */
 	run(
 		automationId: PathParam<"automations", "run", "automation_id">,
 		options?: PromiseRequestOptions,

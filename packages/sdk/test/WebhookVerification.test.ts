@@ -87,7 +87,7 @@ describe("SDK WebhookVerification", () => {
 			id: "evt_automation_auto_1_4",
 			created_at: "2026-02-02T00:00:00.000Z",
 			data: {
-				type: "automation_run.succeeded",
+				type: "automation_run.started",
 				id: "arun_1",
 				automation_id: "auto_1",
 			},
@@ -107,7 +107,7 @@ describe("SDK WebhookVerification", () => {
 			secret: SECRET_B,
 			nowSeconds: now,
 		})
-		expect(unwrapped.data.type).toBe("automation_run.succeeded")
+		expect(unwrapped.data.type).toBe("automation_run.started")
 		expect(unwrapped.data.automation_id).toBe("auto_1")
 	})
 

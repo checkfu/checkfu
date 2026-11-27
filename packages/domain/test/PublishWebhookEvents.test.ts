@@ -222,9 +222,9 @@ describe("PublishWebhookEvents policy", () => {
 				const runEvents = published.filter((event) =>
 					event.event_type.startsWith("automation_run."),
 				)
-				expect(runEvents.map((event) => event.event_type).sort()).toEqual([
+				expect(runEvents.map((event) => event.event_type)).toEqual([
+					"automation_run.queued",
 					"automation_run.started",
-					"automation_run.succeeded",
 				])
 				expect(
 					runEvents.every((event) => event.resource_id === automationRunId(automationId, 2)),

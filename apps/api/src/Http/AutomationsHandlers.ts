@@ -58,6 +58,7 @@ import {
 	commitForStream,
 	createIdentity,
 	handled,
+	idempotentCommandId,
 	isPending,
 	orPending,
 	reject,
@@ -428,17 +429,27 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				}).pipe(handled),
 			)
 			.handle("archive", ({ params, query }) => archive(params.automation_id, query.revision))
-			.handle("run", ({ params }) =>
+			.handle("run", ({ params, headers }) =>
 				Effect.gen(function* () {
 					const id = params.automation_id
-					const receipt = yield* automations.send(new RunAutomation({ automation_id: id }))
+					const key = headers["idempotency-key"]
+					const options =
+						key === undefined
+							? undefined
+							: { commandId: yield* idempotentCommandId(digest, "run-automation", [id, key]) }
+					const receipt = yield* automations.send(new RunAutomation({ automation_id: id }), options)
+					const queued = receipt.events.find((event) => event._tag === "automation.fired")
+					if (queued === undefined) {
+						return yield* reject(500, "The automation run receipt is missing its session ID.")
+					}
 					return {
 						type: "automation_run" as const,
-						id: automationRunId(id, receipt.reply.run),
+						id: automationRunId(id, queued.run),
 						automation_id: id,
-						run: receipt.reply.run,
+						run: queued.run,
 						status: "queued" as const,
 						trigger: { type: "manual" as const },
+						session_id: queued.session_id,
 					}
 				}).pipe(handled),
 			)

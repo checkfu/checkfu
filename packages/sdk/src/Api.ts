@@ -1119,6 +1119,7 @@ export const AutomationRunQueued = Schema.Struct({
 	run: PositiveInt,
 	status: Schema.Literal("queued"),
 	trigger: Schema.Struct({ type: Schema.Literal("manual") }),
+	session_id: SessionId.annotate({ description: "Session ID the run will use if it starts" }),
 }).pipe(HttpApiSchema.status(201))
 export type AutomationRunQueued = typeof AutomationRunQueued.Type
 
@@ -1270,7 +1271,8 @@ export type ArtifactDeleted = typeof ArtifactDeleted.Type
 export const WebhookEventSubscriptions = Schema.Array(WebhookEventSubscription)
 	.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_WEBHOOK_EVENT_TYPES))
 	.annotate({
-		description: 'Subscribed event types (or ["*"] to subscribe to all events)',
+		description:
+			'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running.',
 	})
 
 export const CreateWebhookBody = Schema.Struct({
@@ -2610,13 +2612,14 @@ const Automations = HttpApiGroup.make("automations")
 	.add(
 		HttpApiEndpoint.post("run", "/v1/automations/:automation_id/run", {
 			params: automationParams,
+			headers: IdempotencyHeaders,
 			success: AutomationRunQueued,
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Run an automation now")
 			.annotate(
 				OpenApi.Description,
-				"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
+				"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "automations",

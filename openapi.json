@@ -21585,6 +21585,18 @@
 							"description": "Automation ID"
 						},
 						"required": true
+					},
+					{
+						"name": "idempotency-key",
+						"in": "header",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Optional Idempotency-Key header for safe retries"
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -21636,9 +21648,23 @@
 											},
 											"required": ["type"],
 											"additionalProperties": false
+										},
+										"session_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256,
+											"description": "Session ID the run will use if it starts"
 										}
 									},
-									"required": ["id", "type", "automation_id", "run", "status", "trigger"],
+									"required": [
+										"id",
+										"type",
+										"automation_id",
+										"run",
+										"status",
+										"trigger",
+										"session_id"
+									],
 									"additionalProperties": false
 								}
 							}
@@ -21981,7 +22007,7 @@
 						}
 					}
 				},
-				"description": "Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
+				"description": "Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run.",
 				"summary": "Run an automation now",
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "run",
@@ -38505,8 +38531,8 @@
 												"automation.paused",
 												"automation.unpaused",
 												"automation.archived",
+												"automation_run.queued",
 												"automation_run.started",
-												"automation_run.succeeded",
 												"automation_run.failed",
 												"artifact.created",
 												"artifact.version_added",
@@ -38527,7 +38553,7 @@
 										},
 										"minItems": 1,
 										"maxItems": 64,
-										"description": "Subscribed event types (or [\"*\"] to subscribe to all events)"
+										"description": "Subscribed event types (or [\"*\"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running."
 									}
 								},
 								"required": ["url", "event_types"],
@@ -40167,8 +40193,8 @@
 												"automation.paused",
 												"automation.unpaused",
 												"automation.archived",
+												"automation_run.queued",
 												"automation_run.started",
-												"automation_run.succeeded",
 												"automation_run.failed",
 												"artifact.created",
 												"artifact.version_added",
@@ -40189,7 +40215,7 @@
 										},
 										"minItems": 1,
 										"maxItems": 64,
-										"description": "Subscribed event types (or [\"*\"] to subscribe to all events)"
+										"description": "Subscribed event types (or [\"*\"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running."
 									},
 									"reactivate": {
 										"type": "boolean",

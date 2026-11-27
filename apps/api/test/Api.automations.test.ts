@@ -431,6 +431,7 @@ describe("Automations API", () => {
 					run: 1,
 					status: "queued",
 					trigger: { type: "manual" },
+					session_id: `sess_${id}_1`,
 				})
 
 				const afterFirst = yield* settledRuns(apiFetch, id, 1)
@@ -517,6 +518,49 @@ describe("Automations API", () => {
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
 				expect(fetched.body.run_count).toBe(2)
 				expect(fetched.body.last_run_at).not.toBeNull()
+			}),
+		))
+
+	it("replays the original run and session for the same key, including after later runs", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Idempotent report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const trigger = (key?: string) =>
+					call<RunBody>(
+						apiFetch,
+						"POST",
+						`/v1/automations/${id}/run`,
+						undefined,
+						key === undefined ? {} : { "idempotency-key": key },
+					)
+				const [first, duplicate] = yield* Effect.all([trigger("same-key"), trigger("same-key")], {
+					concurrency: "unbounded",
+				})
+				expect(first.status).toBe(201)
+				expect(first.body).toMatchObject({ run: 1, session_id: `sess_${id}_1` })
+				expect(duplicate).toEqual(first)
+				const afterFirst = yield* settledRuns(apiFetch, id, 1)
+				expect(afterFirst.body.data.map((entry) => entry.session_id)).toEqual([
+					first.body.session_id,
+				])
+
+				const unkeyed = yield* trigger()
+				expect(unkeyed.body).toMatchObject({ run: 2, session_id: `sess_${id}_2` })
+				expect(yield* trigger("same-key")).toEqual(first)
+				const another = yield* trigger("another-key")
+				expect(another.body).toMatchObject({ run: 3, session_id: `sess_${id}_3` })
+				const history = yield* settledRuns(apiFetch, id, 3)
+				expect(history.body.data.map((entry) => [entry.run, entry.session_id])).toEqual(
+					[first, unkeyed, another].map(({ body }) => [body.run, body.session_id]),
+				)
 			}),
 		))
 

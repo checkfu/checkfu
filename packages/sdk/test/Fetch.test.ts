@@ -160,10 +160,23 @@ describe("the fetch client", () => {
 		const { sent, fetch } = recording(202, JSON.stringify({ run: 1 }))
 		const request = untyped(createFetchClient({ fetch }))
 		const input: LooseInput = { path: { automation_id: "auto_1" }, idempotencyKey: "run-once" }
-		await expect(request("automations.run", input)).rejects.toThrow(
-			"automations.run takes no idempotency key",
+		await expect(request("automations.retrieve", input)).rejects.toThrow(
+			"automations.retrieve takes no idempotency key",
 		)
 		expect(sent).toEqual([])
+	})
+
+	it("sends a run idempotency key and gives back the session ID", async () => {
+		const queued = { run: 1, session_id: "sess_auto_1_1" }
+		const { sent, fetch } = recording(201, JSON.stringify(queued))
+		const request = createFetchClient({ fetch })
+		expect(
+			await request("automations.run", {
+				path: { automation_id: "auto_1" },
+				idempotencyKey: "run-once",
+			}),
+		).toEqual(queued)
+		expect(sent.map((call) => call.headers.get("idempotency-key"))).toEqual(["run-once"])
 	})
 
 	it("uses the headers it was created with, even if the caller's object changes later", async () => {
@@ -215,7 +228,7 @@ describe("the fetch client", () => {
 	it("does not accept a field the operation does not declare, from a literal or a variable", () => {
 		const retrieveWithBody = { path: { agent_id: "a" }, body: { version: 1, name: "x" } }
 		const createWithQuery = { query: { order: "desc" as const } }
-		const runWithKey = { path: { automation_id: "auto_1" }, idempotencyKey: "run-once" }
+		const retrieveWithKey = { path: { automation_id: "auto_1" }, idempotencyKey: "run-once" }
 		const urlWithBody = { path: { agent_id: "a" }, body: { name: "x" } }
 		expectTypeOf<
 			Assignable<typeof retrieveWithBody, FetchInput<"agents.retrieve">>
@@ -224,7 +237,7 @@ describe("the fetch client", () => {
 			Assignable<typeof createWithQuery, UrlInput<"agents.create">>
 		>().toEqualTypeOf<false>()
 		expectTypeOf<
-			Assignable<typeof runWithKey, FetchInput<"automations.run">>
+			Assignable<typeof retrieveWithKey, FetchInput<"automations.retrieve">>
 		>().toEqualTypeOf<false>()
 		expectTypeOf<
 			Assignable<typeof urlWithBody, UrlInput<"agents.retrieve">>

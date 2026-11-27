@@ -1344,6 +1344,14 @@ const automationsRunCommandSpec: GeneratedOperationDescriptor = {
 			kind: "string",
 			required: true,
 		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
 	],
 }
 
@@ -1354,11 +1362,16 @@ const automationsRunCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
 		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
 	},
 	(flags) => invokeGeneratedOperation(automationsRunCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
+		"Trigger an automation run outside its schedule, including while paused. The response gives the queued run number and the session ID it will use if it starts. The run appears in history once session creation succeeds or fails. Repeating a request with the same Idempotency-Key returns the same run.",
 	),
 )
 
@@ -3840,7 +3853,7 @@ const webhooksCreateCommand = CommandMake(
 		eventTypes: FlagString("event-types").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				'Subscribed event types (or ["*"] to subscribe to all events) (JSON, YAML, or @file)',
+				'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running. (JSON, YAML, or @file)',
 			),
 			FlagOptional,
 		),
@@ -4199,7 +4212,7 @@ const webhooksUpdateCommand = CommandMake(
 		eventTypes: FlagString("event-types").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				'Subscribed event types (or ["*"] to subscribe to all events) (JSON, YAML, or @file)',
+				'Subscribed event types (or ["*"] to subscribe to all events). automation_run.started is sent when the run creates its session. The session turn may still be running. (JSON, YAML, or @file)',
 			),
 			FlagOptional,
 		),

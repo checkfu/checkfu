@@ -2833,6 +2833,7 @@ describe("@checkfu/sdk", () => {
 								automation_id: "auto_run",
 								run: 4,
 								status: "queued",
+								session_id: "sess_pending_4",
 								trigger: { type: "manual" },
 							},
 							201,

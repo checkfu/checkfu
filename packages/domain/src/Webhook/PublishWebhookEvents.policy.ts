@@ -139,9 +139,9 @@ export const notificationOf = ({
 			return {
 				event_type:
 					event._tag === "automation.fired"
-						? "automation_run.started"
+						? "automation_run.queued"
 						: event._tag === "automation.run_started"
-							? "automation_run.succeeded"
+							? "automation_run.started"
 							: "automation_run.failed",
 				resource_type: "automation_run",
 				resource_id: automationRunId(source.id, event.run),
