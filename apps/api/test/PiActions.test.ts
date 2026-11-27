@@ -13,6 +13,8 @@ import {
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
+import { createToolSearchExtension } from "@earendil-works/pi-durable/tool-search"
+import { makeSessionMcp } from "../src/Pi/PiMcpSession.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import { makeAssistantReply, makeScriptedPiModels } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
@@ -333,6 +335,145 @@ describe("an operation that waits on a custom tool", () => {
 		},
 		30_000,
 	)
+
+	it("recovers an MCP approval with its original catalog, then admits the refreshed tool", async () => {
+		const kept = new Map<string, string>()
+		const executed: Array<string> = []
+		let clock = 0
+		let turn = 1
+		let advertised = "first"
+		let listings = 0
+		const mcpTurn = {
+			networking: null,
+			servers: [
+				{
+					name: "docs",
+					url: "https://example.test/mcp",
+					vault_id: "vlt_1",
+					credential_id: "cred_1",
+				},
+			],
+		}
+		const build = async (storage?: InMemoryPiDurableBackend["storage"]) => {
+			const mcp = makeSessionMcp({
+				kv: { get: (key) => kept.get(key), put: (key, value) => kept.set(key, value) },
+				now: () => clock,
+				admittedTurn: () => turn,
+				agentTools: () => [
+					{
+						type: "mcp_toolset",
+						mcp_server_name: "docs",
+						default_config: { permission_policy: { type: "always_ask" } },
+						configs: [{ name: "second", permission_policy: { type: "always_allow" } }],
+					},
+				],
+				vaults: {
+					list: async () => {
+						listings++
+						return {
+							ok: true,
+							tools: [
+								{ name: advertised, description: "Test tool", inputSchema: { type: "object" } },
+							],
+						}
+					},
+					call: async (_vault, _credential, _url, tool) => {
+						executed.push(tool.name)
+						return { ok: true, content: [{ type: "text", text: tool.name }], isError: false }
+					},
+				},
+			})
+			const registry = createCheckfuRegistry()
+			const install = () => {
+				for (const extension of mcp.extensions()) {
+					registry.install(extension)
+				}
+			}
+			install()
+			registry.install(createToolSearchExtension())
+			registry.install(actionsExtension((name) => mcp.toolOf(name)))
+			const scripted = makeScriptedPiModels(async (model, context) => {
+				const last = context.messages.at(-1)
+				if (last?.role === "toolResult" && last.toolName !== "tool_search") {
+					return makeAssistantReply(
+						model,
+						null,
+						last.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+						1,
+						1,
+					)
+				}
+				return {
+					...makeAssistantReply(model, null, "", 1, 1),
+					content: [
+						last?.role === "toolResult"
+							? {
+									type: "toolCall",
+									name: `mcp__docs__${advertised}`,
+									id: `c${turn}`,
+									arguments: {},
+								}
+							: {
+									type: "toolCall",
+									name: "tool_search",
+									id: `s${turn}`,
+									arguments: { query: advertised },
+								},
+					],
+					stopReason: "toolUse",
+				}
+			})
+			const backend = await createInMemoryPiDurableBackend(scripted, 1, registry, undefined, {
+				...(storage === undefined ? {} : { storage }),
+				mcpToolOf: (name) => mcp.toolOf(name),
+				publishMcp: async (req) => mcp.publish(req.turn, mcpTurn) && mcp.undiscovered(),
+			})
+			return {
+				...backend,
+				discoverMcp: async (req: { turn: number }, signal?: AbortSignal) => {
+					await mcp.discover(req.turn, signal)
+					install()
+				},
+			}
+		}
+		const first = await build()
+		const outcome = await Effect.runPromise(runPiDurableTurn(first, request))
+		expect(outcome, JSON.stringify(outcome)).toMatchObject({
+			ok: "paused",
+			calls: [{ awaits: "confirmation", name: "first" }],
+		})
+		if (outcome.ok !== "paused") {
+			throw new Error("Expected an approval")
+		}
+		const id = outcome.calls[0]!.tool_use_id
+		first.retire()
+		clock = 300_000
+		advertised = "second"
+		const second = await build(first.storage)
+		try {
+			expect(
+				await Effect.runPromise(recoverPiDurableTurn(second, request.operationId)),
+			).toMatchObject({ ok: "paused", calls: [{ tool_use_id: id }] })
+			expect(
+				await Effect.runPromise(
+					answerPiDurableCall(second, id, { type: "confirmation", allow: true, deny_message: "" }),
+				),
+			).toBe("delivered")
+			expect(
+				await Effect.runPromise(recoverPiDurableTurn(second, request.operationId)),
+			).toMatchObject({ ok: true, reply: { text: "first" } })
+			expect([listings, executed]).toEqual([1, ["first"]])
+			turn = 2
+			expect(
+				await Effect.runPromise(
+					runPiDurableTurn(second, { ...request, turn, operationId: "turn:2" }),
+				),
+			).toMatchObject({ ok: true, reply: { text: "second" } })
+			expect([listings, executed]).toEqual([2, ["first", "second"]])
+		} finally {
+			await second.close()
+		}
+	})
 
 	it("reports the parked call with its checked arguments, and settles once it is answered", async () => {
 		const backend = await open()

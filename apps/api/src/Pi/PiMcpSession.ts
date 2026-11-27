@@ -1,5 +1,5 @@
-import { MAX_MCP_SERVERS, mcpHostAllowed } from "@checkfu/domain/Mcp/McpServers"
-import type { AgentTool, McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
+import { MAX_MCP_SERVERS, McpServerBinding, mcpHostAllowed } from "@checkfu/domain/Mcp/McpServers"
+import type { AgentTool } from "@checkfu/domain/Mcp/McpServers"
 import type { Extension } from "@earendil-works/pi-durable"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -7,12 +7,11 @@ import type { CredentialAccess } from "../Api.ts"
 import {
 	MAX_TOOL_LIST_BYTES,
 	cacheableTools,
-	cachedTools,
 	mcpExtension,
 	mcpRegistry,
 	withinCatalog,
 } from "./PiMcp.ts"
-import type { McpDispatch, McpRegistry, McpServerTools } from "./PiMcp.ts"
+import type { McpDispatch, McpRegistry } from "./PiMcp.ts"
 import type { McpCaller, McpPeer } from "./PiMcpCaller.ts"
 import {
 	MAX_MCP_RESPONSE_BYTES,
@@ -21,6 +20,7 @@ import {
 	MCP_CREDENTIAL_ENDED,
 	McpCallOutcome,
 	McpListOutcome,
+	McpToolDescriptors,
 	mcpCallScope,
 	withMcpDeadline,
 } from "./PiMcpTypes.ts"
@@ -30,12 +30,32 @@ import { MCP_TURN_KEY, McpTurn } from "./PiTurn.ts"
 const MCP_DISCOVERY_RETRY_MS = 300_000
 const MCP_SLOW_FAILURE_MS = 5000
 
-const Brought = Schema.Struct({ turn: Schema.Finite, ...McpTurn.fields })
+const Brought = Schema.Struct({ turn: Schema.Finite, admittedAt: Schema.Finite, ...McpTurn.fields })
 const broughtJson = Schema.fromJsonString(Brought)
 const encodeBrought = Schema.encodeSync(broughtJson)
 const decodeBrought = Schema.decodeOption(broughtJson)
-const toolsKey = (server: string) => `mcp-tools:${server}`
-const unavailableKey = (server: string) => `mcp-unavailable:${server}`
+const catalogKey = (server: string) => `mcp-catalog:${server}`
+const CatalogEntry = Schema.Struct({
+	binding: McpServerBinding,
+	turn: Schema.Finite,
+	checkedAt: Schema.Finite,
+	catalog: Schema.Union([
+		Schema.Struct({ status: Schema.Literal("listed"), tools: McpToolDescriptors }),
+		Schema.Struct({
+			status: Schema.Literal("unavailable"),
+			reason: Schema.String,
+			retryAt: Schema.NullOr(Schema.Finite),
+		}),
+	]),
+})
+const catalogJson = Schema.fromJsonString(CatalogEntry)
+const encodeCatalog = Schema.encodeSync(catalogJson)
+const decodeCatalog = Schema.decodeOption(catalogJson)
+const sameBinding = (a: McpServerBinding, b: McpServerBinding) =>
+	a.name === b.name &&
+	a.url === b.url &&
+	a.vault_id === b.vault_id &&
+	a.credential_id === b.credential_id
 
 export interface SessionKv {
 	readonly get: (key: string) => string | undefined
@@ -168,7 +188,14 @@ export const makeSessionMcp = (options: {
 	readonly listTimeoutMs?: number
 }) => {
 	const { kv, now = Date.now } = options
-	const unreachable = new Map<string, { readonly reason: string; readonly retryAt: number }>()
+	const pending = new Map<
+		string,
+		{
+			readonly request: Promise<void>
+			readonly admission: string
+			readonly signal: AbortSignal | undefined
+		}
+	>()
 
 	const brought = (): typeof Brought.Type | undefined =>
 		Option.getOrUndefined(Option.flatMap(Option.fromNullishOr(kv.get(MCP_TURN_KEY)), decodeBrought))
@@ -179,11 +206,15 @@ export const makeSessionMcp = (options: {
 		turn: number,
 		signal: AbortSignal | undefined,
 	): string | undefined => {
-		if (options.admittedTurn() !== turn) {
+		const selected = current()
+		if (
+			options.admittedTurn() !== turn ||
+			!selected.servers.some((server) => sameBinding(server, binding))
+		) {
 			return "This turn is no longer the session's current one, so the request was not sent."
 		}
 		const { host } = new URL(binding.url)
-		if (!mcpHostAllowed(current().networking, host)) {
+		if (!mcpHostAllowed(selected.networking, host)) {
 			return `The environment's network rules do not allow MCP server "${binding.name}" (${host}).`
 		}
 		return signal?.aborted === true
@@ -208,13 +239,13 @@ export const makeSessionMcp = (options: {
 		},
 	})
 
-	const toolsOf = (server: string): McpServerTools | undefined => {
-		const text = kv.get(toolsKey(server))
-		if (text !== undefined) {
-			return cachedTools(text)
+	const catalogOf = (binding: McpServerBinding): typeof CatalogEntry.Type | undefined => {
+		const text = kv.get(catalogKey(binding.name))
+		if (text === undefined) {
+			return undefined
 		}
-		const reason = kv.get(unavailableKey(server))
-		return reason === undefined ? undefined : { status: "unavailable", reason }
+		const saved = Option.getOrUndefined(decodeCatalog(text))
+		return saved !== undefined && sameBinding(binding, saved.binding) ? saved : undefined
 	}
 
 	const listed = async (
@@ -240,42 +271,95 @@ export const makeSessionMcp = (options: {
 	const list = async (
 		binding: McpServerBinding,
 		turn: number,
+		admission: string,
 		signal: AbortSignal | undefined,
 	): Promise<void> => {
 		const refused = refusal(binding, turn, signal)
 		const started = now()
-		const outcome: McpListOutcome =
-			refused === undefined ? await listed(binding, turn, signal) : { ok: false, message: refused }
-		if (signal?.aborted === true || options.admittedTurn() !== turn || brought()?.turn !== turn) {
+		const outcome =
+			refused === undefined
+				? await listed(binding, turn, signal)
+				: { ok: false as const, message: refused }
+		if (
+			signal?.aborted === true ||
+			options.admittedTurn() !== turn ||
+			kv.get(MCP_TURN_KEY) !== admission
+		) {
 			return
 		}
 		const kept = cacheableTools(outcome)
-		if ("text" in kept) {
-			unreachable.delete(binding.name)
-			kv.put(toolsKey(binding.name), kept.text)
-		} else if (!kept.retry) {
-			unreachable.delete(binding.name)
-			kv.put(unavailableKey(binding.name), kept.unavailable)
-		} else if (toolsOf(binding.name) === undefined) {
-			const finished = now()
-			const slow = refused === undefined && finished - started >= MCP_SLOW_FAILURE_MS
-			const retryAt = finished + (slow ? MCP_DISCOVERY_RETRY_MS : 0)
-			if (retryAt >= (unreachable.get(binding.name)?.retryAt ?? finished)) {
-				unreachable.set(binding.name, { reason: kept.unavailable, retryAt })
+		const finished = now()
+		const slow = refused === undefined && finished - started >= MCP_SLOW_FAILURE_MS
+		const catalog: (typeof CatalogEntry.Type)["catalog"] =
+			"tools" in kept
+				? { status: "listed", tools: kept.tools }
+				: {
+						status: "unavailable",
+						reason: kept.unavailable,
+						retryAt: kept.retry ? finished + (slow ? MCP_DISCOVERY_RETRY_MS : 0) : null,
+					}
+		kv.put(catalogKey(binding.name), encodeCatalog({ binding, turn, checkedAt: finished, catalog }))
+	}
+
+	const listOnce = async (
+		binding: McpServerBinding,
+		turn: typeof Brought.Type,
+		admission: string,
+		signal?: AbortSignal,
+	): Promise<void> => {
+		if (
+			signal?.aborted === true ||
+			options.admittedTurn() !== turn.turn ||
+			kv.get(MCP_TURN_KEY) !== admission ||
+			!needsListing(binding, turn)
+		) {
+			return
+		}
+		const previous = pending.get(binding.name)
+		if (previous?.admission === admission && !previous.signal?.aborted) {
+			const interrupted = Promise.withResolvers<void>()
+			const leave = () => interrupted.resolve()
+			signal?.addEventListener("abort", leave, { once: true })
+			try {
+				await Promise.race([previous.request, interrupted.promise])
+			} finally {
+				signal?.removeEventListener("abort", leave)
+			}
+			if (previous.signal?.aborted && !signal?.aborted) {
+				await listOnce(binding, turn, admission, signal)
+			}
+			return
+		}
+		const request = list(binding, turn.turn, admission, signal)
+		pending.set(binding.name, { request, admission, signal })
+		try {
+			await request
+		} finally {
+			if (pending.get(binding.name)?.request === request) {
+				pending.delete(binding.name)
 			}
 		}
 	}
 
-	const needsListing = (name: string, at: number): boolean =>
-		toolsOf(name) === undefined && (unreachable.get(name)?.retryAt ?? at) <= at
+	const needsListing = (binding: McpServerBinding, turn: typeof Brought.Type): boolean => {
+		const entry = catalogOf(binding)
+		if (entry === undefined) {
+			return true
+		}
+		if (entry.turn === turn.turn) {
+			return false
+		}
+		const retryAt = entry.catalog.status === "unavailable" ? entry.catalog.retryAt : null
+		return turn.admittedAt >= (retryAt ?? entry.checkedAt + MCP_DISCOVERY_RETRY_MS)
+	}
 
 	const servers = () =>
 		withinCatalog(
 			current().servers.map((binding) => ({
 				binding,
-				tools: toolsOf(binding.name) ?? {
+				tools: catalogOf(binding)?.catalog ?? {
 					status: "unavailable" as const,
-					reason: unreachable.get(binding.name)?.reason ?? "it has not been reached yet",
+					reason: "it has not been reached yet",
 				},
 			})),
 		)
@@ -314,24 +398,24 @@ export const makeSessionMcp = (options: {
 			if (kept !== undefined && kept.turn > turn) {
 				return false
 			}
-			const text = encodeBrought({ turn, ...mcp })
+			const admittedAt = kept?.turn === turn ? kept.admittedAt : now()
+			const text = encodeBrought({ turn, admittedAt, ...mcp })
 			if (kv.get(MCP_TURN_KEY) !== text) {
 				kv.put(MCP_TURN_KEY, text)
 			}
 			return true
 		},
 		undiscovered: (): boolean => {
-			const at = now()
-			return current().servers.some((binding) => needsListing(binding.name, at))
+			const kept = brought()
+			return kept?.servers.some((binding) => needsListing(binding, kept)) ?? false
 		},
 		discover: async (turn: number, signal?: AbortSignal): Promise<void> => {
 			const kept = brought()
 			if (kept === undefined || kept.turn !== turn) {
 				return
 			}
-			const at = now()
-			const missing = kept.servers.filter((binding) => needsListing(binding.name, at))
-			await Promise.all(missing.map((binding) => list(binding, turn, signal)))
+			const admission = encodeBrought(kept)
+			await Promise.all(kept.servers.map((binding) => listOnce(binding, kept, admission, signal)))
 		},
 	}
 }
