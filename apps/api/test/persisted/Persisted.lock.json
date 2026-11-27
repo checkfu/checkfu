@@ -5,7 +5,7 @@
 	"baselines": [
 		{
 			"label": "pre-release",
-			"cut_at": "2026-11-27T13:50:09.610Z",
+			"cut_at": "2026-11-27T13:57:58.832Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -99,7 +99,6 @@
 				"event:Checkfu.Artifact/artifact.reserved": "16f16f1e5b5ab058e69385c48e5ff64a16d5cc9f64e8fda43649847f0e0121d8",
 				"event:Checkfu.Artifact/artifact.reservation_expired": "6d072406d5ea6f667ccb30dd90aec786586f9d364cc16661968e3d5fa713fd4a",
 				"event:Checkfu.Artifact/artifact.created": "7b296a7f9fe5ffb77f702ef51e27c5df2dbea74d7f632e710919747037a91c60",
-				"event:Checkfu.Artifact/artifact.opened": "ee79d596b1006ab5827cf618f8bbcefcc9452e34e168d8c46912d882c053f253",
 				"event:Checkfu.Artifact/artifact.version_added": "b74d982d0f7c200737a20a06f76c143cd82bb4aae9833b574170ddc895dc81cb",
 				"event:Checkfu.Artifact/artifact.deleted": "f4a9b59a11486240383562ecc29249179066687f46e5b2c3eb2b1fb45c4a9e2b",
 				"event:Checkfu.Artifact/artifact.published": "593155b5e447ae0fb694476e52073291e1cd94989075f46648ec1fe09b159128",
@@ -109,7 +108,6 @@
 				"command-reply:Checkfu/ExpireArtifactReservation": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"scheduled-command:Checkfu.Artifact/ExpireArtifactReservation": "b9b84c4a01d364ac33b7b3a515df350b8168ffd54831026e018750de3428ddd5",
 				"command-reply:Checkfu/CreateArtifact": "10e48fa01759f910250d262f57fbc7db43e63b384b33b800c7ce34fbc37e0983",
-				"command-reply:Checkfu/OpenArtifact": "010c37d5d6f817f241c5e10e1ec6eedb66edb39506f331c24b65bdaa916bc24a",
 				"command-reply:Checkfu/AddArtifactVersion": "10e48fa01759f910250d262f57fbc7db43e63b384b33b800c7ce34fbc37e0983",
 				"command-reply:Checkfu/DeleteArtifact": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/PublishArtifact": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
@@ -186,12 +184,12 @@
 				"policy-delivery:Checkfu.ReleaseArtifactBytes/Artifact": "0477bfb7e6de3eb5c7426bbf46219105ac0b0628d2a4718a3b68eabceefa927b",
 				"policy-delivery:Checkfu.ExpireFileReservations/File": "d951fbd467e214195ff7deae09aa0b6f98712dd79d1c84ce4eeecf0ffadb932d",
 				"policy-delivery:Checkfu.ReleaseFileBytes/File": "961c35cf6b9d19dcd8802f695f23e10c0892d5678bcd9df446d57ebba4e1842e",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
-				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
-				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "8630ec0ee57d7f08c58ecfd9a802bf4f84123b887da7174c68676c19d5c6a797",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Session": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Automation": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
+				"policy-delivery:Checkfu.PublishWebhookEvents/Artifact": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
+				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": "148c05cd547e0533c294a0ded3e3f932d2e80f966c2525fb93e7efeb476b9223",
 				"saga-input:Checkfu.RunTurn": "1a0bcf1a8a50ea7f088641cd2ae7e8f25fd7c1bdfef74188748ded4892cdb441",
 				"saga-result:Checkfu.RunTurn": "3c8df7c46d31b2029d9557c40023bb9bf6be699ae73785730604c586d7d56d4d",
 				"state:Webhooks.WebhookEndpoint": "42513e12ece950579289bf9adcc879b8311c0c23eeaa1e49b2ed254ea30df2bb",
@@ -5734,40 +5732,6 @@
 						"total_bytes": 60
 					}
 				],
-				"event:Checkfu.Artifact/artifact.opened": [
-					{
-						"_tag": "artifact.opened",
-						"name": "-1"
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": "l"
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": "gW%cK9"
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": "\t"
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": "NUnA:t]|\\"
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": " "
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": "\t"
-					},
-					{
-						"_tag": "artifact.opened",
-						"name": "😀"
-					}
-				],
 				"event:Checkfu.Artifact/artifact.version_added": [
 					{
 						"_tag": "artifact.version_added",
@@ -6056,32 +6020,6 @@
 					},
 					{
 						"version": 83
-					}
-				],
-				"command-reply:Checkfu/OpenArtifact": [
-					{
-						"version": 43
-					},
-					{
-						"version": 98
-					},
-					{
-						"version": 0
-					},
-					{
-						"version": 97
-					},
-					{
-						"version": 5
-					},
-					{
-						"version": 99
-					},
-					{
-						"version": 2
-					},
-					{
-						"version": 100
 					}
 				],
 				"command-reply:Checkfu/AddArtifactVersion": [
@@ -10000,7 +9938,8 @@
 				],
 				"policy-delivery:Checkfu.PublishWebhookEvents/Agent": [
 					{
-						"_tag": "automation.archived"
+						"_tag": "automation.unpaused",
+						"activation": 56
 					},
 					{
 						"_tag": "automation.unpaused",
@@ -10062,7 +10001,9 @@
 				],
 				"policy-delivery:Checkfu.PublishWebhookEvents/Environment": [
 					{
-						"_tag": "artifact.deleted"
+						"_tag": "memory_store.created",
+						"name": "<.wga142*0",
+						"description": "}+ADdsG9L"
 					},
 					{
 						"_tag": "automation.created",
@@ -10131,7 +10072,8 @@
 						"_tag": "automation.archived"
 					},
 					{
-						"_tag": "automation.archived"
+						"_tag": "automation.unpaused",
+						"activation": 98
 					},
 					{
 						"_tag": "environment.updated",
@@ -10149,16 +10091,13 @@
 						"_tag": "memory_store.archived"
 					},
 					{
-						"_tag": "automation.run_failed",
+						"_tag": "automation.run_started",
 						"run": 1,
-						"trigger": "schedule",
-						"scheduled_at": 25,
-						"agent_id": "-1",
-						"agent_version": 21,
-						"error": {
-							"type": "\udc00",
-							"message": "\u0000"
-						}
+						"session_id": "\t",
+						"trigger": "manual",
+						"scheduled_at": 5,
+						"agent_id": "0",
+						"agent_version": 7
 					},
 					{
 						"_tag": "agent.updated",
@@ -10204,8 +10143,21 @@
 						"rescheduled": false
 					},
 					{
-						"_tag": "automation.paused",
-						"reason": "[F7'"
+						"_tag": "automation.updated",
+						"name": "7Y6wmsH`",
+						"description": null,
+						"text": "\udc00",
+						"schedule": {
+							"type": "cron",
+							"expression": "z!6_",
+							"timezone": "A"
+						},
+						"agent_version": 54,
+						"agent_id": "😀",
+						"environment_id": "prototype",
+						"revision": 44,
+						"activation": 74,
+						"rescheduled": false
 					},
 					{
 						"_tag": "artifact.deleted"
@@ -10274,11 +10226,30 @@
 						"rescheduled": false
 					},
 					{
-						"_tag": "environment.archived"
+						"_tag": "environment.updated",
+						"version": 6,
+						"name": "񲹉",
+						"description": null,
+						"config": {
+							"type": "cloud",
+							"networking": {
+								"type": "limited",
+								"allow_mcp_servers": true,
+								"allow_package_managers": false,
+								"allowed_hosts": [
+									"\udc00",
+									"\udc00"
+								]
+							}
+						}
 					},
 					{
-						"_tag": "artifact.opened",
-						"name": "Y/Q\"po$v`x"
+						"_tag": "artifact.created",
+						"version": 41,
+						"name": "__proto__",
+						"manifest": "4294967295",
+						"file_count": 100,
+						"total_bytes": 98
 					},
 					{
 						"_tag": "environment.updated",
@@ -10293,11 +10264,7 @@
 						}
 					},
 					{
-						"_tag": "automation.fired",
-						"run": 100,
-						"session_id": "\t",
-						"trigger": "manual",
-						"scheduled_at": 0
+						"_tag": "automation.archived"
 					},
 					{
 						"_tag": "session.status_idle",
@@ -10308,28 +10275,23 @@
 						"event_ids": "0"
 					},
 					{
-						"_tag": "artifact.version_added",
-						"version": 98,
-						"manifest": "toString",
-						"file_count": 74,
-						"total_bytes": 1
+						"_tag": "artifact.published",
+						"token": "\ud800",
+						"pinned_version": 5
 					},
 					{
-						"_tag": "automation.updated",
+						"_tag": "automation.created",
 						"name": "'",
 						"description": "4[S",
-						"text": "@:$R",
+						"agent_id": "@:$R",
+						"agent_version": 7,
+						"environment_id": "=",
+						"text": "ggo':PL36w",
 						"schedule": {
 							"type": "cron",
-							"expression": "-1",
-							"timezone": "/=y9r"
-						},
-						"agent_version": 77,
-						"agent_id": "PL36wKhd|(",
-						"environment_id": "U",
-						"revision": 5,
-						"activation": 99,
-						"rescheduled": true
+							"expression": "toString",
+							"timezone": "j"
+						}
 					}
 				],
 				"policy-delivery:Checkfu.PublishWebhookEvents/MemoryStore": [
@@ -10347,7 +10309,7 @@
 						"tools": " "
 					},
 					{
-						"_tag": "agent.updated",
+						"_tag": "agent.created",
 						"version": 3,
 						"version_id": "|<tBDf<d4\"",
 						"name": "0",
@@ -10365,38 +10327,50 @@
 						"pinned_version": 3
 					},
 					{
-						"_tag": "automation.paused",
-						"reason": "n"
+						"_tag": "automation.updated",
+						"name": "󳫨򉵣񪋴􍱁",
+						"description": null,
+						"text": "s?Kx;",
+						"schedule": {
+							"type": "cron",
+							"expression": "-1",
+							"timezone": "."
+						},
+						"agent_version": 3,
+						"agent_id": ".l!2kR\\*-:",
+						"environment_id": " ",
+						"revision": 101,
+						"activation": 84,
+						"rescheduled": true
 					},
 					{
-						"_tag": "automation.run_started",
+						"_tag": "automation.fired",
 						"run": 61,
 						"session_id": " ",
 						"trigger": "schedule",
-						"scheduled_at": null,
-						"agent_id": "XY6X#,2RV5",
-						"agent_version": 99
+						"scheduled_at": null
 					},
 					{
-						"_tag": "artifact.opened",
-						"name": "d"
+						"_tag": "artifact.created",
+						"version": 43,
+						"name": "toString",
+						"manifest": "\n",
+						"file_count": 1,
+						"total_bytes": 3
 					},
 					{
-						"_tag": "automation.updated",
+						"_tag": "automation.created",
 						"name": "]/&eye!ueU",
 						"description": null,
-						"text": "0",
+						"agent_id": "0",
+						"agent_version": 4,
+						"environment_id": "toString",
+						"text": "O.J",
 						"schedule": {
 							"type": "cron",
-							"expression": " ",
-							"timezone": "cs3O.JJN]S"
-						},
-						"agent_version": 3,
-						"agent_id": "prototype",
-						"environment_id": "\t",
-						"revision": 67,
-						"activation": 6,
-						"rescheduled": true
+							"expression": "4294967295",
+							"timezone": "_FK]"
+						}
 					},
 					{
 						"_tag": "artifact.version_added",

@@ -200,6 +200,7 @@ describe("@checkfu/sdk live API integration", () => {
 								run: 1,
 								status: "queued",
 								trigger: { type: "manual" },
+								session_id: expect.stringMatching(/^sess_/),
 							})
 							yield* client.automations.run(automation.id)
 							yield* client.automations.run(automation.id)

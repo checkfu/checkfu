@@ -514,7 +514,7 @@ const artifactsCreateCommand = CommandMake(
 		files: FlagString("file").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+				"File as JSON, YAML, or @file: path with content (and optional encoding), or path with file_id; content_type is optional (repeatable)",
 			),
 			FlagBetween(0, 1000),
 		),
@@ -815,7 +815,7 @@ const artifactsVersionsCreateCommand = CommandMake(
 		files: FlagString("file").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"File as JSON, YAML, or @file with path and content (optional encoding and content_type), or path and the sha256 of a file to keep from the version being replaced (repeatable)",
+				"File as JSON, YAML, or @file: path with content (and optional encoding), path with file_id, or path with the sha256 of a file to keep from the version being replaced; content_type is optional (repeatable)",
 			),
 			FlagBetween(0, 1000),
 		),

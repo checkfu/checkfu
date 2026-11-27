@@ -185,7 +185,7 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 					const bytes = objects.get(artifactBlobKey(scope, artifactId, sha256))
 					return bytes === undefined ? null : Stream.make(bytes)
 				}),
-			putBlob: (artifactId, sha256, body, size) =>
+			putBlob: (artifactId, sha256, body, size, reservation) =>
 				Effect.andThen(
 					Effect.suspend(() => beforePut),
 					ownerOf(scope, artifactId).putBlob(
@@ -193,6 +193,7 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 						sha256,
 						Stream.toReadableStream(body),
 						size,
+						reservation,
 					),
 				),
 			purge: (artifactId) => ownerOf(scope, artifactId).purge(artifactId),

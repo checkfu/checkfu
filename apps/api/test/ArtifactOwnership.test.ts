@@ -193,7 +193,7 @@ describe("artifact owner", () => {
 				Effect.andThen(Deferred.succeed(uploading, undefined), Deferred.await(release)),
 			)
 			const upload = yield* Effect.forkChild(
-				owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1),
+				owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1, null),
 			)
 			yield* Deferred.await(uploading)
 			const purge = yield* Effect.forkChild(owner.purge(ID))
@@ -205,7 +205,7 @@ describe("artifact owner", () => {
 			expect(objects.size).toBe(0)
 			expect(
 				isFailure(
-					yield* Effect.exit(owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1)),
+					yield* Effect.exit(owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1, null)),
 					"ArtifactPurged",
 				),
 			).toBe(true)
@@ -213,17 +213,39 @@ describe("artifact owner", () => {
 	)
 
 	it.effect(
-		"records an empty artifact's reservation, so releasing an older one keeps its files",
+		"records a reservation before its bytes arrive, so releasing an older one keeps them",
 		() =>
 			Effect.gen(function* () {
 				const { owner, objects, marks } = makeOwner()
 				yield* owner.stage(ID, null, 2)
 				expect(marks()).toEqual({ purged: false, staged: 2, released: 0 })
-				yield* owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1)
+				yield* owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1, null)
 				yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), null)
 				yield* owner.release(ID, 1)
 				expect(objects.size).toBe(3)
 			}),
+	)
+
+	it.effect("refuses bytes for a reservation that has been released, so none outlive it", () =>
+		Effect.gen(function* () {
+			const { owner, objects } = makeOwner()
+			yield* owner.stage(ID, null, 1)
+			yield* owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1, 1)
+			expect(objects.size).toBe(1)
+			yield* owner.release(ID, 1)
+			expect(objects.size).toBe(0)
+			expect(
+				isFailure(
+					yield* Effect.exit(owner.putBlob(ID, "b".repeat(64), new Blob(["y"]).stream(), 1, 1)),
+					"ArtifactReservationStale",
+				),
+			).toBe(true)
+			expect(objects.size).toBe(0)
+			yield* owner.stage(ID, null, 2)
+			expect(yield* owner.putBlob(ID, "b".repeat(64), new Blob(["y"]).stream(), 1, 2)).toBe(
+				"stored",
+			)
+		}),
 	)
 
 	it.effect("writes a new digest once when two uploads of it race, and checks the second", () =>
@@ -233,10 +255,10 @@ describe("artifact owner", () => {
 			setDuringUpload(Deferred.await(release))
 			const key = artifactBlobKey(SCOPE, ID, "a".repeat(64))
 			const first = yield* Effect.forkChild(
-				owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1),
+				owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1, null),
 			)
 			const second = yield* Effect.forkChild(
-				owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1),
+				owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1, null),
 			)
 			yield* Effect.yieldNow
 			yield* Deferred.succeed(release, undefined)
@@ -248,11 +270,13 @@ describe("artifact owner", () => {
 	it.effect("refuses an upload declared empty whose body is not", () =>
 		Effect.gen(function* () {
 			const { owner, objects } = makeOwner()
-			expect(yield* owner.putBlob(ID, "e".repeat(64), new Blob(["not empty"]).stream(), 0)).toBe(
-				"mismatch",
-			)
+			expect(
+				yield* owner.putBlob(ID, "e".repeat(64), new Blob(["not empty"]).stream(), 0, null),
+			).toBe("mismatch")
 			expect(objects.size).toBe(0)
-			expect(yield* owner.putBlob(ID, "e".repeat(64), new Blob([]).stream(), 0)).toBe("stored")
+			expect(yield* owner.putBlob(ID, "e".repeat(64), new Blob([]).stream(), 0, null)).toBe(
+				"stored",
+			)
 		}),
 	)
 })

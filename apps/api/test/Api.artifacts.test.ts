@@ -1926,6 +1926,59 @@ describe("Artifact bytes", () => {
 			}),
 		))
 
+	it("answers a retry with the committed artifact or version after the source file is deleted", () =>
+		withApi(({ call, uploadFile }) =>
+			Effect.gen(function* () {
+				const file = yield* json<{ id: string }>(yield* uploadFile("data.bin", bytesOf(64)))
+				const body = { name: "Kept", files: [{ path: "data.bin", file_id: file.id }] }
+				const created = yield* call("POST", "/v1/artifacts", body, {
+					"idempotency-key": "from-file",
+				})
+				expect(created.status).toBe(201)
+				const artifact = yield* json<ArtifactBody>(created)
+				const next = {
+					version: 1,
+					files: [
+						{ path: "copy.bin", file_id: file.id },
+						{ path: "note.txt", content: "hi" },
+					],
+				}
+				const versions = `/v1/artifacts/${artifact.id}/versions`
+				expect((yield* call("POST", versions, next)).status).toBe(201)
+
+				expect((yield* call("DELETE", `/v1/files/${file.id}`)).status).toBe(200)
+				const retried = yield* call("POST", "/v1/artifacts", body, {
+					"idempotency-key": "from-file",
+				})
+				expect(retried.status).toBe(201)
+				expect((yield* json<ArtifactBody>(retried)).id).toBe(artifact.id)
+				const resent = yield* call("POST", versions, next)
+				expect(resent.status).toBe(201)
+				expect((yield* json<VersionBody>(resent)).version).toBe(2)
+
+				const fresh = yield* call("POST", "/v1/artifacts", body, {
+					"idempotency-key": "another-key",
+				})
+				expect(fresh.status).toBe(404)
+				expect((yield* call("POST", versions, { ...next, version: 2 })).status).toBe(404)
+			}),
+		))
+
+	it("refuses an entry that names its bytes two ways", () =>
+		withApi(({ call, uploadFile }) =>
+			Effect.gen(function* () {
+				const file = yield* json<{ id: string }>(yield* uploadFile("data.bin", bytesOf(8)))
+				for (const entry of [
+					{ path: "a.bin", file_id: file.id, content: "x" },
+					{ path: "a.bin", file_id: file.id, sha256: "0".repeat(64) },
+				]) {
+					expect(
+						(yield* call("POST", "/v1/artifacts", { name: "Both", files: [entry] })).status,
+					).toBe(400)
+				}
+			}),
+		))
+
 	it("refuses an artifact with no files", () =>
 		withApi(({ call }) =>
 			Effect.gen(function* () {
