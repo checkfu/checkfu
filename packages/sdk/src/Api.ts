@@ -3040,7 +3040,10 @@ const Artifacts = HttpApiGroup.make("artifacts")
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Delete an artifact")
-			.annotate(OpenApi.Description, "Delete an artifact and every stored version of its files")
+			.annotate(
+				OpenApi.Description,
+				"Permanently delete an artifact, all versions of its files, and all documents in its database. Its public address and viewing links stop working.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts",
 				"x-forge-method-name": "delete",

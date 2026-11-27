@@ -231,8 +231,8 @@ function ArtifactView({
 					onConfirm={() => remove.run()}
 					onCancel={() => setDeleting(false)}
 				>
-					Delete {artifact.name} and every version of its files? Its public address and every
-					viewing link stop working at once. This cannot be undone.
+					Delete {artifact.name}, every version of its files, and all documents in its database? Its
+					public address and every viewing link stop working at once. This cannot be undone.
 				</Confirm>
 			) : null}
 			{remove.error === undefined ? null : <Callout tone="error">{remove.error}</Callout>}

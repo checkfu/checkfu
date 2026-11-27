@@ -579,7 +579,11 @@ const artifactsDeleteCommand = CommandMake(
 		),
 	},
 	(flags) => invokeGeneratedOperation(artifactsDeleteCommandSpec, flags),
-).pipe(CommandWithDescription("Delete an artifact and every stored version of its files"))
+).pipe(
+	CommandWithDescription(
+		"Permanently delete an artifact, all versions of its files, and all documents in its database. Its public address and viewing links stop working.",
+	),
+)
 
 const artifactsListCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts list",

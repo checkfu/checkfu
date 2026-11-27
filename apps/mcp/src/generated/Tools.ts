@@ -1022,7 +1022,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "artifacts_deleteArtifact",
 		title: "Delete an artifact",
-		description: "Delete an artifact and every stored version of its files",
+		description:
+			"Permanently delete an artifact, all versions of its files, and all documents in its database. Its public address and viewing links stop working.",
 		method: "DELETE",
 		path: "/v1/artifacts/{artifact_id}",
 		readOnly: false,

@@ -1741,7 +1741,7 @@ export class EffectArtifactsResource {
 		)
 	}
 
-	/** Delete an artifact and every stored version of its files */
+	/** Permanently delete an artifact, all versions of its files, and all documents in its database. Its public address and viewing links stop working. */
 	delete(
 		artifactId: PathParam<"artifacts", "delete", "artifact_id">,
 		options: WithResponseRequestOptions<never>,
@@ -5763,7 +5763,7 @@ export class ArtifactsResource {
 		)
 	}
 
-	/** Delete an artifact and every stored version of its files */
+	/** Permanently delete an artifact, all versions of its files, and all documents in its database. Its public address and viewing links stop working. */
 	delete(
 		artifactId: PathParam<"artifacts", "delete", "artifact_id">,
 		options?: PromiseRequestOptions<never>,

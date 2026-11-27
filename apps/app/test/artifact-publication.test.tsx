@@ -60,6 +60,9 @@ const open = async ({
 		if (path === "/auth/session") {
 			return { body: {} }
 		}
+		if (path === artifactPath && method === "DELETE") {
+			return { body: { id: artifact.id, type: "artifact_deleted" } }
+		}
 		if (path === artifactPath && method === "GET") {
 			return failRefresh && artifact.publication === null
 				? { status: 503, body: { error: { type: "api_error", message: "Refresh failed." } } }
@@ -193,6 +196,8 @@ const open = async ({
 			act(async () => {
 				await queryClient.invalidateQueries({ queryKey: artifactQuery(artifact.id).queryKey })
 			}),
+		deletions: () =>
+			sent.filter(({ path, method }) => path === artifactPath && method === "DELETE").length,
 		changes: () =>
 			sent
 				.filter(({ path }) => path === publicationPath)
@@ -289,6 +294,22 @@ it("keeps publication busy when the artifact is reopened in the same dashboard",
 	await act(async () => page.completePublish())
 	await waitFor(() => expect(button(page.container, "Follow latest").disabled).toBe(false))
 	expect(page.container.textContent).toContain("v3, pinned")
+})
+
+it("describes erasure of every version and database document before deletion", async () => {
+	const page = await open()
+	await click(button(page.container, "Delete"))
+	expect(page.container.textContent).toContain(
+		"every version of its files, and all documents in its database",
+	)
+	expect(page.container.textContent).toContain(
+		"Its public address and every viewing link stop working",
+	)
+	await click(button(page.container, "Cancel"))
+	expect(page.deletions()).toBe(0)
+	await click(button(page.container, "Delete"))
+	await click(button(page.container, "Delete artifact"))
+	await waitFor(() => expect(page.deletions()).toBe(1))
 })
 
 it("removes a revoked address even if the detail refresh fails", async () => {
