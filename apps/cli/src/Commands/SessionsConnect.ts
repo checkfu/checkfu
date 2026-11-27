@@ -392,6 +392,11 @@ const renderConnectEvent = (
 					yield* writeStderrLine(
 						`[tool] ${event.tool_use_id} did not run: ${TOOL_REJECTIONS[event.rejected]}`,
 					)
+				} else if (!rawStructuredMode && event.is_error) {
+					const detail = escapeTerminalControlCharacters(
+						event.content.map((block) => block.text).join("\n"),
+					)
+					yield* writeStderrLine(`[tool error] ${event.tool_use_id}: ${shownText(detail)}`)
 				}
 				break
 			}
@@ -492,12 +497,14 @@ export type WaitingCall = Pick<ToolCall, "awaits" | "name" | "server" | "input">
 
 export const MAX_SHOWN_ARGUMENT_CHARACTERS = 2000
 
-const shownArguments = (input: unknown): string => {
-	const characters = Array.from(stringifyTerminalSafeJson(input))
+const shownText = (text: string): string => {
+	const characters = Array.from(text)
 	return characters.length <= MAX_SHOWN_ARGUMENT_CHARACTERS
 		? characters.join("")
 		: `${characters.slice(0, MAX_SHOWN_ARGUMENT_CHARACTERS).join("")}… (${characters.length - MAX_SHOWN_ARGUMENT_CHARACTERS} more characters)`
 }
+
+const shownArguments = (input: unknown): string => shownText(stringifyTerminalSafeJson(input))
 
 export const describeWaitingCall = (
 	sessionId: string,

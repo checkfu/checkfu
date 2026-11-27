@@ -358,6 +358,37 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 	})
 
+	it("shows bounded, escaped tool failures while a connected agent recovers", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const cli = yield* makeTestServer({
+					toolEvents: () => [
+						{
+							type: "tool_use",
+							tool_use_id: "failed_bash",
+							name: "bash",
+							input: { command: "write report" },
+						},
+						{
+							type: "tool_result",
+							tool_use_id: "failed_bash",
+							is_error: true,
+							content: [{ type: "text", text: "No such directory\u001b[2J " + "😀".repeat(5000) }],
+						},
+					],
+				})
+				const id = yield* createReadySession(cli)
+				const connected = yield* cli.run(["sessions", "connect", id], { stdin: "Make a report\n" })
+				expect(connected.exitCode).toBe(0)
+				expect(connected.stderr).toContain("[tool error]")
+				expect(connected.stderr).toContain(String.raw`No such directory\x1b[2J`)
+				expect(connected.stderr).not.toContain("\u001b")
+				expect(connected.stderr.length).toBeLessThan(6000)
+				expect(connected.stdout).toContain("Echo: Make a report")
+			}).pipe(Effect.scoped),
+		)
+	})
+
 	it("connects non-interactively, sanitizes terminal output, and settles turns cleanly", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
