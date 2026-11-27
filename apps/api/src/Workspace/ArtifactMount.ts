@@ -14,10 +14,11 @@ const nested = (
 	prefix: string,
 	recursive: boolean,
 	walkLimit: number,
+	existing = 0,
 ): Array<PassthroughDirent> => {
 	const entries = new Map<string, PassthroughDirent>()
 	const add = (entry: PassthroughDirent): void => {
-		if (!entries.has(entry.name) && entries.size >= walkLimit) {
+		if (!entries.has(entry.name) && existing + entries.size >= walkLimit) {
 			throw failure("EIO", `More than ${walkLimit} entries to list.`)
 		}
 		entries.set(entry.name, entry)
@@ -77,12 +78,25 @@ export const makeArtifactMount = (
 			return listing.some((entry) => entry.path.startsWith(`${at.path}/`)) ? DIR : null
 		},
 		readdir: async (rel, options) => {
+			const limit = Math.min(walkLimit, options?.limit ?? walkLimit)
 			if (rel === "") {
 				const all = await mounted()
+				if (all.length > limit) {
+					throw failure("EIO", `More than ${limit} entries to list.`)
+				}
 				const entries: Array<PassthroughDirent> = all.map((name) => ({ name, ...DIR }))
 				if (options?.recursive === true) {
 					for (const name of all) {
-						entries.push(...nested(await files(name), "", `${name}/`, true, walkLimit))
+						for (const entry of nested(
+							await files(name),
+							"",
+							`${name}/`,
+							true,
+							limit,
+							entries.length,
+						)) {
+							entries.push(entry)
+						}
 					}
 				}
 				return entries
@@ -95,7 +109,7 @@ export const makeArtifactMount = (
 			if (listing.some((file) => file.path === at.path)) {
 				throw failure("ENOTDIR", `Not a directory: ${rel}`)
 			}
-			const entries = nested(listing, at.path, "", options?.recursive === true, walkLimit)
+			const entries = nested(listing, at.path, "", options?.recursive === true, limit)
 			if (at.path !== "" && entries.length === 0) {
 				return null
 			}

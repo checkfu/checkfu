@@ -87,6 +87,31 @@ const text = async (mount: ReturnType<typeof mountOver>, rel: string) => {
 }
 
 describe("memory mount", () => {
+	it("bounds a whole recursive memory walk and builds only direct children for a shallow listing", async () => {
+		const memory = fakeMemory(
+			new Map([
+				["/team/plan/q3", "x"],
+				["/team/plan/q4", "y"],
+			]),
+		)
+		const seen: Array<string> = []
+		const mount = makeMemoryMount({
+			...memory,
+			mounts: async () => ["a", "b", "c"].map((name) => ({ name, access: "read_write" })),
+			list: async (name) => {
+				seen.push(name)
+				return memory.list(name)
+			},
+		})
+		expect(await mount.readdir("a", { limit: 1 })).toMatchObject([{ name: "team" }])
+		seen.length = 0
+		await expect(mount.readdir("", { recursive: true, limit: 8 })).rejects.toThrow(
+			"More than 8 entries",
+		)
+		expect(seen).toEqual(["a", "b"])
+		expect(await mount.readdir("a", { recursive: true, limit: 4 })).toHaveLength(4)
+	})
+
 	it("shows a store as directories that exist while a memory is below them", async () => {
 		const mount = mountOver(
 			new Map([

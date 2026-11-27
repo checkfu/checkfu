@@ -197,7 +197,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 							import("./MemoryMount.ts"),
 						])
 					const mounts = (walkLimit: number) => ({
-						[MEMORY_ROOT]: makeMemoryMount(memory),
+						[MEMORY_ROOT]: makeMemoryMount(memory, walkLimit),
 						[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts, walkLimit),
 						[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
 						[FILE_MOUNT_ROOT]: makeFilesMount(FILE_MOUNT_ROOT, artifacts, walkLimit),
