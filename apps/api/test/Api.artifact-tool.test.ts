@@ -2,7 +2,9 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Schedule from "effect/Schedule"
+import { artifactData } from "../src/Workspace/ArtifactDataTool.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
+import { MAX_TOOL_ARTIFACT_FILES } from "../src/Workspace/SessionArtifactTool.ts"
 import {
 	AUTH_HEADERS,
 	makeAssistantReply,
@@ -659,6 +661,62 @@ describe("An artifact the agent saves", () => {
 			}),
 		))
 
+	it("reuses the returned add key after a committed response is lost", () =>
+		withSessions(
+			(apiFetch, { createSession, workspaceFiles, save, runInWorld, sessionArtifactSaves }) =>
+				Effect.gen(function* () {
+					const session = yield* createSession
+					workspaceFiles(session.id).set("/workspace/site/index.html", "report")
+					const id = idIn(yield* save(session.id, "Report", "/workspace/site"))
+					const data = { name: "Report", collection: "rows", operation: "add", data: "one" }
+					const saves = sessionArtifactSaves()
+					const firstKey = `pi:${session.id}:20`
+					let committed: string | null = null
+					const lost = yield* Effect.promise(() =>
+						artifactData(data, {
+							defaultKey: firstKey,
+							writeResult: async () => {
+								throw new Error("Unexpected large result")
+							},
+							ask: async (name, req) => {
+								const result = await runInWorld(saves.sessionArtifactData(session.id, 1, name, req))
+								if (result.ok) {
+									committed = result.id
+								}
+								throw new Error("Lost the committed response")
+							},
+						}),
+					)
+					expect(committed).toBeTypeOf("string")
+					expect(lost.content).toEqual([
+						{
+							type: "text",
+							text: `The add could have succeeded. Repeat it with key "${firstKey}" to avoid another document.`,
+						},
+					])
+					const retried = yield* Effect.promise(() =>
+						artifactData(
+							{ ...data, key: firstKey },
+							{
+								defaultKey: `pi:${session.id}:21`,
+								writeResult: async () => {
+									throw new Error("Unexpected large result")
+								},
+								ask: (name, req) => runInWorld(saves.sessionArtifactData(session.id, 1, name, req)),
+							},
+						),
+					)
+					expect(retried.isError).toBe(false)
+					const rows = yield* json<{ data: ReadonlyArray<{ id: string }> }>(
+						yield* request(apiFetch, "GET", `/v1/artifacts/${id}/data/rows`),
+					)
+					expect(rows.data.map((row) => row.id)).toEqual([committed])
+					expect(retried.content).toEqual([
+						{ type: "text", text: expect.stringContaining(JSON.stringify(committed)) },
+					])
+				}),
+		))
+
 	it("rejects invalid page sizes at the API binding and refuses writes from an interrupted turn", () =>
 		withSessions(
 			(apiFetch, { createSession, workspaceFiles, save, runInWorld, sessionArtifactSaves }) =>
@@ -728,7 +786,7 @@ describe("An artifact the agent saves", () => {
 				const mount = "/mnt/artifacts/document"
 				const first = yield* save(session.id, "Q3 notes", "/workspace/notes", `${mount}/`)
 				const id = idIn(first)
-				expect(first).toBe(`Saved "Q3 notes" as artifact ${id}, version 1, with 1 file.`)
+				expect(first).toBe(`Saved "Q3 notes" as artifact ${id}, version 1, with 4 files.`)
 				const made = yield* json<{
 					files: ReadonlyArray<{ path: string }>
 					capabilities: unknown
@@ -793,6 +851,117 @@ describe("An artifact the agent saves", () => {
 						),
 					)).made_from,
 				).toBeNull()
+			}),
+		))
+
+	it("copies the attached source when the session adds no files", () =>
+		withSessions((apiFetch, { createSessionWith, runInWorld, sessionArtifactSaves }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/artifacts", {
+						name: "template",
+						files: [{ path: "index.html", content: "<main>Dashboard</main>" }],
+					}),
+				)
+				const session = yield* createSessionWith([{ type: "artifact", artifact_id: id }])
+				const result = yield* Effect.promise(() =>
+					runInWorld(
+						sessionArtifactSaves().sessionArtifactSave(
+							session.id,
+							1,
+							"Dashboard",
+							[],
+							"/mnt/artifacts/template",
+						),
+					),
+				)
+				expect(result).toMatchObject({ ok: true, version: 1, file_count: 1, changed: true })
+				if (result.ok) {
+					const artifact = yield* json<ArtifactBody & { made_from: unknown }>(
+						yield* request(apiFetch, "GET", `/v1/artifacts/${result.artifact_id}`),
+					)
+					expect(artifact.made_from).toEqual({ artifact_id: id, version: 1 })
+					expect(artifact.files.map((file) => file.path)).toEqual(["index.html"])
+				}
+			}),
+		))
+
+	it("versions a save from a different attached source even when its files are identical", () =>
+		withSessions((apiFetch, { createSessionWith, workspaceFiles, save }) =>
+			Effect.gen(function* () {
+				const first = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/artifacts", {
+						name: "template-a",
+						files: [{ path: "index.html", content: "<main>Report</main>" }],
+					}),
+				)
+				const second = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/artifacts", {
+						name: "template-b",
+						files: [{ path: "index.html", content: "<main>Report</main>" }],
+					}),
+				)
+				const session = yield* createSessionWith([
+					{ type: "artifact", artifact_id: first.id },
+					{ type: "artifact", artifact_id: second.id },
+				])
+				workspaceFiles(session.id).set("/workspace/out/content.md", "# Report")
+				const id = idIn(
+					yield* save(session.id, "Report", "/workspace/out", "/mnt/artifacts/template-a"),
+				)
+				expect(
+					yield* save(session.id, "Report", "/workspace/out", "/mnt/artifacts/template-b"),
+				).toBe(`Saved "Report" as artifact ${id}, version 2, with 2 files.`)
+				const latest = yield* json<{ made_from: unknown }>(
+					yield* request(apiFetch, "GET", `/v1/artifacts/${id}`),
+				)
+				expect(latest.made_from).toEqual({ artifact_id: second.id, version: 1 })
+			}),
+		))
+
+	it("refuses a deleted attached source while its manifest still awaits erasure", () =>
+		withSessions((apiFetch, { createSessionWith, workspaceFiles, artifactStore, save }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/artifacts", {
+						name: "template",
+						files: [{ path: "index.html", content: "<main>Report</main>" }],
+					}),
+				)
+				const session = yield* createSessionWith([{ type: "artifact", artifact_id: id }])
+				workspaceFiles(session.id).set("/workspace/out/content.md", "# Report")
+				artifactStore.setBeforeDelete(Effect.sync(() => artifactStore.setFailing(true)))
+				const deleted = yield* request(apiFetch, "DELETE", `/v1/artifacts/${id}`)
+				artifactStore.setBeforeDelete(Effect.void)
+				artifactStore.setFailing(false)
+				expect(deleted.status).toBe(503)
+				expect((yield* request(apiFetch, "GET", `/v1/artifacts/${id}`)).status).toBe(404)
+				expect(
+					[...artifactStore.objects.keys()].some((key) => key.includes(`/${id}/manifests/`)),
+				).toBe(true)
+				expect(yield* save(session.id, "Report", "/workspace/out", "/mnt/artifacts/template")).toBe(
+					`Artifact ${id} not found.`,
+				)
+			}),
+		))
+
+	it("counts files inherited from the attached source toward the artifact tool limit", () =>
+		withSessions((apiFetch, { createSessionWith, workspaceFiles, save }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/artifacts", {
+						name: "template",
+						files: Array.from({ length: MAX_TOOL_ARTIFACT_FILES }, (_, index) => ({
+							path: `file-${index}.txt`,
+							content: "template",
+						})),
+					}),
+				)
+				const session = yield* createSessionWith([{ type: "artifact", artifact_id: id }])
+				workspaceFiles(session.id).set("/workspace/out/content.md", "# Report")
+				expect(yield* save(session.id, "Report", "/workspace/out", "/mnt/artifacts/template")).toBe(
+					`An artifact holds 1 to ${MAX_TOOL_ARTIFACT_FILES} files.`,
+				)
 			}),
 		))
 

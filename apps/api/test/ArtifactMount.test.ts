@@ -183,6 +183,30 @@ describe("artifact mount", () => {
 		30_000,
 	)
 
+	it("shares the recursive limit across all mounted manifests", async () => {
+		const seen: Array<string> = []
+		const mount = makeArtifactMount(
+			"/mnt/artifacts",
+			{
+				mounts: async () => ["a", "b", "c"].map((name) => `/mnt/artifacts/${name}`),
+				files: async (name) => {
+					seen.push(name)
+					return [
+						{ path: "dir/x", size: 1 },
+						{ path: "dir/y", size: 1 },
+					]
+				},
+				read: async () => null,
+			},
+			20,
+		)
+		await expect(mount.readdir("", { recursive: true, limit: 8 })).rejects.toThrow(
+			"More than 8 entries",
+		)
+		expect(seen).toEqual(["/mnt/artifacts/a", "/mnt/artifacts/b"])
+		expect(await mount.readdir("", { recursive: true, limit: 12 })).toHaveLength(12)
+	})
+
 	it("lists a directory's children without walking its subtrees, and refuses a walk past the limit", async () => {
 		const deep = Array.from({ length: 1000 }, (_, file) => ({
 			path: `${Array.from({ length: 120 }, (_unused, level) => `d${level}`).join("/")}/f${file}.txt`,

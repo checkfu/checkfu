@@ -527,6 +527,30 @@ describe("Checkfu automations", () => {
 		)
 	})
 
+	it.effect("reports a success and then a failure for their own manual runs", () =>
+		story(
+			...created(),
+			Story.when(new RunAutomation({ automation_id: automation.id })),
+			Story.then(automation, manual(1), startedOn(1, null)),
+			...opened(1, 1),
+			Story.when(new ArchiveAgent({ agent_id: agent.id })),
+			Story.then(agent, new AgentArchived()),
+			Story.when(new RunAutomation({ automation_id: automation.id })),
+			Story.then(
+				automation,
+				manual(2),
+				failedOn(
+					2,
+					null,
+					AGENT_UNAVAILABLE,
+					"The automation's agent or pinned agent version is not available.",
+				),
+				new AutomationPaused({ reason: AGENT_UNAVAILABLE }),
+			),
+			Story.then(sessionOf(2)),
+		),
+	)
+
 	it.effect("pauses and opens no session once its agent is archived", () =>
 		story(
 			...created(),

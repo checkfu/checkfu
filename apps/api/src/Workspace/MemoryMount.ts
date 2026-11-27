@@ -61,21 +61,38 @@ const nested = (
 	files: ReadonlyArray<MemoryFileInfo>,
 	dir: string,
 	prefix: string,
+	recursive: boolean,
+	limit: number,
+	existing = 0,
 ): Array<PassthroughDirent> => {
 	const entries = new Map<string, PassthroughDirent>()
-	for (const file of below(files, dir)) {
-		const parts = file.path.slice(dir.length + 1).split("/")
-		for (let depth = 1; depth < parts.length; depth += 1) {
-			const name = `${prefix}${parts.slice(0, depth).join("/")}`
-			entries.set(name, { name, ...dirStat(mount) })
+	for (const file of files) {
+		if (!file.path.startsWith(`${dir}/`)) {
+			continue
 		}
-		const name = `${prefix}${parts.join("/")}`
-		entries.set(name, { name, ...fileStat(mount, file.size, file.updated_at) })
+		const relative = file.path.slice(dir.length + 1)
+		let slash = relative.indexOf("/")
+		for (;;) {
+			const name = prefix + (slash === -1 ? relative : relative.slice(0, slash))
+			if (!entries.has(name)) {
+				if (existing + entries.size >= limit) {
+					throw failure("EIO", `More than ${limit} entries to list.`)
+				}
+				entries.set(name, {
+					name,
+					...(slash === -1 ? fileStat(mount, file.size, file.updated_at) : dirStat(mount)),
+				})
+			}
+			if (!recursive || slash === -1) {
+				break
+			}
+			slash = relative.indexOf("/", slash + 1)
+		}
 	}
 	return [...entries.values()]
 }
 
-export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
+export const makeMemoryMount = (memory: SessionMemory, walkLimit = Infinity): PassthroughMount => {
 	const locate = async (rel: string, fresh = false): Promise<Located | undefined> => {
 		const [name, ...rest] = rel.split("/")
 		const mount = (await memory.mounts(fresh)).find((mounted) => mounted.name === name)
@@ -125,15 +142,29 @@ export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 				: null
 		},
 		readdir: async (rel, options) => {
+			const limit = Math.min(walkLimit, options?.limit ?? walkLimit)
 			if (rel === "") {
 				const all = await memory.mounts()
+				if (all.length > limit) {
+					throw failure("EIO", `More than ${limit} entries to list.`)
+				}
 				const entries: Array<PassthroughDirent> = all.map((mount) => ({
 					name: mount.name,
 					...dirStat(mount),
 				}))
 				if (options?.recursive === true) {
 					for (const mount of all) {
-						entries.push(...nested(mount, await memory.list(mount.name), "", `${mount.name}/`))
+						for (const entry of nested(
+							mount,
+							await memory.list(mount.name),
+							"",
+							`${mount.name}/`,
+							true,
+							limit,
+							entries.length,
+						)) {
+							entries.push(entry)
+						}
 					}
 				}
 				return entries
@@ -146,13 +177,11 @@ export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 			if (listing.some((file) => file.path === at.path)) {
 				throw failure("ENOTDIR", `Not a directory: ${rel}`)
 			}
-			const entries = nested(at.mount, listing, at.path, "")
+			const entries = nested(at.mount, listing, at.path, "", options?.recursive === true, limit)
 			if (at.path !== "" && entries.length === 0) {
 				return null
 			}
-			return options?.recursive === true
-				? entries
-				: entries.filter((entry) => !entry.name.includes("/"))
+			return entries
 		},
 		readFile: async (rel) => {
 			const at = await locate(rel)

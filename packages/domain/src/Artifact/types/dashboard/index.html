@@ -77,29 +77,43 @@
 				})
 				.join("")
 		}
+		const documentLimit = 100
+		let refreshing = false
 		const refresh = async () => {
+			if (refreshing) {
+				return
+			}
+			refreshing = true
 			const status = document.getElementById("status")
 			try {
 				const documents = []
 				let page
 				do {
-					const listed = await artifactData.collection("numbers").list({ limit: 100, page })
+					const listed = await artifactData
+						.collection("numbers")
+						.list({ limit: documentLimit - documents.length, page })
 					documents.push(...listed.data)
 					page = listed.next_page
-				} while (typeof page === "string")
+				} while (typeof page === "string" && documents.length < documentLimit)
 				const title = documents.find((document) => document.id === "title")
-				if (title !== undefined && typeof title.data === "string") {
-					document.getElementById("title").textContent = title.data
-					document.title = title.data
-				}
+				const heading = typeof title?.data === "string" ? title.data : "Dashboard"
+				document.getElementById("title").textContent = heading
+				document.title = heading
 				document.getElementById("numbers").innerHTML = numberCards(documents)
+				const updated = "Updated " + new Date().toLocaleTimeString()
 				status.textContent =
-					documents.length === 0 ? "No numbers yet." : "Updated " + new Date().toLocaleTimeString()
+					documents.length === 0
+						? "No numbers yet."
+						: typeof page === "string"
+							? "Showing the first " + documentLimit + " documents. " + updated
+							: updated
 			} catch (error) {
 				status.textContent =
 					error.status === 403
 						? "This address was shared without access to the data. Share it with read access."
 						: error.message
+			} finally {
+				refreshing = false
 			}
 		}
 		refresh()

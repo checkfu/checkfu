@@ -291,10 +291,10 @@ export const PiSessionLive = PiSession.make(
 					}),
 				)
 
-				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal) =>
+				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal, taskId) =>
 					runPromise(
 						workspace()
-							.runTool(call, { turn: admittedTurn() })
+							.runTool(call, { turn: admittedTurn() }, taskId)
 							.pipe(Effect.onInterrupt(() => Effect.ignore(workspace().stopCall(call.id)))),
 						signal === undefined ? undefined : { signal },
 					),

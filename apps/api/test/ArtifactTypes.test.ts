@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import { buildArtifactVersion, readDeclaration } from "../src/Artifacts/ArtifactFiles.ts"
 
-const ROOT = fileURLToPath(new URL("../../../artifact-types/", import.meta.url))
+const ROOT = fileURLToPath(new URL("../../../packages/domain/src/Artifact/types/", import.meta.url))
 const TYPES = ["dashboard", "document", "slides"] as const
 
 const fileOf = (type: string, name: string) => readFileSync(`${ROOT}${type}/${name}`, "utf8")
@@ -41,13 +41,23 @@ interface Listed {
 	readonly next_page: string | null
 }
 
+interface DeckKey {
+	readonly key: string
+	readonly target?: { readonly closest: (selector: string) => object | null }
+	readonly preventDefault: () => void
+}
+
 interface PageGlobals {
+	readonly location?: { readonly hash: string }
 	readonly fetch?: (
 		path: string,
 	) => Promise<{ readonly ok: boolean; readonly text: () => Promise<string> }>
 	readonly artifactData?: {
 		readonly collection: (name: string) => {
-			readonly list: (options: { readonly page?: string }) => Promise<Listed | undefined>
+			readonly list: (options: {
+				readonly limit: number
+				readonly page?: string
+			}) => Promise<Listed | undefined>
 		}
 	}
 }
@@ -59,10 +69,9 @@ interface PageContext extends PageGlobals {
 	numberCards?: (documents: Listed["data"]) => string
 	readonly document?: {
 		readonly getElementById: (id: string) => Pick<Element, "innerHTML" | "textContent">
-		readonly addEventListener: () => void
+		readonly addEventListener: (type: string, listener: (event: DeckKey) => void) => void
 		title: string
 	}
-	readonly location?: { readonly hash: string }
 	readonly history?: { readonly replaceState: () => void }
 	readonly setInterval?: () => number
 }
@@ -75,6 +84,7 @@ const scope = (members: PageContext): PageContext => {
 
 const page = (type: string, extra: PageGlobals) => {
 	const elements = new Map<string, Element>()
+	const keys: Array<(event: DeckKey) => void> = []
 	const element = (id: string) => {
 		const made = elements.get(id) ?? { innerHTML: "", textContent: "", listeners: [] }
 		elements.set(id, made)
@@ -98,7 +108,13 @@ const page = (type: string, extra: PageGlobals) => {
 		}
 	}
 	const context = scope({
-		document: { getElementById: element, addEventListener: () => undefined, title: "" },
+		document: {
+			getElementById: element,
+			addEventListener: (_type, listener) => {
+				keys.push(listener)
+			},
+			title: "",
+		},
 		location: { hash: "" },
 		history: { replaceState: () => undefined },
 		setInterval: () => 0,
@@ -107,7 +123,7 @@ const page = (type: string, extra: PageGlobals) => {
 	for (const script of scriptsOf(fileOf(type, "index.html"))) {
 		runInNewContext(script, context)
 	}
-	return { context, elements }
+	return { context, elements, keys }
 }
 
 const settled = () =>
@@ -127,7 +143,11 @@ describe("The example artifact types", () => {
 	it.effect("are each a valid artifact with a page, a declaration and instructions", () =>
 		Effect.gen(function* () {
 			const digest = yield* Digest.Digest
-			expect(readdirSync(ROOT).filter((name) => !name.includes("."))).toEqual([...TYPES])
+			expect(
+				readdirSync(ROOT)
+					.filter((name) => !name.includes("."))
+					.toSorted(),
+			).toEqual([...TYPES])
 			const declared: Record<string, string> = {}
 			for (const type of TYPES) {
 				const names = readdirSync(`${ROOT}${type}`).toSorted()
@@ -189,6 +209,12 @@ describe("The example artifact types", () => {
 				'<p><img alt="chart" src="images/chart.png"></p>',
 			].join("\n"),
 		)
+		expect(render("[report](files/report*copy*.png) and `a*b*c`")).toBe(
+			'<p><a href="files/report*copy*.png">report</a> and <code>a*b*c</code></p>',
+		)
+		expect(render("**[Read the report](report.md)** or *Run `checkfu` first*")).toBe(
+			'<p><strong><a href="report.md">Read the report</a></strong> or <em>Run <code>checkfu</code> first</em></p>',
+		)
 		expect(render('<script>alert(1)</script> [x](javascript:alert(1)) [y](" onclick="z)')).toBe(
 			'<p>&lt;script&gt;alert(1)&lt;/script&gt; <a href="#">x</a>) [y](&quot; onclick=&quot;z)</p>',
 		)
@@ -236,6 +262,35 @@ describe("The example artifact types", () => {
 			press("previous")
 			press("previous")
 			expect(position()).toBe("1 / 3")
+		}),
+	)
+
+	it.effect("normalizes a fractional slide and leaves Space on a button to its native click", () =>
+		Effect.gen(function* () {
+			const deck = page("slides", {
+				...content("# One\n---\n# Two\n---\n# Three"),
+				location: { hash: "#1.5" },
+			})
+			yield* settled()
+			const position = () => deck.elements.get("position")?.textContent
+			expect(position()).toBe("1 / 3")
+			let prevented = 0
+			const preventDefault = () => {
+				prevented += 1
+			}
+			for (const listener of deck.keys) {
+				listener({ key: " ", target: { closest: () => ({}) }, preventDefault })
+			}
+			expect(position()).toBe("1 / 3")
+			expect(prevented).toBe(0)
+			for (const listener of deck.elements.get("next")?.listeners ?? []) {
+				listener()
+			}
+			expect(position()).toBe("2 / 3")
+			for (const listener of deck.keys) {
+				listener({ key: " ", preventDefault })
+			}
+			expect(position()).toBe("3 / 3")
 		}),
 	)
 
@@ -296,5 +351,36 @@ describe("The example artifact types", () => {
 				yield* settled()
 				expect(refused.elements.get("status")?.textContent).toContain("Share it with read access")
 			}),
+	)
+	it.effect("stops loading dashboard pages at its displayed document limit", () =>
+		Effect.gen(function* () {
+			const limits: Array<number> = []
+			const dashboard = page("dashboard", {
+				artifactData: {
+					collection: () => ({
+						list: ({ limit, page }) => {
+							limits.push(limit)
+							const offset = Number(page ?? 0)
+							const length = Math.min(limit, 8)
+							return Promise.resolve({
+								data: Array.from({ length }, (_, index) => ({
+									id: "metric-" + (offset + index),
+									data: index,
+								})),
+								next_page: String(offset + length),
+							})
+						},
+					}),
+				},
+			})
+			yield* settled()
+			expect(limits).toHaveLength(13)
+			expect(limits.at(-1)).toBe(4)
+			expect(dashboard.elements.get("status")?.textContent).toContain(
+				"Showing the first 100 documents",
+			)
+			expect(dashboard.elements.get("numbers")?.innerHTML).toContain("metric-99")
+			expect(dashboard.elements.get("numbers")?.innerHTML).not.toContain("metric-100")
+		}),
 	)
 })

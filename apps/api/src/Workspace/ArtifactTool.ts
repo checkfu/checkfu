@@ -129,7 +129,7 @@ export const saveArtifact = async (
 		}
 		paths.push(path)
 	}
-	if (paths.length === 0) {
+	if (paths.length === 0 && madeFrom === "") {
 		return refused(`${directory} holds no files.`)
 	}
 	if (paths.length > MAX_TOOL_ARTIFACT_FILES) {
@@ -179,7 +179,7 @@ export const saveArtifact = async (
 	if (!artifact.ok) {
 		return refused(artifact.message)
 	}
-	const files = `${entries.length} ${entries.length === 1 ? "file" : "files"}`
+	const files = `${artifact.file_count} ${artifact.file_count === 1 ? "file" : "files"}`
 	return told(
 		artifact.changed
 			? `Saved ${JSON.stringify(name)} as artifact ${artifact.artifact_id}, version ${artifact.version}, with ${files}.`

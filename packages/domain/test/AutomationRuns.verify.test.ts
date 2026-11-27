@@ -116,6 +116,7 @@ const STANDING = {
 	"Session.TurnAdvancesByAtMostOne": "proved",
 	"Session.TurnNeverDecreases": "proved",
 	"AutomationRuns.ReservedSlotsCoverLiveAutomations": "checked",
+	"AutomationRuns.EveryRunReportMatchesItsFiring": "checked",
 	"AutomationRuns.EveryFiredRunIsReported": "checked",
 	"AutomationRuns.ReservedSlotsEqualLiveAutomations": "checked",
 	"AutomationRuns.AStartedRunIsReported": "reached",

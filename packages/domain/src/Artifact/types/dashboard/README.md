@@ -12,3 +12,5 @@ Change a number by putting its document again under the same id.
 The page only reads. Whoever opens it needs an address shared with `read` access: a link made with `access: "read"`, or a publication with `access: "read"`.
 
 Do not supply `index.html` or `artifact.json`; they come from the type.
+
+The dashboard refreshes every 30 seconds and shows the first 100 documents. The optional title counts toward this limit.

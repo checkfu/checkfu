@@ -111,6 +111,7 @@ export interface SessionWorkspaceShape {
 	readonly runTool: (
 		call: WorkspaceToolCall,
 		token: TurnToken,
+		taskId: number,
 	) => Effect.Effect<WorkspaceToolResult>
 	readonly stopCall: (callId: string) => Effect.Effect<void>
 	readonly listOutputs: (turn: number) => Effect.Effect<OutputsListing | null>
@@ -196,7 +197,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 							import("./MemoryMount.ts"),
 						])
 					const mounts = (walkLimit: number) => ({
-						[MEMORY_ROOT]: makeMemoryMount(memory),
+						[MEMORY_ROOT]: makeMemoryMount(memory, walkLimit),
 						[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts, walkLimit),
 						[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
 						[FILE_MOUNT_ROOT]: makeFilesMount(FILE_MOUNT_ROOT, artifacts, walkLimit),
@@ -414,6 +415,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 					call: WorkspaceToolCall,
 					signal: AbortSignal,
 					turn: number,
+					taskId: number,
 				): Promise<WorkspaceToolResult> => {
 					if (call.name === BASH_TOOL.name) {
 						return runBash(call.arguments, signal)
@@ -440,7 +442,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						return artifactData(call.arguments, {
 							ask: (name, request) =>
 								askApi(api.sessionArtifactData(sessionId, turn, name, request), { signal }),
-							defaultKey: call.id,
+							defaultKey: `pi:${sessionId}:${taskId}`,
 							writeResult: (text) =>
 								onActive(async (on) => {
 									signal.throwIfAborted()
@@ -535,7 +537,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						Effect.sync(() => {
 							fence.interrupt(token)
 						}),
-					runTool: (call: WorkspaceToolCall, token: TurnToken) =>
+					runTool: (call: WorkspaceToolCall, token: TurnToken, taskId: number) =>
 						Effect.promise(async (interrupted) => {
 							if (storage.kv.get(DISCARDED) === true) {
 								return failed("The session has ended and its workspace was discarded.")
@@ -546,7 +548,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								.run(token, async (turn): Promise<WorkspaceToolResult> => {
 									const signal = AbortSignal.any([stopping.signal, turn])
 									await initialize((await workspace()).fs)
-									const { content, isError } = await answer(call, signal, token.turn)
+									const { content, isError } = await answer(call, signal, token.turn, taskId)
 									return boundWorkspaceResult(call.name, { content, isError })
 								})
 								.finally(() => {

@@ -31521,7 +31521,7 @@
 						}
 					}
 				},
-				"description": "List the documents in a collection, oldest first. Use next_page to continue",
+				"description": "List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null.",
 				"summary": "List documents",
 				"x-forge-group-name": "artifacts.data",
 				"x-forge-method-name": "list",

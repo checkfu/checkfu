@@ -553,6 +553,91 @@ describe("A session's MCP servers", () => {
 		}
 	}
 
+	it("refreshes tool descriptors on the first eligible new turn, including an empty catalog", async () => {
+		const stored = new Map<string, string>()
+		const binding = { name: "docs", url: URL_, credential_id: "cred_1", vault_id: "vlt_1" }
+		let currentTurn = 1
+		let clock = 0
+		let attempts = 0
+		let outcome: McpListOutcome = { ok: true, tools: [echo] }
+		const called: Array<string> = []
+		const open = () =>
+			makeSessionMcp({
+				kv: { get: (key) => stored.get(key), put: (key, value) => stored.set(key, value) },
+				now: () => clock,
+				admittedTurn: () => currentTurn,
+				agentTools: () => [],
+				vaults: {
+					list: async () => {
+						attempts++
+						return outcome
+					},
+					call: async (_vault, _credential, _url, tool) => {
+						called.push(tool.name)
+						return { ok: true, content: [], isError: false }
+					},
+				},
+			})
+		let mcp = open()
+		const admit = (number: number, credential = binding.credential_id) => {
+			currentTurn = number
+			return prepare(mcp, turn([{ ...binding, credential_id: credential }]), number)
+		}
+		const offered = () => mcp.extensions().flatMap((extension) => extension.tools ?? [])
+		await admit(1)
+		expect(offered().map((tool) => tool.name)).toEqual(["mcp__docs__echo"])
+		outcome = {
+			ok: true,
+			tools: [
+				{
+					...echo,
+					name: "changed",
+					inputSchema: { type: "object", properties: { count: { type: "number" } } },
+				},
+			],
+		}
+		clock = 299_999
+		await admit(2)
+		mcp = open()
+		clock++
+		await admit(2)
+		expect([attempts, offered()[0]?.name]).toEqual([1, "mcp__docs__echo"])
+		await admit(3)
+		const tools = offered()
+		expect(tools.map((tool) => tool.name)).toEqual(["mcp__docs__changed"])
+		expect(tools[0]?.parameters).toMatchObject({ properties: { count: { type: "number" } } })
+		await tools[0]!.execute({ count: 1 }, {} as never, {} as never)
+		expect(called).toEqual(["changed"])
+		expect(attempts).toBe(2)
+		outcome = { ok: true, tools: [] }
+		clock += 300_000
+		await admit(4)
+		expect(offered()).toEqual([])
+		outcome = { ok: true, tools: [echo] }
+		clock += 300_000
+		await admit(5)
+		expect(offered()[0]?.name).toBe("mcp__docs__echo")
+		outcome = { ok: false, message: MCP_CREDENTIAL_ENDED }
+		await admit(6, "cred_rotated")
+		expect(offered()).toEqual([])
+		expect(mcp.extensions()[0]?.namespace?.description).toContain(MCP_CREDENTIAL_ENDED)
+		outcome = { ok: false, tooLarge: true, message: "oversized" }
+		await admit(7, "cred_rotated")
+		expect(mcp.extensions()[0]?.namespace?.description).toContain("more than")
+		expect(offered()).toEqual([])
+		outcome = { ok: true, tools: [echo] }
+		const attemptsAfterRefusal = attempts
+		clock += 299_999
+		await admit(8, "cred_rotated")
+		clock++
+		await admit(8, "cred_rotated")
+		expect(attempts).toBe(attemptsAfterRefusal)
+		expect(offered()).toEqual([])
+		await admit(9, "cred_rotated")
+		expect(attempts).toBe(attemptsAfterRefusal + 1)
+		expect(offered()[0]?.name).toBe("mcp__docs__echo")
+	})
+
 	it("bounds the listing failure shown in a tool namespace", async () => {
 		const { mcp, discover } = failedDiscovery(0, "Credential was refused: " + "x".repeat(5000))
 		await discover(1)
@@ -571,7 +656,8 @@ describe("A session's MCP servers", () => {
 		time.now += 289_999
 		expect(mcp.undiscovered()).toBe(false)
 		time.now += 1
-		expect(mcp.undiscovered()).toBe(true)
+		await discover(2)
+		expect(time.attempts).toBe(1)
 		await discover(3)
 		expect(time.attempts).toBe(2)
 	})
@@ -579,7 +665,9 @@ describe("A session's MCP servers", () => {
 	it("retries a fast listing failure on the next turn", async () => {
 		const { mcp, time, discover } = failedDiscovery(0, "The server could not be reached.")
 		await discover(1)
-		expect(mcp.undiscovered()).toBe(true)
+		expect(mcp.undiscovered()).toBe(false)
+		await discover(1)
+		expect(time.attempts).toBe(1)
 		await discover(2)
 		expect(time.attempts).toBe(2)
 	})
@@ -616,24 +704,39 @@ describe("A session's MCP servers", () => {
 		old.resolve({ ok: false, message: "Failed slowly" })
 		await first
 		expect(time.attempts).toBe(2)
-		expect(mcp.undiscovered()).toBe(true)
+		expect(mcp.undiscovered()).toBe(false)
 		expect(mcp.extensions().at(0)?.namespace?.description).toContain("Failed quickly")
+		await discover(3)
+		expect(time.attempts).toBe(3)
 	})
 
-	it("keeps a slow failure's cooldown when an overlapping listing fails quickly", async () => {
+	it("lets a cancelled admission leave an overlapping catalog request", async () => {
+		const reply = Promise.withResolvers<McpListOutcome>()
+		const { mcp, discover, time } = failedDiscovery(0, "", async () => reply.promise)
+		const first = discover(1)
+		const cancelled = new AbortController()
+		const duplicate = mcp.discover(1, cancelled.signal)
+		cancelled.abort()
+		try {
+			await duplicate
+			expect(time.attempts).toBe(1)
+		} finally {
+			reply.resolve({ ok: true, tools: [echo] })
+			await first
+		}
+		expect(mcp.extensions()[0]?.tools?.[0]?.name).toBe("mcp__docs__echo")
+	})
+
+	it("shares an overlapping listing and keeps the slow failure cooldown", async () => {
 		const first = Promise.withResolvers<McpListOutcome>()
-		const second = Promise.withResolvers<McpListOutcome>()
-		const { mcp, time, discover } = failedDiscovery(0, "", async (attempt) =>
-			attempt === 1 ? first.promise : second.promise,
-		)
+		const { mcp, time, discover } = failedDiscovery(0, "", async () => first.promise)
 		const slow = discover(1)
 		time.now += 6000
 		const fast = discover(1)
 		first.resolve({ ok: false, message: "Failed slowly" })
 		await slow
-		second.resolve({ ok: false, message: "Failed quickly" })
 		await fast
-		expect(time.attempts).toBe(2)
+		expect(time.attempts).toBe(1)
 		expect(mcp.undiscovered()).toBe(false)
 		expect(mcp.extensions().at(0)?.namespace?.description).toContain("Failed slowly")
 	})
@@ -850,20 +953,21 @@ describe("A session's MCP servers", () => {
 		await mcp.discover(1)
 		expect(asked).toEqual([])
 
-		expect(mcp.publish(1, turn([binding]))).toBe(true)
-		await mcp.discover(1)
+		state.turn = 2
+		expect(mcp.publish(2, turn([binding]))).toBe(true)
+		await mcp.discover(2)
 		expect(asked).toEqual(["list vlt_1/cred_1"])
 		expect(await call(gone.signal)).toMatchObject({
 			output: [{ type: "text", text: expect.stringContaining("interrupted") }],
 			isError: true,
 		})
-		expect(mcp.publish(1, turn([binding], limited([])))).toBe(true)
+		expect(mcp.publish(2, turn([binding], limited([])))).toBe(true)
 		expect(await call()).toMatchObject({
 			output: [{ type: "text", text: expect.stringContaining("network rules do not allow") }],
 			isError: true,
 		})
 		expect(asked).toEqual(["list vlt_1/cred_1"])
-		expect(mcp.publish(1, turn([binding]))).toBe(true)
+		expect(mcp.publish(2, turn([binding]))).toBe(true)
 		expect(await call()).toMatchObject({ isError: false })
 		expect(asked).toEqual(["list vlt_1/cred_1", "call vlt_1/cred_1"])
 	})

@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "pre-release",
-			"cut_at": "2026-11-27T20:22:45.529Z",
+			"label": "mounted-artifact-admission",
+			"cut_at": "2026-11-27T21:21:22.243Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -147,6 +147,7 @@
 				"command-reply:Checkfu/CreateAgent": "97506d720f7740b90ea82a50e4676cc0c88ba90d774fe016a2f4114175cb4c34",
 				"command-reply:Checkfu/UpdateAgent": "97506d720f7740b90ea82a50e4676cc0c88ba90d774fe016a2f4114175cb4c34",
 				"command-reply:Checkfu/AdmitSession": "69f55f6957f8cd4b91f68e3f86920ad49d7bd0d1e6734ceab2180288c9e8d72b",
+				"command-reply:Checkfu/AdmitMountedSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/AdmitSessionWithMessages": "69f55f6957f8cd4b91f68e3f86920ad49d7bd0d1e6734ceab2180288c9e8d72b",
 				"command-reply:Checkfu/AdmitAutomation": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"command-reply:Checkfu/OpenAutomationSession": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
@@ -341,11 +342,11 @@
 				"api-call:Api.memoryMounts/args": "b004d702513d177168fe50e40e987659d68efb65c89735f7cf7edf7abcdcc380",
 				"api-call:Api.memoryMounts/result": "d31f7155797f878788a2b70bd92640df0f57594bdacd8275ccc8c5a6b9174a4c",
 				"api-call:Api.memoryList/args": "7ff824b326822bc239f2a7a8c32e8b2854507c67ed4d295864bbf040a8baa700",
-				"api-call:Api.memoryList/result": "0615ac174eecd67ab54f2aaebedad93c248736dc1f3ef62b60b33c3299dbd6f8",
+				"api-call:Api.memoryList/result": "e459ec3d151ca4026ed78c0af0ad83d578c4dd3873ef7933e8ee2f303586b96e",
 				"api-call:Api.memoryStat/args": "76c19a333893f8313f2913195317f2513df7c51761ce29f4a586c304a1241dd9",
-				"api-call:Api.memoryStat/result": "29102859bed3a5bf92208ea078dd7e75317831d1ffd38fc78183fd3f1d4772df",
+				"api-call:Api.memoryStat/result": "eb6f4e3318c4c75891115f31f388dbaae57665badae1351a706cd0423d48bcb2",
 				"api-call:Api.memoryRead/args": "76c19a333893f8313f2913195317f2513df7c51761ce29f4a586c304a1241dd9",
-				"api-call:Api.memoryRead/result": "ebc1e3b0bfc66d7b359178b30c7187ac82f6f0d269fc1ea62c56ede58f50f99f",
+				"api-call:Api.memoryRead/result": "f83f5ec978477d3140b07088e400716b22003087588771a4cfd3f76811151d24",
 				"api-call:Api.memoryWrite/args": "932b42a1e15f674c5ec2c3d662a5f25490228fb9802da90f7dc224a5d77b2eac",
 				"api-call:Api.memoryWrite/result": "fbd94455026cad7ed194c8ac70161ad361cd12dca4799a9ee7e8f3fd3bd403bb",
 				"api-call:Api.memoryRemove/args": "15ea040bc311f489e8ec2ee716e5a7c472692cb5103e3ec2cb73a093e6632b17",
@@ -359,7 +360,7 @@
 				"api-call:Api.sessionFileSave/args": "6a66c561a71d417886ff0bbd0317525d61df1bae2c1f5fdaae13af96429ea87a",
 				"api-call:Api.sessionFileSave/result": "5202d677d6d59fe97ce65457968dd7b6729c47c2db5e846dc9956cdf74968ea5",
 				"api-call:Api.sessionArtifactSave/args": "e1d6c53bf6513ee9abdc5fd2bacddda4d0ee9441194d0cf06d40b1a97494b5d7",
-				"api-call:Api.sessionArtifactSave/result": "2ca6647ffdcd0a316b8320cac832fcd24bb9da67620dd674adda4718917724e3",
+				"api-call:Api.sessionArtifactSave/result": "6909679e100df092df688ab9e5b6d825a1c53e8ba7b551b7b4af13a7aec51c12",
 				"api-call:Api.sessionArtifactData/args": "620a96a3952343d62cd4cd12b0cc3e6efbd11d54a2ce5fedd14c9ba2be27f304",
 				"api-call:Api.sessionArtifactData/result": "157f75be7cddb83282080c39c19b9388e0de2bb03a6927b1a4c321ec11c77b60"
 			},
@@ -7605,6 +7606,16 @@
 					{
 						"agent_version": 24
 					}
+				],
+				"command-reply:Checkfu/AdmitMountedSession": [
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null
 				],
 				"command-reply:Checkfu/AdmitSessionWithMessages": [
 					{
@@ -18848,321 +18859,35 @@
 					]
 				],
 				"api-call:Api.memoryList/result": [
+					"busy",
+					"busy",
+					"busy",
+					"busy",
+					"busy",
+					"busy",
 					[
 						{
-							"path": "\t",
-							"size": 86,
-							"updated_at": 88
-						},
-						{
-							"path": "😀",
-							"size": 6,
-							"updated_at": 13
-						},
-						{
-							"path": "-::F]JNQ&2",
-							"size": 22,
-							"updated_at": 28
-						},
-						{
-							"path": "8LI-",
-							"size": 98,
-							"updated_at": 78
-						},
-						{
-							"path": "toString",
-							"size": 47,
-							"updated_at": 5
-						},
-						{
-							"path": "",
-							"size": 5,
-							"updated_at": 13
-						},
-						{
-							"path": "8,t9aRAt^e",
-							"size": 0,
-							"updated_at": 99
-						}
-					],
-					[
-						{
-							"path": "wQpe? pv",
-							"size": 6,
-							"updated_at": 24
-						},
-						{
-							"path": "\u0000",
-							"size": 5,
-							"updated_at": 81
-						},
-						{
-							"path": "&",
-							"size": 65,
-							"updated_at": 2
-						},
-						{
-							"path": "\n",
-							"size": 94,
-							"updated_at": 1
-						},
-						{
-							"path": "\n",
-							"size": 6,
-							"updated_at": 1
-						}
-					],
-					[
-						{
-							"path": "L7$@h:$",
-							"size": 94,
-							"updated_at": 74
-						},
-						{
-							"path": " !",
-							"size": 2,
-							"updated_at": 48
-						},
-						{
-							"path": "\t",
-							"size": 0,
-							"updated_at": 97
-						},
-						{
-							"path": "\u0000",
-							"size": 6,
-							"updated_at": 16
-						},
-						{
-							"path": "",
-							"size": 2,
-							"updated_at": 97
-						},
-						{
-							"path": "4294967295",
-							"size": 5,
-							"updated_at": 8
-						},
-						{
-							"path": "",
-							"size": 47,
-							"updated_at": 5
-						},
-						{
-							"path": "4294967295",
-							"size": 98,
-							"updated_at": 99
-						},
-						{
-							"path": "\t",
-							"size": 6,
-							"updated_at": 64
-						},
-						{
-							"path": "toString",
-							"size": 6,
-							"updated_at": 73
-						}
-					],
-					[
-						{
-							"path": "K6bEP38,w+",
-							"size": 39,
-							"updated_at": 98
-						},
-						{
-							"path": "\ud800",
-							"size": 72,
-							"updated_at": 97
-						},
-						{
-							"path": "",
-							"size": 6,
-							"updated_at": 6
-						},
-						{
-							"path": "bZt",
-							"size": 7,
-							"updated_at": 89
-						},
-						{
-							"path": "W`",
-							"size": 6,
-							"updated_at": 100
-						},
-						{
-							"path": ">Yr6f~",
-							"size": 4,
-							"updated_at": 98
-						},
-						{
-							"path": "0",
-							"size": 48,
-							"updated_at": 63
-						},
-						{
-							"path": "",
-							"size": 92,
-							"updated_at": 100
-						}
-					],
-					[
-						{
-							"path": "0",
-							"size": 73,
-							"updated_at": 1
-						},
-						{
-							"path": " ",
-							"size": 44,
+							"path": "5S",
+							"size": 93,
 							"updated_at": 71
 						},
 						{
-							"path": "I*n]6_,t0",
-							"size": 95,
-							"updated_at": 82
+							"path": "\udc00",
+							"size": 5,
+							"updated_at": 32
 						},
 						{
 							"path": "\n",
-							"size": 98,
-							"updated_at": 6
-						},
-						{
-							"path": "",
-							"size": 0,
-							"updated_at": 4
-						},
-						{
-							"path": "iJy<Am.&}c",
-							"size": 0,
-							"updated_at": 86
-						},
-						{
-							"path": "ku2]7#Yd7{",
-							"size": 3,
-							"updated_at": 1
-						},
-						{
-							"path": " ",
-							"size": 56,
-							"updated_at": 54
-						},
-						{
-							"path": "z;5J{",
-							"size": 3,
-							"updated_at": 19
-						},
-						{
-							"path": "-1",
-							"size": 1,
-							"updated_at": 94
-						}
-					],
-					[
-						{
-							"path": "pK=!<8M1z/",
-							"size": 2,
+							"size": 32,
 							"updated_at": 99
 						},
 						{
-							"path": "",
-							"size": 55,
+							"path": "toString",
+							"size": 82,
 							"updated_at": 4
-						},
-						{
-							"path": "__proto__",
-							"size": 45,
-							"updated_at": 52
-						},
-						{
-							"path": "\udc00",
-							"size": 80,
-							"updated_at": 6
-						},
-						{
-							"path": "ef;w'1NX",
-							"size": 5,
-							"updated_at": 8
-						},
-						{
-							"path": "\udc00",
-							"size": 6,
-							"updated_at": 96
-						},
-						{
-							"path": "0",
-							"size": 88,
-							"updated_at": 3
-						},
-						{
-							"path": "RfErU",
-							"size": 6,
-							"updated_at": 5
-						},
-						{
-							"path": "",
-							"size": 5,
-							"updated_at": 57
-						},
-						{
-							"path": "\n",
-							"size": 4,
-							"updated_at": 3
 						}
 					],
-					[],
-					[
-						{
-							"path": "",
-							"size": 2,
-							"updated_at": 5
-						},
-						{
-							"path": "\ud800",
-							"size": 0,
-							"updated_at": 6
-						},
-						{
-							"path": "8(d@G(NAR)",
-							"size": 3,
-							"updated_at": 21
-						},
-						{
-							"path": "",
-							"size": 97,
-							"updated_at": 3
-						},
-						{
-							"path": "",
-							"size": 4,
-							"updated_at": 3
-						},
-						{
-							"path": "-1",
-							"size": 56,
-							"updated_at": 6
-						},
-						{
-							"path": "",
-							"size": 96,
-							"updated_at": 74
-						},
-						{
-							"path": "__proto__",
-							"size": 4,
-							"updated_at": 1
-						},
-						{
-							"path": "\t",
-							"size": 98,
-							"updated_at": 97
-						},
-						{
-							"path": "",
-							"size": 5,
-							"updated_at": 0
-						}
-					]
+					[]
 				],
 				"api-call:Api.memoryStat/args": [
 					[
@@ -19208,28 +18933,22 @@
 				],
 				"api-call:Api.memoryStat/result": [
 					{
-						"size": 99,
+						"size": 77,
 						"updated_at": 0
 					},
 					{
-						"size": 6,
+						"size": 87,
 						"updated_at": 5
 					},
 					{
-						"size": 6,
-						"updated_at": 44
+						"size": 97,
+						"updated_at": 5
 					},
+					"busy",
+					"busy",
 					null,
 					null,
-					{
-						"size": 94,
-						"updated_at": 13
-					},
-					{
-						"size": 29,
-						"updated_at": 43
-					},
-					null
+					"busy"
 				],
 				"api-call:Api.memoryRead/args": [
 					[
@@ -19274,30 +18993,26 @@
 					]
 				],
 				"api-call:Api.memoryRead/result": [
-					{
-						"content": "W~ uLhV\"!u",
-						"content_sha256": "Xz4c_B%",
-						"updated_at": 95
-					},
-					{
-						"content": "\u0000",
-						"content_sha256": "\udc00",
-						"updated_at": 1
-					},
 					null,
+					{
+						"content": "\n",
+						"content_sha256": "",
+						"updated_at": 0
+					},
+					"busy",
+					{
+						"content": "\t",
+						"content_sha256": "",
+						"updated_at": 40
+					},
+					"busy",
+					"busy",
 					{
 						"content": " ",
-						"content_sha256": "4294967295",
-						"updated_at": 99
+						"content_sha256": "",
+						"updated_at": 0
 					},
-					null,
-					null,
-					{
-						"content": "\u0000",
-						"content_sha256": "😀",
-						"updated_at": 96
-					},
-					null
+					"busy"
 				],
 				"api-call:Api.memoryWrite/args": [
 					[
@@ -20261,43 +19976,50 @@
 						"ok": true,
 						"artifact_id": "",
 						"version": -5,
-						"changed": false
+						"file_count": 49,
+						"changed": true
 					},
 					{
 						"ok": true,
 						"artifact_id": "X'?",
 						"version": -4,
+						"file_count": -95,
 						"changed": true
 					},
 					{
 						"ok": true,
 						"artifact_id": "~n9%/Oe_n%",
 						"version": -34,
+						"file_count": -94,
 						"changed": true
 					},
 					{
 						"ok": true,
 						"artifact_id": "\t",
 						"version": -87,
-						"changed": true
+						"file_count": -94,
+						"changed": false
 					},
 					{
 						"ok": true,
 						"artifact_id": "\u0000",
 						"version": -1,
-						"changed": true
+						"file_count": -95,
+						"changed": false
 					},
 					{
 						"ok": true,
 						"artifact_id": "4294967295",
 						"version": -85,
-						"changed": true
+						"file_count": 3,
+						"changed": false
 					},
 					{
 						"ok": true,
 						"artifact_id": ".COm",
 						"version": 1,
-						"changed": true
+						"file_count": -2,
+						"changed": false
 					},
 					{
 						"ok": false,

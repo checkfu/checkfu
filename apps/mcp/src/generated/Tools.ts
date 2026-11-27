@@ -1343,7 +1343,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "artifacts_listDocuments",
 		title: "List documents",
-		description: "List the documents in a collection, oldest first. Use next_page to continue",
+		description:
+			"List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null.",
 		method: "GET",
 		path: "/v1/artifacts/{artifact_id}/data/{collection}",
 		readOnly: true,

@@ -1151,13 +1151,18 @@ describe("Automations API", () => {
 			}),
 		))
 
-	it("applies an update the view has not caught up with, and refuses an unchanged update to an archived automation", () =>
+	it("applies guarded and unguarded edits through view lag and refuses stale edits", () =>
 		run(() =>
 			Effect.gen(function* () {
 				const views = yield* AutomationView
 				let stale: AutomationSnapshot | undefined
+				let timedOut = false
 				const lagging = {
 					...views,
+					waitFor: (...args: Parameters<typeof views.waitFor>) =>
+						timedOut
+							? Effect.fail(new Domain.WaitTimeout({ view: "AutomationView", key: args[0].id }))
+							: views.waitFor(...args),
 					get: (
 						ref: Parameters<typeof views.get>[0],
 						options?: Parameters<typeof views.get>[1],
@@ -1182,6 +1187,31 @@ describe("Automations API", () => {
 				const ref = Automation.ref(AutomationId.make(id))
 				const before = Option.getOrNull(yield* Effect.orDie(views.get(ref)))
 				yield* call(apiFetch, "POST", `/v1/automations/${id}`, { name: "B" })
+
+				const guarded = { revision: 2, description: "Changed at revision two" }
+				stale = before ?? undefined
+				timedOut = true
+				expect((yield* call(apiFetch, "POST", `/v1/automations/${id}`, guarded)).status).toBe(503)
+				timedOut = false
+				stale = before ?? undefined
+				const applied = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					`/v1/automations/${id}`,
+					guarded,
+				)
+				expect(applied.status).toBe(200)
+				expect(applied.body).toMatchObject({
+					revision: 3,
+					name: "B",
+					description: guarded.description,
+				})
+				stale = before ?? undefined
+				expect(
+					(yield* call(apiFetch, "POST", `/v1/automations/${id}`, { ...guarded, revision: 4 }))
+						.status,
+				).toBe(409)
+				expect((yield* call(apiFetch, "POST", `/v1/automations/${id}`, guarded)).status).toBe(409)
 
 				stale = before ?? undefined
 				const back = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {

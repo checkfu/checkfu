@@ -13,6 +13,7 @@ import {
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
 import { decodeSystemMessage } from "../src/Session/SendSystemMessage.command.ts"
+import * as Explore from "@alchemy.run/domain/Explore"
 import * as Verify from "@alchemy.run/domain/Verify"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -81,6 +82,7 @@ import {
 	BoundedAgentId,
 	BoundedEnvironmentId,
 } from "../src/Session/AdmitSession.command.ts"
+import { AdmitMountedSessionDecision } from "../src/Session/AdmitMountedSession.decision.ts"
 import { AdmitSessionDecision } from "../src/Session/AdmitSession.decision.ts"
 
 class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
@@ -95,17 +97,18 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 	views: ["AgentView", "AgentVersionByNumberView", "EnvironmentView", "SessionView"],
 }) {}
 
-// The archive decisions add preconditions to existing archive events. Their variable
-// participant lists have separate bounded proofs and an end-to-end Workerd race test.
+// Variable-participant admissions and guarded archives have dedicated verification and integration tests.
 const CheckfuProofBase: Model.Any & (new (_: never) => object) = Checkfu
 class CheckfuInductiveModel extends CheckfuProofBase {
 	static override readonly decisions = Checkfu.decisions.filter(
 		(decision) =>
+			decision !== AdmitMountedSessionDecision &&
 			decision !== ArchiveAgentIfCurrentDecision &&
 			decision !== ArchiveEnvironmentIfCurrentDecision,
 	)
 	static override readonly commands = Checkfu.commands.filter(
 		(command) =>
+			command !== AdmitMountedSessionDecision.command &&
 			command !== ArchiveAgentIfCurrentDecision.command &&
 			command !== ArchiveEnvironmentIfCurrentDecision.command,
 	)
@@ -342,6 +345,10 @@ const STANDING = {
 	"Checkfu.EveryTurnSettles": "checked",
 } as const
 
+const REPLY_WITNESS = "Checkfu.ASessionGetsAReply"
+const INTERRUPT_POLICY = "EnsureTurnStopped"
+const ALLOW_EXPLORATION = { skipped: ["EnsureTurnStarted", "PublishWebhookEvents"] } as const
+
 const PROVED = Object.entries(STANDING)
 	.filter(([, standing]) => standing === "proved")
 	.map(([name]) => name)
@@ -438,7 +445,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"MemoryIndex",
 		])
 		const report = await Effect.runPromise(
-			Verify.model(CheckfuInductiveModel, {
+			Verify.report(CheckfuInductiveModel, {
 				apis: [CheckfuLifecycleApi],
 				instances: 1,
 				depth: 3,
@@ -446,7 +453,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 120, length: 12 },
 
-				allow: { skipped: ["EnsureTurnStarted", "PublishWebhookEvents"] },
+				allow: ALLOW_EXPLORATION,
 				opaque: [
 					sessionIdOfNextRun,
 					isUsableSchedule,
@@ -462,18 +469,42 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),
 		)
-		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
-			STANDING,
+		const replyUnreached = report.rules.some(
+			(rule) => rule.name === REPLY_WITNESS && rule.standing === "unreached",
 		)
-		expect(report.undone).toEqual([])
+		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual({
+			...STANDING,
+			[REPLY_WITNESS]: replyUnreached ? "unreached" : "reached",
+		})
+		// The required hosted story supplies this witness even when sampled harness replies do not.
+		const missingReply = replyUnreached
+			? Explore.undone(
+					{
+						...report.explored,
+						sometimes: report.explored.sometimes.filter(
+							(rule) => `${report.explored.model}.${rule.name}` === REPLY_WITNESS,
+						),
+					},
+					ALLOW_EXPLORATION,
+				).filter((reason) => reason.startsWith(`${REPLY_WITNESS} is never reached:`))
+			: []
+		expect(missingReply).toHaveLength(replyUnreached ? 1 : 0)
+		const remaining = report.undone.filter((reason) => !missingReply.includes(reason))
 		Effect.runSync(Effect.logInfo(Verify.render(report)))
-		expect(report.explored.followed).toEqual([
+		expect(remaining).toEqual([])
+		expect(Verify.verified({ ...report, undone: remaining })).toBe(true)
+		// The required interrupt recovery test drives this policy even when search leaves it idle.
+		expect(
+			[...report.explored.followed, ...report.explored.idle].filter(
+				(policy) => policy === INTERRUPT_POLICY,
+			),
+		).toEqual([INTERRUPT_POLICY])
+		expect(report.explored.followed.filter((policy) => policy !== INTERRUPT_POLICY)).toEqual([
 			"RecordInitialMessages",
 			"StartTurn",
 			"SaveSessionOutputs",
 		])
-		expect(report.explored.idle).toEqual([
-			"EnsureTurnStopped",
+		expect(report.explored.idle.filter((policy) => policy !== INTERRUPT_POLICY)).toEqual([
 			"ArmAutomation",
 			"StartAutomationRun",
 			"FreeAutomationSlot",

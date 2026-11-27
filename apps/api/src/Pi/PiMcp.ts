@@ -5,7 +5,6 @@ import { isJsonValue } from "@earendil-works/chord/json"
 import { renderToolSample } from "@earendil-works/pi-codemode/declarations"
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable"
 import * as Schema from "effect/Schema"
-import * as Option from "effect/Option"
 import { McpToolDescriptors } from "./PiMcpTypes.ts"
 import type { McpCallOutcome, McpListOutcome, McpToolDescriptor } from "./PiMcpTypes.ts"
 import { mcpPermission } from "./PiActions.ts"
@@ -31,11 +30,12 @@ export type McpServerTools =
 
 const toolsJson = Schema.fromJsonString(McpToolDescriptors)
 const encodeTools = Schema.encodeSync(toolsJson)
-const decodeTools = Schema.decodeUnknownOption(toolsJson)
 
 export const cacheableTools = (
 	listed: McpListOutcome,
-): { readonly text: string } | { readonly unavailable: string; readonly retry: boolean } => {
+):
+	| { readonly tools: ReadonlyArray<McpToolDescriptor> }
+	| { readonly unavailable: string; readonly retry: boolean } => {
 	if (!listed.ok) {
 		return listed.tooLarge === true
 			? {
@@ -53,18 +53,12 @@ export const cacheableTools = (
 	const text = encodeTools(listed.tools)
 	const bytes = new TextEncoder().encode(text).byteLength
 	return bytes <= MAX_TOOL_LIST_BYTES
-		? { text }
+		? { tools: listed.tools }
 		: {
 				unavailable: `its tool list is ${bytes} bytes, more than the ${MAX_TOOL_LIST_BYTES} a session keeps`,
 				retry: false,
 			}
 }
-
-export const cachedTools = (text: string): McpServerTools =>
-	Option.match(decodeTools(text), {
-		onSome: (tools) => ({ status: "listed", tools }),
-		onNone: () => ({ status: "unavailable", reason: "its stored tool list could not be read" }),
-	})
 
 const OPEN_SCHEMA: Schema.JsonObject = { type: "object" }
 const UNCHECKED_INPUT =

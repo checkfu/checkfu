@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto"
 import { describe, expect, it } from "@effect/vitest"
+import { WaitTimeout } from "@alchemy.run/domain"
+import { SessionMemoryAccess } from "../src/SessionMemoryAccess.ts"
 import { MemoryIndex } from "@checkfu/domain/Memory/MemoryIndex.view"
 import { MemoryView } from "@checkfu/domain/Memory/MemoryView.view"
 import * as Effect from "effect/Effect"
@@ -407,6 +409,77 @@ describe("Memory stores", () => {
 						{ id: created.id, type: "memory", pending: true, memory_store_id: store.id },
 					])
 					expect((yield* request(apiFetch, "GET", path)).status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("distinguishes a busy mounted memory from absence in reads, stats and listings", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch } = yield* makeApiHandler
+					const create = (path: string, body: unknown) =>
+						request(fetch, "POST", path, body).pipe(
+							Effect.flatMap((response) => {
+								expect(response.status).toBe(201)
+								return json<{ id: string }>(response)
+							}),
+						)
+					const store = yield* create("/v1/memory_stores", { name: "Notes" })
+					const agent = yield* create("/v1/agents", { name: "Agent", model: "gpt-4o-mini" })
+					const env = yield* create("/v1/environments", { name: "Env" })
+					const session = yield* create("/v1/sessions", {
+						agent: agent.id,
+						environment_id: env.id,
+						resources: [{ type: "memory_store", memory_store_id: store.id }],
+					})
+					yield* create(`/v1/memory_stores/${store.id}/memories`, {
+						path: "/report.md",
+						content: "雪",
+					})
+					let lag = true
+					const views = yield* MemoryView
+					const index = yield* MemoryIndex
+					const access = yield* SessionMemoryAccess.pipe(
+						Effect.provideService(MemoryView, {
+							...views,
+							waitFor: (ref, where, options) =>
+								lag
+									? Effect.fail(new WaitTimeout({ view: "MemoryView", key: ref.id }))
+									: views.waitFor(ref, where, options),
+						}),
+						Effect.provideService(MemoryIndex, {
+							...index,
+							waitFor: (ref, where, options) =>
+								lag
+									? Effect.fail(new WaitTimeout({ view: "MemoryIndex", key: ref.id }))
+									: index.waitFor(ref, where, options),
+						}),
+					)
+					const [mount] = yield* access.memoryMounts(session.id)
+					if (mount === undefined) {
+						throw new Error("Expected an attached store")
+					}
+					expect(yield* access.memoryList(session.id, mount.name, [])).toBe("busy")
+					expect(yield* access.memoryRead(session.id, mount.name, "/report.md")).toBe("busy")
+					expect(yield* access.memoryStat(session.id, mount.name, "/report.md")).toBe("busy")
+					expect(yield* access.memoryRead(session.id, mount.name, "/missing")).toBeNull()
+					lag = false
+					expect(yield* access.memoryList(session.id, mount.name, [])).toMatchObject([
+						{ path: "/report.md", size: 3 },
+					])
+					expect(yield* access.memoryRead(session.id, mount.name, "/report.md")).toMatchObject({
+						content: "雪",
+					})
+					expect(yield* access.memoryStat(session.id, mount.name, "/report.md")).toMatchObject({
+						size: 3,
+					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

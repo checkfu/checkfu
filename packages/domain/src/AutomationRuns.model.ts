@@ -30,6 +30,22 @@ export class AutomationRuns extends Domain.Model("AutomationRuns", {
 	views: [AutomationView, AutomationRunView],
 	policies: [PrepareAutomationRunFixture, StartAutomationRun, FreeAutomationSlot],
 	invariants: {
+		EveryRunReportMatchesItsFiring: (m) =>
+			m.Automation.every((automation) =>
+				automation.events.every((report) => {
+					if (report._tag !== "automation.run_started" && report._tag !== "automation.run_failed") {
+						return true
+					}
+					return automation.events.some(
+						(fired) =>
+							fired._tag === "automation.fired" &&
+							fired.run === report.run &&
+							fired.trigger === report.trigger &&
+							fired.scheduled_at === report.scheduled_at &&
+							(report._tag !== "automation.run_started" || report.session_id === fired.session_id),
+					)
+				}),
+			),
 		ReservedSlotsCoverLiveAutomations: (m) => {
 			const live = m.Automation.filter((a) =>
 				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
@@ -61,13 +77,30 @@ export class AutomationRuns extends Domain.Model("AutomationRuns", {
 	},
 	sometimes: {
 		AStartedRunIsReported: (m) =>
-			[
-				m.Automation.some((a) => a.state.reported >= 1),
-				m.Session.some((s) => s.state._tag === "Running"),
-			].every((ok) => ok),
+			m.Automation.some((automation) =>
+				automation.events.some(
+					(report) =>
+						report._tag === "automation.run_started" &&
+						m.Session.some(
+							(session) =>
+								session.id === report.session_id &&
+								session.events.some(
+									(created) =>
+										created._tag === "session.created" && created.automation_id === automation.id,
+								),
+						),
+				),
+			),
 		AFailedRunPausesTheAutomation: (m) =>
-			m.Automation.some((a) =>
-				[a.state.status === "paused", a.state.reported >= 1].every((ok) => ok),
+			m.Automation.some((automation) =>
+				automation.events.some((report, index) => {
+					const next = automation.events[index + 1]
+					return (
+						report._tag === "automation.run_failed" &&
+						next?._tag === "automation.paused" &&
+						next.reason === report.error.type
+					)
+				}),
 			),
 		AnArchivedAutomationFreesItsSlot: (m) =>
 			[

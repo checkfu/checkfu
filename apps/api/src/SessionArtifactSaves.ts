@@ -35,7 +35,13 @@ import { DocumentCalls, DocumentRefused, isDocumentRefused } from "./ArtifactDat
 import { outputFileId } from "./Files/OutputsSaverLive.ts"
 import { SessionResources } from "./SessionResources.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
-import { RESERVATION_LOST, artifactWrites, startedFrom } from "./Http/ArtifactsHandlers.ts"
+import {
+	RESERVATION_LOST,
+	artifactReads,
+	artifactWrites,
+	startedFrom,
+} from "./Http/ArtifactsHandlers.ts"
+import type { ResolvedFiles } from "./Http/ArtifactsHandlers.ts"
 import {
 	DEFAULT_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
@@ -125,7 +131,8 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 	const files = yield* File
 	const digest = yield* Digest.Digest
 	const storeFile = yield* makeStoreFile
-	const { build, fromFiles, copyIn, stage, capabilitiesOf, loadManifest } = yield* artifactWrites
+	const { build, fromFiles, copyIn, stage, capabilitiesOf } = yield* artifactWrites
+	const { loadManifest, requireActive } = yield* artifactReads
 	const resourcesOf = yield* SessionResources
 
 	const stopped = (sessionId: string, turn: number) =>
@@ -342,7 +349,10 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 					if (!isArtifactSave(args) || !isSessionId(sessionId)) {
 						return refused("Invalid session artifact save.")
 					}
-					if (entries.length === 0 || entries.length > MAX_TOOL_ARTIFACT_FILES) {
+					if (
+						(entries.length === 0 && madeFrom === "") ||
+						entries.length > MAX_TOOL_ARTIFACT_FILES
+					) {
 						return refused(`An artifact holds 1 to ${MAX_TOOL_ARTIFACT_FILES} files.`)
 					}
 					if (!isArtifactName(name)) {
@@ -374,26 +384,25 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 					}
 					const id = yield* sessionArtifactId(digest, sessionId, name)
 					const own = yield* fromFiles(wanted)
-					const source =
-						madeFrom === ""
-							? undefined
-							: artifactsOf(yield* resourcesOf(sessionId)).find(
-									(mount) => mount.mount_path === madeFrom,
-								)
-					if (madeFrom !== "" && source === undefined) {
-						return refused(
-							`${madeFrom} is not an artifact attached to this session. made_from takes the mount path of one, such as ${ARTIFACT_MOUNT_ROOT}/document.`,
+					let resolved: ResolvedFiles = own
+					let made_from = ""
+					if (madeFrom !== "") {
+						const source = artifactsOf(yield* resourcesOf(sessionId)).find(
+							(mount) => mount.mount_path === madeFrom,
 						)
+						if (source === undefined) {
+							return refused(
+								`${madeFrom} is not an artifact attached to this session. made_from takes the mount path of one, such as ${ARTIFACT_MOUNT_ROOT}/document.`,
+							)
+						}
+						const from = ArtifactId.make(source.artifact_id)
+						yield* requireActive(from)
+						resolved = yield* startedFrom(from, yield* loadManifest(from, source.manifest), own)
+						made_from = encodeMadeFrom({ artifact_id: from, version: source.version })
 					}
-					const from = source === undefined ? undefined : ArtifactId.make(source.artifact_id)
-					const resolved =
-						source === undefined || from === undefined
-							? own
-							: yield* startedFrom(from, yield* loadManifest(from, source.manifest), own)
-					const made_from =
-						source === undefined || from === undefined
-							? ""
-							: encodeMadeFrom({ artifact_id: from, version: source.version })
+					if (resolved.files.length > MAX_TOOL_ARTIFACT_FILES) {
+						return refused(`An artifact holds 1 to ${MAX_TOOL_ARTIFACT_FILES} files.`)
+					}
 					const built = yield* build(resolved.files)
 					if (
 						built.total_bytes > MAX_TOOL_ARTIFACT_TOTAL_BYTES ||
@@ -406,6 +415,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 						ok: true as const,
 						artifact_id: id,
 						version,
+						file_count: built.file_count,
 						changed,
 					})
 					const deleted = refused(`The artifact named ${JSON.stringify(name)} was deleted.`)
@@ -420,7 +430,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 							return deleted
 						}
 						if (state.status === "active") {
-							if (state.manifest === built.manifest_hash) {
+							if (state.manifest === built.manifest_hash && state.made_from === made_from) {
 								return saved(state.version, false)
 							}
 							yield* copyIn(id, resolved, null)

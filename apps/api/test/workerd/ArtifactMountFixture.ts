@@ -30,6 +30,8 @@ import {
 	mountReadChunkBytes,
 } from "../helpers/ArtifactMountMeasurements.ts"
 
+import { measureStaging, qualifyConditionalPut } from "./ArtifactStagingMeasurement.ts"
+
 export class ArtifactMountTestWorker extends Cloudflare.Worker<
 	ArtifactMountTestWorker,
 	Record<never, never>
@@ -55,6 +57,24 @@ export default ArtifactMountTestWorker.make(
 			fetch: Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest
 				const path = new URL(request.url, "http://fixture.test").pathname
+				if (path === "/health") {
+					return HttpServerResponse.empty({ status: 200 })
+				}
+				if (path === "/staging/qualify") {
+					return HttpServerResponse.jsonUnsafe(yield* qualifyConditionalPut(bucket))
+				}
+				const [, route, fileCount, distribution, strategy, extra] = path.split("/")
+				if (
+					route === "staging" &&
+					(fileCount === "2" || fileCount === "64") &&
+					(distribution === "cold" || distribution === "warm" || distribution === "mixed") &&
+					(strategy === "head" || strategy === "conditional") &&
+					extra === undefined
+				) {
+					return HttpServerResponse.jsonUnsafe(
+						yield* measureStaging(bucket, Number(fileCount), distribution, strategy),
+					)
+				}
 				const index = Number(path.slice(1))
 				const measurement = String(index) === path.slice(1) ? mountReadCases[index] : undefined
 				if (measurement === undefined) {

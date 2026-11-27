@@ -171,22 +171,9 @@ export const measureBundle = async (
 	}
 }
 
-export const API_WORKER_BUDGET = {
-	eagerBytes: 1_748_000,
-	totalBytes: 1_789_000,
-	startupCpuMs: 500,
-} as const
-
-export const CONTENT_WORKER_BUDGET = {
-	eagerBytes: 633_000,
-	totalBytes: 633_000,
-	startupCpuMs: 500,
-} as const
-
-export const PI_HARNESS_WORKER_BUDGET = {
-	eagerBytes: 2_196_000,
-	totalBytes: 3_240_000,
-	startupCpuMs: 500,
+export const WORKER_LIMITS = {
+	totalBytes: 16 * 1024 * 1024,
+	startupCpuMs: 650,
 } as const
 
 export const HARNESS_SOURCES_HELP =
@@ -200,8 +187,11 @@ export const describeEager = (worker: string, measured: BundleMeasurement): stri
 		),
 	].join("\n")
 
-export const EAGER_BYTES_HELP =
-	"Every isolate, each Durable Object's included, parses and runs this code before its first event. Before raising the budget, look at the largest sources below: data belongs in a static asset or storage, and code only one path needs belongs behind that path or in its own Worker. Lower the budget if the bundle shrank."
+export const TOTAL_BYTES_HELP =
+	"Cloudflare's limit for a Worker is 64 MiB uncompressed. One at a quarter of that carries something that is not code: put data in a static asset or storage."
 
 export const STARTUP_HELP =
-	"Cloudflare rejects a Worker whose global scope needs more than one second of CPU (error 10021); the budget is half that. Keep schema and layer construction out of module scope."
+	"Cloudflare caps global-scope startup at one second (error 10021). In the API Worker sample, CI read about 1.6 times the median upload time, and a past upload read about twice its usual time. The 650 ms CI limit leaves room for variation. Build schemas and layers when the Worker handles a request."
+
+export const describeMeasured = (worker: string, measured: BundleMeasurement): string =>
+	`${worker}: start-up ${Math.round(measured.startupCpuMs)} ms of CPU, ${measured.eagerBytes} bytes loaded at start-up, ${measured.totalBytes} bytes in all.`

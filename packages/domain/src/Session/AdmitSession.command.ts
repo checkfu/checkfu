@@ -32,25 +32,38 @@ export class AgentVersionNotFound extends Domain.Rejection(
 	{ httpApiStatus: 404, description: "Agent version not found." },
 ) {}
 
+export const repositoryAndMemoryResources = SessionResources.check(
+	Schema.makeFilter(
+		(resources) =>
+			resources.every(
+				(resource) => resource.type === "github_repository" || resource.type === "memory_store",
+			),
+		{ expected: "files, skills and artifacts must use mounted session admission" },
+	),
+)
+
+export const admissionFields = {
+	session_id: SessionId,
+	agent_id: BoundedAgentId,
+	agent_version: Schema.NullOr(PositiveInt),
+	environment_id: BoundedEnvironmentId,
+	title: Schema.NullOr(SessionTitle),
+	mcp_server_credentials: McpServerCredentialsText,
+	resources: repositoryAndMemoryResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+}
+export const admissionRejections = [
+	AgentNotFound,
+	AgentArchivedError,
+	AgentVersionNotFound,
+	EnvironmentNotFound,
+	EnvironmentArchivedError,
+	SessionAlreadyExists,
+] as const
+
 const admission = {
-	input: {
-		session_id: SessionId,
-		agent_id: BoundedAgentId,
-		agent_version: Schema.NullOr(PositiveInt),
-		environment_id: BoundedEnvironmentId,
-		title: Schema.NullOr(SessionTitle),
-		mcp_server_credentials: McpServerCredentialsText,
-		resources: SessionResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
-	},
+	input: admissionFields,
 	events: [SessionCreated],
-	rejects: [
-		AgentNotFound,
-		AgentArchivedError,
-		AgentVersionNotFound,
-		EnvironmentNotFound,
-		EnvironmentArchivedError,
-		SessionAlreadyExists,
-	],
+	rejects: admissionRejections,
 	reply: {
 		agent_version: PositiveInt,
 	},

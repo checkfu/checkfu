@@ -51,7 +51,13 @@ const workspace = (
 		},
 		saveArtifact: async (name, entries) => {
 			artifacts.push({ name, paths: entries.map((entry) => entry.path) })
-			return { ok: true, artifact_id: "art_1", version: artifacts.length, changed: true }
+			return {
+				ok: true,
+				artifact_id: "art_1",
+				version: artifacts.length,
+				file_count: entries.length,
+				changed: true,
+			}
 		},
 		...over,
 	}
@@ -78,9 +84,31 @@ describe("the save_artifact tool", () => {
 		expect(artifacts).toEqual([{ name: "Site", paths: saved }])
 	})
 
+	it("saves an attached source with no additional files", async () => {
+		const { ports, saved } = workspace(new Map([["/workspace/site/", 0]]))
+		const saveFrom = async (_name: string, entries: ReadonlyArray<unknown>, source: string) => {
+			expect(entries).toEqual([])
+			expect(source).toBe("/mnt/artifacts/template")
+			return { ok: true as const, artifact_id: "art_1", version: 1, file_count: 2, changed: true }
+		}
+		const result = await saveArtifact(
+			{ name: "Dashboard", directory: "/workspace/site", made_from: "/mnt/artifacts/template" },
+			{ ...ports, saveArtifact: saveFrom },
+		)
+		expect(result.isError).toBe(false)
+		expect(textOf(result)).toBe('Saved "Dashboard" as artifact art_1, version 1, with 2 files.')
+		expect(saved).toEqual([])
+	})
+
 	it("says when nothing changed", async () => {
 		const { ports } = workspace(new Map([["/workspace/site/index.html", 10]]), {
-			saveArtifact: async () => ({ ok: true, artifact_id: "art_1", version: 4, changed: false }),
+			saveArtifact: async () => ({
+				ok: true,
+				artifact_id: "art_1",
+				version: 4,
+				file_count: 1,
+				changed: false,
+			}),
 		})
 		expect(textOf(await saveArtifact({ name: "Site", directory: "/workspace/site" }, ports))).toBe(
 			'"Site" is unchanged: artifact art_1 is still at version 4, with 1 file.',

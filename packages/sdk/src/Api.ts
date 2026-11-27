@@ -3272,7 +3272,7 @@ const ArtifactData = HttpApiGroup.make("artifact_data")
 			.annotate(OpenApi.Summary, "List documents")
 			.annotate(
 				OpenApi.Description,
-				"List the documents in a collection, oldest first. Use next_page to continue",
+				"List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts.data",

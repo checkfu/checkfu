@@ -89,6 +89,10 @@ import {
 } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
+import {
+	AdmitMountedSession,
+	AdmitMountedSessionDecision,
+} from "@checkfu/domain/Session/AdmitMountedSession.decision"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
@@ -474,6 +478,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const admitMounted = yield* AdmitMountedSessionDecision
 		const admitWithMessages = yield* AdmitSessionWithMessagesDecision
 		const startSession = yield* OpenAutomationSessionDecision
 		const confirmTool = yield* ConfirmToolDecision
@@ -958,10 +963,39 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						title,
 						resources,
 					}
-					const refused = { SessionAlreadyExists: () => reusedKey, ...missing }
+					const refused = {
+						SessionAlreadyExists: () => reusedKey,
+						FileNotFound: ({ file_id }: { file_id: string }) =>
+							reject(404, `File ${file_id} not found.`),
+						ArtifactNotFound: ({ artifact_id }: { artifact_id: string }) =>
+							reject(404, `Artifact ${artifact_id} not found.`),
+						ArtifactVersionNotFound: ({
+							artifact_id,
+							version,
+						}: {
+							artifact_id: string
+							version: number
+						}) => reject(404, `Artifact ${artifact_id} has no version ${version}.`),
+						...missing,
+					}
 					// The host looks up the original command receipt before deciding against the current state.
-					const send =
-						initialPlan !== undefined
+					const send = asked.some(
+						(resource) =>
+							resource.type === "file" || resource.type === "artifact" || resource.type === "skill",
+					)
+						? admitMounted.send(
+								new AdmitMountedSession({
+									...admission,
+									initial:
+										initialPlan !== undefined
+											? { type: "queue", plan: initialPlan }
+											: initialMessage === undefined
+												? { type: "idle" }
+												: { type: "start", text: initialMessage },
+								}),
+								sendOptions,
+							)
+						: initialPlan !== undefined
 							? admitWithMessages.send(
 									new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
 									sendOptions,

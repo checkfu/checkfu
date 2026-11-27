@@ -175,11 +175,11 @@ export const actionsExtension = (
 					if (answer === undefined) {
 						return { sleep: { signals: [ToolConfirmationSignal.key(ANSWER)] } }
 					}
-					return "value" in answer && answer.value.allow
+					return answer.kind === "value" && answer.value.allow
 						? undefined
 						: blockAtGate(
 								api,
-								"value" in answer ? denial(answer.value.deny_message) : denial(""),
+								answer.kind === "value" ? denial(answer.value.deny_message) : denial(""),
 								context,
 							)
 				},
@@ -216,7 +216,7 @@ export const customToolsExtension = (tools: ReadonlyArray<CustomTool>): Extensio
 			execute: async (args, api, context) => {
 				const answer = await api.readSignal(CustomToolResultSignal, ANSWER, context)
 				if (answer !== undefined) {
-					return "value" in answer
+					return answer.kind === "value"
 						? {
 								output: [{ type: "text", text: answer.value.text }],
 								isError: answer.value.is_error,
@@ -232,7 +232,7 @@ export const customToolsExtension = (tools: ReadonlyArray<CustomTool>): Extensio
 					{ awaits: "result", name: tool.name, mcp_server_name: "", input },
 					context,
 				)
-				return { sleep: { signals: [CustomToolResultSignal.key(ANSWER)], checkpoint: input } }
+				return { kind: "sleep", signals: [CustomToolResultSignal.key(ANSWER)], checkpoint: input }
 			},
 		})),
 	})

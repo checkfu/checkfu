@@ -18,7 +18,11 @@
 		},
 		"@checkfu/api#test": {
 			"dependsOn": ["^typecheck"],
-			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/alchemy.run.ts"]
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/alchemy.run.ts",
+				"$TURBO_ROOT$/packages/domain/src/Artifact/types/**"
+			]
 		},
 		"@checkfu/domain#test": {
 			"dependsOn": ["^typecheck"],

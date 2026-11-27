@@ -46,6 +46,17 @@ export const MemoryOutcome = Schema.Union([
 ])
 export type MemoryOutcome = typeof MemoryOutcome.Type
 
+export const MEMORY_BUSY_MESSAGE = "The memory store is busy. Try again."
+const Busy = Schema.Literal("busy")
+type ReadResult<A> = A | typeof Busy.Type
+
+const readValue = <A>(value: ReadResult<A>): A => {
+	if (value === "busy") {
+		throw Object.assign(new Error(MEMORY_BUSY_MESSAGE), { code: "EIO" })
+	}
+	return value
+}
+
 const Session = Schema.String
 const StoreName = Schema.String
 const Path = Schema.String
@@ -54,15 +65,15 @@ export const SessionMemoryCalls = {
 	memoryMounts: { args: Schema.Tuple([Session]), result: Schema.Array(MemoryMountInfo) },
 	memoryList: {
 		args: Schema.Tuple([Session, StoreName, Schema.Array(MemoryReceipt)]),
-		result: Schema.Array(MemoryFileInfo),
+		result: Schema.Union([Schema.Array(MemoryFileInfo), Busy]),
 	},
 	memoryStat: {
 		args: Schema.Tuple([Session, StoreName, Path]),
-		result: Schema.NullOr(MemoryStat),
+		result: Schema.Union([Schema.NullOr(MemoryStat), Busy]),
 	},
 	memoryRead: {
 		args: Schema.Tuple([Session, StoreName, Path]),
-		result: Schema.NullOr(MemoryContent),
+		result: Schema.Union([Schema.NullOr(MemoryContent), Busy]),
 	},
 	memoryWrite: {
 		args: Schema.Tuple([Session, StoreName, Path, Schema.String, Schema.Boolean]),
@@ -90,12 +101,12 @@ export interface SessionMemory {
 
 export interface SessionMemoryCalls {
 	readonly mounts: () => ReturnType<SessionMemory["mounts"]>
-	readonly stat: SessionMemory["stat"]
+	readonly stat: (name: string, path: string) => Promise<ReadResult<MemoryStat | null>>
 	readonly list: (
 		name: string,
 		after: ReadonlyArray<MemoryReceipt>,
-	) => Promise<ReadonlyArray<MemoryFileInfo>>
-	readonly read: SessionMemory["read"]
+	) => Promise<ReadResult<ReadonlyArray<MemoryFileInfo>>>
+	readonly read: (name: string, path: string) => Promise<ReadResult<MemoryContent | null>>
 	readonly write: SessionMemory["write"]
 	readonly remove: SessionMemory["remove"]
 }
@@ -147,15 +158,15 @@ export const makeSessionMemory = (
 	}
 	return {
 		mounts,
-		stat: calls.stat,
-		read: calls.read,
+		stat: async (name, path) => readValue(await calls.stat(name, path)),
+		read: async (name, path) => readValue(await calls.read(name, path)),
 		remove: (name, path, expected) => {
 			throwIfCallStopped()
 			return calls.remove(name, path, expected)
 		},
 		list: async (name) => {
 			const asked = pendingFor(name)
-			const listed = await calls.list(name, asked)
+			const listed = readValue(await calls.list(name, asked))
 			keep(
 				name,
 				pendingFor(name).filter(
