@@ -24,6 +24,7 @@ import {
 	verifyLink,
 } from "./ArtifactLink.ts"
 import { DATA_HELPER, DATA_HELPER_PATH } from "./DataHelper.ts"
+import { contentRange, matchesETag, requestedRange } from "./ByteRange.ts"
 
 export const CONTENT_SECURITY_POLICY = [
 	"sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock",
@@ -37,7 +38,7 @@ export const CONTENT_HEADERS = {
 	"x-content-type-options": "nosniff",
 	"referrer-policy": "no-referrer",
 	"access-control-allow-origin": "*",
-	"access-control-expose-headers": "etag",
+	"access-control-expose-headers": "etag, accept-ranges, content-range",
 	"cross-origin-resource-policy": "cross-origin",
 	"cache-control": "private, no-store",
 	"x-robots-tag": "noindex",
@@ -118,13 +119,6 @@ const helperResponse = (method: string) => {
 const INDEX_FILE = "index.html"
 
 const FILE_CACHE_CONTROL = "private, no-cache"
-
-const matchesETag = (ifNoneMatch: string | undefined, etag: string) =>
-	ifNoneMatch !== undefined &&
-	ifNoneMatch.split(",").some((candidate) => {
-		const tag = candidate.trim()
-		return tag === "*" || (tag.startsWith("W/") ? tag.slice(2) : tag) === etag
-	})
 
 const plain = (status: number, message: string) =>
 	HttpServerResponse.text(message, { status, headers: CONTENT_HEADERS })
@@ -492,6 +486,7 @@ export const serveContent = (options: {
 				...CONTENT_HEADERS,
 				"cache-control": FILE_CACHE_CONTROL,
 				etag: `"${file.sha256}-${typeDigest.slice(0, 16)}"`,
+				"accept-ranges": "bytes",
 			}
 			if (matchesETag(request.headers["if-none-match"], fileHeaders.etag)) {
 				return HttpServerResponse.empty({ status: 304, headers: fileHeaders })
@@ -508,15 +503,30 @@ export const serveContent = (options: {
 						})
 					: notFound
 			}
-			const body = yield* store.blobStream(artifactId, file.sha256)
+			const range = requestedRange(
+				request.headers.range,
+				request.headers["if-range"],
+				fileHeaders.etag,
+				file.size,
+			)
+			if (range === "unsatisfiable") {
+				return HttpServerResponse.empty({
+					status: 416,
+					headers: { ...fileHeaders, "content-range": `bytes */${file.size}` },
+				})
+			}
+			const body = yield* store.blobStream(artifactId, file.sha256, range)
 			if (body === null) {
 				return notFound
 			}
 			return HttpServerResponse.stream(body, {
-				status: 200,
+				status: range === undefined ? 200 : 206,
 				contentType,
-				contentLength: file.size,
-				headers: fileHeaders,
+				contentLength: range?.length ?? file.size,
+				headers:
+					range === undefined
+						? fileHeaders
+						: { ...fileHeaders, "content-range": contentRange(range, file.size) },
 			})
 		}).pipe(
 			Effect.catchTags({

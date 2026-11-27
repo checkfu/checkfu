@@ -7,7 +7,9 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-import { FileStoreError } from "../src/Files/FileStore.ts"
+import * as Stream from "effect/Stream"
+import type { ByteRange } from "../src/Content/ByteRange.ts"
+import { FileStore, FileStoreError } from "../src/Files/FileStore.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { DEFAULT_STORAGE_SCOPE as SCOPE } from "../src/Placement.ts"
 import {
@@ -47,7 +49,12 @@ const contentKey = (id: string) => `files/${SCOPE}/${id}/content`
 const withFiles = <A>(
 	run: (world: {
 		readonly store: World["fileStore"]
-		readonly call: (method: string, path: string) => Effect.Effect<Response>
+		readonly call: (
+			method: string,
+			path: string,
+			headers?: Record<string, string>,
+		) => Effect.Effect<Response>
+		readonly transfers: ReadonlyArray<{ readonly range: ByteRange | undefined; size: number }>
 		readonly upload: (
 			query: string,
 			body: Uint8Array | ReadableStream<Uint8Array>,
@@ -60,10 +67,33 @@ const withFiles = <A>(
 	)
 	return Effect.runPromise(
 		Effect.gen(function* () {
-			const { fetch: apiFetch } = yield* makeApiHandler
+			const storage = yield* FileStore
+			const transfers: Array<{ readonly range: ByteRange | undefined; size: number }> = []
+			const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+				Effect.provideService(FileStore, {
+					...storage,
+					content: (id, range) =>
+						Effect.gen(function* () {
+							const transfer = { range, size: 0 }
+							transfers.push(transfer)
+							const body = yield* storage.content(id, range)
+							return (
+								body?.pipe(
+									Stream.tap((chunk) =>
+										Effect.sync(() => {
+											transfer.size += chunk.byteLength
+										}),
+									),
+								) ?? null
+							)
+						}),
+				}),
+			)
 			return yield* run({
 				store: fileStore,
-				call: (method, path) => sendRequest(apiFetch, { method, path, headers: AUTH_HEADERS }),
+				transfers,
+				call: (method, path, headers) =>
+					sendRequest(apiFetch, { method, path, headers: { ...AUTH_HEADERS, ...headers } }),
 				upload: (query, body, headers) => {
 					const requestHeaders = new Headers({
 						...AUTH_HEADERS,
@@ -99,6 +129,71 @@ const withFiles = <A>(
 }
 
 describe("Files API", () => {
+	it("passes a single file range to storage and checks request conditions first", () =>
+		withFiles(({ upload, call, transfers }) =>
+			Effect.gen(function* () {
+				const block = 64 * 1024
+				const data = bytesOf(4 * block)
+				const file = yield* json<FileBody>(yield* upload("filename=report.bin", data))
+				const path = `/v1/files/${file.id}/content`
+				const etag = `"${file.sha256}"`
+				const downloaded = yield* call("GET", path)
+				expect(new Uint8Array(yield* Effect.promise(() => downloaded.arrayBuffer()))).toEqual(data)
+				expect(downloaded.headers.get("accept-ranges")).toBe("bytes")
+				for (const [header, offset, length] of [
+					[`bytes=0-${block - 1}`, 0, block],
+					[`bytes=-${block}`, data.length - block, block],
+					[`bytes=${block * 2}-`, block * 2, block * 2],
+				] as const) {
+					const response = yield* call("GET", path, { range: header, "if-range": etag })
+					expect(response.status, header).toBe(206)
+					expect(response.headers.get("content-range")).toBe(
+						`bytes ${offset}-${offset + length - 1}/${data.length}`,
+					)
+					expect(response.headers.get("content-length")).toBe(String(length))
+					expect(new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))).toEqual(
+						data.subarray(offset, offset + length),
+					)
+				}
+				expect(transfers).toEqual([
+					{ range: undefined, size: data.length },
+					{ range: { offset: 0, length: block }, size: block },
+					{ range: { offset: data.length - block, length: block }, size: block },
+					{ range: { offset: block * 2, length: block * 2 }, size: block * 2 },
+				])
+				const atEnd = { range: `bytes=${data.length}-` }
+				const cached = yield* call("GET", path, { ...atEnd, "if-none-match": `W/${etag}` })
+				expect(cached.status).toBe(304)
+				const unsatisfied = yield* call("GET", path, atEnd)
+				expect(unsatisfied.status).toBe(416)
+				expect(unsatisfied.headers.get("content-range")).toBe(`bytes */${data.length}`)
+				expect(transfers).toHaveLength(4)
+				const head = yield* call("HEAD", path, atEnd)
+				expect(head.status).toBe(200)
+				expect(head.headers.get("content-range")).toBeNull()
+				expect(head.headers.get("content-length")).toBe(String(data.length))
+				expect((yield* Effect.promise(() => head.arrayBuffer())).byteLength).toBe(0)
+				expect(transfers).toHaveLength(4)
+				for (const headers of [
+					{ range: "bytes=3-1" },
+					{ range: "bytes=9007199254740993-9007199254740992" },
+					{ range: "bytes=0-1,6-9" },
+					{ range: "items=0-1" },
+					{ range: "bytes=0-1", "if-range": `W/${etag}` },
+				]) {
+					const full = yield* call("GET", path, headers)
+					expect(full.status).toBe(200)
+					expect((yield* Effect.promise(() => full.arrayBuffer())).byteLength).toBe(data.length)
+				}
+				const empty = yield* json<FileBody>(yield* upload("filename=empty.bin", new Uint8Array()))
+				expect(
+					(yield* call("GET", `/v1/files/${empty.id}/content`, { range: "bytes=-1" })).status,
+				).toBe(416)
+				yield* call("DELETE", `/v1/files/${file.id}`)
+				expect((yield* call("GET", path, { range: "bytes=0-1" })).status).toBe(404)
+			}),
+		))
+
 	it("uploads a file, then retrieves, lists, downloads and deletes it", () =>
 		withFiles(({ call, upload, store }) =>
 			Effect.gen(function* () {

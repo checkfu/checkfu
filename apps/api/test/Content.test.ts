@@ -9,6 +9,7 @@ import * as Headers from "effect/http/Headers"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
 import { WaitTimeout } from "@alchemy.run/domain"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
@@ -19,6 +20,7 @@ import { VisitorData } from "../src/ArtifactData/VisitorData.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "../src/Artifacts/ResolvePublication.ts"
 import type { ArtifactLinkClaims } from "../src/Content/ArtifactLink.ts"
+import type { ByteRange } from "../src/Content/ByteRange.ts"
 import {
 	DEFAULT_LINK_TTL_SECONDS,
 	MAX_LINK_TTL_SECONDS,
@@ -40,12 +42,20 @@ import {
 
 const MacLive = Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCrypto))
 
-const webRequest = (url: string, method = "GET", ifNoneMatch?: string) =>
+const webRequest = (
+	url: string,
+	method = "GET",
+	ifNoneMatch?: string,
+	headers?: Record<string, string>,
+) =>
 	contentRequestOf(
 		HttpServerRequest.fromWeb(
 			new Request(url, {
 				method,
-				headers: ifNoneMatch === undefined ? {} : { "if-none-match": ifNoneMatch },
+				headers: {
+					...headers,
+					...(ifNoneMatch === undefined ? {} : { "if-none-match": ifNoneMatch }),
+				},
 			}),
 		),
 	)
@@ -70,7 +80,13 @@ interface LinkBody {
 const withContent = <A>(
 	run: (tools: {
 		readonly api: (method: string, path: string, body?: unknown) => Effect.Effect<Response>
-		readonly open: (url: string, method?: string, ifNoneMatch?: string) => Effect.Effect<Response>
+		readonly open: (
+			url: string,
+			method?: string,
+			ifNoneMatch?: string,
+			headers?: Record<string, string>,
+		) => Effect.Effect<Response>
+		readonly transfers: ReadonlyArray<{ readonly range: ByteRange | undefined; size: number }>
 		readonly openIn: (scope: string, url: string) => Effect.Effect<Response>
 		readonly openLagging: (lag: ViewLag, url: string) => Effect.Effect<Response>
 		readonly openUrl: (url: string) => Effect.Effect<Response>
@@ -100,6 +116,25 @@ const withContent = <A>(
 			const key = yield* Effect.orDie(linkKey(TEST_LINK_SECRET))
 			let now: number | undefined
 			const store = yield* ArtifactStore
+			const transfers: Array<{ readonly range: ByteRange | undefined; size: number }> = []
+			const streamed = {
+				...store,
+				blobStream: (artifactId: string, sha256: string, range?: ByteRange) =>
+					Effect.gen(function* () {
+						const transfer = { range, size: 0 }
+						transfers.push(transfer)
+						const body = yield* store.blobStream(artifactId, sha256, range)
+						return (
+							body?.pipe(
+								Stream.tap((chunk) =>
+									Effect.sync(() => {
+										transfer.size += chunk.byteLength
+									}),
+								),
+							) ?? null
+						)
+					}),
+			}
 			const resolveArtifactVersion = yield* ArtifactVersionResolver
 			const resolvePublication = yield* PublicationResolver
 			const artifactData = yield* VisitorData
@@ -129,7 +164,7 @@ const withContent = <A>(
 					mac,
 					digest,
 					key,
-					store,
+					store: streamed,
 					resolveArtifactVersion: resolve,
 					resolvePublication,
 					artifactData,
@@ -145,8 +180,12 @@ const withContent = <A>(
 						headers: AUTH_HEADERS,
 						...(body === undefined ? {} : { body }),
 					}),
-				open: (url, method = "GET", ifNoneMatch) =>
-					Effect.map(serve(webRequest(url, method, ifNoneMatch)), HttpServerResponse.toWeb),
+				transfers,
+				open: (url, method = "GET", ifNoneMatch, headers) =>
+					Effect.map(
+						serve(webRequest(url, method, ifNoneMatch, headers)),
+						HttpServerResponse.toWeb,
+					),
 				openIn: (scope, url) =>
 					Effect.map(serveWith(scope)(webRequest(url)), HttpServerResponse.toWeb),
 				openUrl: (url) =>
@@ -571,6 +610,74 @@ describe("Artifact viewing links", () => {
 				expect(folder.status).toBe(308)
 				expect(folder.headers.get("location")).toBe(`${root}docs/?tab=2`)
 				expect((yield* open(`${link.url}docs`)).headers.get("location")).toBe(`${root}docs/`)
+			}),
+		))
+
+	it("streams one range of a published asset and handles conditional requests before storage", () =>
+		withContent(({ api, open, transfers }) =>
+			Effect.gen(function* () {
+				const block = 64 * 1024
+				const data = Uint8Array.from({ length: 4 * block }, (_, index) => index % 251)
+				const { id } = yield* createArtifact(api, [
+					{ path: "asset.bin", content: Buffer.from(data).toString("base64"), encoding: "base64" },
+					{ path: "empty.bin", content: "" },
+				])
+				const publication = yield* json<{ publication: { url: string } }>(
+					yield* api("POST", `/v1/artifacts/${id}/publication`, { version: 1 }),
+				)
+				const url = `${publication.publication.url}asset.bin`
+				const full = yield* open(url)
+				expect(full.status).toBe(200)
+				expect(full.headers.get("accept-ranges")).toBe("bytes")
+				const etag = full.headers.get("etag") ?? ""
+				expect(new Uint8Array(yield* Effect.promise(() => full.arrayBuffer()))).toEqual(data)
+				for (const [request, offset, length] of [
+					[`bytes=0-${block - 1}`, 0, block],
+					[`bytes=-${block}`, data.length - block, block],
+					[`bytes=${2 * block}-`, 2 * block, 2 * block],
+				] as const) {
+					const response = yield* open(url, "GET", undefined, { range: request, "if-range": etag })
+					expect(response.status, request).toBe(206)
+					expect(response.headers.get("content-length")).toBe(String(length))
+					expect(response.headers.get("content-range")).toBe(
+						`bytes ${offset}-${offset + length - 1}/${data.length}`,
+					)
+					expect(response.headers.get("access-control-expose-headers")).toContain("content-range")
+					expectSandboxed(response, request)
+					expect(new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))).toEqual(
+						data.subarray(offset, offset + length),
+					)
+				}
+				expect(transfers).toEqual([
+					{ range: undefined, size: data.length },
+					{ range: { offset: 0, length: block }, size: block },
+					{ range: { offset: data.length - block, length: block }, size: block },
+					{ range: { offset: block * 2, length: block * 2 }, size: block * 2 },
+				])
+				const outside = { range: `bytes=${data.length}-` }
+				const cached = yield* open(url, "GET", `W/${etag}`, outside)
+				expect(cached.status).toBe(304)
+				const invalid = yield* open(url, "GET", undefined, outside)
+				expect(invalid.status).toBe(416)
+				expect(invalid.headers.get("content-range")).toBe(`bytes */${data.length}`)
+				const head = yield* open(url, "HEAD", undefined, outside)
+				expect(head.status).toBe(200)
+				expect(head.headers.get("content-length")).toBe(String(data.length))
+				expect(head.headers.get("content-range")).toBeNull()
+				expect(transfers).toHaveLength(4)
+				const changed = yield* open(url, "GET", undefined, {
+					range: "bytes=0-1",
+					"if-range": '"old"',
+				})
+				expect(changed.status).toBe(200)
+				expect((yield* Effect.promise(() => changed.arrayBuffer())).byteLength).toBe(data.length)
+				const empty = yield* open(`${publication.publication.url}empty.bin`, "GET", undefined, {
+					range: "bytes=0-",
+				})
+				expect(empty.status).toBe(416)
+				expect(empty.headers.get("content-range")).toBe("bytes */0")
+				yield* api("DELETE", `/v1/artifacts/${id}/publication`)
+				expect((yield* open(url, "GET", undefined, { range: "bytes=0-1" })).status).toBe(404)
 			}),
 		))
 

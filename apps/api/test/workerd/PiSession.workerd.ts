@@ -583,6 +583,12 @@ describe("PiSession real Durable Object under workerd", () => {
 		)
 		expect(download.status).toBe(200)
 		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
+		const middle = await apiFetch(`/v1/files/${file.id}/content`, {
+			headers: { range: "bytes=65536-131071" },
+		})
+		expect(middle.status).toBe(206)
+		expect(middle.headers.get("content-range")).toBe("bytes 65536-131071/300000")
+		expect(new Uint8Array(await middle.arrayBuffer())).toEqual(data.subarray(65_536, 131_072))
 
 		const version = await apiJson<{ readonly version: number }>(
 			`/v1/artifacts/${created.body.id}/versions`,

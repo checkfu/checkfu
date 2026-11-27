@@ -2955,7 +2955,10 @@ const Files = HttpApiGroup.make("files")
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Download a file")
-			.annotate(OpenApi.Description, "Download a file's bytes, with its content type")
+			.annotate(
+				OpenApi.Description,
+				"Download a file's bytes with its content type. A single HTTP byte range returns 206. A range outside the file returns 416. A matching If-None-Match returns 304.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-skip": true,
 				"x-checkfu-endpoint": { group: "files", endpoint: "content" },

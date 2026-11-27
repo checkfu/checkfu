@@ -101,12 +101,18 @@ export const makeFileStoreMemory = (options?: { readonly scope?: string }) => {
 		},
 		measure: (body) =>
 			Effect.map(hashed(body), ({ bytes, sha256 }) => ({ sha256, size: bytes.byteLength })),
-		content: (fileId) =>
+		content: (fileId, range) =>
 			Effect.andThen(
 				online,
 				Effect.sync(() => {
 					const bytes = objects.get(fileContentKey(scope, fileId))
-					return bytes === undefined ? null : Stream.make(bytes)
+					return bytes === undefined
+						? null
+						: Stream.make(
+								range === undefined
+									? bytes
+									: bytes.subarray(range.offset, range.offset + range.length),
+							)
 				}),
 			),
 		read: (fileId, range) =>

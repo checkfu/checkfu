@@ -181,11 +181,17 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 					blobChecks += 1
 					return objects.get(artifactBlobKey(scope, artifactId, sha256))?.byteLength ?? null
 				}),
-			blobStream: (artifactId, sha256) =>
+			blobStream: (artifactId, sha256, range) =>
 				read(() => {
 					blobReads += 1
 					const bytes = objects.get(artifactBlobKey(scope, artifactId, sha256))
-					return bytes === undefined ? null : Stream.make(bytes)
+					return bytes === undefined
+						? null
+						: Stream.make(
+								range === undefined
+									? bytes
+									: bytes.subarray(range.offset, range.offset + range.length),
+							)
 				}),
 			putBlob: (artifactId, sha256, body, size, reservation) =>
 				Effect.andThen(

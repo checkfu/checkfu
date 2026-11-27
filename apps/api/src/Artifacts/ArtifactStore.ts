@@ -7,15 +7,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import type { ByteRange } from "../Content/ByteRange.ts"
 import { JURISDICTION_ENV, placement, storageScope } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import type { ArtifactManifest, BuiltArtifactVersion } from "./ArtifactFiles.ts"
 import type { ArtifactPurged, ArtifactReservationStale } from "./ArtifactOwnership.ts"
-
-export interface ByteRange {
-	readonly offset: number
-	readonly length: number
-}
 
 export class ArtifactStoreError extends Schema.TaggedError<
 	ArtifactStoreError,
@@ -48,6 +44,7 @@ export interface ArtifactStoreService {
 	readonly blobStream: (
 		artifactId: string,
 		sha256: string,
+		range?: ByteRange,
 	) => Effect.Effect<Stream.Stream<Uint8Array, ArtifactStoreError> | null, ArtifactStoreError>
 	readonly putBlob: (
 		artifactId: string,
@@ -169,12 +166,17 @@ export const artifactReads = (
 				object === null ? null : object.size,
 			),
 		),
-	blobStream: (artifactId, sha256) =>
+	blobStream: (artifactId, sha256, range) =>
 		run(
-			Effect.map(bucket.get(artifactBlobKey(scope, artifactId, sha256)), (object) =>
-				object === null
-					? null
-					: object.body.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
+			Effect.map(
+				bucket.get(
+					artifactBlobKey(scope, artifactId, sha256),
+					range === undefined ? undefined : { range },
+				),
+				(object) =>
+					object === null
+						? null
+						: object.body.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
 			),
 		),
 })

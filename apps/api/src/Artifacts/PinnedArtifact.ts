@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import { ArtifactStore } from "./ArtifactStore.ts"
-import type { ByteRange } from "./ArtifactStore.ts"
+import type { ByteRange } from "../Content/ByteRange.ts"
 
 export class ArtifactBytesMissing extends Schema.TaggedError<
 	ArtifactBytesMissing,

@@ -1853,9 +1853,16 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		interface Published {
 			readonly publication: { readonly url: string; readonly version: number | null } | null
 		}
+		const data = Uint8Array.from({ length: 256 * 1024 }, (_, index) => index % 251)
 		const created = await apiJson<{ readonly id: string }>("/v1/artifacts", {
 			method: "POST",
-			body: { name: "Published", files: [{ path: "index.html", content: "first" }] },
+			body: {
+				name: "Published",
+				files: [
+					{ path: "index.html", content: "first" },
+					{ path: "asset.bin", content: Buffer.from(data).toString("base64"), encoding: "base64" },
+				],
+			},
 		})
 		expect(created.status).toBe(201)
 		const id = created.body.id
@@ -1875,6 +1882,10 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		expect(await page.text()).toBe("first")
 		expect(page.headers.get("content-security-policy") ?? "").toContain("sandbox")
 		expect(page.headers.get("content-security-policy") ?? "").not.toContain("allow-same-origin")
+		const last = await fetch(new URL("asset.bin", url), { headers: { range: "bytes=-65536" } })
+		expect(last.status).toBe(206)
+		expect(last.headers.get("content-range")).toBe("bytes 196608-262143/262144")
+		expect(new Uint8Array(await last.arrayBuffer())).toEqual(data.subarray(-65_536))
 
 		const added = await apiFetch(`/v1/artifacts/${id}/versions`, {
 			method: "POST",

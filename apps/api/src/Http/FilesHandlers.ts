@@ -11,6 +11,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { contentRange, matchesETag, requestedRange } from "../Content/ByteRange.ts"
 import { FileStore, FileStoreError } from "../Files/FileStore.ts"
 import { makeStoreFile } from "../Files/StoreFile.ts"
 import { CheckfuApi, FileResource, apiError } from "./Api.ts"
@@ -144,24 +145,57 @@ export const FilesLive = HttpApiBuilder.group(CheckfuApi, "files", (handlers) =>
 					fileResource(params.file_id, state),
 				).pipe(handled),
 			)
-			.handleRaw("content", ({ params }) =>
+			.handleRaw("content", ({ params, request }) =>
 				Effect.gen(function* () {
 					const id = params.file_id
 					const state = yield* requireReady(id)
-					const body = yield* stored(store.content(id))
+					const etag = `"${state.sha256}"`
+					const headers = {
+						"content-disposition": attachmentNamed(state.filename),
+						"content-security-policy": "sandbox",
+						"x-content-type-options": "nosniff",
+						"accept-ranges": "bytes",
+						etag,
+					}
+					if (matchesETag(request.headers["if-none-match"], etag)) {
+						return HttpServerResponse.empty({ status: 304, headers })
+					}
+					if (request.method === "HEAD") {
+						return HttpServerResponse.empty({
+							status: 200,
+							headers: {
+								...headers,
+								"content-type": state.content_type,
+								"content-length": String(state.size),
+							},
+						})
+					}
+					const range = requestedRange(
+						request.headers.range,
+						request.headers["if-range"],
+						etag,
+						state.size,
+					)
+					if (range === "unsatisfiable") {
+						return HttpServerResponse.empty({
+							status: 416,
+							headers: { ...headers, "content-range": `bytes */${state.size}` },
+						})
+					}
+					const body = yield* stored(store.content(id, range))
 					if (body === null) {
 						yield* requireReady(id)
 						yield* Effect.logError("File bytes are missing", { file_id: id })
 						return yield* reject(500, "Failed to load the file.")
 					}
 					return HttpServerResponse.stream(body, {
+						status: range === undefined ? 200 : 206,
 						contentType: state.content_type,
-						contentLength: state.size,
-						headers: {
-							"content-disposition": attachmentNamed(state.filename),
-							"content-security-policy": "sandbox",
-							"x-content-type-options": "nosniff",
-						},
+						contentLength: range?.length ?? state.size,
+						headers:
+							range === undefined
+								? headers
+								: { ...headers, "content-range": contentRange(range, state.size) },
 					})
 				}).pipe(handled),
 			)

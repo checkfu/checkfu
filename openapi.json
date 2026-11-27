@@ -35885,7 +35885,7 @@
 						}
 					}
 				},
-				"description": "Download a file's bytes, with its content type",
+				"description": "Download a file's bytes with its content type. A single HTTP byte range returns 206. A range outside the file returns 416. A matching If-None-Match returns 304.",
 				"summary": "Download a file",
 				"x-forge-skip": true,
 				"x-checkfu-endpoint": {

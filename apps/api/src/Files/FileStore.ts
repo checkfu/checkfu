@@ -36,10 +36,11 @@ export interface FileStoreService {
 	) => Effect.Effect<StoredBytes, FileStoreError>
 	readonly content: (
 		fileId: string,
+		range?: ByteRange,
 	) => Effect.Effect<Stream.Stream<Uint8Array, FileStoreError> | null, FileStoreError>
 	readonly read: (
 		fileId: string,
-		range: { readonly offset: number; readonly length: number },
+		range: ByteRange,
 	) => Effect.Effect<Uint8Array | null, FileStoreError>
 	readonly purge: (fileId: string) => Effect.Effect<void, FileStoreError>
 	readonly release: (fileId: string, reservation: number) => Effect.Effect<void, FileStoreError>
@@ -59,8 +60,8 @@ export const fileContent =
 		bucket: Pick<Cloudflare.R2.ReadBucketClient, "get">,
 		runtime: RuntimeContext["Service"],
 	): FileStoreService["content"] =>
-	(fileId) =>
-		bucket.get(fileContentKey(scope, fileId)).pipe(
+	(fileId, range) =>
+		bucket.get(fileContentKey(scope, fileId), range === undefined ? undefined : { range }).pipe(
 			Effect.mapBoth({
 				onSuccess: (object) =>
 					object === null
@@ -85,3 +86,4 @@ export const fileRange =
 			Effect.mapError((cause) => new FileStoreError({ cause })),
 			Effect.provideService(RuntimeContext, runtime),
 		)
+import type { ByteRange } from "../Content/ByteRange.ts"
