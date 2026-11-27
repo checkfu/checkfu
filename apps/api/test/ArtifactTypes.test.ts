@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import { buildArtifactVersion, readDeclaration } from "../src/Artifacts/ArtifactFiles.ts"
 
-const ROOT = fileURLToPath(new URL("../../../artifact-types/", import.meta.url))
+const ROOT = fileURLToPath(new URL("../../../packages/domain/src/Artifact/types/", import.meta.url))
 const TYPES = ["dashboard", "document", "slides"] as const
 
 const fileOf = (type: string, name: string) => readFileSync(`${ROOT}${type}/${name}`, "utf8")
