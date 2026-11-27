@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import {
+	chmod,
+	link,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	stat,
+	symlink,
+	writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { gzipSync } from "node:zlib"
@@ -394,6 +404,12 @@ describe("deployment downloads", () => {
 		)
 		await expect(readFile(binary, "utf8")).resolves.toBe("verified runtime")
 		expect((await stat(binary)).mode & 0o777).toBe(0o700)
+		await chmod(binary, 0o600)
+		await expect(
+			installRuntime(directory, f.runtimeSpec, "darwin-arm64", f.distribution, signal()),
+		).resolves.toBe(binary)
+		expect((await stat(binary)).mode & 0o777).toBe(0o700)
+		expect(f.calls).toEqual(["runtime"])
 		await writeFile(binary, "tampered")
 		await installRuntime(directory, f.runtimeSpec, "darwin-arm64", f.distribution, signal())
 		await expect(readFile(binary, "utf8")).resolves.toBe("verified runtime")
@@ -401,6 +417,27 @@ describe("deployment downloads", () => {
 			installRuntime(directory, f.runtimeSpec, "win32-x64", f.distribution, signal()),
 		).rejects.toThrow("does not support")
 	})
+
+	it.each([symlink, link])(
+		"rebuilds a linked cached executable without changing its target",
+		async (makeLink) => {
+			const directory = await temporary()
+			const f = await fixture()
+			const install = () =>
+				installRuntime(directory, f.runtimeSpec, "darwin-arm64", f.distribution, signal())
+			const binary = await install()
+			const target = join(directory, "another-bun")
+			await writeFile(target, await readFile(binary), { mode: 0o600 })
+			await rm(binary)
+			await makeLink(target, binary)
+
+			await expect(install()).resolves.toBe(binary)
+			expect(f.calls).toEqual(["runtime", "runtime"])
+			expect((await stat(target)).mode & 0o777).toBe(0o600)
+			expect((await stat(binary)).mode & 0o777).toBe(0o700)
+			expect((await stat(binary)).ino).not.toBe((await stat(target)).ino)
+		},
+	)
 
 	it.each([
 		"../outside",
