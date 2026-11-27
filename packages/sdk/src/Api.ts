@@ -748,16 +748,16 @@ export const SkillMountParams = Schema.Struct({
 	),
 })
 
+const MAX_FILE_MOUNT_RELATIVE_LENGTH = MAX_MOUNT_PATH_LENGTH - FILE_MOUNT_ROOT.length - 1
+
 export const FileMountParams = Schema.Struct({
 	type: Schema.Literal("file"),
 	file_id: FileId.annotate({
 		description: "File to place in the session's uploads directory, read-only",
 	}),
 	mount_path: Schema.optionalKey(
-		ArtifactPath.check(
-			Schema.isMaxLength(MAX_MOUNT_PATH_LENGTH - FILE_MOUNT_ROOT.length - 1),
-		).annotate({
-			description: `Where to place it, relative to ${FILE_MOUNT_ROOT} (default: the file's name)`,
+		ArtifactPath.check(Schema.isMaxLength(MAX_FILE_MOUNT_RELATIVE_LENGTH)).annotate({
+			description: `Path relative to ${FILE_MOUNT_ROOT}, up to ${MAX_FILE_MOUNT_RELATIVE_LENGTH} UTF-16 code units. Defaults to the file's name.`,
 		}),
 	),
 })

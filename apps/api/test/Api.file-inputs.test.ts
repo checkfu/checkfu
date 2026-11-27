@@ -271,21 +271,33 @@ describe("Files in a session", () => {
 		withSessions((apiFetch, { uploadedFiles, onTurn, createSession, upload }) =>
 			Effect.gen(function* () {
 				const file = yield* upload("a.txt", "a")
+				const empty = yield* upload("empty.txt", "")
 				const session = yield* json<SessionBody>(
-					yield* createSession([{ type: "file", file_id: file.id }]),
+					yield* createSession([
+						{ type: "file", file_id: file.id },
+						{ type: "file", file_id: empty.id },
+					]),
 				)
-				const seen: Array<string | null> = []
+				const seen: Array<ReadonlyArray<string | null>> = []
 				onTurn(async () => {
+					const files = uploadedFiles(session.id)
 					seen.push(
-						await uploadedFiles(session.id)
-							.read(`${UPLOADS}/a.txt`)
-							.catch(() => "unavailable"),
+						await Promise.all([
+							files.read(`${UPLOADS}/a.txt`).catch(() => "unavailable"),
+							files.read(`${UPLOADS}/a.txt`, { offset: 1, length: 4 }),
+							files.read(`${UPLOADS}/empty.txt`),
+						]),
 					)
 				})
-				yield* sendAndSettle(apiFetch, session.id, ["Read it."], 1)
-				expect((yield* request(apiFetch, "DELETE", `/v1/files/${file.id}`)).status).toBe(200)
-				yield* sendAndSettle(apiFetch, session.id, ["Read it again."], 2)
-				expect(seen).toEqual(["a", "unavailable"])
+				yield* sendAndSettle(apiFetch, session.id, ["Read them."], 1)
+				for (const deleted of [file, empty]) {
+					expect((yield* request(apiFetch, "DELETE", `/v1/files/${deleted.id}`)).status).toBe(200)
+				}
+				yield* sendAndSettle(apiFetch, session.id, ["Read them again."], 2)
+				expect(seen).toEqual([
+					["a", "", ""],
+					["unavailable", null, null],
+				])
 			}),
 		))
 })

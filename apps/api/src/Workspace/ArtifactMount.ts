@@ -42,6 +42,7 @@ export const makeArtifactMount = (
 	root: string,
 	artifacts: SessionArtifacts,
 	walkLimit: number,
+	verifyEmptyReads = false,
 ): PassthroughMount => {
 	const mounted = async () =>
 		(await artifacts.mounts())
@@ -112,6 +113,13 @@ export const makeArtifactMount = (
 			const offset = Math.min(options?.range?.offset ?? 0, file.size)
 			const end = offset + Math.min(options?.range?.length ?? file.size, file.size - offset)
 			const mountPath = `${root}/${at.name}`
+			if (
+				verifyEmptyReads &&
+				offset === end &&
+				(await artifacts.read(mountPath, at.path, offset, 0)) === null
+			) {
+				return null
+			}
 			let next = offset
 			return {
 				stat: fileStat(file.size),
@@ -145,7 +153,7 @@ export const makeFilesMount = (
 ): PassthroughMount => {
 	const at = mountPath.lastIndexOf("/")
 	const name = mountPath.slice(at + 1)
-	const inner = makeArtifactMount(mountPath.slice(0, at), artifacts, walkLimit)
+	const inner = makeArtifactMount(mountPath.slice(0, at), artifacts, walkLimit, true)
 	const inside = (rel: string) => (rel === "" ? name : `${name}/${rel}`)
 	return {
 		...inner,
