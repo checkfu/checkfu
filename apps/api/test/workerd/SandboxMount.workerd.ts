@@ -585,6 +585,158 @@ describe("a session's machine, in a container of its image", () => {
 		await sh("rm -rf /workspace/repos /srv/origin")
 	}, 30_000)
 
+	it("measures repository admission before and after disk restore", async () => {
+		// The origin lives outside the disposable machine and counts actual Git transport requests.
+		const origin = "/srv/checkout-measurement"
+		const url = "git://127.0.0.1:19447/repo"
+		await sh(
+			`mkdir -p ${origin} && git init -q -b main ${origin}/repo && git -C ${origin}/repo -c user.email=a@b -c user.name=a commit -q --allow-empty -m seed`,
+		)
+		const commit = (await sh(`git -C ${origin}/repo rev-parse HEAD`)).trim()
+		const daemon = await docker([
+			"exec",
+			"--detach",
+			container,
+			"sh",
+			"-c",
+			`exec git daemon --verbose --listen=127.0.0.1 --port=19447 --export-all --base-path=${origin} ${origin} 2>${origin}/git.log`,
+		])
+		expect(daemon.exitCode).toBe(0)
+		const ready = await sh(
+			`for i in $(seq 1 50); do git ls-remote "${url}" HEAD 2>/dev/null && break; sleep 0.1; done`,
+		)
+		expect(ready).toContain(commit)
+		const transfers = async () =>
+			Number((await sh(`grep -c 'Request upload-pack' ${origin}/git.log`)).trim())
+		const initialRequests = await transfers()
+		const image = (await docker(["inspect", "--format={{.Config.Image}}", container])).stdout
+			.toString()
+			.trim()
+		const kept = new Map<string, unknown>()
+		let live = ""
+		let starts = 0
+		let restores = 0
+		let probes = 0
+		let saved: { bytes: Array<Uint8Array>; compressed: boolean } | undefined
+		const remove = async () => {
+			if (live !== "") {
+				const removed = await docker(["rm", "--force", live])
+				expect(removed.exitCode).toBe(0)
+				live = ""
+			}
+		}
+		const machine = makeWorkspaceMachine({
+			sandboxes: {
+				open: () =>
+					Effect.promise(async () => {
+						if (!live) {
+							const started = await docker([
+								"run",
+								"--detach",
+								"--rm",
+								"--network",
+								`container:${container}`,
+								image,
+								"sleep",
+								"infinity",
+							])
+							expect(started.exitCode, started.stderr.toString()).toBe(0)
+							live = started.stdout.toString().trim()
+							starts++
+						}
+						return containerSandbox(live)
+					}),
+				remove: () => Effect.promise(remove),
+			},
+			key: "checkout-measurement",
+			directory: "/workspace",
+			store: {
+				get: <A>(key: string) => kept.get(key) as A | undefined,
+				put: (k, v) => {
+					kept.set(k, v)
+				},
+				delete: (k) => {
+					kept.delete(k)
+				},
+			},
+			stored: storedFiles(new Map([["/workspace", { kind: "dir", mode: 0o755 }]])),
+			settled: async () => {},
+			touched: () => {},
+			disk: {
+				read: () => {
+					const disk = saved
+					return disk === undefined
+						? undefined
+						: {
+								compressed: disk.compressed,
+								chunks: (async function* () {
+									restores++
+									yield* disk.bytes
+								})(),
+							}
+				},
+				replace: async (archive) => {
+					const bytes: Array<Uint8Array> = []
+					for await (const chunk of archive.chunks) {
+						bytes.push(chunk)
+					}
+					saved = { compressed: archive.compressed, bytes }
+				},
+			},
+		})
+		const mounts: ReadonlyArray<RepositoryMount> = [
+			{
+				id: "sesrsc_branch",
+				url,
+				access: "read_only",
+				mount_path: "/workspace/branch",
+				checkout: { type: "branch", name: "main" },
+			},
+			{
+				id: "sesrsc_commit",
+				url,
+				access: "read_only",
+				mount_path: "/workspace/pinned",
+				checkout: { type: "commit", sha: commit },
+			},
+		]
+		const run = async (args: ReadonlyArray<string>) => {
+			const result = await machine.command(args, { cwd: "/", seconds: 20 }, undefined)
+			expect(result.isError, JSON.stringify(result.content)).toBe(false)
+			return result.content
+		}
+		const prepare = async () => {
+			for (const mount of mounts) {
+				await run(cloneCommand(mount))
+				probes++
+			}
+		}
+		const counts = async () => [starts, restores, probes, (await transfers()) - initialRequests]
+		try {
+			await prepare()
+			expect(await counts()).toEqual([1, 0, 2, 2])
+			await prepare()
+			expect(await counts()).toEqual([1, 0, 4, 2])
+			await machine.sleep()
+			await prepare()
+			expect(await counts()).toEqual([2, 1, 6, 2])
+			await run(["git", "-C", "/workspace/branch", "fetch", "--quiet", "origin"])
+			expect(await counts()).toEqual([2, 1, 6, 3])
+			await machine.sleep()
+			await run(["git", "-C", "/workspace/branch", "fetch", "--quiet", "origin"])
+			expect(await counts()).toEqual([3, 2, 6, 4])
+			await run(["rm", "-rf", "/workspace/pinned"])
+			await machine.sleep()
+			await prepare()
+			expect(await counts()).toEqual([4, 3, 8, 5])
+			expect(await run(["git", "-C", "/workspace/pinned", "rev-parse", "HEAD"])).toEqual([
+				{ type: "text", text: commit },
+			])
+		} finally {
+			await remove()
+		}
+	}, 120_000)
+
 	it("runs a command to its end, its limit or its last output, whichever a call can hold", async () => {
 		const kept = new Map<string, unknown>()
 		const machine = makeWorkspaceMachine({
