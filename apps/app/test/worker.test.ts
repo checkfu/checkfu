@@ -263,3 +263,41 @@ describe("app worker", () => {
 		expect(seen).toHaveLength(0)
 	})
 })
+
+it("keeps saved File attachments byte-for-byte behind the dashboard session cookie", async () => {
+	const { env } = makeEnv()
+	const bytes = new Uint8Array([0, 5, 128, 255, 10])
+	const filename = `attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.csv`
+	let available = true
+	const upstream = vi.fn<typeof fetch>((input, init) => {
+		const request = new Request(input, init)
+		expect(new URL(request.url).pathname).toBe("/v1/files/file_saved/content")
+		expect(request.headers.get("cookie")).toBeNull()
+		if (request.headers.get("authorization") !== `Bearer ${KEY}`) {
+			return Promise.resolve(new Response(null, { status: 401 }))
+		}
+		return Promise.resolve(
+			available
+				? new Response(request.method === "HEAD" ? null : bytes, {
+						headers: { "content-disposition": filename, "content-length": String(bytes.length) },
+					})
+				: new Response(null, { status: 404 }),
+		)
+	})
+	const dashboard = { ...env, API: { fetch: upstream } }
+	const url = `${ORIGIN}/v1/files/file_saved/content`
+	expect((await worker.fetch(new Request(url), dashboard)).status).toBe(401)
+	expect(upstream).toHaveBeenCalledOnce()
+	const cookie = await sessionCookie(dashboard)
+	const fetchFile = (method: "HEAD" | "GET") =>
+		worker.fetch(new Request(url, { method, headers: { cookie } }), dashboard)
+	const head = await fetchFile("HEAD")
+	expect(head.status).toBe(200)
+	expect(head.body).toBeNull()
+	expect(head.headers.get("content-disposition")).toBe(filename)
+	const file = await fetchFile("GET")
+	expect(file.headers.get("content-disposition")).toBe(filename)
+	expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes)
+	available = false
+	expect((await fetchFile("HEAD")).status).toBe(404)
+})
