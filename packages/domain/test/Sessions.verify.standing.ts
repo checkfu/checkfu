@@ -13,6 +13,7 @@ export const STANDING = {
 	"Session.OnlyTheLastInitialMessageStartsTheTurn": "proved",
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
+	"Session.FencingClosesAnUninitializedSessionBeforeItCanAdmit": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
 	"Session.TurnNeverDecreases": "proved",
 	"Session.TurnAdvancesByAtMostOne": "proved",

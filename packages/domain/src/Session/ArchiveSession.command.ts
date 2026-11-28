@@ -19,3 +19,12 @@ export class ArchiveSession extends Domain.Command("ArchiveSession", {
 	events: [SpanModelRequestEnd, SessionStatusTerminated, SessionArchived],
 	rejects: [SessionNotFound],
 }) {}
+
+/** Hosting custody can close an allocated ID before an admission reaches its aggregate. */
+export class SessionAdmissionFenced extends Domain.Event("session.admission_fenced") {}
+
+export class FenceSessionAdmission extends Domain.Command("FenceSessionAdmission", {
+	input: { session_id: SessionId },
+	events: [SessionAdmissionFenced],
+	rejects: [],
+}) {}

@@ -3,6 +3,8 @@ import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
 import {
 	ArchiveSession,
+	FenceSessionAdmission,
+	SessionAdmissionFenced,
 	SessionArchived,
 	SessionStatusTerminated,
 } from "./ArchiveSession.command.ts"
@@ -204,6 +206,7 @@ export class Session extends Domain.Aggregate("Session", {
 		InterruptModelRequest,
 		AbandonTurn,
 		ArchiveSession,
+		FenceSessionAdmission,
 		ClaimIdempotencyKey,
 	],
 	events: [AgentCustomToolUse, UserToolConfirmation, UserCustomToolResult, SystemMessage],
@@ -237,6 +240,10 @@ export class Session extends Domain.Aggregate("Session", {
 			command._tag !== "RecordInitialMessage" ||
 			!events.some((e) => e._tag === "session.status_running") ||
 			(before._tag === "Idle" && before.initial_messages_remaining === 1),
+		FencingClosesAnUninitializedSessionBeforeItCanAdmit: ({ before, after, command }) =>
+			command._tag !== "FenceSessionAdmission" ||
+			before._tag !== "Uninitialized" ||
+			after._tag === "Terminated",
 		TerminatedSessionStaysTerminated: ({ before, after }) =>
 			before._tag !== "Terminated" || after._tag === "Terminated",
 		ArchivedSessionStaysArchived: ({ before, after }) =>
@@ -740,6 +747,9 @@ export class Session extends Domain.Aggregate("Session", {
 			return abandonTurn(state, cmd.error_type, cmd.message, { input_tokens: 0, output_tokens: 0 })
 		},
 
+		FenceSessionAdmission: (state) =>
+			state._tag === "Uninitialized" ? [new SessionAdmissionFenced()] : [],
+
 		ArchiveSession: (state, _cmd, ctx) => {
 			if (state._tag === "Uninitialized") {
 				return new SessionNotFound({ session_id: ctx.id })
@@ -767,6 +777,8 @@ export class Session extends Domain.Aggregate("Session", {
 				: [new IdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })],
 	},
 	evolve: {
+		"session.admission_fenced": (state) =>
+			state._tag === "Uninitialized" ? { _tag: "Terminated" as const, archived: false } : state,
 		"session.created": (_, e) => ({
 			_tag: "Idle" as const,
 			turn: 0,

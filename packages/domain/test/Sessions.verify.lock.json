@@ -261,6 +261,10 @@
 			"Session.ATruncatedReplyNeverEndsTheTurnAsFinished": {
 				"kind": "transition",
 				"source": "({ command, events }) =>\n\t\t\tcommand._tag !== \"CommitModelReply\" ||\n\t\t\tcommand.truncated !== true ||\n\t\t\tevents.every(\n\t\t\t\t(event) => event._tag !== \"session.status_idle\" || event.stop_reason.type !== \"end_turn\",\n\t\t\t)"
+			},
+			"Session.FencingClosesAnUninitializedSessionBeforeItCanAdmit": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"FenceSessionAdmission\" ||\n\t\t\tbefore._tag !== \"Uninitialized\" ||\n\t\t\tafter._tag === \"Terminated\""
 			}
 		}
 	}

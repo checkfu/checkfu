@@ -15,6 +15,8 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import {
 	ArchiveSession,
+	FenceSessionAdmission,
+	SessionAdmissionFenced,
 	SessionArchived,
 	SessionStatusTerminated,
 } from "../src/Session/ArchiveSession.command.ts"
@@ -158,6 +160,26 @@ describe("Sessions", () => {
 			Effect.provide([Domain.InMemory, HarnessNoopLayer, OutputsUnsaved]),
 		),
 	)
+
+	it.effect("fences a native Session ID before creation and refuses a late admission", () => {
+		const session = Session.ref("sess_001")
+		return story(
+			Story.when(new FenceSessionAdmission({ session_id: session.id })),
+			Story.then(session, new SessionAdmissionFenced()),
+			Story.when(new FenceSessionAdmission({ session_id: session.id })),
+			Story.then(session),
+			Story.when(
+				new CreateSession({
+					session_id: session.id,
+					agent_id: "agent_001",
+					agent_version: 1,
+					environment_id: "env_001",
+					title: null,
+				}),
+			),
+			Story.rejected(new SessionAlreadyExists({ session_id: session.id })),
+		)
+	})
 
 	it.effect("runs a full turn from user.message to session.status_idle", () => {
 		const session = Session.ref("sess_001")
