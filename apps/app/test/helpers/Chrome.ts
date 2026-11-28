@@ -142,6 +142,9 @@ export const withChrome = async <A>(
 		child.once("exit", () => resolve())
 	})
 	let browser: Awaited<ReturnType<typeof openDevtools>> | undefined
+	const launched = performance.now()
+	const mark = (what: string) =>
+		process.stderr.write(`[TRIAL] ${what} at ${Math.round(performance.now() - launched)}ms\n`)
 	try {
 		const port = await until(async () => {
 			if (failed !== undefined) {
@@ -155,17 +158,21 @@ export const withChrome = async <A>(
 			)
 			return file?.split("\n")[0]
 		}, "the browser debugger")
+		mark("port file")
 		const debug = "http://127.0.0.1:" + port
 		const inspect = (path: string) => fetch(debug + path, { signal: AbortSignal.timeout(5000) })
 		const targets = (await (await inspect("/json/list")).json()) as ReadonlyArray<{
 			readonly type: string
 			readonly webSocketDebuggerUrl: string
 		}>
+		mark("page list")
 		const page = targets.find((entry) => entry.type === "page")
 		assert.ok(page)
 		browser = await openDevtools(page.webSocketDebuggerUrl)
 		const version = (await (await inspect("/json/version")).json()) as { readonly Browser: string }
+		mark("version")
 		await browser.send("Page.enable")
+		mark("page enabled")
 		return await run(browser, version.Browser)
 	} finally {
 		browser?.close()
