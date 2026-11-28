@@ -16,7 +16,10 @@ import {
 	withinCatalog,
 } from "../src/Pi/PiMcp.ts"
 import type { McpServerEntry } from "../src/Pi/PiMcp.ts"
+import { mcpPermission } from "../src/Pi/PiActions.ts"
+import { listMcpTools } from "../src/Pi/PiMcpClient.ts"
 import type { McpCallOutcome, McpToolDescriptor } from "../src/Pi/PiMcpTypes.ts"
+import * as Option from "effect/Option"
 import {
 	MAX_PUBLIC_TOOL_NAME_LENGTH,
 	MODEL_TOOL_NAME,
@@ -31,6 +34,20 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { makeVaultsTestLayer } from "./helpers/VaultsHarness.ts"
+
+it.effect("drops server tool hints and takes permission from the owner's policy", () =>
+	Effect.gen(function* () {
+		const listed = yield* listMcpTools({
+			listTools: () =>
+				Effect.succeed([
+					{ name: "search", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+				]),
+		})
+		const tools = Option.getOrElse(listed, () => [])
+		expect(tools).toEqual([{ name: "search", description: "", inputSchema: { type: "object" } }])
+		expect(tools.map((tool) => mcpPermission([], "docs", tool))).toEqual(["ask"])
+	}),
+)
 
 const DOCS = "https://docs.mcp.example/mcp"
 const TOKEN = "tok_live_mcp_SECRET_1b2c"

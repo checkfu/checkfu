@@ -8,9 +8,6 @@ export const McpToolDescriptor = Schema.Struct({
 	description: Schema.String,
 	inputSchema: Schema.JsonObject,
 	outputSchema: Schema.optionalKey(Schema.JsonObject),
-	annotations: Schema.optionalKey(
-		Schema.Struct({ readOnlyHint: Schema.optionalKey(Schema.Boolean) }),
-	),
 })
 export type McpToolDescriptor = typeof McpToolDescriptor.Type
 

@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "artifact-capture-path",
-			"cut_at": "2026-11-28T00:37:06.467Z",
+			"label": "connection-custody",
+			"cut_at": "2026-11-28T00:50:25.692Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -302,8 +302,6 @@
 				"harness-call:PiHarness.discardWorkspace/result": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"harness-call:PiHarness.putSecret/args": "5eb8868a710b0ad671caebebe46b719a3c9af658f6aa72c1be535131a9d34317",
 				"harness-call:PiHarness.putSecret/result": "928768ba965a8a04b0609c863b2603efd8046c041e504513bf11a4cefc3748ce",
-				"harness-call:PiHarness.secretUsable/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
-				"harness-call:PiHarness.secretUsable/result": "b1d9840fedc4cbfc93f17bd28b384777654f2b7afdb086f525bed2b01533da3f",
 				"harness-call:PiHarness.eraseSecret/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
 				"harness-call:PiHarness.eraseSecret/result": "3eacb7e067800267aaac91d35286b8b3121f73a80eef2ebf11658d81df252b9a",
 				"harness-call:PiHarness.sealVault/args": "b004d702513d177168fe50e40e987659d68efb65c89735f7cf7edf7abcdcc380",
@@ -17055,50 +17053,6 @@
 					{
 						"refused": null
 					}
-				],
-				"harness-call:PiHarness.secretUsable/args": [
-					[
-						"",
-						"\ud800"
-					],
-					[
-						"~z' %WL;\"g",
-						"-1"
-					],
-					[
-						"&K?",
-						""
-					],
-					[
-						"__proto__",
-						""
-					],
-					[
-						"44r",
-						"[T3]U|r`EO"
-					],
-					[
-						"",
-						"\udc00"
-					],
-					[
-						"T%]79R2~",
-						"\t"
-					],
-					[
-						"",
-						"\n"
-					]
-				],
-				"harness-call:PiHarness.secretUsable/result": [
-					true,
-					true,
-					false,
-					false,
-					true,
-					false,
-					false,
-					false
 				],
 				"harness-call:PiHarness.eraseSecret/args": [
 					[

@@ -95,7 +95,6 @@ export const makeSecretCustody = (sql: CustodySql) => {
 				)
 			})
 		},
-		usable: (credentialId: string): boolean => read(credentialId) !== null,
 		ended: gone,
 		read,
 	}

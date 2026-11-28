@@ -53,7 +53,7 @@ export type Permission = "allow" | "ask"
 export const mcpPermission = (
 	tools: ReadonlyArray<AgentTool>,
 	server: string,
-	tool: { readonly name: string; readonly annotations?: { readonly readOnlyHint?: boolean } },
+	tool: { readonly name: string },
 ): Permission => {
 	const toolset = tools.find(
 		(declared) => declared.type === "mcp_toolset" && declared.mcp_server_name === server,

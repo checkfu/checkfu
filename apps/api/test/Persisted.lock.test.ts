@@ -474,7 +474,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					"recoverTurn",
 					"runTurn",
 					"sealVault",
-					"secretUsable",
 					"storeRepositoryToken",
 				]
 					.flatMap((method) => [

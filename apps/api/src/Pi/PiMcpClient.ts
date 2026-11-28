@@ -142,7 +142,7 @@ export const connectMcp = (
 const decodeTools = Schema.decodeUnknownOption(McpToolDescriptors)
 
 export const listMcpTools = (
-	client: McpClient.McpClient,
+	client: Pick<McpClient.McpClient, "listTools">,
 ): Effect.Effect<Option.Option<ReadonlyArray<McpToolDescriptor>>, McpClientError> =>
 	Effect.map(client.listTools(), (tools) =>
 		decodeTools(
@@ -151,9 +151,6 @@ export const listMcpTools = (
 				description: tool.description ?? "",
 				inputSchema: tool.inputSchema,
 				...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
-				...(typeof tool.annotations?.readOnlyHint === "boolean"
-					? { annotations: { readOnlyHint: tool.annotations.readOnlyHint } }
-					: {}),
 			})),
 		),
 	)

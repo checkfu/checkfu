@@ -143,7 +143,6 @@ export const PiHarnessCalls = {
 		args: Schema.Tuple([Schema.String, Schema.String, HeldSecret, Schema.String, PutMode]),
 		result: PutOutcome,
 	},
-	secretUsable: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	eraseSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Void },
 	sealVault: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 	readSkill: { args: Schema.Tuple([Schema.String]), result: SkillReading },

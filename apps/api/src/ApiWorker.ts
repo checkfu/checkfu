@@ -148,10 +148,6 @@ const ConnectionExecutorLive = Layer.effect(
 				connectionCall(Effect.suspend(() => harness.sealVault(vaultId))).pipe(
 					Effect.withSpan("Connection.seal"),
 				),
-			usable: (vaultId, credentialId) =>
-				connectionCall(Effect.suspend(() => harness.secretUsable(vaultId, credentialId))).pipe(
-					Effect.withSpan("Connection.usable"),
-				),
 		}
 	}),
 )

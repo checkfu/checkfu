@@ -31,8 +31,6 @@ export class Connection extends Cloudflare.DurableObject<Connection>()(
 			eraseSecret: (credentialId: string): Effect.Effect<void> =>
 				Effect.promise(() => connection().erase(credentialId)),
 			seal: (): Effect.Effect<void> => Effect.promise(() => connection().seal()),
-			usable: (credentialId: string): Effect.Effect<boolean> =>
-				Effect.sync(() => custody().usable(credentialId)),
 			mcpList: (
 				credentialId: string,
 				sessionKey: string,

@@ -1,6 +1,8 @@
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
+import { Credential } from "@checkfu/domain/Vault/Credential.aggregate"
+import { CredentialId } from "@checkfu/domain/Vault/Credential.id"
 import { CredentialListingLive } from "@checkfu/domain/Vault/CredentialListing.projection"
 import { ListCredentialsLive } from "@checkfu/domain/Vault/ListCredentials.query"
 import { ListVaultsLive } from "@checkfu/domain/Vault/ListVaults.query"
@@ -24,6 +26,7 @@ import type * as Schedule from "effect/Schedule"
 import {
 	ConnectionCallFailed,
 	CredentialSecretsLive,
+	credentialAccessInVault,
 	makeConnectionExecutorLayer,
 } from "../../src/Connection/CredentialCustody.ts"
 import { makeSecretCustody } from "../../src/Connection/SecretCustody.ts"
@@ -144,7 +147,6 @@ export const makeVaultsTestLayer = (
 				erase: (vaultId, id) =>
 					call("erase", vaultId, id, (custody) => custody.erase(id), eraseBlocked.has(id)),
 				seal: (vaultId) => call("seal", vaultId, null, (custody) => custody.seal()),
-				usable: (vaultId, id) => call("usable", vaultId, id, (custody) => custody.usable(id)),
 			}),
 		),
 		Layer.provide(Domain.InMemory),
@@ -174,6 +176,16 @@ export const makeVaultsTestLayer = (
 					: read(id)
 			}),
 		secretOf: (credentialId: string): string | null => read(credentialId)?.secret.token ?? null,
+		credentialUsable: (credentialId: string) =>
+			Effect.gen(function* () {
+				const credentials = yield* Credential
+				const { vault_id } = yield* credentials.get(CredentialId.make(credentialId))
+				const access = yield* credentialAccessInVault(vault_id, credentialId)
+				return (
+					access === "held" &&
+					(connections.get(vault_id)?.custody.read(credentialId) ?? null) !== null
+				)
+			}),
 		targetOf: (credentialId: string): string | null => read(credentialId)?.target ?? null,
 		rowsOf: (credentialId: string): CustodyRows => databaseOf(credentialId)?.rows() ?? NOTHING,
 		storedWith: (credentialId: string): string => databaseOf(credentialId)?.stored() ?? "",

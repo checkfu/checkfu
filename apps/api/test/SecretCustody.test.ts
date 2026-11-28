@@ -21,7 +21,7 @@ describe("Sealing a vault's secrets", () => {
 		}
 		custody.seal()
 		expect(rows()).toEqual({ secrets: [], tombstones: [], sealed: true })
-		expect(custody.usable("vcrd_1")).toBe(false)
+		expect(custody.read("vcrd_1")).toBeNull()
 		expect(custody.put("vcrd_1", secret("token-again"), TARGET, "replace")).toEqual({
 			refused: "erased",
 		})

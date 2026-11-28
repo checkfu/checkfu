@@ -16,7 +16,7 @@ export class CredentialSecrets extends Domain.ExternalSystem("CredentialSecrets"
 			mcp_server_url: McpServerUrl,
 			mode: Schema.Literals(["create", "replace"]),
 		},
-		success: { refused: Schema.NullOr(Schema.Literals(["erased", "different"])) },
+		success: { refused: Schema.NullOr(Schema.Literal("erased")) },
 		error: CredentialSecretsUnavailable,
 	},
 	erase: {

@@ -30,10 +30,6 @@ export interface ConnectionExecutorService {
 		credentialId: string,
 	) => Effect.Effect<void, ConnectionCallFailed>
 	readonly seal: (vaultId: string) => Effect.Effect<void, ConnectionCallFailed>
-	readonly usable: (
-		vaultId: string,
-		credentialId: string,
-	) => Effect.Effect<boolean, ConnectionCallFailed>
 }
 
 export class ConnectionExecutor extends Context.Service<
@@ -54,19 +50,6 @@ export const credentialAccessInVault = (vaultId: string, credentialId: string) =
 			return "ended"
 		}
 		return credential.custody === "held" ? "held" : "empty"
-	})
-
-export const credentialUsable = (credentialId: CredentialId) =>
-	Effect.gen(function* () {
-		const credentials = yield* Credential
-		const vaults = yield* Vault
-		const connections = yield* ConnectionExecutor
-		const { custody, vault_id } = yield* credentials.get(credentialId)
-		if (custody !== "held") {
-			return false
-		}
-		const { status } = yield* vaults.get(VaultId.make(vault_id))
-		return status === "active" && (yield* connections.usable(vault_id, credentialId))
 	})
 
 const UNAVAILABLE: CredentialSecretsUnavailable = { _tag: "CredentialSecretsUnavailable" }

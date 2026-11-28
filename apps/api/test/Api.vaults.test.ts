@@ -11,7 +11,7 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
-import { credentialAccessInVault, credentialUsable } from "../src/Connection/CredentialCustody.ts"
+import { credentialAccessInVault } from "../src/Connection/CredentialCustody.ts"
 import { vaultsOver } from "../src/Pi/PiMcpSession.ts"
 import { MCP_CREDENTIAL_ENDED } from "../src/Pi/PiMcpTypes.ts"
 import { makeVaultMcp } from "../src/Connection/VaultMcp.ts"
@@ -348,7 +348,7 @@ describe("Vaults", () => {
 				expect(credential.id).toMatch(/^vcrd_[0-9a-f]{24}$/u)
 				expect(Object.keys(credential.auth).sort()).toEqual(["mcp_server_url", "type"])
 				expect(vaults.secretOf(credential.id)).toBe(TOKEN)
-				expect(yield* credentialUsable(CredentialId.make(credential.id))).toBe(true)
+				expect(yield* vaults.credentialUsable(credential.id)).toBe(true)
 
 				const read = yield* call("GET", `/v1/vaults/${vault.id}/credentials/${credential.id}`)
 				expect(read).toEqual({ status: 200, body: credential })
@@ -421,7 +421,7 @@ describe("Vaults", () => {
 					expect(JSON.stringify(reused.body)).toContain("Idempotency-Key")
 				}
 				expect(vaults.secretOf(credential.id)).toBe(TOKEN)
-				expect(yield* credentialUsable(CredentialId.make(credential.id))).toBe(true)
+				expect(yield* vaults.credentialUsable(credential.id)).toBe(true)
 
 				const rotate = (token: string) =>
 					call("POST", `${path}/${credential.id}`, { auth: { type: "static_bearer", token } })
@@ -638,7 +638,7 @@ describe("Vaults", () => {
 				const erased = archived.body as CredentialBody
 				expect(erased.custody).toBe("erased")
 				expect(vaults.erased(credential.id)).toBe(true)
-				expect(yield* credentialUsable(CredentialId.make(credential.id))).toBe(false)
+				expect(yield* vaults.credentialUsable(credential.id)).toBe(false)
 				expect(yield* call("GET", path)).toEqual({ status: 200, body: erased })
 				expect(yield* call("POST", `${path}/archive`)).toEqual({ status: 200, body: erased })
 				expect(yield* call("POST", `${path}/archive`)).toEqual({ status: 200, body: erased })
@@ -686,7 +686,7 @@ describe("Vaults", () => {
 				}
 				expect(yield* call("DELETE", livePath)).toEqual(deleted)
 				expect(vaults.erased(live.id)).toBe(true)
-				expect(yield* credentialUsable(CredentialId.make(live.id))).toBe(false)
+				expect(yield* vaults.credentialUsable(live.id)).toBe(false)
 				expect(yield* call("DELETE", livePath)).toEqual({
 					status: 200,
 					body: { id: live.id, type: "vault_credential_deleted", custody: "erased" },
@@ -727,7 +727,7 @@ describe("Vaults", () => {
 				expect((yield* call("GET", `${base}/${archived.id}`)).body).toMatchObject({
 					custody: "erasing",
 				})
-				expect(yield* credentialUsable(CredentialId.make(archived.id))).toBe(false)
+				expect(yield* vaults.credentialUsable(archived.id)).toBe(false)
 				expect(vaults.secretOf(archived.id)).toBe(TOKEN)
 				expect(
 					yield* Effect.promise(() =>
@@ -738,7 +738,7 @@ describe("Vaults", () => {
 					status: 202,
 					body: { id: deleted.id, type: "vault_credential_deleted", custody: "erasing" },
 				})
-				expect(yield* credentialUsable(CredentialId.make(deleted.id))).toBe(false)
+				expect(yield* vaults.credentialUsable(deleted.id)).toBe(false)
 				expect(yield* vaultCustody(call, vault.id, (custody) => custody.held === 0)).toEqual({
 					storing: 0,
 					held: 0,
@@ -763,8 +763,8 @@ describe("Vaults", () => {
 				})
 				expect([one.id, two.id].map((id) => vaults.secretOf(id))).toEqual([TOKEN, TOKEN])
 
-				expect(yield* credentialUsable(CredentialId.make(one.id))).toBe(false)
-				expect(yield* credentialUsable(CredentialId.make(two.id))).toBe(false)
+				expect(yield* vaults.credentialUsable(one.id)).toBe(false)
+				expect(yield* vaults.credentialUsable(two.id)).toBe(false)
 				expect(yield* credentialAccessInVault(whole.id, one.id)).toBe("ended")
 				expect(yield* credentialAccessInVault(gone.id, two.id)).toBe("ended")
 
@@ -871,7 +871,7 @@ describe("Vaults", () => {
 				const kept = (yield* createCredential(call, vault.id, "https://mcp.kept.example/mcp"))
 					.body as CredentialBody
 				const base = `/v1/vaults/${vault.id}/credentials`
-				const usable = (id: string) => credentialUsable(CredentialId.make(id))
+				const usable = (id: string) => vaults.credentialUsable(id)
 				expect(yield* Effect.forEach([archived.id, deleted.id, kept.id], usable)).toEqual([
 					true,
 					true,
@@ -881,12 +881,12 @@ describe("Vaults", () => {
 				const archive = yield* call("POST", `${base}/${archived.id}/archive`)
 				expect(archive).toMatchObject({ status: 200, body: { custody: "erased" } })
 				expect(yield* usable(archived.id)).toBe(false)
-				expect(vaults.custodyOf(vault.id).usable(archived.id)).toBe(false)
+				expect(vaults.custodyOf(vault.id).read(archived.id)).toBeNull()
 				expect(yield* call("DELETE", `${base}/${deleted.id}`)).toEqual({
 					status: 200,
 					body: { id: deleted.id, type: "vault_credential_deleted", custody: "erased" },
 				})
-				expect(vaults.custodyOf(vault.id).usable(deleted.id)).toBe(false)
+				expect(vaults.custodyOf(vault.id).read(deleted.id)).toBeNull()
 				expect(vaults.secretOf(kept.id)).toBe(TOKEN)
 
 				const whole = yield* createVault(call, "Bob")
@@ -894,7 +894,7 @@ describe("Vaults", () => {
 				const two = (yield* createCredential(call, whole.id, "https://mcp.linear.example/mcp"))
 					.body as CredentialBody
 				expect((yield* call("POST", `/v1/vaults/${whole.id}/archive`)).status).toBe(200)
-				expect([one.id, two.id].map((id) => vaults.custodyOf(whole.id).usable(id))).toEqual([
+				expect([one.id, two.id].map((id) => vaults.custodyOf(whole.id).read(id) !== null)).toEqual([
 					false,
 					false,
 				])
@@ -904,7 +904,7 @@ describe("Vaults", () => {
 				const gone = yield* createVault(call, "Carol")
 				const three = (yield* createCredential(call, gone.id)).body as CredentialBody
 				expect((yield* call("DELETE", `/v1/vaults/${gone.id}`)).status).toBe(200)
-				expect(vaults.custodyOf(gone.id).usable(three.id)).toBe(false)
+				expect(vaults.custodyOf(gone.id).read(three.id)).toBeNull()
 				expect(vaults.secretOf(three.id)).toBeNull()
 			}),
 		)
@@ -1045,7 +1045,7 @@ describe("Vaults", () => {
 				const log = JSON.stringify(yield* vaults.storedEvents("Credential", credential.id))
 				expect(log).not.toContain("vault_credential.renamed")
 				expect(log).not.toContain("vault_credential.rotated")
-				expect(yield* credentialUsable(CredentialId.make(credential.id))).toBe(false)
+				expect(yield* vaults.credentialUsable(credential.id)).toBe(false)
 			}),
 		)
 	})
@@ -1106,10 +1106,10 @@ describe("Vaults", () => {
 					)
 				expect(yield* put(TOKEN, "create")).toEqual({ refused: "erased" })
 				expect(yield* put(ROTATED, "replace")).toEqual({ refused: "erased" })
-				expect(custody.usable(credential.id)).toBe(false)
+				expect(custody.read(credential.id)).toBeNull()
 				expect(custody.read(credential.id)).toBeNull()
 				expect(vaults.secretOf(credential.id)).toBeNull()
-				expect(yield* credentialUsable(id)).toBe(false)
+				expect(yield* vaults.credentialUsable(id)).toBe(false)
 				expect(((yield* call("GET", path)).body as CredentialBody).custody).toBe("erased")
 				expect(vaults.secretOf(other.id)).toBe(TOKEN)
 				expect(vaults.rowsOf(credential.id)).toEqual({
@@ -1126,7 +1126,7 @@ describe("Vaults", () => {
 				expect(yield* late(other.id, "replace")).toEqual({ refused: "erased" })
 				expect(yield* late("vcrd_never_seen", "create")).toEqual({ refused: "erased" })
 				expect(vaults.rowsOf(other.id)).toMatchObject(SEALED)
-				expect(custody.usable(other.id)).toBe(false)
+				expect(custody.read(other.id)).toBeNull()
 			}),
 		)
 	})
@@ -1191,7 +1191,7 @@ describe("Vaults", () => {
 						"erased",
 					)
 					expect(after.archived_at).not.toBeNull()
-					expect(yield* credentialUsable(CredentialId.make(id))).toBe(false)
+					expect(yield* vaults.credentialUsable(id)).toBe(false)
 				}
 				expect((yield* createCredential(call, archived.id, "https://new.example/mcp")).status).toBe(
 					409,
@@ -1245,10 +1245,10 @@ describe("Vaults", () => {
 							"erased",
 						)
 						expect(after.archived_at).not.toBeNull()
-						expect(yield* credentialUsable(CredentialId.make(racedId))).toBe(false)
+						expect(yield* vaults.credentialUsable(racedId)).toBe(false)
 					}
 					expect(vaults.rowsOf(settled.id)).toMatchObject(SEALED)
-					expect(yield* credentialUsable(CredentialId.make(settled.id))).toBe(false)
+					expect(yield* vaults.credentialUsable(settled.id)).toBe(false)
 					expect(yield* vaultCustody(call, vault.id, (custody) => custody.erasing === 0)).toEqual({
 						storing: 0,
 						held: 0,
@@ -1292,7 +1292,7 @@ describe("Vaults", () => {
 				expect(vaults.secretOf(credential.id)).toBe(TOKEN)
 				const log = yield* vaults.storedEvents("Credential", credential.id)
 				expect(JSON.stringify(log)).not.toContain("vault_credential.rotated")
-				expect(yield* credentialUsable(CredentialId.make(plainId))).toBe(false)
+				expect(yield* vaults.credentialUsable(plainId)).toBe(false)
 				const unstored = yield* call("GET", `${path}/${plainId}`)
 				expect((unstored.body as CredentialBody).custody).toBe("storing")
 				const listed = (yield* call("GET", path)).body as {
@@ -1317,14 +1317,14 @@ describe("Vaults", () => {
 				const retriedId = (retried.body as CredentialBody).id
 				expect((retried.body as CredentialBody).custody).toBe("held")
 				expect(vaults.secretOf(retriedId)).toBe(TOKEN)
-				expect(yield* credentialUsable(CredentialId.make(retriedId))).toBe(true)
+				expect(yield* vaults.credentialUsable(retriedId)).toBe(true)
 				const updated = yield* call("POST", `${path}/${plainId}`, {
 					auth: { type: "static_bearer", token: ROTATED },
 				})
 				expect(updated.status).toBe(200)
 				expect((updated.body as CredentialBody).custody).toBe("held")
 				expect(vaults.secretOf(plainId)).toBe(ROTATED)
-				expect(yield* credentialUsable(CredentialId.make(plainId))).toBe(true)
+				expect(yield* vaults.credentialUsable(plainId)).toBe(true)
 				expect((yield* call("GET", `/v1/vaults/${vault.id}`)).body).toMatchObject({
 					custody: { storing: 0, held: 3, erasing: 0 },
 				})

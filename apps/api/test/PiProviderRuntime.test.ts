@@ -214,7 +214,6 @@ describe("PiProviderRuntime", () => {
 								readOutputs: () => Effect.succeed([]),
 								discardWorkspace: () => Effect.void,
 								putSecret: () => Effect.die(new Error("plan only")),
-								secretUsable: () => Effect.succeed(false),
 								eraseSecret: () => Effect.void,
 								sealVault: () => Effect.void,
 								pauseUsage: () => Effect.die(new Error("plan only")),

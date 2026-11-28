@@ -251,7 +251,6 @@ export const makeTestServer = (handler?: ModelHandler) =>
 					put: () => Effect.succeed({ refused: null }),
 					erase: () => Effect.void,
 					seal: () => Effect.void,
-					usable: () => Effect.succeed(true),
 				}),
 			),
 		)

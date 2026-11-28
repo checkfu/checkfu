@@ -80,7 +80,6 @@ export const makeTestServer = Effect.gen(function* () {
 				put: () => Effect.succeed({ refused: null }),
 				erase: () => Effect.void,
 				seal: () => Effect.void,
-				usable: () => Effect.succeed(true),
 			}),
 		),
 		Layer.provide(Domain.InMemory),

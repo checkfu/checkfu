@@ -62,8 +62,6 @@ export default PiHarnessWorker.make(
 			),
 			putSecret: (vaultId, credentialId, secret, target, mode) =>
 				Effect.orDie(connection(vaultId).putSecret(credentialId, secret, target, mode)),
-			secretUsable: (vaultId, credentialId) =>
-				Effect.orDie(connection(vaultId).usable(credentialId)),
 			eraseSecret: (vaultId, credentialId) =>
 				Effect.orDie(connection(vaultId).eraseSecret(credentialId)),
 			sealVault: (vaultId) => Effect.orDie(connection(vaultId).seal()),
