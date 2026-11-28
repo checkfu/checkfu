@@ -27,83 +27,189 @@ curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/agents" \
 
 ## The server
 
-```ts server.mts
+```ts tools.ts
 import { createHash } from "node:crypto"
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
-import { text as readText } from "node:stream/consumers"
-import Checkfu, { type JsonSessionEvent } from "@checkfu/sdk"
+import type Checkfu from "@checkfu/sdk"
+import type { JsonSessionEvent } from "@checkfu/sdk"
 
-const client = new Checkfu()
-type ToolCall = Extract<JsonSessionEvent, { type: "agent.custom_tool_use" | "agent.mcp_tool_use" }>
-
-const tools: Record<string, (input: Record<string, unknown>) => Promise<unknown>> = {
-	lookup_order: async ({ order_id }) => ({ order_id, status: "shipped" }),
-}
-
-async function answer(sessionId: string, call: ToolCall) {
-	if (call.type !== "agent.custom_tool_use") return // MCP calls wait for the user
-	const run =
-		tools[call.name] ??
-		(async () => {
-			throw new Error(`Unknown tool ${call.name}`)
-		})
-	const [text, isError] = await run(call.input).then(
-		(out) => [JSON.stringify(out), false] as const,
-		(e) => [String(e), true] as const,
-	)
-	const id = `result-${createHash("sha256").update(call.id).digest("hex")}` // safe to resend
-	await client.sessions.events
-		.send(sessionId, {
-			events: [
-				{
-					id,
-					type: "user.custom_tool_result",
-					custom_tool_use_id: call.id,
-					content: [{ type: "text", text }],
-					is_error: isError,
-				},
-			],
-		})
-		.catch((error) => {
-			if (!(error instanceof Checkfu.ConflictError)) throw error
-		}) // 409: no longer waiting
-}
-
-async function findCall(sessionId: string, id: string) {
-	const types = ["agent.custom_tool_use", "agent.mcp_tool_use"] as const
-	for await (const event of client.sessions.events.list(sessionId, {
-		order: "desc",
-		types: [...types],
-	})) {
-		if (
-			(event.type === "agent.custom_tool_use" || event.type === "agent.mcp_tool_use") &&
-			event.id === id
-		)
-			return event
+export async function relaySession(
+	client: Pick<Checkfu, "sessions">,
+	sessionId: string,
+	after: number | undefined,
+	signal: AbortSignal,
+	write: (event: JsonSessionEvent) => void,
+) {
+	for await (const event of await client.sessions.events.stream(
+		sessionId,
+		after === undefined ? undefined : { after },
+		{ signal },
+	)) {
+		write(event)
 	}
 }
+
+type CustomCall = Extract<JsonSessionEvent, { type: "agent.custom_tool_use" }>
+type Pause = Extract<JsonSessionEvent, { type: "session.status_idle" }>
+export type ToolResult = {
+	id: string
+	type: "user.custom_tool_result"
+	custom_tool_use_id: string
+	content: [{ type: "text"; text: string }]
+	is_error: boolean
+}
+type Results = {
+	read: (key: string) => Promise<ToolResult | undefined>
+	write: (key: string, result: ToolResult) => Promise<void>
+}
+
+export function createToolProcessor(
+	client: Pick<Checkfu, "sessions">,
+	tools: Record<string, (input: Record<string, unknown>) => Promise<unknown>>,
+	results: Results,
+) {
+	const stillWaiting = async (sessionId: string, pause: Pause, callId: string) => {
+		const session = await client.sessions.retrieve(sessionId)
+		if (session.status !== "idle" || session.archived_at !== null) return false
+		for await (const event of client.sessions.events.list(sessionId, {
+			order: "desc",
+			types: ["session.status_idle", "user.custom_tool_result"],
+		})) {
+			if (event.type === "user.custom_tool_result" && event.custom_tool_use_id === callId)
+				return false
+			if (event.type === "session.status_idle") return event.seq === pause.seq
+		}
+		return false
+	}
+	const findCall = async (sessionId: string, id: string) => {
+		for await (const event of client.sessions.events.list(sessionId, {
+			order: "desc",
+			types: ["agent.custom_tool_use", "agent.mcp_tool_use"],
+		})) {
+			if (event.id === id) {
+				return event.type === "agent.custom_tool_use" ? event : undefined
+			}
+		}
+	}
+	const answer = async (sessionId: string, pause: Pause, call: CustomCall) => {
+		if (!(await stillWaiting(sessionId, pause, call.id))) return
+		const key = createHash("sha256")
+			.update(JSON.stringify([sessionId, call.id]))
+			.digest("hex")
+		let result = await results.read(key)
+		if (result === undefined) {
+			const evaluate = async () => {
+				const run = Object.hasOwn(tools, call.name) ? tools[call.name] : undefined
+				if (run === undefined) throw new Error("Unknown application tool")
+				return JSON.stringify(await run(call.input)) ?? "null"
+			}
+			const [text, isError] = await evaluate().then(
+				(out) => [out, false] as const,
+				() => ["Application tool failed.", true] as const,
+			)
+			result = {
+				id: "result-" + key,
+				type: "user.custom_tool_result",
+				custom_tool_use_id: call.id,
+				content: [{ type: "text", text }],
+				is_error: isError,
+			}
+			await results.write(key, result)
+		}
+		try {
+			await client.sessions.events.send(sessionId, { events: [result] })
+		} catch (error) {
+			if (await stillWaiting(sessionId, pause, call.id)) throw error
+		}
+	}
+	return async (sessionId: string, event: JsonSessionEvent) => {
+		if (event.type !== "session.status_idle" || event.stop_reason.type !== "requires_action") return
+		for (const id of event.stop_reason.event_ids) {
+			const call = await findCall(sessionId, id)
+			if (call !== undefined) await answer(sessionId, event, call)
+		}
+	}
+}
+```
+
+```ts server.mts
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import { text as readText } from "node:stream/consumers"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
+import Checkfu from "@checkfu/sdk"
+import { createToolProcessor, relaySession, type ToolResult } from "./tools.ts"
+
+const client = new Checkfu()
+const resultDirectory = ".checkfu-tool-results"
+const processEvent = createToolProcessor(
+	client,
+	{ lookup_order: async ({ order_id }) => ({ order_id, status: "shipped" }) },
+	{
+		read: async (key) => {
+			try {
+				return JSON.parse(await readFile(join(resultDirectory, key), "utf8")) as ToolResult
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+				throw error
+			}
+		},
+		write: async (key, result) => {
+			await mkdir(resultDirectory, { recursive: true, mode: 0o700 })
+			const final = join(resultDirectory, key)
+			const staged = final + "." + crypto.randomUUID()
+			try {
+				await writeFile(staged, JSON.stringify(result), { flag: "wx", mode: 0o600 })
+				await rename(staged, final)
+			} finally {
+				await rm(staged, { force: true })
+			}
+		},
+	},
+)
+
+const processing = new Set<string>()
+function ownSession(sessionId: string) {
+	if (processing.has(sessionId)) return
+	processing.add(sessionId)
+	const follow = async () => {
+		let after: number | undefined
+		for (;;) {
+			try {
+				for await (const event of await client.sessions.events.stream(sessionId, { after })) {
+					await processEvent(sessionId, event)
+					after = event.seq
+					if (event.type === "session.status_terminated" || event.type === "session.archived")
+						return
+				}
+			} catch (error) {
+				if (error instanceof Checkfu.NotFoundError || error instanceof Checkfu.AuthenticationError)
+					throw error
+				console.error("Session tool processor will retry", sessionId)
+			}
+			await delay(1_000)
+		}
+	}
+	void follow()
+		.catch(() => console.error("Session tool processor stopped", sessionId))
+		.finally(() => {
+			processing.delete(sessionId)
+		})
+}
+
+// Supply the still-active Session IDs restored by your application on restart.
+for (const id of (process.env.ACTIVE_SESSION_IDS ?? "").split(",").filter(Boolean)) ownSession(id)
 
 async function relay(req: IncomingMessage, res: ServerResponse, sessionId: string) {
 	const last = Number(req.headers["last-event-id"])
 	const controller = new AbortController()
 	req.on("close", () => controller.abort())
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
-	const calls = new Map<string, ToolCall>()
 	try {
-		const after = Number.isInteger(last) && last >= 0 ? { after: last } : undefined
-		for await (const event of await client.sessions.events.stream(sessionId, after, {
-			signal: controller.signal,
-		})) {
+		const after = Number.isInteger(last) && last >= 0 ? last : undefined
+		await relaySession(client, sessionId, after, controller.signal, (event) => {
 			res.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
-			if (event.type === "agent.custom_tool_use" || event.type === "agent.mcp_tool_use")
-				calls.set(event.id, event)
-			if (event.type === "session.status_idle" && event.stop_reason.type === "requires_action") {
-				for (const id of event.stop_reason.event_ids) {
-					const call = calls.get(id) ?? (await findCall(sessionId, id))
-					if (call !== undefined) void answer(sessionId, call).catch(console.error)
-				}
-			}
-		}
+		})
 	} catch (error) {
 		if (!controller.signal.aborted) console.error(error)
 	}
@@ -127,6 +233,7 @@ createServer(async (req, res) => {
 					environment_id: process.env.ENVIRONMENT_ID!,
 				}),
 			)
+			ownSession(session.id)
 			res.end(JSON.stringify({ id: session.id }))
 		} else if (req.method === "GET" && sessionId && action === "events") {
 			await relay(req, res, sessionId) // In a real app, check that the user owns this Session.
@@ -149,8 +256,10 @@ createServer(async (req, res) => {
 		if (!res.headersSent)
 			res.writeHead(error instanceof Checkfu.APIError ? error.status : 500).end(String(error))
 	}
-}).listen(3000, () => console.log("Listening on http://localhost:3000"))
+}).listen(3000, "127.0.0.1", () => console.log("Listening on http://127.0.0.1:3000"))
 ```
+
+This local demo listens on loopback. For an application, authorize each session read, message, and confirmation against the signed-in user.
 
 Start the server in one terminal with `CHECKFU_BASE_URL` and `CHECKFU_API_KEY` exported:
 
@@ -190,4 +299,4 @@ A pause arrives as `session.status_idle` with stop reason `requires_action`. Ans
 - Answer `agent.custom_tool_use` with `user.custom_tool_result`.
 - Answer `agent.mcp_tool_use` that has `evaluated_permission: "ask"` with `user.tool_confirmation` (`result: "allow"` or `"deny"`).
 
-Give each answer a deterministic event `id`: resending with the same `id` returns the original receipt, so two server instances won't answer twice. While paused, the Session waits without making any model requests. See [Tools](/concepts/tools) and [Resume a stream](/guides/resume-a-stream).
+The server owns one tool processor per Session, even with zero browsers connected. Browser streams only observe events. The processor checks that a replayed pause is still current and saves each result and its stable event ID before submitting it. A retry reuses the saved result. After a restart, supply the active Session IDs from your application and reuse the same private results directory. This example uses one server and a read-only lookup. For several servers, claim each call in a shared durable store. For a side-effecting tool, use the same call key with a downstream idempotency check or commit the application effect and result together. Reusing a Checkfu event ID only deduplicates the submitted answer. While paused, the Session waits without making any model requests. See [Tools](/concepts/tools) and [Resume a stream](/guides/resume-a-stream).
