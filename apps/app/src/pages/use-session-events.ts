@@ -14,6 +14,7 @@ import {
 	liveQuery,
 	newestSeqOf,
 	sessionQuery,
+	sessionOutputsQuery,
 	transcriptQuery,
 } from "../queries.ts"
 import { loadUntilWaitingCallsSeen, sessionCallsOf } from "../tool-calls.ts"
@@ -30,6 +31,12 @@ const CHANGES_SNAPSHOT: ReadonlySet<SessionEventType> = new Set([
 	"session.archived",
 ])
 
+const captureTurnOf = (event: JsonSessionEvent) =>
+	event.type === "session.status_idle" &&
+	["end_turn", "budget_reached", "refusal"].includes(event.stop_reason.type)
+		? event.turn
+		: undefined
+
 export function useSessionEvents({
 	session,
 	onSnapshotChange,
@@ -44,6 +51,7 @@ export function useSessionEvents({
 	const tail = useQuery(live).data ?? NO_EVENTS
 	const [preview, setPreview] = useState<SessionMessagePreview>()
 	const [connection, setConnection] = useState<Connection>("live")
+	const [outputRecovery, setOutputRecovery] = useState(0)
 	const [batch] = useState(
 		() =>
 			new EventBatch((events) =>
@@ -52,6 +60,7 @@ export function useSessionEvents({
 	)
 	const refresh = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const events = transcriptEvents(eventsOf(history.data), tail)
+	const captured = events.findLast((event) => captureTurnOf(event) !== undefined)
 	const calls = sessionCallsOf(events)
 	const { unseen } = calls
 	const findingCalls = useQuery({
@@ -69,6 +78,8 @@ export function useSessionEvents({
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 	useMountEffect(() => {
+		const invalidateOutputs = () =>
+			void queryClient.invalidateQueries({ queryKey: sessionOutputsQuery(session.id).queryKey })
 		const resync = () => {
 			if (refresh.current === undefined) {
 				refresh.current = setTimeout(() => {
@@ -85,6 +96,9 @@ export function useSessionEvents({
 			}
 			if (CHANGES_SNAPSHOT.has(event.type)) {
 				resync()
+			}
+			if (captureTurnOf(event) !== undefined) {
+				invalidateOutputs()
 			}
 		}
 		const stop = isFinal(events)
@@ -111,6 +125,10 @@ export function useSessionEvents({
 							resync()
 						}
 					},
+					recovered: () => {
+						invalidateOutputs()
+						setOutputRecovery((count) => count + 1)
+					},
 				})
 		return () => {
 			stop()
@@ -121,6 +139,8 @@ export function useSessionEvents({
 	})
 	return {
 		events,
+		outputTurn: captured === undefined ? 0 : (captureTurnOf(captured) ?? 0),
+		outputRecovery,
 		preview,
 		calls,
 		reconnecting: connection === "reconnecting",

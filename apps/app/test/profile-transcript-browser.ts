@@ -79,6 +79,21 @@ const fixtureServer = () => {
 					response.setHeader("content-type", "application/json")
 					response.end(JSON.stringify(transcriptSession))
 					return
+				case `${sessionPath}/outputs`:
+					response.setHeader("content-type", "application/json")
+					response.end(
+						JSON.stringify({
+							type: "session_outputs",
+							session_id: transcriptSession.id,
+							status: "none",
+							turn: 0,
+							reason: null,
+							recorded_at: null,
+							files: [],
+							skipped: [],
+						}),
+					)
+					return
 				case `${sessionPath}/events`: {
 					response.setHeader("content-type", "application/json")
 					if (request.method === "POST") {

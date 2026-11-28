@@ -32,6 +32,7 @@ export type RunPage = FetchResult<"automations.runs.list">
 export type JsonAutomationRun = RunPage["data"][number]
 export type EventPage = FetchResult<"sessions.events.list">
 export type JsonArtifactLink = FetchResult<"artifacts.versions.link">
+export type JsonSessionOutputs = FetchResult<"sessions.outputs.retrieve">
 
 interface Pending {
 	readonly id: string
@@ -223,6 +224,33 @@ const vaults = {
 	},
 }
 
+const isObject = (value: unknown): value is object => typeof value === "object" && value !== null
+
+const isSavedFile = (file: unknown): boolean =>
+	isObject(file) &&
+	"id" in file &&
+	typeof file.id === "string" &&
+	"filename" in file &&
+	typeof file.filename === "string" &&
+	"size" in file &&
+	Number.isSafeInteger(file.size) &&
+	"origin" in file &&
+	isObject(file.origin) &&
+	"type" in file.origin &&
+	(file.origin.type === "upload" ||
+		(file.origin.type === "session" &&
+			"turn" in file.origin &&
+			Number.isSafeInteger(file.origin.turn) &&
+			"path" in file.origin &&
+			typeof file.origin.path === "string"))
+
+const isSkippedFile = (file: unknown): boolean =>
+	isObject(file) &&
+	"path" in file &&
+	typeof file.path === "string" &&
+	"reason" in file &&
+	typeof file.reason === "string"
+
 export const checkfu = {
 	agents: {
 		list: (page?: string, signal?: AbortSignal) =>
@@ -330,6 +358,27 @@ export const checkfu = {
 		list: (page?: string, signal?: AbortSignal) =>
 			request("sessions.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: retrieveSession,
+		outputs: async (session_id: string, signal?: AbortSignal): Promise<JsonSessionOutputs> => {
+			const output = await request("sessions.outputs.retrieve", {
+				path: { session_id },
+				...withSignal(signal),
+			})
+			if (
+				output?.type !== "session_outputs" ||
+				output.session_id !== session_id ||
+				!["none", "saved", "skipped"].includes(output.status) ||
+				!Number.isSafeInteger(output.turn) ||
+				(output.reason !== null && typeof output.reason !== "string") ||
+				(output.recorded_at !== null && typeof output.recorded_at !== "string") ||
+				!Array.isArray(output.files) ||
+				!output.files.every(isSavedFile) ||
+				!Array.isArray(output.skipped) ||
+				!output.skipped.every(isSkippedFile)
+			) {
+				throw new Error("The server returned an invalid saved files result.")
+			}
+			return output
+		},
 		create: async (body: BodyOf<"sessions.create">, idempotencyKey: string) =>
 			settled(retrieveSession, await request("sessions.create", { body, idempotencyKey })),
 		archive: async (session_id: string) =>
