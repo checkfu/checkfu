@@ -151,6 +151,7 @@ import {
 	MAX_SESSION_EVENTS_PER_BATCH,
 	MAX_SESSION_INITIAL_MESSAGES_BYTES,
 	MAX_SESSION_VAULTS,
+	MAX_QUERY_INTEGER,
 } from "./Limits.ts"
 
 export const REQUEST_ID_HEADER = "request-id"
@@ -1923,13 +1924,10 @@ export const ListWebhookDeliveriesResponse = listResponse(WebhookDeliveryResourc
 export type ListWebhookDeliveriesResponse = typeof ListWebhookDeliveriesResponse.Type
 
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
-	Schema.decodeTo(
-		Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
-		{
-			decode: SchemaGetter.transform(Number),
-			encode: SchemaGetter.transform(String),
-		},
-	),
+	Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_QUERY_INTEGER })), {
+		decode: SchemaGetter.transform(Number),
+		encode: SchemaGetter.transform(String),
+	}),
 )
 
 const EventListPage = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).annotate({
@@ -1969,7 +1967,7 @@ const positiveIntegerFromString = (description: string) =>
 		.annotate({ description })
 		.pipe(
 			Schema.decodeTo(
-				Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999_999_999 })),
+				Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_QUERY_INTEGER })),
 				{
 					decode: SchemaGetter.transform(Number),
 					encode: SchemaGetter.transform(String),

@@ -1,4 +1,5 @@
 import { CheckfuFetchError, createFetchClient, operationUrl } from "@checkfu/sdk/fetch"
+import { MAX_QUERY_INTEGER } from "@checkfu/sdk/Limits"
 import type { FetchInput, FetchResult, JsonOperationId } from "@checkfu/sdk/fetch"
 import type {
 	CreateAgentBody,
@@ -93,6 +94,13 @@ const requireAutomationRevision = (revision: number): number => {
 		)
 	}
 	return revision
+}
+
+const requireArchiveVersion = (version: number): number => {
+	if (!Number.isInteger(version) || version < 1 || version > MAX_QUERY_INTEGER) {
+		throw new Error("The API did not return a usable version. Reload before archiving.")
+	}
+	return version
 }
 
 const isArchived = (value: unknown): boolean =>
@@ -228,8 +236,15 @@ export const checkfu = {
 				await request("agents.update", { path: { agent_id }, body }),
 				(saved) => versionOf(saved) > body.version,
 			),
-		archive: async (agent_id: string) =>
-			settled(retrieveAgent, await request("agents.archive", { path: { agent_id } }), isArchived),
+		archive: async (agent_id: string, version: number) =>
+			settled(
+				retrieveAgent,
+				await request("agents.archive", {
+					path: { agent_id },
+					query: { version: requireArchiveVersion(version) },
+				}),
+				isArchived,
+			),
 	},
 	environments: {
 		list: (page?: string, signal?: AbortSignal) =>
@@ -243,10 +258,13 @@ export const checkfu = {
 				await request("environments.update", { path: { environment_id }, body }),
 				(saved) => saved.version > body.version,
 			),
-		archive: async (environment_id: string) =>
+		archive: async (environment_id: string, version: number) =>
 			settled(
 				retrieveEnvironment,
-				await request("environments.archive", { path: { environment_id } }),
+				await request("environments.archive", {
+					path: { environment_id },
+					query: { version: requireArchiveVersion(version) },
+				}),
 				isArchived,
 			),
 	},
@@ -279,10 +297,13 @@ export const checkfu = {
 				await request("automations.unpause", { path: { automation_id } }),
 				(automation) => automation.status !== "paused",
 			),
-		archive: async (automation_id: string) =>
+		archive: async (automation_id: string, revision: number) =>
 			settled(
 				retrieveAutomation,
-				await request("automations.archive", { path: { automation_id } }),
+				await request("automations.archive", {
+					path: { automation_id },
+					query: { revision: requireArchiveVersion(revision) },
+				}),
 				isArchived,
 			),
 		run: async (

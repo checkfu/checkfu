@@ -415,7 +415,7 @@ export function AutomationView({
 	})
 	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
 	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
-	const archive = useAction(() => checkfu.automations.archive(automation.id), { invalidates })
+	const archive = useAction(checkfu.automations.archive, { invalidates })
 	const archived = automation.status === "archived"
 	const agent = useQuery({
 		...agentQuery(automation.agent.id),
@@ -474,7 +474,12 @@ export function AutomationView({
 							>
 								Edit
 							</Button>
-							<Button variant="destructive" size="sm" disabled={busy} onClick={() => archive.run()}>
+							<Button
+								variant="destructive"
+								size="sm"
+								disabled={busy}
+								onClick={() => archive.run(automation.id, automation.revision)}
+							>
 								Archive
 							</Button>
 						</>
