@@ -220,6 +220,14 @@ export const SandboxesCloudflare = Layer.effect(
 									...(options.timeout === undefined
 										? {}
 										: { timeout: Duration.toMillis(Duration.fromInputUnsafe(options.timeout)) }),
+									...(options.stdin === undefined
+										? {}
+										: {
+												stdin:
+													typeof options.stdin === "string"
+														? new TextEncoder().encode(options.stdin)
+														: options.stdin,
+											}),
 								},
 							),
 						),
