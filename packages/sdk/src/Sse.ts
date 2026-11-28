@@ -603,6 +603,9 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 							(config.isCursorAdvance
 								? config.isCursorAdvance(cursorAtStart, loopState.cursor)
 								: true)
+						const progressed =
+							advancedCursor ||
+							(config.getCursor === undefined && loopState.cursor === undefined && sawDataEvent)
 						const elapsedMs = Number((yield* Clock.monotonicTimeNanos) - openedAtNanos) / 1_000_000
 						const healthyIdle =
 							!sawDataEvent &&
@@ -617,11 +620,11 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 
 						if (hasStreamError && streamError !== undefined) {
 							if (isRetryableRawError(streamError)) {
-								if (advancedCursor || healthyIdle) {
+								if (progressed || healthyIdle) {
 									loopState.attempt = 0
 									loopState.noProgressCloses = 0
 								}
-								if (loopState.attempt >= maxReconnects) {
+								if (!(loopState.attempt < maxReconnects)) {
 									return yield* mapSseError(streamError, response.headers)
 								}
 								const delayMs = retryDisconnectDelayMs(
@@ -636,15 +639,23 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 							return yield* mapSseError(streamError, response.headers)
 						}
 
-						loopState.attempt = 0
-						if (advancedCursor) {
+						if (progressed) {
+							loopState.attempt = 0
 							loopState.noProgressCloses = 0
 							loopState.pendingDelayMs = loopState.retryDelayMs ?? 0
 						} else if (healthyIdle) {
+							loopState.attempt = 0
 							loopState.noProgressCloses = 0
 							const minIdleDelayMs = Math.min(Math.max(baseDelayMs, 1), 50)
 							loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, minIdleDelayMs)
 						} else {
+							if (!(loopState.attempt < maxReconnects)) {
+								return yield* new APIConnectionError({
+									message:
+										"The event stream closed without progress and exhausted its reconnect attempts.",
+								})
+							}
+							loopState.attempt += 1
 							const streak = loopState.noProgressCloses
 							loopState.noProgressCloses = streak + 1
 							loopState.pendingDelayMs = Math.max(

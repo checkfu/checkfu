@@ -3573,6 +3573,57 @@ describe("@checkfu/sdk", () => {
 				Stream.runCollect(client.sessions.events.stream("sess_wait", {}, options)),
 			).pipe(Effect.provide(makeEffectLayer(fetch)))
 
+		it.live("charges a clean EOF without progress against the reconnect budget", () =>
+			Effect.gen(function* () {
+				for (const maxReconnectAttempts of [0, 2, Number.NaN]) {
+					let calls = 0
+					const fetch: typeof globalThis.fetch = async () => {
+						calls += 1
+						return calls > 4 ? new Response(null, { status: 204 }) : eventStreamResponse("")
+					}
+					const error = yield* Effect.flip(
+						collectEvents(fetch, {
+							maxReconnectAttempts,
+							baseReconnectDelayMs: 1,
+						}),
+					)
+					expect(error).toMatchObject({
+						_tag: "APIConnectionError",
+						message: expect.stringContaining("closed without progress"),
+					})
+					expect(calls).toBe(Number.isNaN(maxReconnectAttempts) ? 1 : maxReconnectAttempts + 1)
+				}
+			}),
+		)
+
+		it.live(
+			"resets on cursor progress and shares the budget between HTTP failure and replayed clean EOF",
+			() =>
+				Effect.gen(function* () {
+					const frames = [
+						new Response(null, { status: 503 }),
+						eventStreamResponse(sseFrame(sampleUserMessageEvent(1))),
+						new Response(null, { status: 503 }),
+						eventStreamResponse(sseFrame(sampleUserMessageEvent(1))),
+						new Response(null, { status: 204 }),
+					]
+					let calls = 0
+					const fetch: typeof globalThis.fetch = async () =>
+						frames[calls++] ?? new Response(null, { status: 204 })
+					const error = yield* Effect.flip(
+						collectEvents(fetch, {
+							maxReconnectAttempts: 1,
+							baseReconnectDelayMs: 1,
+						}),
+					)
+					expect(error).toMatchObject({
+						_tag: "APIConnectionError",
+						message: expect.stringContaining("closed without progress"),
+					})
+					expect(calls).toBe(4)
+				}),
+		)
+
 		it.live("reconnects from the last event when a stream stops sending bytes", () =>
 			Effect.gen(function* () {
 				const signals: Array<AbortSignal> = []
