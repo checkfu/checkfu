@@ -2,6 +2,7 @@ import { Button } from "@checkfu/ui/button"
 import { Callout } from "@checkfu/ui/callout"
 import { useMountEffect } from "@checkfu/ui/use-mount-effect"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { DownloadIcon } from "lucide-react"
 import { useRef } from "react"
 import type * as React from "react"
@@ -186,15 +187,26 @@ export function SessionFiles({
 											: ""}
 									</p>
 								</div>
-								<Button
-									aria-label={`Download ${file.filename}`}
-									variant="outline"
-									size="icon-sm"
-									disabled={download.pending}
-									onClick={() => chooseDownload(file)}
-								>
-									<DownloadIcon />
-								</Button>
+								<div className="flex shrink-0 items-center gap-2">
+									<Button asChild size="sm" variant="outline">
+										<Link
+											to="/sessions/new"
+											search={{ file: file.id }}
+											aria-label={`Use in new session: ${file.filename}`}
+										>
+											Use in new session
+										</Link>
+									</Button>
+									<Button
+										aria-label={`Download ${file.filename}`}
+										variant="outline"
+										size="icon-sm"
+										disabled={download.pending}
+										onClick={() => chooseDownload(file)}
+									>
+										<DownloadIcon />
+									</Button>
+								</div>
 							</li>
 						))}
 					</ul>

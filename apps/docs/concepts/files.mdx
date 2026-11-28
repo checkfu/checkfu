@@ -69,6 +69,8 @@ const session = await client.waitForPending(
 
 The agent reads it at `/mnt/session/uploads/q3/report.pdf`. Its file tools can read uploads directly, while `bash` cannot, so the agent copies a File into `/workspace` if it needs to pass it to a shell command.
 
+To reuse a saved File in the dashboard, choose **Use in new session** in the source session’s Files panel. Review the read-only mount and start the new session when you are ready. The new session references the same File.
+
 ## Files from Session outputs
 
 When a turn ends with `end_turn`, `budget_reached`, or `refusal`, Checkfu saves each file the agent wrote to `/mnt/session/outputs` as a File (subject to [Session output limits](/reference/limits#session-outputs)). Read the File list with a checkout-built SDK:

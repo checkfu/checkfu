@@ -276,6 +276,13 @@ export const lookup = <T>(
 	return { state: "pending" }
 }
 
+export const fileQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["files", id],
+		queryFn: ({ signal }) => checkfu.files.retrieve(id, signal),
+		staleTime: 0,
+	})
+
 export const present = <T>(query: { readonly data: T; readonly error: unknown }): T => {
 	if (lookup(query).state === "gone") {
 		throw query.error

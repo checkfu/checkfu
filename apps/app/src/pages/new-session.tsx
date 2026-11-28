@@ -3,18 +3,25 @@ import { Callout } from "@checkfu/ui/callout"
 import { Field } from "@checkfu/ui/field"
 import { Input, Select } from "@checkfu/ui/input"
 import { PageHeader } from "@checkfu/ui/page-header"
-import { useInfiniteQuery, useQueries, useSuspenseInfiniteQuery } from "@tanstack/react-query"
+import {
+	useInfiniteQuery,
+	useQueries,
+	useQuery,
+	useQueryClient,
+	useSuspenseInfiniteQuery,
+} from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon, XIcon } from "lucide-react"
-import { useState } from "react"
+import { lazy, Suspense, useState } from "react"
 import type * as React from "react"
-import { checkfu, errorMessage } from "../api.ts"
+import { ApiError, checkfu, errorMessage, isSignedOut } from "../api.ts"
 import { choicesOf, OptionPicker } from "../option-picker.tsx"
 import {
 	agentChoices,
 	artifactChoices,
 	artifactQuery,
 	environmentChoices,
+	fileQuery,
 	lookup,
 	memoryStoreChoices,
 	memoryStoreQuery,
@@ -26,6 +33,7 @@ import {
 	RESOURCE_LABELS,
 	checkoutError,
 	emptyDraft,
+	fileMountError,
 	namesResource,
 	resourceBody,
 	resourceIdentity,
@@ -43,12 +51,14 @@ import {
 } from "./session-bindings.tsx"
 import type { ExplicitCredentials } from "./session-bindings.tsx"
 
+const SavedFileFields = lazy(() => import("./saved-file-fields.tsx"))
+
 const NO_VAULTS: ReadonlyArray<string> = []
 const NO_CREDENTIALS: ExplicitCredentials = {}
 
 type ResourceDraftRow = ResourceDraft & { readonly key: string }
 
-type MountCheck = Lookup<string> & { readonly retry: () => void }
+type MountCheck = Lookup<string> & { readonly retry: () => void; readonly signedOut?: boolean }
 
 const mountCheck = <T,>(
 	query: {
@@ -67,7 +77,7 @@ const mountCheck = <T,>(
 	}
 	return status.state === "active"
 		? { state: "active", found: describe(status.found), retry }
-		: { ...status, retry }
+		: { ...status, retry, signedOut: isSignedOut(query.error) }
 }
 
 const useMountChecks = (drafts: ReadonlyArray<ResourceDraftRow>) => {
@@ -105,6 +115,8 @@ const useMountChecks = (drafts: ReadonlyArray<ResourceDraftRow>) => {
 				mountCheck(query, (artifact) => `${artifact.name} (v${artifact.version})`),
 			),
 	})
+	const fileId = drafts.find((draft) => draft.type === "file")?.fileId
+	const file = useQuery({ ...fileQuery(fileId ?? ""), enabled: fileId !== undefined, retry: false })
 	const checks = new Map<string, MountCheck>()
 	for (const draft of drafts) {
 		const result =
@@ -112,7 +124,13 @@ const useMountChecks = (drafts: ReadonlyArray<ResourceDraftRow>) => {
 				? stores[storeIds.indexOf(draft.memoryStoreId)]
 				: draft.type === "github_repository"
 					? undefined
-					: artifacts[artifactIds.indexOf(draft.artifactId)]
+					: draft.type === "file"
+						? mountCheck(
+								file,
+								(value) => value.filename,
+								(value) => value.id === draft.fileId,
+							)
+						: artifacts[artifactIds.indexOf(draft.artifactId)]
 		if (result !== undefined) {
 			checks.set(draft.key, result)
 		}
@@ -120,8 +138,13 @@ const useMountChecks = (drafts: ReadonlyArray<ResourceDraftRow>) => {
 	return checks
 }
 
-export function NewSessionPage(): React.JSX.Element {
+export function NewSessionPage({
+	fileId,
+}: {
+	readonly fileId?: string | undefined
+}): React.JSX.Element {
 	const navigate = useNavigate()
+	const queryClient = useQueryClient()
 	const agentOptions = choicesOf(useSuspenseInfiniteQuery(agentChoices))
 	const environmentOptions = choicesOf(useSuspenseInfiniteQuery(environmentChoices))
 	const agents = agentOptions.items
@@ -133,7 +156,30 @@ export function NewSessionPage(): React.JSX.Element {
 	const agentId = agent.id
 	const environmentId = environment.id
 	const [title, setTitle] = useState("")
-	const [resources, setResources] = useState<ReadonlyArray<ResourceDraftRow>>([])
+	const [otherDrafts, setOtherDrafts] = useState<ReadonlyArray<ResourceDraftRow>>([])
+	const [filePath, setFilePath] = useState<{ readonly fileId: string; readonly value: string }>()
+	const resources: ReadonlyArray<ResourceDraftRow> =
+		fileId === undefined
+			? otherDrafts
+			: [
+					...otherDrafts,
+					{
+						type: "file",
+						key: fileId,
+						fileId,
+						mountPath: filePath?.fileId === fileId ? filePath.value : "",
+					},
+				]
+	const setResources = (drafts: ReadonlyArray<ResourceDraftRow>) => {
+		setOtherDrafts(drafts.filter((draft) => draft.type !== "file"))
+		const file = drafts.find((draft) => draft.type === "file")
+		if (file !== undefined) {
+			setFilePath({ fileId: file.fileId, value: file.mountPath })
+		} else if (fileId !== undefined) {
+			setFilePath(undefined)
+			void navigate({ to: "/sessions/new", search: {}, replace: true })
+		}
+	}
 	const mountChecks = useMountChecks(resources)
 	const ready =
 		agentId !== "" &&
@@ -142,6 +188,7 @@ export function NewSessionPage(): React.JSX.Element {
 			(resource) =>
 				namesResource(resource) &&
 				checkoutError(resource) === undefined &&
+				fileMountError(resource) === undefined &&
 				(resource.type === "github_repository" ||
 					mountChecks.get(resource.key)?.state === "active"),
 		)
@@ -201,9 +248,16 @@ export function NewSessionPage(): React.JSX.Element {
 				...body,
 				...(resources.length === 0 ? {} : { resources: resources.map(resourceIdentity) }),
 			}
-			const session = await checkfu.sessions.create(body, startKey.keyFor(identity))
-			startKey.settle()
-			return session
+			try {
+				const session = await checkfu.sessions.create(body, startKey.keyFor(identity))
+				startKey.settle()
+				return session
+			} catch (error) {
+				if (fileId !== undefined && error instanceof ApiError && error.status === 404) {
+					void queryClient.invalidateQueries({ queryKey: fileQuery(fileId).queryKey, exact: true })
+				}
+				throw error
+			}
 		},
 		{
 			invalidates: [["sessions"]],
@@ -313,7 +367,7 @@ function ResourcesEditor({
 	readonly checks: ReadonlyMap<string, MountCheck>
 	readonly onChange: (drafts: ReadonlyArray<ResourceDraftRow>) => void
 }): React.JSX.Element {
-	const types: ReadonlyArray<ResourceType> = [
+	const types: ReadonlyArray<Exclude<ResourceType, "file">> = [
 		"github_repository",
 		"memory_store",
 		"artifact",
@@ -374,6 +428,12 @@ function ResourceFields({
 	readonly onChange: (draft: ResourceDraft) => void
 }): React.JSX.Element {
 	switch (draft.type) {
+		case "file":
+			return (
+				<Suspense fallback={<p role="status">Checking saved file…</p>}>
+					<SavedFileFields draft={draft} check={check} onChange={onChange} />
+				</Suspense>
+			)
 		case "github_repository": {
 			const error = checkoutError(draft)
 			return (
