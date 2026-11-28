@@ -301,16 +301,17 @@ export const makeWorkspaceMachine = (options: {
 		return next
 	}
 
-	const abandon = async (): Promise<void> => {
+	const abandon = async (previousLost: boolean): Promise<void> => {
 		await run(options.sandboxes.remove(options.key))
 		const now = record()
 		const hasSavedDisk = now.incarnation === "" && !now.notice && options.disk.read() !== undefined
-		write(machineStartFailed(now, hasSavedDisk))
+		write(machineStartFailed(now, { hasSavedDisk, previousLost }))
 	}
 
 	const settle = async (): Promise<{ readonly sandbox: Sandbox; readonly fresh: boolean }> => {
 		const before = record()
 		let pending = before
+		let previousLost = before.phase === "starting" && before.incarnation !== ""
 		const starting = (): void => {
 			pending = machineStartRequested(before)
 			write(pending)
@@ -322,6 +323,7 @@ export const makeWorkspaceMachine = (options: {
 			const sandbox = await run(options.sandboxes.open(options.key))
 			const fresh = sandbox.incarnation !== before.incarnation
 			if (fresh) {
+				previousLost = before.incarnation !== ""
 				starting()
 				const saved = options.disk.read()
 				if (saved === undefined) {
@@ -343,7 +345,7 @@ export const makeWorkspaceMachine = (options: {
 			return { sandbox, fresh }
 		} catch (error) {
 			if (record().phase === "starting") {
-				await abandon().catch(() => undefined)
+				await abandon(previousLost).catch(() => undefined)
 			}
 			throw error
 		}
@@ -352,7 +354,7 @@ export const makeWorkspaceMachine = (options: {
 	const rest = async (): Promise<void> => {
 		const now = record()
 		if (now.phase === "starting") {
-			await abandon()
+			await abandon(now.incarnation !== "")
 			return
 		}
 		if (now.incarnation === "") {

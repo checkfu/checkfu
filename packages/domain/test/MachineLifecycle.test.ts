@@ -15,7 +15,7 @@ const states = phases.flatMap((phase) =>
 	),
 )
 
-it("keeps the previous machine and notice until a start succeeds or fails", () => {
+it("tracks the previous machine and notice through a start, failure or loss", () => {
 	for (const state of states) {
 		expect(machineStartRequested(state)).toEqual({ ...state, phase: "starting" })
 		for (const incarnation of ["original", "replacement"]) {
@@ -25,11 +25,17 @@ it("keeps the previous machine and notice until a start succeeds or fails", () =
 			)
 		}
 		for (const hasSavedDisk of [false, true]) {
-			const phase =
-				state.incarnation !== "" ? "awake" : state.notice || hasSavedDisk ? "asleep" : "local"
-			expect(machineStartFailed(state, hasSavedDisk)).toEqual(
-				state.phase === "starting" ? { ...state, phase } : state,
-			)
+			for (const previousLost of [false, true]) {
+				const phase =
+					state.incarnation !== "" ? "awake" : state.notice || hasSavedDisk ? "asleep" : "local"
+				const expected =
+					previousLost && state.incarnation !== ""
+						? { phase: "asleep", incarnation: "", notice: true }
+						: { ...state, phase }
+				expect(machineStartFailed(state, { hasSavedDisk, previousLost })).toEqual(
+					state.phase === "starting" ? expected : state,
+				)
+			}
 		}
 	}
 })

@@ -260,6 +260,7 @@ const makeMachine = (source?: StoredFiles) => {
 		settled: () => settled,
 		content,
 		savedContent: () => saved.archive?.bytes.map(text).join(""),
+		lifecycle: () => kept.get("machine"),
 		machine: makeWorkspaceMachine(options),
 		again: () => makeWorkspaceMachine(options),
 	}
@@ -640,6 +641,56 @@ describe("workspace machine", () => {
 			"workspace and outputs were restored from the last sleep",
 		)
 		expect(await content(machine)).toBe("saved")
+	})
+
+	it("records a lost machine as asleep after a replacement cannot restore its disk", async () => {
+		const { machine, state, content, kill, lifecycle, savedContent } = makeMachine()
+		await content(machine)
+		state.disk!.content = "saved work"
+		await machine.sleep()
+		await content(machine)
+		expect(lifecycle()).toEqual({ phase: "awake", incarnation: "2", notice: false })
+		kill()
+
+		state.failUnpack = true
+		await expect(machine.sleep()).rejects.toThrow("Could not unpack")
+		expect(lifecycle()).toEqual({ phase: "asleep", incarnation: "", notice: true })
+		expect(state.disk).toBeUndefined()
+		expect(savedContent()).toBe("saved work")
+
+		await machine.sleep()
+		expect(state.opened).toHaveLength(3)
+		state.failUnpack = false
+		await expect(content(machine)).rejects.toThrow(
+			"workspace and outputs were restored from the last sleep",
+		)
+		expect(await content(machine)).toBe("saved work")
+		expect(state.opened).toHaveLength(4)
+		expect(lifecycle()).toEqual({ phase: "awake", incarnation: "4", notice: false })
+	})
+
+	it("preserves evidence of a lost sandbox when restart cleanup succeeds after another failed open", async () => {
+		const { machine, state, content, kill, lifecycle, again } = makeMachine()
+		await content(machine)
+		await machine.sleep()
+		await content(machine)
+		kill()
+
+		state.failUnpack = true
+		state.failRemove = true
+		await expect(machine.sleep()).rejects.toThrow("Could not unpack")
+		expect(lifecycle()).toEqual({ phase: "starting", incarnation: "2", notice: false })
+
+		state.failRemove = false
+		state.failOpen = true
+		const restarted = again()
+		await expect(content(restarted)).rejects.toThrow("no machine to be had")
+		expect(lifecycle()).toEqual({ phase: "asleep", incarnation: "", notice: true })
+		expect(state.disk).toBeUndefined()
+
+		state.failOpen = false
+		await restarted.sleep()
+		expect(state.opened).toHaveLength(3)
 	})
 
 	it("removes only a machine the session asked for", async () => {

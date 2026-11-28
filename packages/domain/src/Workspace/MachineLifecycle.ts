@@ -32,13 +32,18 @@ export const machineStarted = (state: MachineLifecycle, incarnation: string): Ma
 
 export const machineStartFailed = (
 	state: MachineLifecycle,
-	hasSavedDisk: boolean,
+	{
+		hasSavedDisk,
+		previousLost,
+	}: { readonly hasSavedDisk: boolean; readonly previousLost: boolean },
 ): MachineLifecycle => {
 	if (state.phase !== "starting") {
 		return state
 	}
 	if (state.incarnation !== "") {
-		return { ...state, phase: "awake" }
+		return previousLost
+			? { phase: "asleep", incarnation: "", notice: true }
+			: { ...state, phase: "awake" }
 	}
 	return state.notice || hasSavedDisk ? { ...state, phase: "asleep" } : initialMachine
 }

@@ -20,7 +20,7 @@
 			},
 			"AReplacementRaisesTheNotice": {
 				"kind": "transition",
-				"source": "({ before, after, command }) => {\n\t\t\tif (before.notice) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (command._tag !== \"RecordMachineStarted\") {\n\t\t\t\treturn !after.notice\n\t\t\t}\n\t\t\treturn (\n\t\t\t\tafter.notice ===\n\t\t\t\t[\n\t\t\t\t\tbefore.phase === \"starting\",\n\t\t\t\t\tbefore.incarnation !== \"\",\n\t\t\t\t\tbefore.incarnation !== command.incarnation,\n\t\t\t\t].every((ok) => ok)\n\t\t\t)\n\t\t}"
+				"source": "({ before, after, command }) => {\n\t\t\tif (before.notice) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (command._tag === \"RecordMachineStartFailed\") {\n\t\t\t\treturn (\n\t\t\t\t\tafter.notice ===\n\t\t\t\t\t(before.phase === \"starting\" && before.incarnation !== \"\" && command.previous_lost)\n\t\t\t\t)\n\t\t\t}\n\t\t\tif (command._tag !== \"RecordMachineStarted\") {\n\t\t\t\treturn !after.notice\n\t\t\t}\n\t\t\treturn (\n\t\t\t\tafter.notice ===\n\t\t\t\t[\n\t\t\t\t\tbefore.phase === \"starting\",\n\t\t\t\t\tbefore.incarnation !== \"\",\n\t\t\t\t\tbefore.incarnation !== command.incarnation,\n\t\t\t\t].every((ok) => ok)\n\t\t\t)\n\t\t}"
 			},
 			"OnlyReadingClearsTheNotice": {
 				"kind": "transition",
@@ -29,6 +29,10 @@
 			"OnlyAnAwakeMachineSleeps": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"RecordMachineSlept\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn before.phase === \"awake\"\n\t\t\t\t? after.phase === \"asleep\"\n\t\t\t\t: [\n\t\t\t\t\t\tafter.phase === before.phase,\n\t\t\t\t\t\tafter.incarnation === before.incarnation,\n\t\t\t\t\t\tafter.notice === before.notice,\n\t\t\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"AFailedStartThatLostTheMachineLeavesItAsleep": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"RecordMachineStartFailed\" ||\n\t\t\t!command.previous_lost ||\n\t\t\tbefore.phase !== \"starting\" ||\n\t\t\tbefore.incarnation === \"\" ||\n\t\t\t(after.phase === \"asleep\" && after.incarnation === \"\" && after.notice)"
 			}
 		}
 	}

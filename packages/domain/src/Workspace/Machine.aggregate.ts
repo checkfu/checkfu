@@ -50,6 +50,12 @@ export class Machine extends Domain.Aggregate("Machine", {
 			if (before.notice) {
 				return true
 			}
+			if (command._tag === "RecordMachineStartFailed") {
+				return (
+					after.notice ===
+					(before.phase === "starting" && before.incarnation !== "" && command.previous_lost)
+				)
+			}
 			if (command._tag !== "RecordMachineStarted") {
 				return !after.notice
 			}
@@ -62,6 +68,12 @@ export class Machine extends Domain.Aggregate("Machine", {
 				].every((ok) => ok)
 			)
 		},
+		AFailedStartThatLostTheMachineLeavesItAsleep: ({ before, after, command }) =>
+			command._tag !== "RecordMachineStartFailed" ||
+			!command.previous_lost ||
+			before.phase !== "starting" ||
+			before.incarnation === "" ||
+			(after.phase === "asleep" && after.incarnation === "" && after.notice),
 		OnlyReadingClearsTheNotice: ({ before, after, command }) =>
 			!before.notice || after.notice || command._tag === "ReadMachineNotice",
 		OnlyAnAwakeMachineSleeps: ({ before, after, command }) => {
@@ -86,7 +98,14 @@ export class Machine extends Domain.Aggregate("Machine", {
 				: [],
 		RecordMachineStartFailed: (state, cmd) =>
 			state.phase === "starting"
-				? [new MachineStartFailed(machineStartFailed(state, cmd.has_saved_disk))]
+				? [
+						new MachineStartFailed(
+							machineStartFailed(state, {
+								hasSavedDisk: cmd.has_saved_disk,
+								previousLost: cmd.previous_lost,
+							}),
+						),
+					]
 				: [],
 		RecordMachineSlept: (state) =>
 			state.phase === "awake" ? [new MachineSlept(machineSlept(state))] : [],

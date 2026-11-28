@@ -10,6 +10,7 @@ const STANDING = {
 	ALocalMachineHasNoNotice: "proved",
 	AStartEndsWithItsResult: "proved",
 	AReplacementRaisesTheNotice: "proved",
+	AFailedStartThatLostTheMachineLeavesItAsleep: "proved",
 	OnlyReadingClearsTheNotice: "proved",
 	OnlyAnAwakeMachineSleeps: "proved",
 } as const

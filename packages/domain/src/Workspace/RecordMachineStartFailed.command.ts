@@ -8,6 +8,6 @@ export class MachineStartFailed extends Domain.Event(
 ) {}
 
 export class RecordMachineStartFailed extends Domain.Command("RecordMachineStartFailed", {
-	input: { machine_id: MachineId, has_saved_disk: Schema.Boolean },
+	input: { machine_id: MachineId, has_saved_disk: Schema.Boolean, previous_lost: Schema.Boolean },
 	events: [MachineStartFailed],
 }) {}
