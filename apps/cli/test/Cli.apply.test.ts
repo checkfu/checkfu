@@ -1,6 +1,7 @@
 import { RETRY_EXIT_CODE, USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { IsSupportedAgentModel } from "@checkfu/api/Http/AgentsHandlers"
-import { agentProjectFiles } from "@checkfu/authoring/document"
+import { agentProjectFiles, automationProjectFiles } from "@checkfu/authoring/document"
+import type { JsonAutomation } from "@checkfu/sdk/client"
 import { ProjectLockfile, formatProjectLockfile } from "@checkfu/authoring/lockfile"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
@@ -74,6 +75,102 @@ describe("YAML projects", () => {
 					}
 					expect(requests).toEqual([])
 					expect(yield* fs.exists(`${lock}.apply-lock`)).toBe(false)
+				}).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, Path.layer))),
+			),
+		)
+	})
+
+	it("round-trips an exported automation without moving its historical pin", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeProjectTestServer()
+					const fs = yield* FileSystem.FileSystem
+					const path = yield* Path.Path
+					const root = yield* fs.makeTempDirectoryScoped()
+					const agent = yield* cli.run([
+						"agents",
+						"create",
+						"--name",
+						"Reporter",
+						"--model",
+						"fixture-model",
+					])
+					expect(agent.exitCode).toBe(0)
+					const { id: agentId } = JSON.parse(agent.stdout) as { id: string }
+					const environment = yield* cli.run(["environments", "create", "--name", "Cloud"])
+					expect(environment.exitCode).toBe(0)
+					const { id: environmentId } = JSON.parse(environment.stdout) as { id: string }
+					const text = '  Report: "Open, please."\nKeep both lines.  \n'
+					const created = yield* cli.run(["automations", "create"], {
+						stdin: JSON.stringify({
+							name: "Morning report",
+							agent: agentId,
+							environment_id: environmentId,
+							initial_events: [{ type: "user.message", content: [{ type: "text", text }] }],
+							schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+						}),
+					})
+					expect(created.exitCode).toBe(0)
+					const snapshot = JSON.parse(created.stdout) as JsonAutomation
+					const changed = yield* cli.run([
+						"agents",
+						"update",
+						"--agent-id",
+						agentId,
+						"--current-version",
+						"1",
+						"--name",
+						"Current reporter",
+					])
+					expect(changed.exitCode).toBe(0)
+					expect(JSON.parse(changed.stdout)).toMatchObject({ version: 2 })
+					const baseUrl = "http://localhost:1337"
+					const other = yield* Effect.promise(() =>
+						automationProjectFiles({ ...snapshot, id: "auto_fixture_second" }, baseUrl),
+					)
+					const project = yield* Effect.promise(() =>
+						automationProjectFiles(snapshot, baseUrl + "/"),
+					)
+					expect(other.definitionFile).not.toBe(project.definitionFile)
+					const definition = project.files[project.definitionFile] ?? ""
+					expect(definition).toContain("version: 1")
+					expect(definition).toContain(`id: ${agentId}`)
+					yield* fs.makeDirectory(path.join(root, "automations"))
+					for (const [file, content] of Object.entries(project.files)) {
+						yield* fs.writeFileString(path.join(root, file), content)
+					}
+					const requests: Array<string> = []
+					const options = {
+						fileSystem: NodeFileSystem.layer,
+						interceptFetch: (next: (request: Request) => Promise<Response>, request: Request) => {
+							requests.push(`${request.method} ${new URL(request.url).pathname}`)
+							return next(request)
+						},
+					}
+					const apply = ["apply", "--lock-file", path.join(root, "checkfu-lock.json")]
+					expect(plan(yield* cli.run([...apply, "--dry-run", root], options))).toMatchObject([
+						{ file: `./${project.definitionFile}`, id: snapshot.id, action: "unchanged" },
+					])
+					expect(requests).toEqual([`GET /v1/automations/${snapshot.id}`])
+
+					const file = path.join(root, project.definitionFile)
+					yield* fs.writeFileString(file, definition.replace("Morning report", "Updated report"))
+					expect(plan(yield* cli.run([...apply, "--yes", file], options))).toMatchObject([
+						{ file: `./${project.definitionFile}`, id: snapshot.id, action: "update" },
+					])
+					const retrieved = yield* cli.run([
+						"automations",
+						"retrieve",
+						"--automation-id",
+						snapshot.id,
+					])
+					expect(retrieved.exitCode).toBe(0)
+					expect(JSON.parse(retrieved.stdout)).toMatchObject({
+						name: "Updated report",
+						agent: { id: agentId, version: 1 },
+						initial_events: snapshot.initial_events,
+					})
 				}).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, Path.layer))),
 			),
 		)

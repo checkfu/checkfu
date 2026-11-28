@@ -428,6 +428,10 @@ export function AutomationView({
 	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
 	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
 	const archive = useAction(checkfu.automations.archive, { invalidates })
+	const exportProject = useAction(async (id: string) => {
+		const { exportSavedAutomation } = await import("../automation-export.ts")
+		await exportSavedAutomation(id)
+	})
 	const archived = automation.status === "archived"
 	const agent = useQuery({
 		...agentQuery(automation.agent.id),
@@ -454,7 +458,8 @@ export function AutomationView({
 		runNow.error ??
 		[pause, unpause, archive].find(
 			(action) => action.receipt === undefined && action.error !== undefined,
-		)?.error
+		)?.error ??
+		exportProject.error
 	return (
 		<>
 			<ActionReceipt receipt={pause.receipt} onVisible={pause.confirmReceipt} />
@@ -470,6 +475,14 @@ export function AutomationView({
 				actions={
 					archived || editBase !== null ? undefined : (
 						<>
+							<Button
+								size="sm"
+								variant="outline"
+								disabled={exportProject.pending}
+								onClick={() => exportProject.run(automation.id)}
+							>
+								Export as code
+							</Button>
 							<Button
 								size="sm"
 								disabled={busy}
