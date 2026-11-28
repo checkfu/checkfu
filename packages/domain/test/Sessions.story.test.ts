@@ -480,8 +480,10 @@ describe("Sessions", () => {
 		)
 	})
 
-	it.effect("queues a second user.message while running without duplicating status_running", () => {
+	it.effect("starts a second turn with the queued message after the active reply", () => {
 		const session = Session.ref("sess_002")
+		const request = "sess_002:turn:1:req:1"
+		const usage = { input_tokens: 2, output_tokens: 1 }
 		return story(
 			Story.given(
 				session,
@@ -499,6 +501,40 @@ describe("Sessions", () => {
 				model_requests_started: 0,
 				pending_user_messages: 1,
 			}),
+			Story.when(
+				new RecordModelRequestStart({
+					session_id: session.id,
+					turn: 1,
+					request_seq: 1,
+					model_request_start_id: request,
+				}),
+			),
+			Story.then(session, new SpanModelRequestStart({ model_request_start_id: request })),
+			Story.when(
+				new CommitModelReply({
+					session_id: session.id,
+					turn: 1,
+					request_seq: 1,
+					model_request_start_id: request,
+					thinking: null,
+					text: "First done.",
+					model_usage: usage,
+					stop_reason: { type: "end_turn" },
+				}),
+			),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "First done." }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: request,
+					model_usage: usage,
+					is_error: false,
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
+				new SessionStatusRunning({ turn: 2 }),
+			),
+			Story.state(session, { _tag: "Running", turn: 2, pending_user_messages: 0 }),
+			Story.view(TurnInput, session, { turn: 2, input: ["Second"], unsent: [] }),
 		)
 	})
 
