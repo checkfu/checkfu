@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import type { UpdateAutomationBody } from "@checkfu/sdk/Api"
+import { strFromU8, unzipSync } from "fflate"
+import { parseProjectDocument } from "@checkfu/authoring/document"
 import type { JsonAutomation } from "@checkfu/sdk/client"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { waitFor } from "@testing-library/react"
@@ -171,6 +173,7 @@ const editor = async ({
 }
 
 afterEach(() => {
+	vi.restoreAllMocks()
 	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
 })
@@ -474,3 +477,70 @@ it("keeps input on a network failure and sends no update after cancelling and re
 		page.unmount()
 	}
 })
+
+it.each(["available", "missing", "changed"] as const)(
+	"exports the saved agent pin only when the historical agent and environment are %s",
+	async (status) => {
+		let zip: Blob | undefined
+		const clicked = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+		vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+			if ("arrayBuffer" in blob) {
+				zip = blob
+			}
+			return "blob:https://dashboard.test/export"
+		})
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+		const saved = { ...automation, agent: { ...automation.agent, version: 1 } }
+		const sent = stubApi(({ path }) => {
+			if (path === "/auth/deployment") {
+				return { body: { api_url: "https://api.example.test" } }
+			}
+			if (path === endpoint) {
+				return { body: saved }
+			}
+			if (path === "/v1/agents/agent_1?version=1") {
+				return status === "missing"
+					? { status: 404, body: { error: { message: "Missing." } } }
+					: { body: { id: "agent_1", version: status === "changed" ? 3 : 1, archived_at: null } }
+			}
+			if (path === "/v1/agents/agent_1") {
+				return { body: { id: "agent_1", version: 3, archived_at: null } }
+			}
+			if (path === "/v1/environments/env_1") {
+				return { body: { id: "env_1", archived_at: null } }
+			}
+			return { body: emptyPage }
+		})
+		const page = await mount(<AutomationUnderTest />)
+		try {
+			await click(button(page.container, "Export as code"))
+			if (status !== "available") {
+				await waitFor(() =>
+					expect(page.container.textContent).toContain("Agent agent_1 version 1 is unavailable."),
+				)
+				expect(clicked).not.toHaveBeenCalled()
+			} else {
+				await waitFor(() => expect(clicked).toHaveBeenCalledOnce())
+				if (zip === undefined) {
+					throw new Error("Expected a project ZIP.")
+				}
+				const files = unzipSync(new Uint8Array(await zip.arrayBuffer()))
+				const entry = files["automations/morning-report--auto_1.yaml"]
+				if (entry === undefined) {
+					throw new Error("Expected the automation definition in the ZIP.")
+				}
+				const exported = strFromU8(entry)
+				expect(exported).toContain("https://api.example.test/schemas/apply/automation.json")
+				expect(parseProjectDocument(exported, "mapping").body).toMatchObject({
+					agent: { id: "agent_1", version: 1 },
+					environment_id: "env_1",
+					initial_events: saved.initial_events,
+				})
+			}
+			expect(sent.filter(({ path }) => path === "/v1/agents/agent_1?version=1")).toHaveLength(1)
+			expect(sent.every(({ method }) => method === "GET")).toBe(true)
+		} finally {
+			page.unmount()
+		}
+	},
+)

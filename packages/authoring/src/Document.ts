@@ -1,8 +1,15 @@
 import * as Schema from "effect/Schema"
 import * as YAML from "yaml"
-import { CreateAgentBody } from "@checkfu/sdk/Api"
+import { CreateAgentBody, CreateAutomationBody } from "@checkfu/sdk/Api"
+import type { JsonAutomation } from "@checkfu/sdk/client"
 import { formatProjectLockfile, projectLockfileName } from "./Lockfile.ts"
-import { agentProjectDefinition, canonicalProjectJson, maxProjectSourceBytes } from "./Project.ts"
+import {
+	agentProjectDefinition,
+	automationProjectDefinition,
+	canonicalProjectJson,
+	maxProjectSourceBytes,
+	savedAutomationDefinition,
+} from "./Project.ts"
 
 const markdownStart = /^---[ \t]*\r?\n/u
 const frontmatter = /^---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/mu
@@ -104,31 +111,34 @@ const agentDefinitionMarkdown = (body: CreateAgentBody): string => {
 	return `---\n${agentDefinitionYaml({ ...body, system: null })}---\n\n${system}\n`
 }
 
-export const agentProjectFiles = async (
-	agent: CreateAgentBody & { readonly id: string },
+const nameStem = (name: string, fallback: string): string =>
+	name
+		.toLowerCase()
+		.replaceAll(/[^a-z0-9]+/gu, "-")
+		.replaceAll(/^-|-$/gu, "")
+		.slice(0, 80)
+		.replace(/-$/u, "") || fallback
+
+const projectFiles = async (
+	id: string,
+	kind: "agent" | "automation",
+	stem: string,
+	file: string,
+	definition: unknown,
 	baseUrl: string,
+	text: string,
 ) => {
-	const stem =
-		agent.name
-			.toLowerCase()
-			.replaceAll(/[^a-z0-9]+/gu, "-")
-			.replaceAll(/^-|-$/gu, "")
-			.slice(0, 80)
-			.replace(/-$/u, "") || "agent"
-	const file = `agents/${stem}.md`
-	const definition = agentProjectDefinition(agent)
 	const hash = await crypto.subtle.digest(
 		"SHA-256",
 		new TextEncoder().encode(canonicalProjectJson(definition)),
 	)
-	const apiUrl = baseUrl.replace(/\/+$/u, "")
 	const lock = {
 		version: 1 as const,
-		base_url: apiUrl,
+		base_url: baseUrl,
 		resources: {
 			[`./${file}`]: {
-				kind: definition.kind,
-				id: agent.id,
+				kind,
+				id,
 				hash: Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(
 					"",
 				),
@@ -137,13 +147,58 @@ export const agentProjectFiles = async (
 	}
 	return {
 		stem,
-		files: {
-			[file]: agentDefinitionMarkdown(definition.body).replace(
-				"---\n",
-				`---\n# yaml-language-server: $schema=${apiUrl}/schemas/apply/agent.json\n`,
-			),
-			[projectLockfileName]: formatProjectLockfile(lock),
-		},
+		files: { [file]: text, [projectLockfileName]: formatProjectLockfile(lock) },
 		definitionFile: file,
 	}
+}
+
+export const agentProjectFiles = (
+	agent: CreateAgentBody & { readonly id: string },
+	baseUrl: string,
+) => {
+	const stem = nameStem(agent.name, "agent")
+	const definition = agentProjectDefinition(agent)
+	const apiUrl = baseUrl.replace(/\/+$/u, "")
+	return projectFiles(
+		agent.id,
+		definition.kind,
+		stem,
+		`agents/${stem}.md`,
+		definition,
+		apiUrl,
+		agentDefinitionMarkdown(definition.body).replace(
+			"---\n",
+			`---\n# yaml-language-server: $schema=${apiUrl}/schemas/apply/agent.json\n`,
+		),
+	)
+}
+
+const decodeAutomation = Schema.decodeUnknownSync(CreateAutomationBody, {
+	onExcessProperty: "error",
+})
+
+export const automationProjectFiles = (automation: JsonAutomation, baseUrl: string) => {
+	if (automation.archived_at !== null) {
+		throw new Error("Archived automations cannot be exported.")
+	}
+	const definition = savedAutomationDefinition(automation)
+	const stem = `${nameStem(automation.name, "automation")}--${automation.id}`
+	const apiUrl = baseUrl.replace(/\/+$/u, "")
+	const text = YAML.stringify({ type: definition.kind, ...definition.body }, { lineWidth: 0 })
+	const parsed = parseProjectDocument(text, "mapping")
+	if (
+		canonicalProjectJson(automationProjectDefinition(decodeAutomation(parsed.body))) !==
+		canonicalProjectJson(definition)
+	) {
+		throw new Error("The exported definition does not match the saved automation.")
+	}
+	return projectFiles(
+		automation.id,
+		definition.kind,
+		stem,
+		`automations/${stem}.yaml`,
+		definition,
+		apiUrl,
+		`# yaml-language-server: $schema=${apiUrl}/schemas/apply/automation.json\n${text}`,
+	)
 }

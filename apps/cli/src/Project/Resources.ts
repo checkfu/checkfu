@@ -7,7 +7,12 @@ import {
 	isPendingResource,
 } from "@checkfu/sdk/Api"
 import type { Agent, ApiError, Automation, Environment, PendingResource } from "@checkfu/sdk/Api"
-import { agentProjectDefinition, canonicalProjectJson } from "@checkfu/authoring/project"
+import {
+	agentProjectDefinition,
+	automationProjectDefinition,
+	canonicalProjectJson,
+	savedAutomationDefinition,
+} from "@checkfu/authoring/project"
 import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/EnvironmentDefaults"
 import { AgentId, AutomationId, EnvironmentId } from "@checkfu/sdk/Schemas"
 import * as Effect from "effect/Effect"
@@ -38,20 +43,8 @@ export const remoteBody = (resource: Resource): Definition => {
 			return agentProjectDefinition(resource)
 		case "environment":
 			return { kind: "environment", body: { name, description, config: resource.config } }
-		case "automation": {
-			const { agent, environment_id, initial_events, schedule } = resource
-			return {
-				kind: "automation",
-				body: {
-					name,
-					description,
-					environment_id,
-					initial_events,
-					schedule,
-					agent: { type: "agent", id: agent.id, version: agent.version },
-				},
-			}
-		}
+		case "automation":
+			return savedAutomationDefinition(resource)
 	}
 }
 
@@ -70,32 +63,8 @@ export const desiredBody = (definition: Definition): Definition => {
 				},
 			}
 		}
-		case "automation": {
-			const { name, description, agent, environment_id, initial_events, schedule } = definition.body
-			return {
-				kind: "automation",
-				body: {
-					name,
-					description: description ?? null,
-					agent: typeof agent === "string" ? agent : agent.version === undefined ? agent.id : agent,
-					environment_id,
-					initial_events: [
-						{
-							type: "user.message",
-							content: [
-								{
-									type: "text",
-									text: initial_events
-										.flatMap((event) => event.content.map((block) => block.text))
-										.join("\n"),
-								},
-							],
-						},
-					],
-					schedule,
-				},
-			}
-		}
+		case "automation":
+			return automationProjectDefinition(definition.body)
 	}
 }
 
