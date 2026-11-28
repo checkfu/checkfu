@@ -11,6 +11,7 @@ export interface CustodyRows {
 export const makeCustodyDatabase = () => {
 	const db = new DatabaseSync(":memory:")
 	let failNext: string | undefined
+	let failNextCommit = false
 	const sql: CustodySql = {
 		exec: (query, ...bindings) => {
 			if (failNext !== undefined && query.startsWith(failNext)) {
@@ -29,6 +30,10 @@ export const makeCustodyDatabase = () => {
 			db.exec("BEGIN")
 			try {
 				const result = run()
+				if (failNextCommit) {
+					failNextCommit = false
+					throw new Error("stopped before COMMIT")
+				}
 				db.exec("COMMIT")
 				return result
 			} catch (error) {
@@ -46,6 +51,9 @@ export const makeCustodyDatabase = () => {
 		sql,
 		failAt: (statementPrefix: string) => {
 			failNext = statementPrefix
+		},
+		failCommit: () => {
+			failNextCommit = true
 		},
 		rows: (): CustodyRows => ({
 			secrets: ids("SELECT credential_id FROM secrets ORDER BY credential_id"),
