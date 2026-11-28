@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
 import { Checkfu } from "../src/Checkfu.ts"
+import { CheckfuClient } from "../src/Client.ts"
+import type { UploadFileParams } from "../src/FileTransfer.ts"
+import { MAX_FILE_BYTES } from "../src/Limits.ts"
 
 const file = {
 	id: "file_0123456789abcdef0123456789abcdef",
@@ -10,6 +14,29 @@ const file = {
 	sha256: "a".repeat(64),
 	origin: { type: "upload" },
 	created_at: "2026-11-28T00:00:00.000Z",
+}
+
+const upload = async (
+	facade: "promise" | "effect",
+	fetch: typeof globalThis.fetch,
+	params: UploadFileParams,
+) => {
+	const config = { apiKey: "ck_test_key", baseUrl: "http://localhost:1337", fetch, maxRetries: 1 }
+	const options = { idempotencyKey: "same-upload" }
+	if (facade === "promise") {
+		const client = new Checkfu(config)
+		try {
+			return await client.files.upload(params, options)
+		} finally {
+			await client.close()
+		}
+	}
+	return Effect.runPromise(
+		Effect.gen(function* () {
+			const client = yield* CheckfuClient
+			return yield* client.files.upload(params, options)
+		}).pipe(Effect.provide(CheckfuClient.layerFetch(config))),
+	)
 }
 
 describe("files.upload / files.content (hand-written: Forge skips byte bodies)", () => {
@@ -121,5 +148,126 @@ describe("files.upload / files.content (hand-written: Forge skips byte bodies)",
 		expect(typeof client.files.list).toBe("function")
 		expect(typeof client.files.retrieve).toBe("function")
 		expect(typeof client.files.delete).toBe("function")
+	})
+
+	describe.each(["promise", "effect"] as const)("%s upload retries", (facade) => {
+		it.each(["buffer", "view", "blob"] as const)(
+			"keeps the original %s and metadata",
+			async (kind) => {
+				const original = Uint8Array.from([99, 10, 255, 3, 44])
+				const selected = original.subarray(1, -1)
+				const params = {
+					body:
+						kind === "blob" ? new Blob([selected]) : kind === "buffer" ? original.buffer : selected,
+					filename: "first.bin",
+					content_type: "application/test-first",
+				}
+				const attempts: Array<{
+					body: Array<number>
+					filename: string | null
+					type: string | null
+					key: string | null
+				}> = []
+				await upload(
+					facade,
+					async (input, init) => {
+						const request = new Request(input, init)
+						const query = new URL(request.url).searchParams
+						attempts.push({
+							body: Array.from(new Uint8Array(await request.arrayBuffer())),
+							filename: query.get("filename"),
+							type: query.get("content_type"),
+							key: request.headers.get("idempotency-key"),
+						})
+						if (attempts.length === 1) {
+							original.fill(42)
+							params.filename = "second.bin"
+							params.content_type = "application/test-second"
+							return Response.json(
+								{ type: "error", error: { type: "service_unavailable", message: "Retry" } },
+								{
+									status: 503,
+									headers: { "retry-after-ms": "1" },
+								},
+							)
+						}
+						return Response.json(file, { status: 201 })
+					},
+					params,
+				)
+				const expected = {
+					body: kind === "buffer" ? [99, 10, 255, 3, 44] : [10, 255, 3],
+					filename: "first.bin",
+					type: "application/test-first",
+					key: "same-upload",
+				}
+				expect(attempts).toEqual([expected, expected])
+			},
+		)
+
+		it("owns bytes returned by a Blob implementation", async () => {
+			const source = new Uint8Array([0, 127, 255])
+			let reads = 0
+			class RetainedBytes extends Blob {
+				override async arrayBuffer() {
+					reads += 1
+					return source.buffer
+				}
+			}
+			const attempts: Array<Array<number>> = []
+			await upload(
+				facade,
+				async (input, init) => {
+					attempts.push(Array.from(new Uint8Array(await new Request(input, init).arrayBuffer())))
+					if (attempts.length === 1) {
+						source.fill(5)
+						return new Response("Try again", { status: 503, headers: { "retry-after-ms": "1" } })
+					}
+					return Response.json(file, { status: 201 })
+				},
+				{ body: new RetainedBytes([source]), filename: "retained.bin" },
+			)
+			expect(reads).toBe(1)
+			expect(attempts).toEqual([
+				[0, 127, 255],
+				[0, 127, 255],
+			])
+		})
+
+		it("rejects oversized and unreadable files locally", async () => {
+			const fetch = async () => {
+				throw new Error("Local refusal must not fetch")
+			}
+			let blobReads = 0
+			class OversizedBlob extends Blob {
+				override get size() {
+					return MAX_FILE_BYTES + 1
+				}
+				override async arrayBuffer() {
+					blobReads += 1
+					return new ArrayBuffer(0)
+				}
+			}
+			class UnreadableBlob extends Blob {
+				override async arrayBuffer(): Promise<ArrayBuffer> {
+					blobReads += 1
+					throw new Error("Local source unavailable")
+				}
+			}
+			await expect(
+				upload(facade, fetch, { body: new OversizedBlob(), filename: "size.bin" }),
+			).rejects.toMatchObject({
+				_tag: "CheckfuConfigError",
+				message: `File uploads may be at most ${MAX_FILE_BYTES} bytes.`,
+			})
+			expect(blobReads).toBe(0)
+			await expect(
+				upload(facade, fetch, { body: new UnreadableBlob(), filename: "read.bin" }),
+			).rejects.toMatchObject({
+				_tag: "CheckfuConfigError",
+				message: "Could not read the file upload body.",
+			})
+			expect(blobReads).toBe(1)
+		})
 	})
 })

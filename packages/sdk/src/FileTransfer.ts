@@ -5,7 +5,9 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type { IsoDateTimes } from "./Boundary.ts"
+import { CheckfuConfigError } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
+import { MAX_FILE_BYTES } from "./Limits.ts"
 import { EffectFilesResource, FilesResource } from "./generated/Resources.ts"
 import { executeUnaryPromise } from "./PromiseRuntime.ts"
 import type { APIPromise, PromiseRequestOptions, PromiseSdkRuntime } from "./PromiseRuntime.ts"
@@ -38,12 +40,27 @@ export interface UploadFileParams {
 	readonly content_type?: EndpointQuery<"files", "upload">["content_type"]
 }
 
-const toBytes = (body: FileBytes): Effect.Effect<Uint8Array> =>
-	ArrayBuffer.isView(body)
-		? Effect.succeed(new Uint8Array(body.buffer, body.byteOffset, body.byteLength))
-		: "arrayBuffer" in body
-			? Effect.promise(async () => new Uint8Array(await body.arrayBuffer()))
-			: Effect.succeed(new Uint8Array(body))
+const fileTooLarge = () =>
+	new CheckfuConfigError({ message: `File uploads may be at most ${MAX_FILE_BYTES} bytes.` })
+
+const snapshotUploadBytes = (body: FileBytes) =>
+	Effect.tryPromise({
+		try: async () => {
+			const blob = "arrayBuffer" in body
+			if ((blob ? body.size : body.byteLength) > MAX_FILE_BYTES) {
+				throw fileTooLarge()
+			}
+			const source = blob ? await body.arrayBuffer() : body
+			if (source.byteLength > MAX_FILE_BYTES) {
+				throw fileTooLarge()
+			}
+			return new Uint8Array(ArrayBuffer.isView(source) ? source : new Uint8Array(source))
+		},
+		catch: (cause) =>
+			cause instanceof CheckfuConfigError
+				? cause
+				: new CheckfuConfigError({ message: "Could not read the file upload body.", cause }),
+	})
 
 const concat = (chunks: Iterable<Uint8Array>): Uint8Array => {
 	const parts = [...chunks]
@@ -79,31 +96,30 @@ export class EffectFiles extends EffectFilesResource {
 		options?: AnyRequestOptions,
 	): Effect.Effect<unknown, CheckfuSdkError> {
 		const rt = this.#rt
-		options = snapshotRequestOptions(options)
+		const requestOptions = snapshotRequestOptions(options)
 		return unwrapResponse(
-			Effect.flatMap(toBytes(params.body), (bytes) =>
-				Effect.flatMap(resolveCallIdempotencyKey(rt, options), (key) =>
-					executeWithRetries(
-						rt,
-						"checkfu.files.upload",
-						key !== undefined ? "idempotent" : "pre-commit-only",
-						withResolvedIdempotencyKey(options, key),
-						() =>
-							rt.raw.files.upload({
-								headers: key === undefined ? {} : { "idempotency-key": key },
-								query: {
-									filename: params.filename,
-									...(params.content_type === undefined
-										? {}
-										: { content_type: params.content_type }),
-								},
-								payload: bytes,
-								responseMode: "decoded-and-response",
-							}),
-					),
-				),
-			),
-			options,
+			Effect.gen(function* () {
+				const { body, filename, content_type } = params
+				const bytes = yield* snapshotUploadBytes(body)
+				const key = yield* resolveCallIdempotencyKey(rt, requestOptions)
+				return yield* executeWithRetries(
+					rt,
+					"checkfu.files.upload",
+					key !== undefined ? "idempotent" : "pre-commit-only",
+					withResolvedIdempotencyKey(requestOptions, key),
+					() =>
+						rt.raw.files.upload({
+							headers: key === undefined ? {} : { "idempotency-key": key },
+							query: {
+								filename,
+								...(content_type === undefined ? {} : { content_type }),
+							},
+							payload: bytes,
+							responseMode: "decoded-and-response",
+						}),
+				)
+			}),
+			requestOptions,
 		)
 	}
 
