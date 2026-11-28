@@ -1,11 +1,8 @@
 import { CheckfuApi } from "@checkfu/sdk/Api"
+import { DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE } from "@checkfu/sdk/Limits"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
-import {
-	DEFAULT_DOCUMENT_PAGE_SIZE,
-	DocumentCalls,
-	isDocumentRefused,
-} from "../ArtifactData/DocumentCalls.ts"
+import { DocumentCalls, isDocumentRefused } from "../ArtifactData/DocumentCalls.ts"
 import type { DocumentRefused } from "../ArtifactData/DocumentCalls.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { handled, reject } from "./HttpHelpers.ts"
@@ -37,7 +34,7 @@ export const ArtifactDataLive = HttpApiBuilder.group(CheckfuApi, "artifact_data"
 						params.artifact_id,
 						params.collection,
 						query.page === undefined ? 0 : Number(query.page),
-						query.limit ?? DEFAULT_DOCUMENT_PAGE_SIZE,
+						query.limit ?? DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE,
 					),
 				).pipe(answered),
 			)

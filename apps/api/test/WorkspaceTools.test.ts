@@ -1,7 +1,7 @@
 import { CLIENT_EVENT_ID_MAX_LENGTH } from "@checkfu/sdk/IdempotencyKey"
 import type { JsonSchema } from "effect/JsonSchema"
 import { describe, expect, it } from "vitest"
-import { MAX_ARTIFACT_DATA_LIMIT } from "../src/Workspace/SessionArtifactTool.ts"
+import { MAX_ARTIFACT_DOCUMENT_PAGE_SIZE } from "@checkfu/sdk/Limits"
 import {
 	ARTIFACT_DATA_TOOL,
 	ARTIFACT_TOOL,
@@ -44,7 +44,7 @@ describe("workspace tool parameters", () => {
 				data: {},
 				key: { ...nonempty, maxLength: CLIENT_EVENT_ID_MAX_LENGTH },
 				page: nullable(nonempty),
-				limit: nullable({ type: "integer", minimum: 1, maximum: MAX_ARTIFACT_DATA_LIMIT }),
+				limit: nullable({ type: "integer", minimum: 1, maximum: MAX_ARTIFACT_DOCUMENT_PAGE_SIZE }),
 			},
 			required: ["name", "collection", "operation"],
 			additionalProperties: false,

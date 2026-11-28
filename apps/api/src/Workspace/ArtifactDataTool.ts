@@ -1,8 +1,8 @@
-import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
+import { MAX_ARTIFACT_DOCUMENT_BYTES, MAX_ARTIFACT_DOCUMENT_PAGE_SIZE } from "@checkfu/sdk/Limits"
 import { CLIENT_EVENT_ID_MAX_LENGTH } from "@checkfu/sdk/IdempotencyKey"
 import { ArtifactName } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
-import { ARTIFACT_DATA_OPERATIONS, MAX_ARTIFACT_DATA_LIMIT } from "./SessionArtifactTool.ts"
+import { ARTIFACT_DATA_OPERATIONS } from "./SessionArtifactTool.ts"
 import type { SessionDataRequest, SessionDataResult } from "./SessionArtifactTool.ts"
 import type { WorkspaceToolResult } from "./WorkspaceTools.ts"
 
@@ -22,7 +22,7 @@ export const ArtifactDataToolArguments = Schema.Struct({
 	page: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
 	limit: Schema.optionalKey(
 		Schema.NullOr(
-			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_ARTIFACT_DATA_LIMIT })),
+			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_ARTIFACT_DOCUMENT_PAGE_SIZE })),
 		),
 	),
 })
@@ -45,7 +45,7 @@ export const artifactData = async (
 	const decoded = decodeArguments(args)
 	if (decoded._tag === "None") {
 		return told(
-			`artifact_data needs name (1 to 256 characters), collection and operation (${ARTIFACT_DATA_OPERATIONS.join(", ")}). id is text, data any JSON value, limit an integer from 1 to ${MAX_ARTIFACT_DATA_LIMIT}, and page the next_page text of an earlier list.`,
+			`artifact_data needs name (1 to 256 characters), collection and operation (${ARTIFACT_DATA_OPERATIONS.join(", ")}). id is text, data any JSON value, limit an integer from 1 to ${MAX_ARTIFACT_DOCUMENT_PAGE_SIZE}, and page the next_page text of an earlier list.`,
 			true,
 		)
 	}

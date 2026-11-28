@@ -143,6 +143,9 @@ import {
 	MAX_EVENTS_BODY_BYTES,
 	MAX_ARTIFACT_COLLECTION_DOCUMENTS,
 	MAX_ARTIFACT_DATABASE_BYTES,
+	DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE,
+	MAX_ARTIFACT_DOCUMENT_PAGE_SIZE,
+	MAX_ARTIFACT_DOCUMENT_PAGE_BYTES,
 	MAX_ARTIFACT_DOCUMENT_BYTES,
 	MAX_SESSION_BODY_BYTES,
 	MAX_SESSION_EVENTS_PER_BATCH,
@@ -1974,6 +1977,19 @@ const positiveIntegerFromString = (description: string) =>
 			),
 		)
 
+const ArtifactDocumentLimitFromString = Schema.String.check(
+	Schema.isPattern(new RegExp(String.raw`^(?:[1-9]\d?|${MAX_ARTIFACT_DOCUMENT_PAGE_SIZE})$`, "u")),
+)
+	.annotate({
+		description: `Maximum number of results to return (1-${MAX_ARTIFACT_DOCUMENT_PAGE_SIZE}, default ${DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE})`,
+	})
+	.pipe(
+		Schema.decodeTo(
+			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_ARTIFACT_DOCUMENT_PAGE_SIZE })),
+			{ decode: SchemaGetter.transform(Number), encode: SchemaGetter.transform(String) },
+		),
+	)
+
 const RunNumberFromString = positiveIntegerFromString("Run number as a positive integer")
 const AgentVersionFromString = positiveIntegerFromString(
 	"Agent version. Omit to retrieve the latest version.",
@@ -3297,7 +3313,7 @@ const ArtifactData = HttpApiGroup.make("artifact_data")
 			params: artifactCollectionParams,
 			query: {
 				page: Schema.optionalKey(EventListPage),
-				limit: Schema.optionalKey(ListLimitFromString),
+				limit: Schema.optionalKey(ArtifactDocumentLimitFromString),
 			},
 			success: listResponse(ArtifactDocumentResource),
 			error: HandlerErrors,
@@ -3305,14 +3321,16 @@ const ArtifactData = HttpApiGroup.make("artifact_data")
 			.annotate(OpenApi.Summary, "List documents")
 			.annotate(
 				OpenApi.Description,
-				"List documents oldest first. Pages hold up to 512 KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null.",
+				`List documents oldest first. Pages hold up to ${MAX_ARTIFACT_DOCUMENT_PAGE_BYTES / 1024} KiB of document bodies and can contain fewer than the requested limit. Continue until next_page is null.`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts.data",
 				"x-forge-method-name": "list",
 				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "listDocuments" },
 				"x-checkfu-mcp": { name: "artifacts_listDocuments" },
-				"x-checkfu-cli": resourceListCli,
+				"x-checkfu-cli": {
+					intQueryParams: { limit: { min: 1, max: MAX_ARTIFACT_DOCUMENT_PAGE_SIZE, metavar: "N" } },
+				},
 			}),
 	)
 	.add(

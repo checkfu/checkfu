@@ -15,6 +15,10 @@ import {
 	ArtifactDocumentDeleted,
 	ArtifactDocumentResource,
 } from "@checkfu/sdk/Api"
+import {
+	DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE,
+	MAX_ARTIFACT_DOCUMENT_PAGE_SIZE,
+} from "@checkfu/sdk/Limits"
 import { isClientEventId } from "@checkfu/sdk/IdempotencyKey"
 import { ArtifactCollectionName, ArtifactDocumentId } from "@checkfu/sdk/Schemas"
 import * as Effect from "effect/Effect"
@@ -25,9 +29,7 @@ import { ArtifactVersionAt } from "../Artifacts/ResolveArtifactVersion.ts"
 import { PublishedAt } from "../Artifacts/ResolvePublication.ts"
 import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
 import { DataThrottle } from "./DataThrottle.ts"
-import { DEFAULT_DOCUMENT_PAGE_SIZE, DocumentCalls, isDocumentRefused } from "./DocumentCalls.ts"
-
-const MAX_PAGE_SIZE = 100
+import { DocumentCalls, isDocumentRefused } from "./DocumentCalls.ts"
 
 const isArtifactId = Schema.is(ArtifactId)
 const isCollection = Schema.is(ArtifactCollectionName)
@@ -135,9 +137,14 @@ export const VisitorData = Effect.gen(function* () {
 			if (operation === "list") {
 				const after = call.page === "" ? 0 : wholeNumber(call.page, Number.MAX_SAFE_INTEGER)
 				const limit =
-					call.limit === "" ? DEFAULT_DOCUMENT_PAGE_SIZE : wholeNumber(call.limit, MAX_PAGE_SIZE)
+					call.limit === ""
+						? DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE
+						: wholeNumber(call.limit, MAX_ARTIFACT_DOCUMENT_PAGE_SIZE)
 				if (after === undefined || limit === undefined || limit < 1) {
-					return refused(400, `page must come from next_page, and limit be 1 to ${MAX_PAGE_SIZE}.`)
+					return refused(
+						400,
+						`page must come from next_page, and limit be 1 to ${MAX_ARTIFACT_DOCUMENT_PAGE_SIZE}.`,
+					)
 				}
 				return reply(200, encodeList(yield* documents.list(target.id, collection, after, limit)))
 			}

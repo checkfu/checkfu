@@ -1,5 +1,9 @@
 import type { PiTool, PiToolCall, PiToolResult } from "@cloudflare/computer/tools/pi-ai"
 import type { Extension, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable"
+import {
+	DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE,
+	MAX_ARTIFACT_DOCUMENT_PAGE_SIZE,
+} from "@checkfu/sdk/Limits"
 import * as Predicate from "effect/Predicate"
 import {
 	MAX_OUTPUT_ENTRIES,
@@ -12,8 +16,6 @@ import * as Schema from "effect/Schema"
 import { ArtifactToolArguments } from "./ArtifactTool.ts"
 import { ArtifactDataToolArguments } from "./ArtifactDataTool.ts"
 import {
-	DEFAULT_ARTIFACT_DATA_LIMIT,
-	MAX_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
@@ -72,7 +74,7 @@ export const ARTIFACT_TOOL: WorkspaceTool = {
 
 export const ARTIFACT_DATA_TOOL: WorkspaceTool = {
 	name: "artifact_data",
-	description: `Read or write the data of an artifact you saved in this session with save_artifact: the documents its page reaches through artifactData. Use it to fill a dashboard's numbers or to read what a form collected. \`name\` is the artifact's name and \`collection\` one of its collections. \`operation\` is list, get, add, put or delete: list returns documents oldest first, up to \`limit\` (${DEFAULT_ARTIFACT_DATA_LIMIT} when left out, at most ${MAX_ARTIFACT_DATA_LIMIT}), with a next_page to pass as \`page\`; get, put and delete take the document's \`id\`; add and put take \`data\`, any JSON value, and put stores it under an id you choose. Use the same \`key\` when repeating an add to avoid another document. Large responses give a workspace \`path\`. Use read on that path and pass next_byte_offset as byteOffset to retrieve subsequent JSON chunks. You may use any collection. A list can return fewer documents than requested. Continue until next_page is null.`,
+	description: `Read or write the data of an artifact you saved in this session with save_artifact: the documents its page reaches through artifactData. Use it to fill a dashboard's numbers or to read what a form collected. \`name\` is the artifact's name and \`collection\` one of its collections. \`operation\` is list, get, add, put or delete: list returns documents oldest first, up to \`limit\` (${DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE} when left out, at most ${MAX_ARTIFACT_DOCUMENT_PAGE_SIZE}), with a next_page to pass as \`page\`; get, put and delete take the document's \`id\`; add and put take \`data\`, any JSON value, and put stores it under an id you choose. Use the same \`key\` when repeating an add to avoid another document. Large responses give a workspace \`path\`. Use read on that path and pass next_byte_offset as byteOffset to retrieve subsequent JSON chunks. You may use any collection. A list can return fewer documents than requested. Continue until next_page is null.`,
 	parameters: toolParameters(ArtifactDataToolArguments),
 }
 

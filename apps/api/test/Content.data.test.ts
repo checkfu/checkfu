@@ -523,6 +523,16 @@ describe("A page reaching its artifact's data", () => {
 					"DELETE _/data/board/pinned",
 				])
 
+				for (const limit of [undefined, 100]) {
+					const page = yield* calling(() => board.list(limit === undefined ? {} : { limit }))
+					expect(page.data.map((document) => document.id)).toEqual([first.id])
+					expect(page.next_page).toBeNull()
+				}
+				for (const limit of [0, 101]) {
+					const invalid = yield* calling(() => board.list({ limit }).then(() => null, refusalOf))
+					expect(invalid).toBe("400: page must come from next_page, and limit be 1 to 100.")
+				}
+
 				const refused = yield* Effect.promise(() =>
 					data
 						.collection("hidden")

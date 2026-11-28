@@ -743,6 +743,15 @@ describe("An artifact the agent saves", () => {
 				yield* done({ collection: "numbers", operation: "add", data: [1, 2] })
 				const first = yield* done({ collection: "numbers", operation: "list", limit: 1 })
 				expect(first.data).toEqual([revenue])
+				for (const limit of [undefined, 100]) {
+					const list = yield* done({
+						collection: "numbers",
+						operation: "list",
+						...(limit === undefined ? {} : { limit }),
+					})
+					expect(list.data).toHaveLength(2)
+					expect(list.next_page).toBeNull()
+				}
 				const rest = yield* done({
 					collection: "numbers",
 					operation: "list",

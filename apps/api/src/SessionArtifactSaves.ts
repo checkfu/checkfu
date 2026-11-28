@@ -9,7 +9,10 @@ import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { ARTIFACT_MOUNT_ROOT, artifactsOf } from "@checkfu/domain/Session/SessionResource"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { isClientEventId } from "@checkfu/sdk/IdempotencyKey"
-import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
+import {
+	MAX_ARTIFACT_DOCUMENT_BYTES,
+	DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE,
+} from "@checkfu/sdk/Limits"
 import { isApiErrorEnvelope } from "@checkfu/sdk/Errors"
 import {
 	ArtifactDocumentData,
@@ -46,7 +49,6 @@ import {
 import type { ResolvedFiles } from "./Http/ArtifactsHandlers.ts"
 import {
 	isArtifactCaptureDirectory,
-	DEFAULT_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
@@ -175,7 +177,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 					id,
 					collection,
 					after,
-					request.limit === 0 ? DEFAULT_ARTIFACT_DATA_LIMIT : request.limit,
+					request.limit === 0 ? DEFAULT_ARTIFACT_DOCUMENT_PAGE_SIZE : request.limit,
 				)
 				return told(encodeList(result), null, result.next_page)
 			}

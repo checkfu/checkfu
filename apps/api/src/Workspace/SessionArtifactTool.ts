@@ -1,5 +1,5 @@
 import { CLIENT_EVENT_ID_MAX_LENGTH } from "@checkfu/sdk/IdempotencyKey"
-import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
+import { MAX_ARTIFACT_DOCUMENT_BYTES, MAX_ARTIFACT_DOCUMENT_PAGE_SIZE } from "@checkfu/sdk/Limits"
 import { ArtifactPath } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 import { SESSION_OUTPUTS_PATH } from "./SessionOutputs.ts"
@@ -47,9 +47,6 @@ export type SavedSessionArtifact = typeof SavedSessionArtifact.Type
 
 export const ARTIFACT_DATA_RESULTS_PATH = "/mnt/artifact-data-results"
 
-export const DEFAULT_ARTIFACT_DATA_LIMIT = 50
-export const MAX_ARTIFACT_DATA_LIMIT = 100
-
 export const ARTIFACT_DATA_OPERATIONS = ["list", "get", "add", "put", "delete"] as const
 
 export const SessionDataRequest = Schema.Struct({
@@ -58,7 +55,9 @@ export const SessionDataRequest = Schema.Struct({
 	id: Schema.String.check(Schema.isMaxLength(64)),
 	data: Schema.String.check(Schema.isMaxLength(MAX_ARTIFACT_DOCUMENT_BYTES)),
 	page: Schema.String.check(Schema.isMaxLength(16)),
-	limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_ARTIFACT_DATA_LIMIT })),
+	limit: Schema.Int.check(
+		Schema.isBetween({ minimum: 0, maximum: MAX_ARTIFACT_DOCUMENT_PAGE_SIZE }),
+	),
 	key: Schema.String.check(Schema.isMaxLength(CLIENT_EVENT_ID_MAX_LENGTH)),
 })
 export type SessionDataRequest = typeof SessionDataRequest.Type

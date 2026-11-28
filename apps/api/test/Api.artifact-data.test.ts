@@ -188,6 +188,14 @@ describe("An artifact's data API", () => {
 					created_at: vote.created_at,
 				})
 
+				const minimum = yield* json<ListBody>(yield* call("GET", `${data}/votes?limit=1`))
+				expect(minimum.data).toHaveLength(1)
+				expect(minimum.next_page).not.toBeNull()
+				for (const query of ["", "?limit=100"]) {
+					const list = yield* json<ListBody>(yield* call("GET", `${data}/votes${query}`))
+					expect(list.data).toHaveLength(6)
+					expect(list.next_page).toBeNull()
+				}
 				const first = yield* json<ListBody>(yield* call("GET", `${data}/votes?limit=4`))
 				expect(first.data.map((document) => document.data)).toEqual([
 					{ choice: "a" },
@@ -278,7 +286,9 @@ describe("An artifact's data API", () => {
 				expect(yield* status("PUT", `${data}/votes/${"x".repeat(65)}`, { data: 1 })).toBe(400)
 				expect(yield* status("POST", `${data}/votes`, {})).toBe(400)
 				expect(yield* status("POST", `${data}/votes`, { data: 1, extra: 2 })).toBe(400)
-				expect(yield* status("GET", `${data}/votes?limit=0`)).toBe(400)
+				for (const limit of ["0", "101", "01", "1.5", "1e2"]) {
+					expect(yield* status("GET", `${data}/votes?limit=${limit}`)).toBe(400)
+				}
 				expect(yield* status("GET", `${data}/votes?page=abc`)).toBe(400)
 				expect(yield* status("GET", `${data}/votes/missing`)).toBe(404)
 

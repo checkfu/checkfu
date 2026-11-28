@@ -21,8 +21,6 @@ import { ArtifactDatabase } from "./ArtifactDatabase.ts"
 import type { ArtifactDatabaseError } from "./ArtifactDatabase.ts"
 import type { StoredDocument, WriteRefusal } from "./ArtifactDocuments.ts"
 
-export const DEFAULT_DOCUMENT_PAGE_SIZE = 50
-
 export type DocumentAuthor = "owner" | "visitor"
 
 export class DocumentRefused extends Data.TaggedError("DocumentRefused")<{
