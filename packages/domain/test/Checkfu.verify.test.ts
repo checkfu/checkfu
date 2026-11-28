@@ -165,6 +165,7 @@ const STANDING = {
 	"Session.StatusRunningCarriesStartedTurn": "proved",
 	"Session.StatusIdleCarriesEndedTurn": "proved",
 	"Session.AbandonedTurnEnds": "proved",
+	"Session.ATruncatedReplyNeverEndsTheTurnAsFinished": "proved",
 	"Session.AgentMessageEndsTheTurn": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
 	"Artifact.StatusIsKnown": "proved",

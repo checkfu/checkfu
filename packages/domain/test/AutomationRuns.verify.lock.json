@@ -401,6 +401,10 @@
 			"AutomationRuns.EveryRunReportMatchesItsFiring": {
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Automation.every((automation) =>\n\t\t\t\tautomation.events.every((report) => {\n\t\t\t\t\tif (report._tag !== \"automation.run_started\" && report._tag !== \"automation.run_failed\") {\n\t\t\t\t\t\treturn true\n\t\t\t\t\t}\n\t\t\t\t\treturn automation.events.some(\n\t\t\t\t\t\t(fired) =>\n\t\t\t\t\t\t\tfired._tag === \"automation.fired\" &&\n\t\t\t\t\t\t\tfired.run === report.run &&\n\t\t\t\t\t\t\tfired.trigger === report.trigger &&\n\t\t\t\t\t\t\tfired.scheduled_at === report.scheduled_at &&\n\t\t\t\t\t\t\t(report._tag !== \"automation.run_started\" || report.session_id === fired.session_id),\n\t\t\t\t\t)\n\t\t\t\t}),\n\t\t\t)"
+			},
+			"Session.ATruncatedReplyNeverEndsTheTurnAsFinished": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tcommand._tag !== \"CommitModelReply\" ||\n\t\t\tcommand.truncated !== true ||\n\t\t\tevents.every(\n\t\t\t\t(event) => event._tag !== \"session.status_idle\" || event.stop_reason.type !== \"end_turn\",\n\t\t\t)"
 			}
 		}
 	}

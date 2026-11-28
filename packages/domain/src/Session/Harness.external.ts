@@ -162,10 +162,6 @@ export const clampHarnessReply = (
 					? truncateText(reply.thinking, MAX_THINKING_TEXT_LENGTH)
 					: reply.thinking,
 		text: truncated ? truncateText(reply.text, MAX_MESSAGE_TEXT_LENGTH) : reply.text,
-		stop_reason:
-			truncated && reply.stop_reason.type === "end_turn"
-				? { type: "budget_reached" as const }
-				: reply.stop_reason,
 	})
 }
 

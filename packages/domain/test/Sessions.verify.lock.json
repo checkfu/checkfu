@@ -257,6 +257,10 @@
 			"Sessions.ASessionGetsAReply": {
 				"kind": "sometimes",
 				"source": "(m) => m.TurnInput.some((view) => view.state.last_reply_turn >= 1)"
+			},
+			"Session.ATruncatedReplyNeverEndsTheTurnAsFinished": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tcommand._tag !== \"CommitModelReply\" ||\n\t\t\tcommand.truncated !== true ||\n\t\t\tevents.every(\n\t\t\t\t(event) => event._tag !== \"session.status_idle\" || event.stop_reason.type !== \"end_turn\",\n\t\t\t)"
 			}
 		}
 	}

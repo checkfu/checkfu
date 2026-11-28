@@ -304,6 +304,12 @@ export class Session extends Domain.Aggregate("Session", {
 						(after._tag === "Idle" ||
 							(after._tag === "Running" && after.turn === before.turn + 1))),
 			),
+		ATruncatedReplyNeverEndsTheTurnAsFinished: ({ command, events }) =>
+			command._tag !== "CommitModelReply" ||
+			command.truncated !== true ||
+			events.every(
+				(event) => event._tag !== "session.status_idle" || event.stop_reason.type !== "end_turn",
+			),
 		AgentMessageEndsTheTurn: ({ before, after, events }) =>
 			events.every(
 				(event) =>
@@ -654,7 +660,11 @@ export class Session extends Domain.Aggregate("Session", {
 				model_usage: cmd.model_usage,
 				is_error: false,
 			})
-			const settled = endTurn(running, cmd.stop_reason)
+			const stop =
+				cmd.truncated === true && cmd.stop_reason.type === "end_turn"
+					? { type: "budget_reached" as const }
+					: cmd.stop_reason
+			const settled = endTurn(running, stop)
 			if (cmd.thinking !== null) {
 				return [new AgentThinking({ ...preview, thinking: cmd.thinking }), msg, end, ...settled]
 			}

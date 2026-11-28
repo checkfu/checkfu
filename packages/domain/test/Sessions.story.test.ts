@@ -1901,7 +1901,11 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 5, output_tokens: 2 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
+				new SessionStatusIdle({
+					stop_reason: { type: "budget_reached" },
+					turn: 1,
+					event_ids: "[]",
+				}),
 			),
 			Story.call(OutputsSaver.save, { session_id: session.id, turn: 1 }),
 			Story.succeed(OutputsSaver.save, undefined),
@@ -2000,11 +2004,18 @@ describe("Sessions", () => {
 				session,
 				new AgentMessage({ content: [{ type: "text", text: "Reply" }], truncated: true }),
 				end(2),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, event_ids: "[]" }),
-				new SessionStatusRunning({ turn: 3 }),
+				new SessionStatusIdle({
+					stop_reason: { type: "budget_reached" },
+					turn: 2,
+					event_ids: "[]",
+				}),
 			),
+			Story.state(session, { _tag: "Idle", turn: 2 }),
+			Story.view(TurnInput, session, { turn: 2, input: [], unsent: ["Three"] }),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Resume" })),
+			Story.then(session, text("Resume"), new SessionStatusRunning({ turn: 3 })),
 			Story.state(session, { _tag: "Running", turn: 3 }),
-			Story.view(TurnInput, session, { turn: 3, input: ["Three"] }),
+			Story.view(TurnInput, session, { turn: 3, input: ["Three", "Resume"] }),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Four" })),
 			Story.then(session, text("Four")),
 			Story.when(
@@ -3751,7 +3762,7 @@ describe("Sessions", () => {
 		}
 	})
 
-	it("reports a reply cut to the message limit as budget_reached, never as a clean end_turn", async () => {
+	it("marks replies truncated at the message limit and preserves the model stop reason", async () => {
 		const oversized = {
 			thinking: null,
 			text: "x".repeat(MAX_MESSAGE_TEXT_LENGTH + 1),
@@ -3762,7 +3773,8 @@ describe("Sessions", () => {
 			clampHarnessReply({ ...oversized, stop_reason: { type: "end_turn" } }),
 		)
 		expect(cut.text.length).toBe(MAX_MESSAGE_TEXT_LENGTH)
-		expect(cut.stop_reason).toEqual({ type: "budget_reached" })
+		expect(cut.truncated).toBe(true)
+		expect(cut.stop_reason).toEqual({ type: "end_turn" })
 
 		const refusal = await Effect.runPromise(
 			clampHarnessReply({ ...oversized, stop_reason: { type: "refusal" } }),

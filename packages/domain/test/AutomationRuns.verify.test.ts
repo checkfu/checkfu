@@ -86,6 +86,7 @@ const STANDING = {
 	"Session.APausedTurnWaitsOnACall": "proved",
 	"Session.AStopNamesTheUnansweredCalls": "proved",
 	"Session.AbandonedTurnEnds": "proved",
+	"Session.ATruncatedReplyNeverEndsTheTurnAsFinished": "proved",
 	"Session.AgentMessageEndsTheTurn": "proved",
 	"Session.AnEndedTurnStartsTheQueuedOne": "proved",
 	"Session.AnInterruptEndsAPausedTurn": "proved",
