@@ -9,9 +9,10 @@ import type { JsonMemory, JsonMemoryStore } from "@checkfu/sdk/client"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import type * as React from "react"
 import { checkfu } from "../api.ts"
+import { Confirm } from "../confirm.tsx"
 import { editorOf, rebaseOnto } from "../memory-edit.ts"
 import type { MemoryEdit } from "../memory-edit.ts"
 import { Pager } from "../pager.tsx"
@@ -272,6 +273,9 @@ function MemoryEditor({
 }): React.JSX.Element {
 	const navigate = useNavigate()
 	const [edit, setEdit] = useState<MemoryEdit>()
+	const [deleting, setDeleting] = useState<JsonMemory>()
+	const deleteButton = useRef<HTMLButtonElement>(null)
+	const deletingInFlight = useRef(false)
 	const { text, base, overtaken, canSave } = editorOf(memory, edit)
 	const save = useAction(
 		async (draft: MemoryEdit) =>
@@ -282,8 +286,12 @@ function MemoryEditor({
 		},
 	)
 	const remove = useAction(
-		async () => {
-			await checkfu.memoryStores.deleteMemory(memoryStore.id, base)
+		async (reviewed: JsonMemory) => {
+			try {
+				await checkfu.memoryStores.deleteMemory(memoryStore.id, reviewed)
+			} finally {
+				deletingInFlight.current = false
+			}
 		},
 		{
 			invalidates: [memoriesQuery(memoryStore.id).queryKey],
@@ -310,14 +318,39 @@ function MemoryEditor({
 						<Button
 							variant="destructive"
 							size="sm"
+							ref={deleteButton}
 							disabled={remove.pending}
-							onClick={() => remove.run()}
+							aria-expanded={deleting !== undefined}
+							onClick={() => {
+								if (deleting === undefined) {
+									setDeleting(base)
+								}
+							}}
 						>
 							Delete
 						</Button>
 					) : undefined
 				}
 			/>
+			{writable && deleting !== undefined ? (
+				<Confirm
+					label="Delete memory"
+					pending={remove.pending}
+					onConfirm={() => {
+						if (!deletingInFlight.current) {
+							deletingInFlight.current = true
+							remove.run(deleting)
+						}
+					}}
+					onCancel={() => {
+						setDeleting(undefined)
+						deleteButton.current?.focus()
+					}}
+				>
+					Permanently delete <span className="font-mono">{deleting.path}</span>? You reviewed v
+					{deleting.version}.
+				</Confirm>
+			) : null}
 			<DescriptionList>
 				<Description label="Size">{sizeOf(memory.content_size_bytes)}</Description>
 				<Description label="Version">v{memory.version}</Description>
