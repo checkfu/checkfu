@@ -8,7 +8,6 @@ import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Digest from "effect/crypto/Digest"
-import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { placedStub, placement } from "../Placement.ts"
@@ -73,10 +72,9 @@ export const webhookFanoutImplementation = Effect.gen(function* () {
 	const webhooks = yield* WebhookEndpoint
 	const deliveries = yield* WebhookDeliveryStore
 	const digest = yield* Digest.Digest
-	const random = yield* SecureRandom.SecureRandom
-	return { state, listing, webhooks, deliveries, digest, random }
+	return { state, listing, webhooks, deliveries, digest }
 }).pipe(
-	Effect.map(({ state, listing, webhooks, deliveries, digest, random }) =>
+	Effect.map(({ state, listing, webhooks, deliveries, digest }) =>
 		Effect.gen(function* () {
 			const onRetrySubscriber = yield* Alchemy.makeCallback(
 				RETRY_SUBSCRIBER_CALLBACK,
@@ -164,13 +162,7 @@ export const webhookFanoutImplementation = Effect.gen(function* () {
 							.pipe(Effect.mapError(storeError)),
 					),
 			} satisfies WebhookFanoutShape
-		}).pipe(
-			Effect.provide(
-				Cloudflare.DurableObjectCallbacks.pipe(
-					Layer.provide(Layer.succeed(SecureRandom.SecureRandom, random)),
-				),
-			),
-		),
+		}).pipe(Effect.provide(Cloudflare.DurableObjectCallbacks)),
 	),
 )
 

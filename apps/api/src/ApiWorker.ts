@@ -6,8 +6,8 @@ import * as Alchemy from "alchemy"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
 import * as Digest from "effect/crypto/Digest"
-import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -184,7 +184,6 @@ const WebhookDeliveriesLive = WebhookDeliveryStoreDo.pipe(
 			Layer.provide(WebhooksLive),
 			Layer.provide(WebhookMasterKeyLive),
 			Layer.provide(Mac.layerWebCrypto),
-			Layer.provide(SecureRandom.layerWebCrypto),
 		),
 	),
 )
@@ -196,7 +195,6 @@ const WebhookFanoutRuntimeLive = WebhookFanoutContinuationDo.pipe(
 			Layer.provide(WebhooksLive),
 			Layer.provide(WebhookDeliveriesLive),
 			Layer.provide(Digest.layerWebCrypto),
-			Layer.provide(SecureRandom.layerWebCrypto),
 		),
 	),
 )

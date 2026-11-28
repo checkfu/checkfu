@@ -83,11 +83,8 @@ export const readBoundedResponseText = (
 			Effect.ignore,
 			Effect.catchDefect(() => Effect.void),
 		)
-		const outcome = yield* Effect.race(
-			readBody.pipe(Effect.as("done" as const)),
-			Effect.sleep(Duration.millis(timeoutMs)).pipe(Effect.as("timeout" as const)),
-		)
-		const timedOut = outcome === "timeout"
+		const outcome = yield* Effect.timeoutOption(readBody, Duration.millis(timeoutMs))
+		const timedOut = Option.isNone(outcome)
 		if (truncated || timedOut) {
 			yield* cancelResponseBody(response)
 		}

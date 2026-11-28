@@ -4,7 +4,6 @@ import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Digest from "effect/crypto/Digest"
 import * as Mac from "effect/crypto/Mac"
-import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -36,7 +35,7 @@ export const CONTENT_WORKER_PROPS = {
 
 const ContentLive = Layer.mergeAll(
 	ArtifactReaderR2.pipe(Layer.provide(Cloudflare.R2.ReadBucketBinding)),
-	Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCrypto)),
+	Mac.layerWebCrypto,
 	Digest.layerWebCrypto,
 )
 

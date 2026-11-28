@@ -316,13 +316,7 @@ export const WebhookDelivererLive = WebhookDeliverer.make(
 							}),
 						),
 				} satisfies WebhookDelivererShape
-			}).pipe(
-				Effect.provide(
-					Cloudflare.DurableObjectCallbacks.pipe(
-						Layer.provide(Layer.succeed(SecureRandom.SecureRandom, random)),
-					),
-				),
-			),
+			}).pipe(Effect.provide(Cloudflare.DurableObjectCallbacks)),
 	),
 )
 
