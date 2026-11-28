@@ -226,9 +226,6 @@ export const PiSessionLive = PiSession.make(
 				const workspaceDeclarations = yield* Effect.promise(() => workspaceToolDeclarations())
 				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
 				const previews = yield* PubSub.sliding<PreviewPacket>(128)
-				const writeScriptOutput = (path: string, content: string | Uint8Array) =>
-					runPromise(workspace().writeScriptOutput(path, content, { turn: admittedTurn() }))
-				const outputEnv = scriptOutputEnv(writeScriptOutput)
 				const turnCalls = turnCallLog({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 				})
@@ -342,7 +339,21 @@ export const PiSessionLive = PiSession.make(
 								registry,
 								onWake,
 								settings: PI_HARNESS_SETTINGS,
-								env: () => outputEnv,
+								env: () => {
+									const token = { turn: admittedTurn() }
+									return scriptOutputEnv((path, content, signal) => {
+										const owner = workspace()
+										const taskId = `script:${crypto.randomUUID()}` as const
+										return runPromise(
+											owner
+												.writeScriptOutput(path, content, token, taskId)
+												.pipe(
+													Effect.onInterrupt(() => Effect.ignore(owner.stopTask(token, taskId))),
+												),
+											signal === undefined ? undefined : { signal },
+										)
+									})
+								},
 							},
 							context,
 						)

@@ -12,7 +12,9 @@ export interface FenceStore {
 	readonly put: (turn: FencedTurn) => void
 }
 
-const taskKey = (token: TurnToken, taskId: number): string => `${token.turn}:${taskId}`
+export type WorkspaceTaskId = number | `script:${string}`
+
+const taskKey = (token: TurnToken, taskId: WorkspaceTaskId): string => `${token.turn}:${taskId}`
 
 export const makeTurnFence = <TaskResult = never>(store: FenceStore) => {
 	const running = new Set<Promise<unknown>>()
@@ -77,7 +79,7 @@ export const makeTurnFence = <TaskResult = never>(store: FenceStore) => {
 		run,
 		runTask: (
 			token: TurnToken,
-			taskId: number,
+			taskId: WorkspaceTaskId,
 			caller: AbortSignal,
 			work: (signal: AbortSignal) => Promise<TaskResult>,
 		): Promise<TaskResult | undefined> => {
@@ -103,7 +105,7 @@ export const makeTurnFence = <TaskResult = never>(store: FenceStore) => {
 			tasks.set(key, { controller, ended })
 			return ended
 		},
-		stopTask: async (token: TurnToken, taskId: number): Promise<void> => {
+		stopTask: async (token: TurnToken, taskId: WorkspaceTaskId): Promise<void> => {
 			const task = tasks.get(taskKey(token, taskId))
 			task?.controller.abort()
 			await task?.ended.catch(() => undefined)

@@ -296,6 +296,7 @@ const scriptOptionsExtension = (
 export type WorkspaceWrite = (
 	path: string,
 	content: string | Uint8Array,
+	signal: AbortSignal | undefined,
 ) => Promise<string | undefined>
 
 const refused = (): Promise<Result<never, FileError>> =>
@@ -312,8 +313,14 @@ export const scriptOutputEnv = (write: WorkspaceWrite): ExecutionEnv => ({
 			ok: true,
 			value: `${SCRIPT_OUTPUT_DIRECTORY}/${prefix ?? "script-"}${crypto.randomUUID()}`,
 		}),
-	writeFile: async (path, content) => {
-		const message = await write(path, content).catch((error: unknown) =>
+	writeFile: async (path, content, context) => {
+		if (context.abortSignal?.aborted) {
+			return {
+				ok: false,
+				error: new FileError("unknown", "The script invocation has ended.", path),
+			}
+		}
+		const message = await write(path, content, context.abortSignal).catch((error: unknown) =>
 			error instanceof Error ? error.message : String(error),
 		)
 		return message === undefined
