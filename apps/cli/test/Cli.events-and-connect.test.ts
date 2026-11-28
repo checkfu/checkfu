@@ -494,6 +494,113 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 	})
 
+	it.each(["refused", "unconfirmed", "unconfirmed then denied"] as const)(
+		"retries a %s TTY interrupt",
+		async (disposition) => {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const running = yield* Deferred.make<void>()
+						const failed = yield* Deferred.make<void>()
+						const denied = yield* Deferred.make<void>()
+						let failures = 0
+						const confirmed = yield* Deferred.make<void>()
+						const sigintController = makeSigintController()
+						const cli = yield* makeTestServer({
+							generate: () => Effect.never,
+							interrupt: () => Effect.void,
+						})
+						const sessionId = yield* createReadySession(cli)
+						const attempts: Array<{ readonly key: string | null; readonly body: string }> = []
+						const run = yield* cli
+							.run(["--format", "jsonl", "sessions", "connect", "--session-id", sessionId], {
+								stdinIsTerminal: true,
+								sigintController,
+								terminalReads: [
+									Effect.succeed("long running task"),
+									Deferred.await(confirmed).pipe(Effect.as("/exit")),
+								],
+								onStdoutChunk: (chunk) =>
+									chunk.includes("session.status_running")
+										? Deferred.succeed(running, undefined).pipe(Effect.asVoid)
+										: Effect.void,
+								onStderrChunk: (chunk) => {
+									if (chunk.includes("Interrupt failed:")) {
+										failures += 1
+										return Deferred.succeed(failures === 1 ? failed : denied, undefined).pipe(
+											Effect.asVoid,
+										)
+									}
+									return chunk.includes("Press Ctrl-C again to disconnect.")
+										? Deferred.succeed(confirmed, undefined).pipe(Effect.asVoid)
+										: Effect.void
+								},
+								interceptFetch: async (next, request) => {
+									if (request.method !== "POST" || !request.url.endsWith("/events")) {
+										return next(request)
+									}
+									const body = await request.clone().text()
+									if (!body.includes("user.interrupt")) {
+										return next(request)
+									}
+									attempts.push({ key: request.headers.get("idempotency-key"), body })
+									if (disposition === "refused" && attempts.length === 1) {
+										return Response.json(
+											{ type: "error", error: { type: "conflict_error", message: "Try again." } },
+											{ status: 409 },
+										)
+									}
+									if (disposition === "unconfirmed then denied" && attempts.length === 4) {
+										return new Response("Gateway denied access", { status: 403 })
+									}
+									const response = await next(request)
+									if (disposition !== "refused" && attempts.length <= 3) {
+										await response.body?.cancel()
+										throw new Error("The interrupt response was lost.")
+									}
+									return response
+								},
+							})
+							.pipe(Effect.forkChild)
+						yield* Deferred.await(running)
+						expect(sigintController.handleSigint()).toBe(true)
+						yield* Deferred.await(failed)
+						expect(yield* Deferred.isDone(confirmed)).toBe(false)
+						expect(sigintController.handleSigint()).toBe(true)
+						if (disposition === "unconfirmed then denied") {
+							yield* Deferred.await(denied)
+							expect(yield* Deferred.isDone(confirmed)).toBe(false)
+							expect(sigintController.handleSigint()).toBe(true)
+						}
+						const result = yield* Fiber.join(run)
+						expect(result.exitCode).toBe(0)
+						expect(result.stderr).toContain("Interrupt requested.")
+						expect(attempts).toHaveLength(
+							disposition === "refused" ? 2 : disposition === "unconfirmed" ? 4 : 5,
+						)
+						expect(new Set(attempts.map(({ key }) => key)).size).toBe(
+							disposition === "refused" ? 2 : 1,
+						)
+						expect(new Set(attempts.map(({ body }) => body)).size).toBe(1)
+						const history = yield* cli.run([
+							"sessions:events",
+							"list",
+							"--session-id",
+							sessionId,
+							"--transform",
+							"data.#.type",
+						])
+						expect(
+							(JSON.parse(history.stdout) as ReadonlyArray<string>).filter(
+								(type) => type === "user.interrupt",
+							),
+						).toHaveLength(1)
+					}),
+				),
+			)
+		},
+	)
+
 	it("handles Ctrl-C (SIGINT) during an active TTY turn by sending user.interrupt", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
@@ -5482,121 +5589,177 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 		)
 	}, 15_000)
 
-	it("scopes the TTY Ctrl-C disconnect latch to the interrupted turn so a newly started queued turn is interrupted instead of disconnecting", async () => {
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
-					const turn1Started = yield* Deferred.make<void>()
-					const turn1Interrupted = yield* Deferred.make<void>()
-					const turn2Started = yield* Deferred.make<void>()
-					const turn2Interrupted = yield* Deferred.make<void>()
-					const turn2RunningObserved = yield* Deferred.make<void>()
-					const sigintController = makeSigintController()
+	it.each(["immediately", "late", "with a transport failure"] as const)(
+		"keeps the next turn interruptible after a receipt that arrives %s for the previous turn",
+		async (receiptTiming) => {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+						const turn1Started = yield* Deferred.make<void>()
+						const turn1Interrupted = yield* Deferred.make<void>()
+						const turn2Started = yield* Deferred.make<void>()
+						const turn2Interrupted = yield* Deferred.make<void>()
+						const turn2RunningObserved = yield* Deferred.make<void>()
+						const firstReceiptShown = yield* Deferred.make<void>()
+						const secondReceiptShown = yield* Deferred.make<void>()
+						let receiptsShown = 0
+						let requestsStarted = 0
+						const requestKeys: Array<string | null> = []
+						const sigintController = makeSigintController()
 
-					const cli = yield* makeTestServer({
-						generate: (args) =>
-							Effect.gen(function* () {
-								if (args.turn === 1) {
-									yield* Deferred.succeed(turn1Started, undefined)
-									yield* Deferred.await(turn1Interrupted)
+						const cli = yield* makeTestServer({
+							generate: (args) =>
+								Effect.gen(function* () {
+									if (args.turn === 1) {
+										yield* Deferred.succeed(turn1Started, undefined)
+										yield* Deferred.await(turn1Interrupted)
+										return yield* Effect.fail({
+											_tag: "TurnInterrupted" as const,
+											model_usage: { input_tokens: 2, output_tokens: 0 },
+										})
+									}
+									yield* Deferred.succeed(turn2Started, undefined)
+									yield* Deferred.await(turn2Interrupted)
 									return yield* Effect.fail({
 										_tag: "TurnInterrupted" as const,
 										model_usage: { input_tokens: 2, output_tokens: 0 },
 									})
-								}
-								yield* Deferred.succeed(turn2Started, undefined)
-								yield* Deferred.await(turn2Interrupted)
-								return yield* Effect.fail({
-									_tag: "TurnInterrupted" as const,
-									model_usage: { input_tokens: 2, output_tokens: 0 },
-								})
-							}),
-						interrupt: (args) =>
-							args.turn === 1
-								? Deferred.succeed(turn1Interrupted, undefined).pipe(Effect.asVoid)
-								: Deferred.succeed(turn2Interrupted, undefined).pipe(Effect.asVoid),
-					})
-					const sessionId = yield* createReadySession(cli)
+								}),
+							interrupt: (args) =>
+								args.turn === 1
+									? Deferred.succeed(turn1Interrupted, undefined).pipe(Effect.asVoid)
+									: Deferred.succeed(turn2Interrupted, undefined).pipe(Effect.asVoid),
+						})
+						const sessionId = yield* createReadySession(cli)
 
-					let turn1FirstCtrlC = false
-					let turn2FirstCtrlC = false
-					let turn2SecondCtrlC = true
+						let turn1FirstCtrlC = false
+						let turn2FirstCtrlC = false
+						let turn2SecondCtrlC = true
 
-					const result = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
-						stdinIsTerminal: true,
-						sigintController,
-						interceptFetch: async (next, request) => {
-							if (!request.url.includes("/events/stream")) {
-								return next(request)
-							}
-							const res = await next(request)
-							if (res.status !== 200 || res.body === null) {
-								return res
-							}
-							const reader = res.body.getReader()
-							const decoder = new TextDecoder()
-							let sseBuffer = ""
-							const observed = new ReadableStream<Uint8Array>({
-								async pull(controller) {
-									const chunk = await reader.read()
-									if (chunk.done) {
-										controller.close()
-										return
+						const result = yield* cli.run(
+							["--format", "jsonl", "sessions", "connect", "--session-id", sessionId],
+							{
+								stdinIsTerminal: true,
+								sigintController,
+								onStdoutChunk: (chunk) => {
+									if (chunk.includes('"type":"span.model_request_start"')) {
+										requestsStarted += 1
+										if (requestsStarted === 2) {
+											return Deferred.succeed(turn2RunningObserved, undefined).pipe(Effect.asVoid)
+										}
 									}
-									sseBuffer += decoder.decode(chunk.value, { stream: true })
-									controller.enqueue(chunk.value)
-									if ((sseBuffer.match(/event: session\.status_running/g) ?? []).length >= 2) {
-										await runPromise(Deferred.succeed(turn2RunningObserved, undefined))
+									return Effect.void
+								},
+								onStderrChunk: (chunk) => {
+									if (chunk.includes("The turn ended or changed while sending /interrupt")) {
+										return Deferred.succeed(firstReceiptShown, undefined).pipe(Effect.asVoid)
 									}
+									if (!chunk.includes("Interrupt requested.")) {
+										return Effect.void
+									}
+									receiptsShown += 1
+									return Deferred.succeed(
+										receiptsShown === 1 && receiptTiming !== "with a transport failure"
+											? firstReceiptShown
+											: secondReceiptShown,
+										undefined,
+									).pipe(Effect.asVoid)
 								},
-								cancel(reason) {
-									return reader.cancel(reason)
+								interceptFetch: async (next, request) => {
+									if (!request.url.includes("/events/stream")) {
+										if (request.method !== "POST" || !request.url.endsWith("/events")) {
+											return next(request)
+										}
+										if (!(await request.clone().text()).includes("user.interrupt")) {
+											return next(request)
+										}
+										requestKeys.push(request.headers.get("idempotency-key"))
+										if (receiptTiming === "with a transport failure" && requestKeys.length === 1) {
+											const advance = await runPromise(
+												cli.run([
+													"sessions:events",
+													"send",
+													"--session-id",
+													sessionId,
+													"--event",
+													'{"type":"user.interrupt"}',
+												]),
+											)
+											expect(advance.exitCode).toBe(0)
+											await runPromise(Deferred.await(turn2RunningObserved))
+											throw new Error("The first terminal request never reached the API.")
+										}
+										const response = await next(request)
+										if (receiptTiming === "late" && requestKeys.length === 1) {
+											await runPromise(Deferred.await(turn2RunningObserved))
+										}
+										return response
+									}
+									return next(request)
 								},
-							})
-							return new Response(observed, { status: 200, headers: res.headers })
-						},
-						terminalReads: [
-							Effect.succeed("first turn"),
-							Deferred.await(turn1Started).pipe(Effect.as("already queued turn 2")),
-							Effect.gen(function* () {
-								yield* Effect.sleep("25 millis")
-								turn1FirstCtrlC = sigintController.handleSigint()
-								yield* Deferred.await(turn1Interrupted)
-								yield* Deferred.await(turn2Started)
-								yield* Deferred.await(turn2RunningObserved)
-								yield* Effect.sleep("25 millis")
-								turn2FirstCtrlC = sigintController.handleSigint()
-								turn2SecondCtrlC = sigintController.handleSigint()
-								if (turn2FirstCtrlC) {
-									yield* Deferred.await(turn2Interrupted)
-									yield* Effect.sleep("40 millis")
-								}
-								return "/exit"
-							}),
-						],
-					})
+								terminalReads: [
+									Effect.succeed("first turn"),
+									Deferred.await(turn1Started).pipe(Effect.as("already queued turn 2")),
+									Effect.gen(function* () {
+										yield* Effect.sleep("25 millis")
+										turn1FirstCtrlC = sigintController.handleSigint()
+										yield* Deferred.await(turn1Interrupted)
+										yield* Deferred.await(turn2Started)
+										yield* Deferred.await(turn2RunningObserved)
+										yield* Deferred.await(firstReceiptShown)
+										yield* Effect.sleep("25 millis")
+										turn2FirstCtrlC = sigintController.handleSigint()
+										turn2SecondCtrlC = sigintController.handleSigint()
+										if (turn2FirstCtrlC) {
+											yield* Deferred.await(turn2Interrupted)
+											yield* Deferred.await(secondReceiptShown)
+											yield* Effect.sleep("40 millis")
+										}
+										return "/exit"
+									}),
+								],
+							},
+						)
 
-					expect(result.exitCode).toBe(0)
-					expect(turn1FirstCtrlC).toBe(true)
-					expect(turn2FirstCtrlC).toBe(true)
-					expect(turn2SecondCtrlC).toBe(false)
+						expect(result.exitCode).toBe(0)
+						expect(turn1FirstCtrlC).toBe(true)
+						expect(turn2FirstCtrlC).toBe(true)
+						expect(turn2SecondCtrlC).toBe(false)
+						expect(requestKeys).toHaveLength(2)
+						expect(requestKeys[0]).not.toBe(requestKeys[1])
+						if (receiptTiming === "with a transport failure") {
+							expect(result.stderr).toContain(
+								`delivery unconfirmed for Idempotency-Key: ${requestKeys[0]}`,
+							)
+							expect(result.stderr).not.toContain("retry safely")
+						}
+						if (receiptTiming === "late") {
+							const first = result.stderr.indexOf("Interrupt requested.")
+							const second = result.stderr.indexOf("Interrupt requested.", first + 1)
+							expect(first).toBeGreaterThanOrEqual(0)
+							expect(second).toBeGreaterThan(first)
+							expect(result.stderr.slice(first, second)).not.toContain(
+								"Press Ctrl-C again to disconnect.",
+							)
+						}
 
-					const eventsRes = yield* cli.run([
-						"sessions:events",
-						"list",
-						"--session-id",
-						sessionId,
-						"--transform",
-						"data.#.type",
-					])
-					expect(eventsRes.exitCode).toBe(0)
-					const eventTypes = JSON.parse(eventsRes.stdout) as Array<string>
-					expect(eventTypes.filter((t) => t === "user.interrupt")).toHaveLength(2)
-				}),
-			),
-		)
-	})
+						const eventsRes = yield* cli.run([
+							"sessions:events",
+							"list",
+							"--session-id",
+							sessionId,
+							"--transform",
+							"data.#.type",
+						])
+						expect(eventsRes.exitCode).toBe(0)
+						const eventTypes = JSON.parse(eventsRes.stdout) as Array<string>
+						expect(eventTypes.filter((t) => t === "user.interrupt")).toHaveLength(2)
+					}),
+				),
+			)
+		},
+	)
 
 	it("detects unread piped input waiting in a subsequent chunk when the session ends after an earlier turn settles", async () => {
 		await Effect.runPromise(

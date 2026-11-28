@@ -148,6 +148,7 @@ export interface CliRunOptions {
 	readonly sigintController?: SigintController
 	readonly clock?: Clock.Clock
 	readonly onStdoutChunk?: (chunk: string) => Effect.Effect<void>
+	readonly onStderrChunk?: (chunk: string) => Effect.Effect<void>
 	readonly interceptFetch?: (
 		next: (request: Request) => Promise<Response>,
 		request: Request,
@@ -478,7 +479,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						stdoutIsTerminal: Effect.succeed(options?.stdoutIsTerminal ?? false),
 						stderrIsTerminal: Effect.succeed(options?.stderrIsTerminal ?? false),
 						stdout: () => collectSink(stdoutChunks, options?.onStdoutChunk),
-						stderr: () => collectSink(stderrChunks),
+						stderr: () => collectSink(stderrChunks, options?.onStderrChunk),
 					}),
 					terminalLayer,
 					spawnerLayer,

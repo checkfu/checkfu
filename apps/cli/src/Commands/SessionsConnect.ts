@@ -149,28 +149,53 @@ const formatUnconfirmedSendError = (
 interface SendEventsFailure {
 	readonly failure: CliFailure
 	readonly confirmedPerMessageRejection: boolean
+	readonly deliveryUnconfirmed: boolean
+}
+
+type ConnectClientError = Parameters<typeof formatClientError>[0]
+const interruptTurnChanged = Symbol("interruptTurnChanged")
+const unconfirmedInterruptAfterTurn = (key: string) =>
+	networkFailure(
+		`The turn ended or changed while sending /interrupt (delivery unconfirmed for Idempotency-Key: ${key}). Check the event history for the interrupt receipt.`,
+	)
+
+interface ConnectSendOptions {
+	readonly priorDeliveryUnconfirmed?: boolean
+	readonly canSend?: () => boolean
 }
 
 const sendConnectEventsWithRetry = <A>(
-	send: Effect.Effect<A, Parameters<typeof formatClientError>[0]>,
+	send: Effect.Effect<A, ConnectClientError>,
 	idempotencyKey: string,
+	options?: ConnectSendOptions,
 ): Effect.Effect<A, SendEventsFailure> =>
 	Effect.gen(function* () {
-		let hadUnconfirmedAttempt = false
-		return yield* send.pipe(
+		let hadUnconfirmedAttempt = options?.priorDeliveryUnconfirmed ?? false
+		return yield* Effect.suspend<A, ConnectClientError | typeof interruptTurnChanged, never>(() =>
+			options?.canSend?.() === false ? Effect.fail(interruptTurnChanged) : send,
+		).pipe(
 			Effect.tapError((err) =>
 				Effect.sync(() => {
-					hadUnconfirmedAttempt ||= isUnconfirmedSendError(err)
+					hadUnconfirmedAttempt ||= err !== interruptTurnChanged && isUnconfirmedSendError(err)
 				}),
 			),
 			Effect.retry({
-				while: isRetryableSendError,
+				while: (err) => err !== interruptTurnChanged && isRetryableSendError(err),
 				times: MAX_CONNECT_SEND_RETRIES,
 				schedule: Schedule.exponential(Duration.millis(CONNECT_SEND_RETRY_BASE_MS)),
 			}),
 			Effect.mapError((err) => ({
-				failure: formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt),
-				confirmedPerMessageRejection: !hadUnconfirmedAttempt && isConfirmedPerMessageRejection(err),
+				failure:
+					err === interruptTurnChanged
+						? hadUnconfirmedAttempt
+							? unconfirmedInterruptAfterTurn(idempotencyKey)
+							: failure("The turn changed before /interrupt could be delivered.")
+						: formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt),
+				confirmedPerMessageRejection:
+					err !== interruptTurnChanged &&
+					!hadUnconfirmedAttempt &&
+					isConfirmedPerMessageRejection(err),
+				deliveryUnconfirmed: hadUnconfirmedAttempt,
 			})),
 		)
 	})
@@ -558,6 +583,72 @@ export const answerHint = (
 		: `checkfu sessions:events send --session-id ${shellQuote(sessionId)} --event ${shellQuote(JSON.stringify(event))}`
 }
 
+type InterruptDelivery =
+	| { readonly status: "confirmed" }
+	| { readonly status: "refused" | "unconfirmed"; readonly failure: CliFailure }
+
+const sendInterrupt = (
+	client: CheckfuClient,
+	sessionId: SessionId,
+	key: string,
+	onInterruptedSend?: (failure: CliFailure) => Effect.Effect<void>,
+	options?: ConnectSendOptions,
+): Effect.Effect<InterruptDelivery, never, Stdio.Stdio> =>
+	Effect.gen(function* () {
+		const result = yield* Effect.result(
+			sendConnectEventsWithRetry(
+				client.api.sessions.sendEvents({
+					params: { session_id: sessionId },
+					headers: { "idempotency-key": key },
+					payload: { events: [{ type: "user.interrupt" }] },
+				}),
+				key,
+				options,
+			).pipe(
+				Effect.onInterrupt(() => {
+					const interrupted =
+						options?.canSend?.() === false
+							? unconfirmedInterruptAfterTurn(key)
+							: networkFailure(
+									`Interrupted while sending /interrupt (delivery unconfirmed; retry safely with Idempotency-Key: ${key}).`,
+								)
+					return Effect.all([
+						writeStderrLine(interrupted.message).pipe(Effect.ignore),
+						onInterruptedSend?.(interrupted) ?? Effect.void,
+					])
+				}),
+			),
+		)
+		if (result._tag === "Failure" && !result.failure.deliveryUnconfirmed) {
+			return { status: "refused", failure: result.failure.failure }
+		}
+		if (result._tag === "Success" && hasInterruptReceipt(result.success.data)) {
+			return { status: "confirmed" }
+		}
+		const uncertain =
+			options?.canSend?.() === false
+				? unconfirmedInterruptAfterTurn(key)
+				: result._tag === "Failure"
+					? result.failure.failure
+					: networkFailure(
+							`Interrupt response did not confirm a user.interrupt receipt (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
+						)
+		return { status: "unconfirmed", failure: uncertain }
+	})
+
+const reportInterrupt = (delivery: InterruptDelivery, failOnError = false) =>
+	delivery.status === "confirmed"
+		? writeStderrLine("Interrupt requested.")
+		: failOnError
+			? Effect.fail(delivery.failure)
+			: writeStderrLine(`Interrupt failed: ${delivery.failure.message}`)
+
+interface LiveInterruptAttempt {
+	readonly turn: number
+	key?: string
+	status: "pending" | "unconfirmed" | "confirmed"
+}
+
 const dispatchUserLine = (
 	client: CheckfuClient,
 	sessionId: SessionId,
@@ -567,6 +658,7 @@ const dispatchUserLine = (
 		readonly failOnInterruptError?: boolean
 		readonly reportRecoverableSendErrors?: boolean
 		readonly onInterruptedSend?: (failure: CliFailure) => Effect.Effect<void>
+		readonly interrupt?: Effect.Effect<void, CliFailure, Stdio.Stdio>
 	},
 ): Effect.Effect<"continue" | "exit", CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
@@ -579,42 +671,12 @@ const dispatchUserLine = (
 		}
 
 		if (trimmed === "/interrupt") {
-			const key = yield* client.generateIdempotencyKey
-			const res = yield* Effect.result(
-				sendConnectEventsWithRetry(
-					client.api.sessions.sendEvents({
-						params: { session_id: sessionId },
-						headers: { "idempotency-key": key },
-						payload: { events: [{ type: "user.interrupt" }] },
-					}),
-					key,
-				).pipe(
-					Effect.onInterrupt(() => {
-						const msg = `Interrupted while sending /interrupt (delivery unconfirmed; retry safely with Idempotency-Key: ${key}).`
-						return Effect.all([
-							writeStderrLine(msg).pipe(Effect.ignore),
-							options?.onInterruptedSend !== undefined
-								? options.onInterruptedSend(networkFailure(msg))
-								: Effect.void,
-						])
-					}),
-				),
-			)
-			const interruptFailure =
-				res._tag === "Failure"
-					? res.failure.failure
-					: hasInterruptReceipt(res.success.data)
-						? undefined
-						: networkFailure(
-								`Interrupt response did not confirm a user.interrupt receipt (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
-							)
-			if (interruptFailure !== undefined) {
-				if (options?.failOnInterruptError === true) {
-					return yield* interruptFailure
-				}
-				yield* writeStderrLine(`Interrupt failed: ${interruptFailure.message}`)
+			if (options?.interrupt !== undefined) {
+				yield* options.interrupt
 			} else {
-				yield* writeStderrLine("Interrupt requested.")
+				const key = yield* client.generateIdempotencyKey
+				const result = yield* sendInterrupt(client, sessionId, key, options?.onInterruptedSend)
+				yield* reportInterrupt(result, options?.failOnInterruptError)
 			}
 			return "continue" as const
 		}
@@ -980,21 +1042,95 @@ export const sessionsConnectCommand = Command.make(
 				}
 
 				if (isInteractiveTty) {
-					let interruptedLiveTurn: number | undefined
+					let activeInterrupt: LiveInterruptAttempt | undefined
 					let disconnecting = false
-					const interruptQueue = yield* Queue.unbounded<void, Cause.Done>()
+					const interruptQueue = yield* Queue.unbounded<LiveInterruptAttempt, Cause.Done>()
+					const beginInterrupt = (turn: number): LiveInterruptAttempt | undefined => {
+						if (activeInterrupt?.turn === turn) {
+							if (activeInterrupt.status !== "unconfirmed") {
+								return
+							}
+							activeInterrupt.status = "pending"
+						} else {
+							activeInterrupt = { turn, status: "pending" }
+						}
+						return activeInterrupt
+					}
+
+					const canInterruptTurn = (turn: number) => {
+						const current = Ref.getUnsafe(stateRef)
+						return (
+							!current.ended &&
+							current.liveTurn === turn &&
+							shouldInterruptOnCtrlC(current, undefined)
+						)
+					}
+
+					const runInterrupt = (attempt: LiveInterruptAttempt, fromSignal: boolean) =>
+						Effect.gen(function* () {
+							if (!canInterruptTurn(attempt.turn)) {
+								if (activeInterrupt === attempt) {
+									activeInterrupt = undefined
+								}
+								return
+							}
+							const priorDeliveryUnconfirmed = attempt.key !== undefined
+							attempt.key ??= yield* client.generateIdempotencyKey
+							const result = yield* sendInterrupt(
+								client,
+								sessionId,
+								attempt.key,
+								(error) => Ref.set(incompleteTurnRef, error),
+								{
+									priorDeliveryUnconfirmed,
+									canSend: () => canInterruptTurn(attempt.turn),
+								},
+							)
+							if (activeInterrupt === attempt) {
+								const latest = Ref.getUnsafe(stateRef)
+								if (
+									result.status === "refused" ||
+									latest.ended ||
+									latest.liveTurn !== attempt.turn
+								) {
+									activeInterrupt = undefined
+								} else {
+									attempt.status = result.status
+								}
+							}
+							yield* reportInterrupt(result)
+							const latest = Ref.getUnsafe(stateRef)
+							if (
+								fromSignal &&
+								!latest.ended &&
+								latest.liveTurn === attempt.turn &&
+								result.status === "confirmed" &&
+								activeInterrupt === attempt &&
+								!disconnecting
+							) {
+								yield* writeStderrLine("Press Ctrl-C again to disconnect.")
+							}
+						})
+
+					const typedInterrupt = Effect.gen(function* () {
+						const current = yield* Ref.get(stateRef)
+						if (!shouldInterruptOnCtrlC(current, undefined)) {
+							const key = yield* client.generateIdempotencyKey
+							yield* reportInterrupt(
+								yield* sendInterrupt(client, sessionId, key, (error) =>
+									Ref.set(incompleteTurnRef, error),
+								),
+							)
+							return
+						}
+						const attempt = beginInterrupt(current.liveTurn)
+						if (attempt !== undefined) {
+							yield* runInterrupt(attempt, false)
+						}
+					})
 
 					const interruptWorker = yield* Effect.forever(
-						Queue.take(interruptQueue).pipe(
-							Effect.andThen(dispatchUserLine(client, sessionId, "/interrupt", stateRef)),
-							Effect.andThen(
-								Effect.suspend(() =>
-									disconnecting
-										? Effect.void
-										: writeStderrLine("Press Ctrl-C again to disconnect."),
-								),
-							),
-						),
+						Effect.flatMap(Queue.take(interruptQueue), (attempt) => runInterrupt(attempt, true)),
 					).pipe(Effect.forkChild)
 
 					const deliverRequestedInterrupts = Effect.gen(function* () {
@@ -1026,6 +1162,7 @@ export const sessionsConnectCommand = Command.make(
 								dispatchUserLine(client, sessionId, nextEvent.outcome.success, stateRef, {
 									reportRecoverableSendErrors: true,
 									onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
+									interrupt: typedInterrupt,
 								}).pipe(Effect.map((action) => ({ _tag: "action" as const, action }))),
 								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
 							)
@@ -1037,12 +1174,11 @@ export const sessionsConnectCommand = Command.make(
 
 					yield* withSigintHandler(() => {
 						const current = Ref.getUnsafe(stateRef)
-						if (shouldInterruptOnCtrlC(current, interruptedLiveTurn)) {
-							interruptedLiveTurn = current.liveTurn
-							Queue.offerUnsafe(interruptQueue, undefined)
-							return true
+						if (current.ended || !shouldInterruptOnCtrlC(current, undefined)) {
+							return false
 						}
-						return false
+						const attempt = beginInterrupt(current.liveTurn)
+						return attempt !== undefined && Queue.offerUnsafe(interruptQueue, attempt)
 					}, ttyLoop).pipe(Effect.ensuring(deliverRequestedInterrupts))
 					return
 				}
