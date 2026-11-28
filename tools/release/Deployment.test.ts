@@ -6,7 +6,7 @@ import { promisify } from "node:util"
 import { gzipSync } from "node:zlib"
 import { packTar } from "modern-tar"
 import { expect, it } from "vitest"
-import { githubDistribution } from "../../apps/cli/src/Deployment/Distribution.ts"
+import { makeGithubDistribution } from "../../apps/cli/src/Deployment/Distribution.ts"
 import {
 	installDependencies,
 	managedEnvironment,
@@ -52,8 +52,7 @@ it.skipIf(process.platform === "win32")(
 				{ operation: "deploy", stage: "staging" },
 				{
 					distribution: {
-						...githubDistribution,
-						latest: async () => "a".repeat(40),
+						...makeGithubDistribution("a".repeat(40)),
 						source: async () => archive,
 					},
 					target: `${process.platform}-${process.arch}`,

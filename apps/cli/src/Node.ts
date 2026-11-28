@@ -6,13 +6,15 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { startCli } from "./Runner.ts"
 import { runCli } from "./Cli.ts"
+import { makeGithubDistribution } from "./Deployment/Distribution.ts"
 import {
 	CheckoutResolver,
-	githubDistribution,
 	installDependencies,
 	makeManagedResolver,
 	managedEnvironment,
 } from "./Deployment/Managed.ts"
+
+declare const CHECKFU_DEPLOY_REVISION: string | undefined
 
 const report = process.platform === "linux" ? process.report?.getReport() : undefined
 const musl =
@@ -37,7 +39,9 @@ startCli(
 		Effect.provideService(
 			CheckoutResolver,
 			makeManagedResolver({
-				distribution: githubDistribution,
+				distribution: makeGithubDistribution(
+					typeof CHECKFU_DEPLOY_REVISION === "string" ? CHECKFU_DEPLOY_REVISION : "",
+				),
 				target,
 				env: managedEnvironment(process.env),
 				install: installDependencies,

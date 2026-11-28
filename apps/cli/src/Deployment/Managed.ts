@@ -10,7 +10,7 @@ import type { CheckoutRequest, ResolveCheckout } from "../Commands/Deploy.ts"
 import { configError } from "../Errors.ts"
 import type { CliFailure } from "../Errors.ts"
 import { configDirectory } from "../SavedConnection.ts"
-import { extract, githubDistribution, installRuntime, REVISION, STAGE } from "./Distribution.ts"
+import { extract, installRuntime, REVISION, STAGE } from "./Distribution.ts"
 import type { Distribution } from "./Distribution.ts"
 
 const decodeRevision = Schema.decodeUnknownSync(Schema.Struct({ revision: Schema.String }))
@@ -230,8 +230,7 @@ export const prepareManaged = async (
 			throw error
 		}
 	} else {
-		options.announce("Fetching the latest origin/main commit…")
-		revision = await options.distribution.latest(signal)
+		revision = options.distribution.revision
 	}
 	if (!REVISION.test(revision)) {
 		throw new Error("Invalid deployment revision. Nothing was changed.")
@@ -369,4 +368,4 @@ export const makeManagedResolver =
 			}
 		})
 
-export { CheckoutResolver, githubDistribution }
+export { CheckoutResolver }

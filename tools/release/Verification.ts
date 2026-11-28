@@ -59,6 +59,14 @@ export const journeys: ReadonlyArray<Journey> = [
 			"installed candidate tarballs; production HTTP/domain; bounded echo runtime, not agent execution",
 	},
 	{
+		id: "deployment-source",
+		group: "clients",
+		promise: "Deploy the server revision built with the installed CLI",
+		surfaces: ["cli"],
+		boundary: "installed candidate CLI; deployment source URL compared with the qualified commit",
+		notApplicable: "Only the CLI deploys Checkfu",
+	},
+	{
 		id: "ui-session-admission",
 		group: "ui",
 		promise: "Correct a refused session without losing the form or admitting partial state",
@@ -157,13 +165,6 @@ export const verificationTags = [
 ]
 
 export const gaps = [
-	{
-		id: "published-client-compatibility",
-		status: "failed",
-		reason:
-			"Published checkfu@0.0.2 and @checkfu/sdk@0.0.1 expect ArtifactResource from session outputs; the candidate server returns SessionOutputsResource. Candidate-to-candidate tests do not qualify this pair.",
-		source: "packages/sdk/src/Api.ts",
-	},
 	{
 		id: "mcp-oauth-refresh",
 		status: "product gap",

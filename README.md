@@ -20,7 +20,7 @@ npm install -g checkfu
 checkfu deploy
 ```
 
-`deploy` signs in to Cloudflare, prompts for a provider key, deploys the server from `origin/main`, prints your API, MCP, and Dashboard URLs, and saves credentials in `~/.config/checkfu` (re-run `checkfu deploy` to update in place).
+`deploy` signs in to Cloudflare, prompts for a provider key, deploys the server revision built with your CLI, prints your API, MCP, and Dashboard URLs, and saves credentials in `~/.config/checkfu`. To upgrade, install the newer CLI and run `checkfu deploy` again.
 
 ## Interfaces
 

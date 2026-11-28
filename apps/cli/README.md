@@ -39,7 +39,7 @@ checkfu deploy
 
 The CLI signs in to your Cloudflare account, prompts privately for a model provider key, deploys Checkfu, and saves the connection. Your account needs Workers Paid and R2 enabled. Bun and deployment dependencies are downloaded into a private Checkfu cache automatically. You do not need a source checkout or Docker.
 
-`checkfu deploy` fetches and deploys the latest `origin/main` commit. Server changes do not require an npm CLI update.
+`checkfu deploy` fetches and deploys the server revision built with the installed CLI. Install the newer CLI before deploying a newer server revision.
 
 Run `checkfu deploy` again to update the same deployment, preserving its key, stage, account, and stored data. Use `--stage staging` to create or select a separate deployment; subsequent deploys remember the last selected stage. Settings and credentials live under `~/.config/checkfu` (or `CHECKFU_CONFIG_DIR`), separately from the source cache and globally installed npm package.
 

@@ -66,6 +66,7 @@ it("keeps untouched surfaces, actual browser behavior and unsupported promises o
 	expect(cell?.surfaces["mcp"]).toMatchObject({ status: "passed" })
 	expect(cell?.surfaces["ui"]).toMatchObject({ status: "unverified" })
 	expect(report.gaps.map((gap) => gap.id)).toContain("mcp-oauth-refresh")
-	expect(report.gaps.map((gap) => gap.id)).toContain("published-client-compatibility")
+	expect(report.cases.find((row) => row.id === "deployment-source")?.status).toBe("unverified")
+	expect(report.blockers.map((blocker) => blocker.id)).toContain("deployment-source")
 	expect(report.releaseQualified).toBe(false)
 })

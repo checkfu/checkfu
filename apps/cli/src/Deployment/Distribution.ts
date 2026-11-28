@@ -3,17 +3,15 @@ import { constants } from "node:fs"
 import { chmod, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { unpackTar } from "modern-tar"
-import * as Schema from "effect/Schema"
 import { readResponseBytes } from "./ResponseBytes.ts"
 
 export const REVISION = /^[a-f0-9]{40}$/
 export const STAGE = /^[a-z0-9]+[-_a-z0-9]*$/i
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
-const decodeCommit = Schema.decodeUnknownSync(Schema.Struct({ sha: Schema.String }))
 const RUNTIME_MODE = 0o700
 
 export interface Distribution {
-	readonly latest: (signal: AbortSignal) => Promise<string>
+	readonly revision: string
 	readonly source: (revision: string, signal: AbortSignal) => Promise<Uint8Array>
 	readonly download: (url: string, signal: AbortSignal) => Promise<Uint8Array>
 }
@@ -30,39 +28,22 @@ const bytes = async (response: Response, limit: number): Promise<Uint8Array> => 
 	return readResponseBytes(response.body, limit)
 }
 
-export const makeGithubDistribution = (request: typeof fetch = fetch): Distribution => {
+export const makeGithubDistribution = (
+	revision: string,
+	request: typeof fetch = fetch,
+): Distribution => {
 	const download: Distribution["download"] = async (url, signal) =>
 		bytes(
 			await request(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(180_000)]) }),
 			150 * 1024 * 1024,
 		)
 	return {
-		latest: async (signal) => {
-			const get = async <A>(path: string, decode: (value: unknown) => A): Promise<A> => {
-				const response = await request(`https://api.github.com/repos/checkfu/checkfu/${path}`, {
-					signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
-					headers: { Accept: "application/vnd.github+json", "User-Agent": "checkfu-cli" },
-				})
-				if (!response.ok) {
-					throw new Error(
-						`Could not fetch origin/main (GitHub HTTP ${response.status}). Nothing was deployed; retry later.`,
-					)
-				}
-				return decode(await response.json())
-			}
-			const { sha } = await get("commits/main", decodeCommit)
-			if (!REVISION.test(sha)) {
-				throw new Error("GitHub returned an invalid main revision.")
-			}
-			return sha
-		},
+		revision,
 		source: (revision, signal) =>
 			download(`https://codeload.github.com/checkfu/checkfu/tar.gz/${revision}`, signal),
 		download,
 	}
 }
-
-export const githubDistribution = makeGithubDistribution()
 
 /** No links, absolute paths, traversal, device entries, or executable archive modes. */
 export const extract = async (archive: Uint8Array, directory: string): Promise<void> => {

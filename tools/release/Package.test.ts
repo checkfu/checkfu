@@ -132,6 +132,38 @@ afterAll(async () => {
 })
 
 it(
+	"deploys the server from the exact source revision recorded for the installed CLI",
+	{ timeout: 20_000, tags: ["acceptance", "deployment-source"] },
+	async () => {
+		const { commit } = Schema.decodeSync(
+			Schema.fromJsonString(Schema.Struct({ commit: Schema.String })),
+		)(await readFile(recordPath, "utf8"))
+		const config = join(scratch, "deploy-source")
+		const intercept = new URL(
+			`data:text/javascript,${encodeURIComponent(`
+			globalThis.fetch = async (url) => {
+				process.stderr.write(String(url) + "\\n")
+				return new Response(null, { status: 503 })
+			}
+		`)}`,
+		)
+		const result = execute(consumerNode, ["--import", intercept.href, cli, "deploy"], {
+			cwd: consumer,
+			env: env({ CHECKFU_CONFIG_DIR: config, CHECKFU_DEPLOY_REVISION: "b".repeat(40) }),
+			timeout: 15_000,
+		})
+		await expect(result).rejects.toMatchObject({
+			stderr: expect.stringContaining(
+				`https://codeload.github.com/checkfu/checkfu/tar.gz/${commit}`,
+			),
+		})
+		await expect(result).rejects.toMatchObject({
+			stderr: expect.not.stringContaining("commits/main"),
+		})
+	},
+)
+
+it(
 	"installs independently of the checkout and exposes working JavaScript and TypeScript entry points",
 	{ timeout: 45_000, tags: ["acceptance", "installed-entrypoints"] },
 	async () => {

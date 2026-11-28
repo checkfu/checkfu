@@ -83,8 +83,7 @@ const fixture = async () => {
 	const calls: Array<string> = []
 	let revision = first
 	const distribution: Distribution = {
-		latest: async () => {
-			calls.push("main")
+		get revision() {
 			return revision
 		},
 		source: async (sha) => {
@@ -147,7 +146,7 @@ describe("managed deployment lifecycle", () => {
 				signal(),
 			),
 		).rejects.toThrow("npm install -g checkfu@latest")
-		expect(f.calls).toEqual(["main"])
+		expect(f.calls).toEqual([])
 	})
 	it("holds the operation lock until cancellation has finished asynchronous cleanup", async () => {
 		const directory = await temporary()
@@ -213,7 +212,7 @@ describe("managed deployment lifecycle", () => {
 			await acquireOperation(join(directory, "deploy"))
 		)()
 	})
-	it("installs once, follows main, and preserves stage secrets/data across updates, failures and reinstalls", async () => {
+	it("uses the installed revision and preserves stage data across upgrades and reinstalls", async () => {
 		const directory = await temporary()
 		const f = await fixture()
 		const installed = await prepareManaged(
@@ -232,7 +231,7 @@ describe("managed deployment lifecycle", () => {
 		const repeated = await prepareManaged(directory, { operation: "deploy" }, f.options, signal())
 		expect(repeated.root).toBe(installed.root)
 		expect(repeated.stage).toBe("staging")
-		expect(f.calls).toEqual(["main", `source:${first}`, "runtime", "install", "main"])
+		expect(f.calls).toEqual([`source:${first}`, "runtime", "install"])
 		f.next()
 		const updated = await prepareManaged(directory, { operation: "deploy" }, f.options, signal())
 		expect(updated.root).not.toBe(installed.root)
@@ -499,25 +498,26 @@ describe("managed deployment lifecycle", () => {
 })
 
 describe("deployment downloads", () => {
-	it("fetches the latest main commit once per deployment without consulting or waiting for CI", async () => {
+	it("downloads source for the packaged revision without resolving a branch", async () => {
 		const calls: Array<string> = []
-		const distribution = makeGithubDistribution(async (input) => {
+		const distribution = makeGithubDistribution(first, async (input) => {
 			const url = String(input)
 			calls.push(url)
-			expect(url).toBe("https://api.github.com/repos/checkfu/checkfu/commits/main")
-			return Response.json({ sha: calls.length === 1 ? first : second })
+			return new Response("source")
 		})
-		await expect(distribution.latest(signal())).resolves.toBe(first)
-		await expect(distribution.latest(signal())).resolves.toBe(second)
-		expect(calls).toHaveLength(2)
+		expect(distribution.revision).toBe(first)
+		await expect(distribution.source(distribution.revision, signal())).resolves.toEqual(
+			new TextEncoder().encode("source"),
+		)
+		expect(calls).toEqual([`https://codeload.github.com/checkfu/checkfu/tar.gz/${first}`])
 	})
-	it("refuses an invalid revision or a failed source lookup before downloading code", async () => {
+	it("reports a failed source download", async () => {
 		await expect(
-			makeGithubDistribution(async () => Response.json({ sha: "not-a-commit" })).latest(signal()),
-		).rejects.toThrow("invalid main revision")
-		await expect(
-			makeGithubDistribution(async () => new Response(null, { status: 403 })).latest(signal()),
-		).rejects.toThrow("GitHub HTTP 403")
+			makeGithubDistribution(first, async () => new Response(null, { status: 403 })).source(
+				first,
+				signal(),
+			),
+		).rejects.toThrow("HTTP 403")
 	})
 	it("verifies runtime integrity before executing, detects cache corruption and can retry", async () => {
 		const directory = await temporary()

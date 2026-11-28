@@ -108,7 +108,10 @@ const bundleNotices = async (directory: string, metafile: string) => {
 	await rm(metafile)
 }
 
-export const buildCliPackage = async (root = releaseRoot): Promise<string> => {
+export const buildCliPackage = async (
+	root = releaseRoot,
+	commit = currentCommit(),
+): Promise<string> => {
 	const source = "apps/cli"
 	const { version } = await manifest(source)
 	const directory = await prepare(root, "checkfu", source)
@@ -122,6 +125,8 @@ export const buildCliPackage = async (root = releaseRoot): Promise<string> => {
 			"--packages=bundle",
 			"--define",
 			"CHECKFU_STANDALONE=true",
+			"--define",
+			`CHECKFU_DEPLOY_REVISION=${JSON.stringify(commit)}`,
 			"--banner",
 			"#!/usr/bin/env node",
 			join(repoRoot, source, "src/Node.ts"),
@@ -306,7 +311,7 @@ const buildCandidates = async (directory: string, commit: string) => {
 	const previous = process.env["CHECKFU_API_KEY"]
 	try {
 		process.env["CHECKFU_API_KEY"] = BUILD_CREDENTIAL_SENTINEL
-		const cli = await buildCliPackage(scratch)
+		const cli = await buildCliPackage(scratch, commit)
 		const sdk = await buildSdkPackage(scratch)
 		return await packBuiltPackages([cli, sdk], directory, commit)
 	} finally {
