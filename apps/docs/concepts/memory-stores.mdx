@@ -1,0 +1,69 @@
+---
+title: "Memory stores"
+description: "Keep text files that outlive a Session and share them between Sessions and your app."
+---
+
+A Memory store holds small text files, called memories, that outlive any Session. The agent reads and writes them as files under `/mnt/memory/<store>`, while your app can edit the same memories over the API.
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const store = await client.waitForPending(
+	await client.memoryStores.create({ name: "User Preferences", description: "One file per user." }),
+)
+const memory = await client.waitForPending(
+	await client.memoryStores.memories.create(store.id, {
+		path: "/users/ada.md",
+		content: "Prefers short answers.\n",
+	}),
+)
+```
+
+```sh CLI
+checkfu memory-stores create --name "User Preferences" --description "One file per user."
+checkfu memory-stores:memories create --memory-store-id "$MEMORY_STORE_ID" --path /users/ada.md --content @ada.md
+```
+
+</CodeGroup>
+
+The agent sees the store's `name` and `description` in its prompt, so make the description clear about what belongs there.
+
+## Update without losing changes
+
+Your app and any number of Sessions can write to the same store. Pass the SHA-256 hash you last read so the update applies only if nobody changed the memory in the meantime:
+
+```ts
+const current = await client.memoryStores.memories.retrieve(store.id, memory.id)
+try {
+	await client.memoryStores.memories.update(store.id, memory.id, {
+		content: current.content + "Timezone: Europe/London\n",
+		precondition: { type: "content_sha256", content_sha256: current.content_sha256 },
+	})
+} catch (error) {
+	if (!(error instanceof Checkfu.ConflictError)) throw error
+	// Someone else changed it. Read it again and reapply your edit.
+}
+```
+
+## Mount a store in a Session
+
+```json
+{
+	"agent": "agent_...",
+	"environment_id": "env_...",
+	"resources": [
+		{
+			"type": "memory_store",
+			"memory_store_id": "memstore_...",
+			"access": "read_write",
+			"instructions": "Check the user's file before answering. Record new preferences there."
+		}
+	]
+}
+```
+
+A store named `"User Preferences"` mounts at `/mnt/memory/user-preferences`. In a `read_write` mount, each file write is persisted to the store immediately, so multiple Sessions can share live state. Size and count caps are in [Limits](/reference/limits#memory-stores-and-files).

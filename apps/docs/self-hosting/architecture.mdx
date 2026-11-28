@@ -1,0 +1,31 @@
+---
+title: "Architecture"
+description: "The Workers, Durable Objects, and storage a Checkfu deployment creates in your Cloudflare account."
+---
+
+A deployment creates six Workers. All API traffic goes through `ApiWorker`, which the other public Workers call over service bindings (`ContentWorker` also reads artifact bytes directly from R2).
+
+| Worker                  | Role                                                                                                                                             |
+| :---------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ApiWorker`             | Serves `/v1/*`, `/openapi.json`, and `/schemas/apply/*`, checks the API key, and hosts resource records, Files, Artifacts, and webhook delivery. |
+| `McpWorker`             | Serves the MCP server at `/mcp`.                                                                                                                 |
+| `App`                   | Serves the [Dashboard](/dashboard) and forwards signed-in browser requests to `ApiWorker` with the deployment's API key.                         |
+| `ContentWorker`         | Serves Artifact viewing links and published sites.                                                                                               |
+| `PiHarnessWorker`       | Runs agent turns, manages session workspaces and Vault connections, and calls model providers. No public address.                                |
+| `CodemodeSandboxWorker` | Runs `codemode` JavaScript scripts in QuickJS. No public address.                                                                                |
+
+Each Session can also start a Linux container on demand. The container has no direct internet access; its HTTP and HTTPS traffic is proxied through `PiHarnessWorker`, which enforces the [Environment](/concepts/environments)'s networking policy.
+
+## Where data lives
+
+| Data                            | Storage                                                                |
+| :------------------------------ | :--------------------------------------------------------------------- |
+| Resource records and history    | Durable Objects on `ApiWorker`                                         |
+| Artifact data collections       | `ArtifactDataObjects` Durable Objects on `ApiWorker`                   |
+| List endpoints                  | D1                                                                     |
+| File and Artifact bytes         | R2                                                                     |
+| Conversations and session files | `PiSession` and `SessionWorkspace` Durable Objects (`PiHarnessWorker`) |
+| Vault credentials               | `Connection` Durable Objects, one per Vault (`PiHarnessWorker`)        |
+| Webhook deliveries              | `WebhookFanout` and `WebhookDeliverer` Durable Objects (`ApiWorker`)   |
+
+Everything stays in your Cloudflare account, placed according to [`CHECKFU_JURISDICTION`](/self-hosting/configuration#jurisdiction). Running `checkfu destroy --stage <name>` deletes all of it.

@@ -1,0 +1,50 @@
+---
+title: "Configure a deployment"
+sidebarTitle: "Configuration"
+description: "The settings a Checkfu deployment reads, and how to change them."
+---
+
+Export settings in your shell, then deploy. To change a provider key or deployment option later, export the new value and run `checkfu deploy` again; existing data and the stage's API key stay intact.
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...
+export CHECKFU_API_DOMAIN=api.example.com
+checkfu deploy
+```
+
+| Variable                                                     | Purpose                                                                                                                                |
+| :----------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------- |
+| `CHECKFU_API_KEY`                                            | The deployment's single API key. Generated on first deploy if unset; cannot be changed by exporting a different key on a later deploy. |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`  | Built-in model providers. Set at least one provider.                                                                                   |
+| `CLOUDFLARE_GATEWAY_ID`                                      | Cloudflare AI Gateway.                                                                                                                 |
+| `CLOUDFLARE_AI_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`             | Cloudflare Workers AI. This key is for models only; it is separate from `CLOUDFLARE_API_TOKEN`.                                        |
+| `CHECKFU_PROVIDERS`                                          | Custom providers as a JSON manifest. See [Models and providers](/concepts/models-and-providers).                                       |
+| `CHECKFU_PROVIDER_SECRET_*`                                  | Secrets referenced by name from `CHECKFU_PROVIDERS`. Never put keys directly in the manifest.                                          |
+| `CHECKFU_JURISDICTION`                                       | `eu`, `fedramp`, or `us`. Controls where Durable Objects, R2, and D1 store data.                                                       |
+| `CHECKFU_LOCATION_HINT`                                      | Preferred region for new Durable Objects, such as `wnam` or `weur`.                                                                    |
+| `CHECKFU_API_DOMAIN`, `CHECKFU_MCP_DOMAIN`                   | Custom hostnames for the API and MCP server. Must be distinct hostnames.                                                               |
+| `CHECKFU_PUBLISH_DOMAIN`                                     | Dedicated zone apex for published artifacts, served at `https://<address>.<domain>/`.                                                  |
+| `CHECKFU_MACHINE_IDLE`                                       | How long an idle Session Linux machine stays warm before sleeping (default `10 minutes`).                                              |
+| `CHECKFU_WEBHOOK_EGRESS_URL`, `CHECKFU_WEBHOOK_EGRESS_TOKEN` | Optional egress proxy URL and bearer token for outbound webhook deliveries.                                                            |
+| `ALCHEMY_PROFILE`                                            | Cloudflare credential profile used by `checkfu deploy` when working across multiple accounts.                                          |
+
+The CLI saves the API key and provider settings per stage. It does not save jurisdiction, location hint, custom hostnames, publish domain, idle timeout, or webhook egress settings, so export those same values on every deploy.
+
+If you already deployed a stage, exporting a different `CHECKFU_API_KEY` in your shell causes `checkfu deploy` to stop rather than rotate the key. Unset `CHECKFU_API_KEY` or match the saved key when updating.
+
+## Jurisdiction
+
+<Warning>
+  Choose `CHECKFU_JURISDICTION` before the first deploy. Changing it later would replace the Durable Object namespaces, the R2 bucket (discarding uploaded Files and Artifact files), and the D1 database, so `checkfu deploy` blocks the update with `Update refused`. To change jurisdiction, run `checkfu destroy --stage <name>` and deploy again, which deletes all data.
+</Warning>
+
+## Custom hostnames
+
+Setting `CHECKFU_API_DOMAIN` or `CHECKFU_MCP_DOMAIN` attaches that hostname and detaches every other custom hostname on the Worker, including ones added in the Cloudflare dashboard. Setting a domain variable to `none` detaches all custom hostnames; leaving it empty or unset leaves existing hostnames alone. Every custom zone must belong to the Cloudflare account you deploy to, and the `workers.dev` addresses keep working.
+
+If you set `CHECKFU_PUBLISH_DOMAIN`, it must be a zone apex, and you must also set **both** `CHECKFU_API_DOMAIN` and `CHECKFU_MCP_DOMAIN` explicitly, each to a hostname outside `CHECKFU_PUBLISH_DOMAIN` or to `none`. Leaving either empty fails the deploy.
+
+<Warning>
+	To change a hostname, deploy twice: first with `none`, then with the new name. A one-step change
+	detaches the old name first, and if the new one fails to attach, the Worker is left with neither.
+</Warning>

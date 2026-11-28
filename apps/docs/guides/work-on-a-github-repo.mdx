@@ -1,0 +1,72 @@
+---
+title: "Work on a GitHub repository"
+description: "Mount a GitHub repository in a Session so the agent can fetch and push with a scoped token."
+---
+
+Mount a repository when you create a Session. Checkfu clones it into `/workspace` so the agent can use `git` normally, while keeping your token out of the agent's container and attaching it only on outbound traffic to that repository.
+
+## Mount the repository
+
+```ts
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const session = await client.waitForPending(
+	await client.sessions.create({
+		agent: process.env.AGENT_ID!,
+		environment_id: process.env.ENVIRONMENT_ID!,
+		resources: [
+			{
+				type: "github_repository",
+				url: "https://github.com/acme/api",
+				authorization_token: process.env.GITHUB_TOKEN!,
+				checkout: { type: "branch", name: "main" },
+			},
+		],
+		initial_events: [
+			{
+				type: "user.message",
+				content: [
+					{
+						type: "text",
+						text: "Fix the failing test in /workspace/api on a branch named fix/flaky-test, then commit and push it.",
+					},
+				],
+			},
+		],
+	}),
+)
+
+for await (const event of await client.sessions.events.stream(session.id)) {
+	if (event.type === "agent.message") console.log(event.content.map((block) => block.text).join(""))
+	if (event.type === "session.error") console.error(event.error.type, event.error.message)
+	if (event.type === "session.status_idle" || event.type === "session.status_terminated") break
+}
+```
+
+The token needs read access to the repository, plus write access if you want the agent to push. Set `access: "read_only"` on the resource to block pushes (see [Create a session](/api-reference/sessions/create-a-session)).
+
+The Session's Environment must allow `github.com`. The default `unrestricted` networking does; under `limited` networking, add `github.com` to `allowed_hosts`. See [Environments](/concepts/environments).
+
+## What the agent can do
+
+`origin` points to the `https://github.com/...` URL, so `git fetch`, `pull`, and `push` work normally through `bash`. The initial clone is shallow (`--depth 1`).
+
+Checkfu attaches the token only to HTTPS requests targeting the mounted repository on `github.com`. Other repositories and `api.github.com` do not receive it, so the agent cannot open a pull request with it. Open the PR from your app after the push, or attach a GitHub MCP server to the Agent.
+
+## Rotate the token
+
+GitHub App installation tokens expire quickly. Replace a repository's token on a live Session at any time:
+
+```ts
+const { data } = await client.sessions.resources.list(session.id)
+const repository = data.find((resource) => resource.type === "github_repository")
+if (repository !== undefined) {
+	await client.sessions.resources.update(session.id, repository.id, {
+		authorization_token: process.env.NEW_GITHUB_TOKEN!,
+	})
+}
+```
+
+The next git request uses the new token. Archiving the Session discards both the clone and the token, so make sure the agent pushes before you archive.

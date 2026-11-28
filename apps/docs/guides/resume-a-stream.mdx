@@ -1,0 +1,59 @@
+---
+title: "Resume a stream"
+description: "Reconnect to a Session's event stream without missing or repeating events."
+---
+
+Long-lived connections drop on deploys, network switches, and sleeping laptops, and the server closes every stream after about 4 minutes. Because each stored event carries a monotonic `seq`, reconnecting from the last `seq` you processed picks up cleanly with no gaps or duplicates.
+
+```sh
+curl -N --fail-with-body "$CHECKFU_BASE_URL/v1/sessions/$SESSION_ID/events/stream" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" \
+  -H "Last-Event-ID: 42"
+```
+
+Each SSE frame sets `id` to the event's `seq`. Stored events replay first, then live ones follow with no gap (see [Stream session events](/api-reference/sessions/stream-session-events) for query options).
+
+## With the SDK
+
+`client.sessions.events.stream` reconnects automatically and filters out events it already delivered. To survive a process restart, persist each `seq` as you handle it and pass it back as `after`:
+
+```ts follow.mts
+import { readFile, writeFile } from "node:fs/promises"
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+const sessionId = process.argv[2]!
+const cursorFile = `.cursor-${sessionId}`
+const saved = await readFile(cursorFile, "utf8").then(Number, () => undefined)
+
+const stream = await client.sessions.events.stream(
+	sessionId,
+	saved === undefined ? undefined : { after: saved },
+)
+for await (const event of stream) {
+	if (event.type === "agent.message") console.log(event.content.map((block) => block.text).join(""))
+	await writeFile(cursorFile, String(event.seq))
+	if (event.type === "session.status_terminated") break
+	if (event.type === "session.status_idle" && event.stop_reason.type !== "requires_action") break
+}
+```
+
+Run `npx tsx follow.mts "$SESSION_ID"`, stop it partway through a turn, and run it again. It resumes at the saved `seq`.
+
+## Catch up from history
+
+To render an existing transcript and then follow live updates, page through the list endpoint and start streaming from the last `seq`:
+
+```ts
+let last = 0
+for await (const event of client.sessions.events.list(sessionId, { limit: 100 })) {
+	render(event)
+	last = event.seq
+}
+for await (const event of await client.sessions.events.stream(sessionId, { after: last }))
+	render(event)
+```
+
+## In the browser
+
+`EventSource` cannot send an `Authorization` header, and your API key should stay on your server. Relay the stream from your backend and forward the browser's `Last-Event-ID` header as `after`. [Add an agent to your app](/guides/add-an-agent-to-your-app#stream-events-to-the-browser) shows a working relay.

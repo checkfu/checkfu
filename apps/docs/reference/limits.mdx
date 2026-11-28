@@ -1,0 +1,135 @@
+---
+title: "Limits"
+description: "Every size, count, and rate limit Checkfu enforces."
+---
+
+Limits are identical on every deployment. A request over a limit fails with `400`, `409` (for resource storage caps such as memories per store, credentials per vault, and artifact database caps), `413`, or `429`, and the error message names the limit. Lengths are in characters unless marked bytes.
+
+## Request bodies
+
+| Endpoint                                                          | Max bytes             |
+| :---------------------------------------------------------------- | :-------------------- |
+| Default                                                           | 163,840 (160 KiB)     |
+| `POST /v1/agents`, `POST /v1/agents/{agent_id}`                   | 2,837,248             |
+| `POST /v1/sessions`                                               | 2,097,152 (2 MiB)     |
+| `POST /v1/sessions/{session_id}/events`                           | 802,816 (784 KiB)     |
+| `POST /v1/artifacts`, `POST /v1/artifacts/{artifact_id}/versions` | 16,183,296            |
+| `POST /v1/files`                                                  | 104,857,600 (100 MiB) |
+| Memory create and update                                          | 616,384               |
+| MCP `POST /mcp`                                                   | 16,248,832            |
+
+## Lists
+
+| Limit                      | Value                                                           |
+| :------------------------- | :-------------------------------------------------------------- |
+| `limit`                    | 1 to 100, default 50                                            |
+| One page                   | About 4,000,000 bytes. Pages can hold fewer than `limit` items. |
+| One Artifact document page | 524,288 bytes of document bodies                                |
+
+## Agents and Environments
+
+| Limit                                   | Value                                                 |
+| :-------------------------------------- | :---------------------------------------------------- |
+| Agent `name` / `description` / `system` | 256 / 2,048 / 100,000                                 |
+| Model ID                                | 256                                                   |
+| MCP servers per Agent                   | 20 (name 32, URL 2,048)                               |
+| Tool policies per `mcp_toolset`         | 128 (tool name 128)                                   |
+| Custom tools per Agent                  | 64 (description 4,096, `input_schema` 16,384 as JSON) |
+| Approval deny message                   | 4,096                                                 |
+| Environment `name` / `description`      | 256 / 1,024                                           |
+
+Custom tools cannot reuse a built-in name (`read`, `ls`, `find`, `grep`, `write`, `edit`, `delete`, `bash`, `save_artifact`, `artifact_data`, `codemode`, `tool_search`) or start with `mcp__`.
+
+## Sessions
+
+| Limit                                     | Value                                                                             |
+| :---------------------------------------- | :-------------------------------------------------------------------------------- |
+| `title`                                   | 1,024                                                                             |
+| Initial messages                          | 50, and 1,048,576 bytes of text in total                                          |
+| Vaults                                    | 20                                                                                |
+| Resources                                 | 72: repositories 8, memory stores 8, artifacts 8, skills 16, files 32             |
+| Repository / file / artifact `mount_path` | 1,024 / 512 / 504                                                                 |
+| Branch / repository token                 | 255 / 4,096                                                                       |
+| Memory store `instructions`               | 4,096                                                                             |
+| Skill `name` / `description` / `SKILL.md` | 64 / 1,024 / 262,144 bytes                                                        |
+| Events per send                           | 8                                                                                 |
+| One `user.message`                        | 16,384 UTF-16 code units, text blocks joined with newlines                        |
+| One `user.custom_tool_result`             | 16,384 UTF-16 code units joined with newlines (up to 64 blocks)                   |
+| `system.message`                          | 1,000 blocks per event; 100,000 cumulative JSON chars per Session                 |
+| Event `id`, `Idempotency-Key`             | 1 to 128                                                                          |
+| Queued messages during a turn             | 8. The next returns `429`.                                                        |
+| Tool calls per turn                       | 64                                                                                |
+| `bash` timeout                            | 120 seconds default, 600 max                                                      |
+| Image returned to the model               | 1,048,576 bytes                                                                   |
+| Turn deadline                             | 10 minutes from start or resume. Then the turn ends with `model_request_timeout`. |
+| MCP response / tool list per server       | 4,194,304 / 262,144 bytes                                                         |
+
+## Session outputs
+
+| Limit                                   | Value                                |
+| :-------------------------------------- | :----------------------------------- |
+| Files saved from `/mnt/session/outputs` | 64                                   |
+| One file / all files                    | 1,048,576 / 4,194,304 bytes          |
+| Entries scanned                         | 512. Over that, nothing is saved.    |
+| Directory path                          | 512. Longer directories are skipped. |
+
+## Memory stores and Files
+
+| Limit                        | Value                         |
+| :--------------------------- | :---------------------------- |
+| Store `name` / `description` | 256 / 1,024                   |
+| Memories per store           | 1,000 (over it returns `409`) |
+| Memory content / path        | 100,000 bytes / 256           |
+| File size                    | 104,857,600 bytes (100 MiB)   |
+| `filename` / `content_type`  | 255 / 128                     |
+
+## Artifacts
+
+| Limit                                  | Value                                                     |
+| :------------------------------------- | :-------------------------------------------------------- |
+| `name`                                 | 256                                                       |
+| Files per version                      | 1,000                                                     |
+| One file / whole version               | 100 MiB / 1 GiB                                           |
+| Inline content per file / per request  | 1 MiB / 4 MiB. Upload larger files with `POST /v1/files`. |
+| File path / content type               | 512 / 128                                                 |
+| `artifact.json`                        | 65,536 bytes                                              |
+| Collections / documents per collection | 16 / 10,000 (over either returns `409`)                   |
+| One document / nesting depth           | 65,536 bytes / 32                                         |
+| Whole database                         | 64 MiB (over it returns `409`)                            |
+| Signed link lifetime                   | 60 seconds to 7 days, default 1 hour                      |
+| `save_artifact` tool                   | 256 files, 8 MiB each, 64 MiB total                       |
+
+## Vaults, Automations, Webhooks
+
+| Limit                               | Value                                                      |
+| :---------------------------------- | :--------------------------------------------------------- |
+| Vault and Credential `display_name` | 255                                                        |
+| Credentials per Vault               | 20 (over it returns `409`)                                 |
+| Credential secret                   | 8 to 16,384                                                |
+| Live Automations                    | 100. The next returns `429` `automation_capacity_reached`. |
+| Automation `name` / `description`   | 256 / 2,048                                                |
+| Cron `expression` / `timezone`      | 256 / 64                                                   |
+| Schedule                            | Fires at most once per clock hour                          |
+| Webhook `url` / `description`       | 2,048 / 1,024                                              |
+| Event types per Webhook             | 64                                                         |
+| Pending deliveries per Webhook      | 1,000                                                      |
+| SDK signature tolerance             | 300 seconds                                                |
+
+## Rate limits
+
+`/v1` has no request rate limit. Its only `429` responses are the queued-message limit (8) and live Automations capacity (100). Artifact data calls from signed links and public sites are rate-limited:
+
+| Limit                                                        | Value                                   |
+| :----------------------------------------------------------- | :-------------------------------------- |
+| Per caller network (IPv4 address or IPv6 `/64`) per Artifact | 120 calls per minute                    |
+| Per Artifact, all callers                                    | 1,200 reads and 1,200 writes per minute |
+
+Exceeding either rate limit returns `429` with `Retry-After: 60`. Each visitor data call body is also capped at `131,072` bytes (larger bodies return `413`).
+
+## Streams and MCP
+
+| Limit                   | Value                                                                       |
+| :---------------------- | :-------------------------------------------------------------------------- |
+| Event stream keepalive  | 15 seconds                                                                  |
+| Event stream connection | 4 minutes, then the server closes it. Reconnect with `after`; the SDK does. |
+| MCP tool result         | 200,000 characters                                                          |

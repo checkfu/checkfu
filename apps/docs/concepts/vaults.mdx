@@ -1,0 +1,75 @@
+---
+title: "Vaults"
+description: "Store bearer tokens for MCP servers and let Sessions use them without seeing them."
+---
+
+A Vault holds Credentials: bearer tokens for your agents' MCP servers. Checkfu attaches the token to outbound MCP requests, so the agent, model, transcript, and API responses never see it.
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+import * as Redacted from "effect/Redacted"
+
+const client = new Checkfu()
+
+const vault = await client.waitForPending(
+	await client.vaults.create({ display_name: "Support tools" }),
+)
+
+await client.waitForPending(
+	await client.vaults.credentials.create(vault.id, {
+		auth: {
+			type: "static_bearer",
+			mcp_server_url: "https://mcp.example.com/mcp",
+			token: Redacted.make(process.env.DOCS_MCP_TOKEN!),
+		},
+	}),
+)
+```
+
+```sh curl
+VAULT_ID=$(curl --fail-with-body -s -X POST "$CHECKFU_BASE_URL/v1/vaults" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "display_name": "Support tools" }' | jq -r .id)
+
+curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/vaults/$VAULT_ID/credentials" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"auth\": {\"type\": \"static_bearer\", \"mcp_server_url\": \"https://mcp.example.com/mcp\", \"token\": \"$DOCS_MCP_TOKEN\"}}"
+```
+
+</CodeGroup>
+
+The token is write-only. To rotate it, update the Credential with `{ auth: { type: "static_bearer", token: ... } }`.
+
+## Use a Vault in a Session
+
+```ts
+import Checkfu, { VaultId } from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const session = await client.waitForPending(
+	await client.sessions.create({
+		agent: agentId,
+		environment_id: environmentId,
+		vault_ids: [VaultId.make(vault.id)],
+	}),
+)
+```
+
+For each of the Agent's MCP servers, Checkfu binds the Credential whose `mcp_server_url` matches the server's `url`. If no Credential matches, the server is called unauthenticated. If multiple Vaults in `vault_ids` hold active Credentials for the same URL, creating the Session fails with `mcp_server_credentials_ambiguous`; pass `mcp_server_credentials` to pick one explicitly (see [Create a session](/api-reference/sessions/create-a-session)).
+
+## How secrets are isolated
+
+The API hands each token straight to the Vault's `Connection` Durable Object, which has no public address. That object attaches the token only to requests for the Credential's own `mcp_server_url` and scrubs it to `[redacted]` in responses. The Session's Linux machine never holds the token. See [Architecture](/self-hosting/architecture).
+
+## Archive or delete
+
+Archiving or deleting a Credential immediately blocks new MCP requests from using its secret and starts erasing it from storage (archiving or deleting a Vault does this for all of its Credentials). Erasure can finish in the background: deleting a Vault returns `200` once storage confirms every secret is gone, or `202` with `"secrets": "erasing"` while erasure continues (deleting a single Credential can likewise return `202` with `"custody": "erasing"`). Send the same `DELETE` again to confirm completion.
+
+```ts
+const deleted = await client.vaults.delete(vault.id)
+```

@@ -1,0 +1,70 @@
+---
+title: "Agents"
+description: "An Agent is a model, a system prompt, and tools. Every change saves a new version."
+---
+
+An Agent bundles a model, a system prompt, and the tools it can use.
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const agent = await client.waitForPending(
+	await client.agents.create({
+		name: "Support",
+		model: "claude-sonnet-5-5",
+		system: "Answer support questions and cite your source.",
+	}),
+)
+```
+
+```sh curl
+curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/agents" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Support",
+    "model": "claude-sonnet-5-5",
+    "system": "Answer support questions and cite your source."
+  }'
+```
+
+```sh CLI
+checkfu agents create --name Support --model claude-sonnet-5-5 --system @system.md
+```
+
+</CodeGroup>
+
+Only `name` and `model` are required (see the [Create an agent](/api-reference/agents/create-an-agent) endpoint for optional fields). Add `mcp_servers` and `tools` to give the agent more to work with; see [Tools](/concepts/tools).
+
+## Versions
+
+Every update saves a new version. Because a Session pins one version for its whole life, editing an Agent never affects Sessions that are already running.
+
+Send only the fields you want to change (optionally include `version` to reject concurrent edits with `409`):
+
+```ts
+await client.agents.update(agent.id, {
+	system: "Answer support questions. Link to the page you used.",
+})
+```
+
+New Sessions use the latest version by default. To pin an older version, pass it explicitly:
+
+```ts
+await client.sessions.create({
+	agent: { type: "agent", id: agent.id, version: 1 },
+	environment_id: environment.id,
+})
+```
+
+## Archive
+
+Agents are archived rather than deleted. An archived Agent stays readable and existing Sessions keep their history, but it cannot start new Sessions.
+
+```sh
+checkfu agents archive --agent-id "$AGENT_ID"
+```

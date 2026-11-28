@@ -1,0 +1,52 @@
+---
+title: "Models and providers"
+description: "Choose an Agent's model and set up the providers your deployment calls."
+---
+
+Each Agent names one model, and Checkfu calls it through a provider your deployment has configured. Provider keys are deployment settings exported in your shell before running `checkfu deploy` (or set in the repository `.env` when running from source). They never pass through the HTTP API.
+
+```sh
+checkfu agents create --name Researcher --model openrouter/anthropic/claude-sonnet-5.5
+```
+
+## Model IDs
+
+Write `<provider>/<model-id>`, such as `anthropic/claude-sonnet-5-5`. Bare IDs like `claude-sonnet-5-5` or `gpt-6.2-sol` work for models in the built-in OpenAI and Anthropic catalogs.
+
+If a built-in provider's key is missing, the Session's turn fails with an error naming the missing environment variables. Missing secrets referenced by custom providers fail earlier, at deploy time.
+
+## Built-in providers
+
+| Provider                | Variables                                                                                 | Example model                                                    |
+| :---------------------- | :---------------------------------------------------------------------------------------- | :--------------------------------------------------------------- |
+| `openai`                | `OPENAI_API_KEY`                                                                          | `gpt-6.2-sol`                                                    |
+| `anthropic`             | `ANTHROPIC_API_KEY`                                                                       | `claude-sonnet-5-5`                                              |
+| `openrouter`            | `OPENROUTER_API_KEY`                                                                      | `openrouter/anthropic/claude-sonnet-5.5`                         |
+| `cloudflare-ai-gateway` | `CLOUDFLARE_GATEWAY_ID` (plus `CLOUDFLARE_AI_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` for HTTPS) | `cloudflare-ai-gateway/claude-sonnet-5-5`                        |
+| `cloudflare-workers-ai` | `CLOUDFLARE_AI_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`                                          | `cloudflare-workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017` |
+
+For Cloudflare AI Gateway, set only `CLOUDFLARE_GATEWAY_ID` and `checkfu deploy` attaches the Workers `AI` binding, letting requests reach your gateway without an API token.
+
+## Custom providers
+
+Add any endpoint that speaks `openai-responses`, `openai-completions`, or `anthropic-messages` by exporting `CHECKFU_PROVIDERS` and its secret variables before deploying:
+
+```sh
+export CHECKFU_PROVIDERS='{"xai":{"name":"xAI","format":"openai-responses","base_url":"https://api.x.ai/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_XAI_API_KEY","default_model":"grok-4"}}'
+export CHECKFU_PROVIDER_SECRET_XAI_API_KEY=xai-...
+checkfu deploy
+```
+
+Agents can then use `"model": "xai/grok-4"`. Keep secrets out of the manifest: `api_key_env`, `auth.env`, and `secret_headers` may reference only variables starting with `CHECKFU_PROVIDER_SECRET_`.
+
+| Field                                                          | Notes                                                                                                                                                                      |
+| :------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`                                                       | Required. One of `openai-responses`, `openai-completions`, or `anthropic-messages`.                                                                                        |
+| `base_url`                                                     | Required. Public `https://` URL with no credentials, query, or fragment.                                                                                                   |
+| `api_key_env`                                                  | Provide either `api_key_env` or `auth`. Sends the referenced secret as a bearer token (or `x-api-key` for `anthropic-messages`).                                           |
+| `auth`                                                         | Alternative to `api_key_env`. A JSON object: `{ "type": "none" }`, `{ "type": "bearer", "env": "..." }`, or `{ "type": "api_key_header", "header": "...", "env": "..." }`. |
+| `name`, `default_model`                                        | Optional display name and default model ID for the provider.                                                                                                               |
+| `headers`, `secret_headers`                                    | Static non-secret headers, and header-to-env-var mappings for secret headers.                                                                                              |
+| `context_window`, `max_tokens`, `reasoning`, `input`, `models` | Optional provider-wide model defaults and per-model overrides under `models`.                                                                                              |
+
+See [Configuration](/self-hosting/configuration) for all deployment variables.

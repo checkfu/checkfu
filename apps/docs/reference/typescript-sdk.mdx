@@ -1,0 +1,195 @@
+---
+title: "TypeScript SDK"
+description: "Install @checkfu/sdk and use its Promise and Effect clients."
+---
+
+```sh
+npm install @checkfu/sdk
+```
+
+The SDK requires Node.js 22.0.0 or later and also runs in Cloudflare Workers and browsers. It exports both a Promise client and an [Effect](https://effect.website) client.
+
+<CodeGroup>
+
+```ts Promise
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const agent = await client.waitForPending(
+	await client.agents.create({ name: "Assistant", model: "claude-sonnet-5-5" }),
+)
+const environment = await client.waitForPending(
+	await client.environments.create({ name: "default" }),
+)
+const session = await client.waitForPending(
+	await client.sessions.create({ agent: agent.id, environment_id: environment.id }),
+)
+
+await client.sessions.events.send(session.id, {
+	events: [
+		{ type: "user.message", content: [{ type: "text", text: "Write a short status report." }] },
+	],
+})
+
+for await (const event of await client.sessions.events.stream(session.id)) {
+	if (event.type === "agent.message") console.log(event.content.map((block) => block.text).join(""))
+	if (event.type === "session.status_idle" || event.type === "session.status_terminated") break
+}
+```
+
+```ts Effect
+import { CheckfuClient } from "@checkfu/sdk"
+import * as Effect from "effect/Effect"
+
+const program = Effect.gen(function* () {
+	const client = yield* CheckfuClient
+	const agent = yield* client.waitForPending(
+		yield* client.agents.create({ name: "Assistant", model: "claude-sonnet-5-5" }),
+	)
+	yield* Effect.log(agent.id)
+}).pipe(Effect.catchTag("NotFoundError", (error) => Effect.logError(error.message)))
+
+await Effect.runPromise(program.pipe(Effect.provide(CheckfuClient.layerFetchFromEnv())))
+```
+
+</CodeGroup>
+
+Promise results are plain JSON with ISO 8601 timestamp strings. Effect results decode through the API's `Schema` types, so timestamps are `DateTime.Utc`.
+
+## Options
+
+`new Checkfu(options)` and `CheckfuClient.layerFetchFromEnv(overrides?)` take the same options. `CheckfuClient.layer(config)` and `CheckfuClient.layerFetch(config)` require `apiKey` (which also accepts `Redacted.Redacted<string>` in Effect), and `layer` / `layerFromEnv` omit `fetch` because you provide your own `HttpClient` layer.
+
+| Option               | Default                                          | Description                                                                       |
+| :------------------- | :----------------------------------------------- | :-------------------------------------------------------------------------------- |
+| `apiKey`             | `CHECKFU_API_KEY`                                | Sent as `Authorization: Bearer`.                                                  |
+| `baseUrl`            | `CHECKFU_BASE_URL`, then `http://localhost:1337` | A trailing `/v1` is removed.                                                      |
+| `maxRetries`         | `2`                                              | Retries after the first attempt.                                                  |
+| `timeout`            | 60 seconds                                       | Per attempt. Milliseconds or a duration like `"30 seconds"`. `null` turns it off. |
+| `autoIdempotencyKey` | `true`                                           | Generate `Idempotency-Key` for writes that accept one.                            |
+| `allowInsecureHttp`  | `false`                                          | Allow `http://` to hosts other than `localhost`, `127.0.0.1`, `[::1]`.            |
+| `defaultHeaders`     | none                                             | Headers sent on every request.                                                    |
+| `fetch`              | `globalThis.fetch`                               | Custom `fetch` (Promise client and `layerFetch*` layers).                         |
+
+The client never follows redirects. `client.withOptions({ ... })` returns a copy with updated options (wrapped in an `Effect` on the Effect client). Call `client.close()` to dispose of the Promise client's runtime.
+
+| Effect layer                                                            | Use                                                         |
+| :---------------------------------------------------------------------- | :---------------------------------------------------------- |
+| `CheckfuClient.layerFetchFromEnv(overrides?)`                           | Reads the environment. Uses `fetch`.                        |
+| `CheckfuClient.layerFetch(config)`                                      | Explicit config. Uses `fetch`.                              |
+| `CheckfuClient.layerFromEnv(overrides?)`, `CheckfuClient.layer(config)` | Same, with your own `HttpClient` and `SecureRandom` layers. |
+
+## Resources
+
+Methods mirror the API: path parameters first, then body or query, then request options.
+
+```ts
+const credential = await client.vaults.credentials.retrieve(vaultId, credentialId)
+await client.agents.archive(agentId, { version: 2 })
+```
+
+| Property         | Subresources                     |
+| :--------------- | :------------------------------- |
+| `agents`         | `versions`                       |
+| `environments`   |                                  |
+| `sessions`       | `events`, `outputs`, `resources` |
+| `memoryStores`   | `memories`                       |
+| `files`          |                                  |
+| `artifacts`      | `versions`, `data`               |
+| `vaults`         | `credentials`                    |
+| `automations`    | `runs`                           |
+| `automationRuns` |                                  |
+| `webhooks`       | `deliveries`                     |
+
+File upload, file download, and single-file raw Artifact download (`GET /v1/artifacts/{artifact_id}/versions/{version}/content`) transfer raw bytes and are omitted from the high-level resources. Use `fetch`, the [CLI](/reference/cli), or `client.raw` in the Effect client (`artifacts.versions.file` fetches one file as JSON text or base64).
+
+## Pending receipts
+
+`waitForPending(result)` returns an already-settled resource as is and polls a [pending receipt](/reference/http-api#pending-receipts) until it is readable.
+
+| Option                     | Default                                      |
+| :------------------------- | :------------------------------------------- |
+| `timeout`                  | 30 seconds, then `APIConnectionTimeoutError` |
+| `initialDelay`, `maxDelay` | 200 ms, growing to 2 seconds                 |
+| `until`                    | A predicate the resource must also satisfy   |
+
+## Pagination
+
+```ts
+for await (const agent of client.agents.list({ limit: 50 })) console.log(agent.id)
+
+const page = await client.agents.list({ limit: 50 })
+if (page.hasNextPage()) await page.getNextPage()
+```
+
+In Effect, paginated `list` methods return one page, `listPages` returns a `Stream` of pages, and `listStream` returns a `Stream` of items (`sessions.resources.list` is unpaginated and returns all resources at once).
+
+## Per-request options
+
+```ts
+const { data, status, headers, requestId } = await client.agents.retrieve(agentId).withResponse()
+const result = yield * client.agents.retrieve(agentId, { withResponse: true }) // Effect
+```
+
+Unary and paginated methods accept `headers`, `timeout`, `maxRetries`, and (in the Promise client) `signal`. Endpoints that support `Idempotency-Key` also accept `idempotencyKey`; passing `idempotencyKey` to an endpoint that does not support it throws `CheckfuConfigError`.
+
+`sessions.events.stream` takes stream-specific options instead: `headers`, `event_deltas`, `openTimeoutMs`, `idleTimeoutMs`, `maxReconnectAttempts`, `baseReconnectDelayMs`, `onOpen`, and (in the Promise client) `signal`.
+
+## Retries
+
+The SDK retries with exponential backoff (500 ms to 8 seconds, with jitter) and honors `Retry-After-Ms` and `Retry-After` up to 60 seconds.
+
+| Request                                                                                    | Retried on                                    |
+| :----------------------------------------------------------------------------------------- | :-------------------------------------------- |
+| Reads, idempotent writes (`DELETE`, `PUT`, `archive`, `pause`, `resume`), and keyed writes | `408`, `429`, `5xx`, timeouts, network errors |
+| Non-idempotent writes without an idempotency key                                           | `429` only                                    |
+
+With `autoIdempotencyKey`, each call generates one key and reuses it across retries within that call; to survive a process restart, pass your own key. `automations.create` always requires a key you choose:
+
+```ts
+await client.automations.create(
+	{
+		name: "Weekday report",
+		agent: agent.id,
+		environment_id: environment.id,
+		initial_events: [
+			{ type: "user.message", content: [{ type: "text", text: "Write the daily report." }] },
+		],
+		schedule: { type: "cron", expression: "0 9 * * 1-5", timezone: "America/New_York" },
+	},
+	{ idempotencyKey: "weekday-report" },
+)
+```
+
+## Errors
+
+```ts
+try {
+	await client.agents.retrieve(agentId)
+} catch (error) {
+	if (error instanceof Checkfu.NotFoundError) console.log("missing", error.requestId)
+	else throw error
+}
+```
+
+Every error carries a `_tag` for Effect and matches `instanceof` on the classes attached to `Checkfu`. API errors expose `status`, `errorType`, `message`, `requestId`, `headers`, and `body`. The full list is in [SDK error classes](/reference/errors#sdk-error-classes).
+
+## Types and helpers
+
+```ts
+import type { BodyOf, JsonResultOf, Op, QueryOf } from "@checkfu/sdk"
+
+type CreateAgentInput = BodyOf<Op<"agents.create">>
+type ListEventsQuery = QueryOf<Op<"sessions.events.list">>
+type JsonAgent = JsonResultOf<Op<"agents.retrieve">>
+```
+
+Request bodies for Credential secrets expect `Redacted.make(...)` from `effect/Redacted`. A few request body/query IDs (`ArtifactId`, `FileId`, `VaultId`, `PublicationAddress`) are branded types exported from `@checkfu/sdk` with a `.make(value)` constructor when passing strings returned by the Promise client.
+
+| Helper                                          | What it does                                                                         |
+| :---------------------------------------------- | :----------------------------------------------------------------------------------- |
+| `unwrapWebhookEvent(body, headers, { secret })` | Verifies a [Webhook](/guides/receive-webhooks) signature and parses the event.       |
+| `foldSessionEvents`                             | Reduces a Session's events to its turn state.                                        |
+| `outstandingCalls`                              | Lists a Session's unanswered tool calls.                                             |
+| `accumulateSessionEvent`                        | Builds a live message preview. See [Live previews](/reference/events#live-previews). |

@@ -1,0 +1,102 @@
+---
+title: "Sessions"
+description: "Run a conversation with an Agent, mount resources into it, and collect what it saves."
+---
+
+A Session is one conversation with an Agent. It pins an Agent version, runs in an Environment, and keeps its event log and `/workspace` files across turns.
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const session = await client.waitForPending(
+	await client.sessions.create({
+		agent: process.env.AGENT_ID!,
+		environment_id: process.env.ENVIRONMENT_ID!,
+	}),
+)
+await client.sessions.events.send(session.id, {
+	events: [
+		{ type: "user.message", content: [{ type: "text", text: "Summarize the open ticket." }] },
+	],
+})
+for await (const event of await client.sessions.events.stream(session.id)) {
+	if (event.type === "agent.message") console.log(event.content.map((block) => block.text).join(""))
+	if (event.type === "session.status_idle" || event.type === "session.status_terminated") break
+}
+```
+
+```sh CLI
+SESSION_ID=$(checkfu sessions create --agent "$AGENT_ID" --environment-id "$ENVIRONMENT_ID" --transform id -r)
+checkfu sessions connect "$SESSION_ID"
+```
+
+</CodeGroup>
+
+Passing an Agent ID pins its latest version at creation time. Later edits to the Agent don't change the Session.
+
+## Turns
+
+A `user.message` starts a turn. Each turn ends with a `session.status_idle` event whose `stop_reason` explains why: the agent finished, you interrupted it, or it is paused waiting for tool answers (`requires_action`). See [Tools](/concepts/tools#answer-a-paused-turn) and [Session events](/reference/events).
+
+Send `user.interrupt` to stop a running turn. Every event carries a monotonic `seq` you can use to [resume a stream](/guides/resume-a-stream).
+
+## Filesystem
+
+| Path                          | Contents                                 |
+| :---------------------------- | :--------------------------------------- |
+| `/workspace`                  | Working files and cloned repositories    |
+| `/mnt/session/outputs`        | Files to save back after each turn       |
+| `/mnt/memory/<store>`         | [Memory stores](/concepts/memory-stores) |
+| `/mnt/artifacts/<name>`       | [Artifact](/concepts/artifacts) versions |
+| `/mnt/session/uploads/<path>` | [Files](/concepts/files)                 |
+| `/mnt/skills/<name>`          | Skills (`SKILL.md` and supporting files) |
+
+The agent's file tools can read every mount path. `bash` sees only `/workspace` and `/mnt/session/outputs`.
+
+## Resources
+
+Attach resources when you create the Session; they cannot be added later (see [Create a session](/api-reference/sessions/create-a-session) and [Limits](/reference/limits#sessions) for counts and options).
+
+```json
+{
+	"agent": "agent_...",
+	"environment_id": "env_...",
+	"resources": [
+		{
+			"type": "github_repository",
+			"url": "https://github.com/acme/api",
+			"authorization_token": "ghp_..."
+		},
+		{ "type": "memory_store", "memory_store_id": "memstore_...", "access": "read_only" },
+		{ "type": "file", "file_id": "file_..." },
+		{ "type": "skill", "artifact_id": "art_..." }
+	]
+}
+```
+
+A Skill is an [Artifact](/concepts/artifacts) with a `SKILL.md` at its root (plus any files it references), mounted read-only at `/mnt/skills/<name>`. For GitHub repositories, see [Work on a GitHub repository](/guides/work-on-a-github-repo).
+
+## Outputs
+
+When a turn ends with `end_turn`, `budget_reached`, or `refusal`, Checkfu saves the files in `/mnt/session/outputs` as [Files](/concepts/files):
+
+```ts
+const outputs = await client.sessions.outputs.retrieve(session.id)
+```
+
+## Archive
+
+Archiving stops any running turn. The event history and saved outputs remain readable.
+
+```sh
+checkfu sessions archive --session-id "$SESSION_ID"
+```
+
+<Warning>
+	Archiving discards `/workspace`, the Linux machine, and any stored repository tokens. Push or save
+	what you need first.
+</Warning>

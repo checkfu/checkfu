@@ -1,0 +1,86 @@
+---
+title: "Webhooks"
+description: "Get a signed HTTPS request when a Session, Automation, Artifact, or other resource changes."
+---
+
+A Webhook is an HTTPS endpoint of yours that Checkfu calls when something happens, such as a Session going idle or a scheduled run failing. Requests are signed with the [Standard Webhooks](https://www.standardwebhooks.com/) scheme and retried on failure. For a complete Node.js receiver, see [Receive webhooks](/guides/receive-webhooks).
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const webhook = await client.waitForPending(
+	await client.webhooks.create(
+		{
+			url: "https://hooks.example.com/checkfu",
+			event_types: ["session.status_idled", "automation_run.failed"],
+		},
+		{ idempotencyKey: crypto.randomUUID() },
+	),
+)
+console.log(webhook.signing_secret) // whsec_...
+```
+
+```sh CLI
+checkfu webhooks create --url "https://hooks.example.com/checkfu" \
+  --event-types '["session.status_idled","automation_run.failed"]'
+```
+
+</CodeGroup>
+
+<Warning>
+	The create response is the only time you see `signing_secret`. Store it right away.
+</Warning>
+
+The URL must be public HTTPS. A Webhook only receives events that happen after it is created.
+
+## Events
+
+Subscribe to specific types, or pass `["*"]` for all of them.
+
+- **Session:** `session.status_run_started`, `session.status_idled`, `session.status_terminated`
+- **Automation:** `automation.created`, `automation.updated`, `automation.paused`, `automation.unpaused`, `automation.archived`
+- **Automation run** (scheduled runs only): `automation_run.started`, `automation_run.succeeded`, `automation_run.failed`
+- **Artifact:** `artifact.created`, `artifact.version_added`, `artifact.published`, `artifact.unpublished`, `artifact.deleted`
+- **Agent:** `agent.created`, `agent.updated`, `agent.archived`
+- **Environment:** `environment.created`, `environment.updated`, `environment.archived`, `environment.deleted`
+- **Vault:** `vault.created`, `vault.archived`, `vault.deleted`
+- **Vault credential:** `vault_credential.created`, `vault_credential.archived`, `vault_credential.deleted`
+- **Memory store:** `memory_store.created`, `memory_store.archived`, `memory_store.deleted`
+- **Webhook:** `webhook.test` (sent only by the test endpoint)
+
+Note that `automation_run.succeeded` fires when a scheduled run successfully creates its Session, not when the agent finishes its turn. Subscribe to `session.status_idled` to know when the agent finishes.
+
+Each payload identifies what happened and which resource changed, plus the parent ID for nested resources (`vault_id` on `vault_credential.*`, `automation_id` on `automation_run.*`). Fetch the resource from the API for full details:
+
+```json
+{
+	"type": "event",
+	"id": "evt_session_sess_..._42",
+	"created_at": "2026-11-28T09:00:00.000Z",
+	"data": { "type": "session.status_idled", "id": "sess_..." }
+}
+```
+
+## Delivery
+
+Checkfu waits 10 seconds for a response, and any `2xx` counts as delivered. Failed deliveries get up to 6 attempts spread over about 5 hours. Redirects (`3xx`) are never followed and disable the Webhook immediately.
+
+Completed deliveries are retained for up to 14 days (up to 500 per Webhook), so you can inspect and replay them:
+
+```sh
+checkfu webhooks test --webhook-id "$WEBHOOK_ID"
+checkfu webhooks:deliveries list --webhook-id "$WEBHOOK_ID"
+checkfu webhooks:deliveries redeliver --webhook-id "$WEBHOOK_ID" --delivery-id "$DELIVERY_ID"
+```
+
+## Rotate the signing secret
+
+```sh
+checkfu webhooks rotate-secret --webhook-id "$WEBHOOK_ID"
+```
+
+For the next 24 hours, Checkfu signs every delivery with both secrets so receivers using either key keep working while you roll out the new one. See [Create a webhook](/api-reference/webhooks/create-a-webhook) for pause/resume and update options.

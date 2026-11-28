@@ -1,0 +1,76 @@
+---
+title: "Deploy Checkfu"
+sidebarTitle: "Deploy"
+description: "Deploy Checkfu into your own Cloudflare account, update it, and delete it."
+---
+
+```sh
+npm install -g checkfu
+checkfu deploy
+```
+
+You need Node.js 22 or later, a Cloudflare account on Workers Paid with R2 enabled, and a model provider key. Deploy from macOS or Linux (`arm64` or `x64`); Windows is not yet supported.
+
+The first run signs you in to Cloudflare. Choose OAuth, keep **All Scopes**, and switch on **Account API Token Provisioning** before you approve. It then asks for an Anthropic, OpenAI, or OpenRouter key, generates the deployment's API key, and asks `Deploy Checkfu to "live"?`. When it finishes, it prints your addresses:
+
+```text
+Checkfu is live at https://<api-worker>.workers.dev
+
+  API key    saved to ~/.config/checkfu/config.json
+  API docs   https://<api-worker>.workers.dev/openapi.json
+  Dashboard  https://<app-worker>.workers.dev
+  MCP        https://<mcp-worker>.workers.dev/mcp
+```
+
+The CLI now uses that connection. Continue with the [Quickstart](/quickstart).
+
+## Update
+
+```sh
+npm install -g checkfu@latest
+checkfu deploy
+```
+
+Each CLI release deploys the server revision it was built with, so install a newer CLI to get a newer server. An update keeps the API key and data. If an update would delete or replace infrastructure, the CLI stops with `Update refused` and applies nothing.
+
+## Stages
+
+```sh
+checkfu deploy --stage staging
+```
+
+Each stage is a separate deployment with its own data and API key. The default first stage is `live`.
+
+`checkfu deploy` remembers the last stage you deployed in `deploy/active.json`. After `checkfu deploy --stage staging`, a later `checkfu deploy` without `--stage` updates `staging`, not `live`. Pass `--stage` explicitly when switching back. A stage named `production` enables extra safeguards against destructive updates.
+
+## Unattended deploys
+
+```sh
+export CLOUDFLARE_API_TOKEN=...
+export CLOUDFLARE_ACCOUNT_ID=...
+export ANTHROPIC_API_KEY=...
+checkfu deploy --yes
+```
+
+## Destroy
+
+```sh
+checkfu destroy --stage live
+```
+
+This permanently deletes the stage and all of its data. It asks first; `--yes` skips the question.
+
+<Accordion title="Config files and failed deploys">
+  The CLI keeps its files in `CHECKFU_CONFIG_DIR`, then `$XDG_CONFIG_HOME/checkfu`, or `~/.config/checkfu` by default. Keep this directory private, and update and destroy a stage from the same directory that deployed it.
+
+The CLI records the stage before it changes anything, so you can always retry or destroy.
+
+| Message                                          | Fix                                                                                      |
+| :----------------------------------------------- | :--------------------------------------------------------------------------------------- |
+| `Deploy did not finish`                          | Run the same command again.                                                              |
+| `did not accept its API key within ...`          | The server is deployed but was slow to start. Run `checkfu deploy` again.                |
+| `Another Checkfu deployment operation holds ...` | Wait for the other run. If it was killed, delete `deploy/operation.lock`.                |
+| `recorded "<stage>" in Cloudflare account ...`   | Your credentials act on a different account. Check `ALCHEMY_PROFILE` and `CLOUDFLARE_*`. |
+| `CHECKFU_API_KEY in your shell differs`          | Unset `CHECKFU_API_KEY` or make it match the saved key.                                  |
+
+</Accordion>

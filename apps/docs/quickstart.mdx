@@ -1,0 +1,112 @@
+---
+title: "Quickstart"
+description: "Deploy Checkfu to your Cloudflare account, create an Agent, and talk to it in a Session."
+---
+
+In about five minutes you will deploy Checkfu, create an Agent, and talk to it from the CLI and from TypeScript.
+
+You need Node.js 22 or later, a Cloudflare account on Workers Paid with R2 enabled, and an API key for Anthropic, OpenAI, or OpenRouter. To try Checkfu without Cloudflare, [run it locally](https://github.com/checkfu/checkfu#development) and skip to step 2.
+
+<Steps>
+  <Step title="Deploy Checkfu">
+    ```sh
+    npm install -g checkfu
+    checkfu deploy
+    ```
+
+    `deploy` signs you in to Cloudflare, asks for your model provider key, and deploys the server. It saves the API URL and a new API key in `~/.config/checkfu/config.json` (or `$XDG_CONFIG_HOME/checkfu/config.json` if `XDG_CONFIG_HOME` is set), and the CLI uses them from now on.
+
+    ```text
+    Checkfu is live at https://<api-worker>.workers.dev
+
+      API key    saved to ~/.config/checkfu/config.json
+      API docs   https://<api-worker>.workers.dev/openapi.json
+      Dashboard  https://<app-worker>.workers.dev
+      MCP        https://<mcp-worker>.workers.dev/mcp
+    ```
+
+    Run `checkfu deploy` again to update the same deployment. See [Deploy](/self-hosting/deploy).
+
+  </Step>
+  <Step title="Create an Agent and an Environment">
+    An [Agent](/concepts/agents) is the model and instructions. An [Environment](/concepts/environments) is where its Sessions run. Pick a model your key can call, such as `claude-sonnet-5-5` or `gpt-6.2-sol`.
+
+    ```sh
+    AGENT_ID=$(checkfu agents create --name Assistant --model claude-sonnet-5-5 --transform id -r)
+    ENVIRONMENT_ID=$(checkfu environments create --name default --transform id -r)
+    ```
+
+    `--transform id -r` prints only the new ID.
+
+  </Step>
+  <Step title="Start a Session and talk to it">
+    A [Session](/concepts/sessions) is one conversation. It keeps its history and `/workspace` files between turns.
+
+    ```sh
+    SESSION_ID=$(checkfu sessions create --agent "$AGENT_ID" --environment-id "$ENVIRONMENT_ID" --transform id -r)
+    checkfu sessions connect "$SESSION_ID"
+    ```
+
+    Ask the agent to write a file in `/workspace` and read it back. Run `connect` again later to pick up where you left off, or watch the Session in the [Dashboard](/dashboard).
+
+  </Step>
+  <Step title="Do the same from TypeScript">
+    Install the SDK and export the saved URL and key:
+
+    ```sh
+    npm install @checkfu/sdk
+    export CHECKFU_BASE_URL=$(jq -r .url ~/.config/checkfu/config.json)
+    export CHECKFU_API_KEY=$(jq -r .api_key ~/.config/checkfu/config.json)
+    ```
+
+    Create a Session, send a message, and stream the reply:
+
+    ```ts quickstart.ts
+    import Checkfu from "@checkfu/sdk"
+
+    // Reads CHECKFU_API_KEY and CHECKFU_BASE_URL from the environment.
+    const client = new Checkfu()
+
+    const agent = await client.waitForPending(
+      await client.agents.create({ name: "Assistant", model: "claude-sonnet-5-5" }),
+    )
+    const environment = await client.waitForPending(
+      await client.environments.create({ name: "default" }),
+    )
+    const session = await client.waitForPending(
+      await client.sessions.create({ agent: agent.id, environment_id: environment.id }),
+    )
+
+    await client.sessions.events.send(session.id, {
+      events: [{ type: "user.message", content: [{ type: "text", text: "Write a short status report." }] }],
+    })
+
+    for await (const event of await client.sessions.events.stream(session.id)) {
+      if (event.type === "agent.message") {
+        console.log(event.content.map((block) => block.text).join(""))
+      }
+      if (event.type === "session.status_idle" || event.type === "session.status_terminated") break
+    }
+    ```
+
+    Writes can return HTTP `202` before the read view catches up; `waitForPending` returns settled resources immediately and polls [pending receipts](/reference/http-api#pending-receipts) until they are ready.
+
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+	<Card title="Sessions" icon="messages" href="/concepts/sessions">
+		Events, turns, mounts, and outputs.
+	</Card>
+	<Card title="Tools" icon="wrench" href="/concepts/tools">
+		Built-in tools, MCP servers, and custom tools.
+	</Card>
+	<Card title="Agents as code" icon="file-code" href="/guides/agents-as-code">
+		Keep Agents in your repository and apply them.
+	</Card>
+	<Card title="Add an agent to your app" icon="code" href="/guides/add-an-agent-to-your-app">
+		Run Sessions from your backend and stream them to users.
+	</Card>
+</CardGroup>

@@ -1,0 +1,48 @@
+---
+title: "Checkfu"
+sidebarTitle: "Introduction"
+description: "Open-source managed agents for any model. Runs in your own Cloudflare account."
+---
+
+Checkfu runs AI agents for you. Each agent works in its own sandbox, with files and a shell that persist between messages. It is [open source](https://github.com/checkfu/checkfu) and runs in your own Cloudflare account.
+
+```sh
+npm install -g checkfu
+checkfu deploy
+```
+
+## Resources
+
+| Resource                                | Endpoint            | What it is                                                       |
+| :-------------------------------------- | :------------------ | :--------------------------------------------------------------- |
+| [Agent](/concepts/agents)               | `/v1/agents`        | Model, system prompt, and tools. Every edit saves a new version. |
+| [Environment](/concepts/environments)   | `/v1/environments`  | Where Sessions run, and what network they can reach.             |
+| [Session](/concepts/sessions)           | `/v1/sessions`      | One running conversation with its own files and shell.           |
+| [Memory store](/concepts/memory-stores) | `/v1/memory_stores` | Text files that outlive a Session.                               |
+| [File](/concepts/files)                 | `/v1/files`         | Immutable bytes you upload or a Session saves.                   |
+| [Artifact](/concepts/artifacts)         | `/v1/artifacts`     | Versioned file sets you can mount, share, or publish as a site.  |
+| [Vault](/concepts/vaults)               | `/v1/vaults`        | Credentials for MCP servers.                                     |
+| [Automation](/concepts/automations)     | `/v1/automations`   | Starts Sessions on a schedule or on demand.                      |
+| [Webhook](/concepts/webhooks)           | `/v1/webhooks`      | Signed event notifications to your endpoint.                     |
+
+## Interfaces
+
+All of them call the same HTTP API.
+
+| Interface                                   | Purpose                                                                       |
+| :------------------------------------------ | :---------------------------------------------------------------------------- |
+| [CLI](/reference/cli)                       | Deploy, manage resources, and chat with `checkfu sessions connect`.           |
+| [TypeScript SDK](/reference/typescript-sdk) | Call the API from your app with Promise or Effect clients.                    |
+| [HTTP API](/reference/http-api)             | Use REST and server-sent events under `/v1/*`.                                |
+| [MCP server](/reference/mcp)                | Give an MCP client the same operations as tools.                              |
+| [Dashboard](/dashboard)                     | Edit resources and watch Sessions live in the browser.                        |
+| [Agents as code](/guides/agents-as-code)    | Keep Agents, Environments, and Automations as files and `checkfu apply` them. |
+
+<CardGroup cols={2}>
+	<Card title="Quickstart" icon="rocket" href="/quickstart">
+		Deploy and talk to your first agent.
+	</Card>
+	<Card title="Add an agent to your app" icon="code" href="/guides/add-an-agent-to-your-app">
+		Run Sessions from your backend and stream them to users.
+	</Card>
+</CardGroup>

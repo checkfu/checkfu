@@ -1,0 +1,76 @@
+---
+title: "MCP server"
+sidebarTitle: "MCP"
+description: "Connect an MCP client to your deployment and call the Checkfu API as tools."
+---
+
+Every deployment runs an MCP server that exposes the Checkfu HTTP API as MCP tools.
+
+<CodeGroup>
+
+```sh Claude Code
+claude mcp add --transport http checkfu "$CHECKFU_MCP_URL" \
+  --header "Authorization: Bearer $CHECKFU_API_KEY"
+```
+
+```ts TypeScript
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
+
+const client = new Client(
+	{ name: "my-app", version: "1.0.0" },
+	{ versionNegotiation: { mode: "auto" } },
+)
+
+await client.connect(
+	new StreamableHTTPClientTransport(new URL(process.env.CHECKFU_MCP_URL!), {
+		requestInit: { headers: { authorization: `Bearer ${process.env.CHECKFU_API_KEY}` } },
+	}),
+)
+
+const agents = await client.callTool({
+	name: "agents_listAgents",
+	arguments: { query: { limit: 10 } },
+})
+console.log(agents.structuredContent)
+```
+
+</CodeGroup>
+
+## Connection
+
+| Property          | Value                                                                            |
+| :---------------- | :------------------------------------------------------------------------------- |
+| URL               | The `MCP` URL `checkfu deploy` prints, or `https://<CHECKFU_MCP_DOMAIN>/mcp`     |
+| Local URL         | `http://localhost:1338/mcp` under `bun run dev`                                  |
+| Authentication    | The deployment's API key as `Authorization: Bearer` or `x-api-key`. No OAuth.    |
+| Transport         | Streamable HTTP, JSON-RPC over `POST`                                            |
+| Protocol revision | `2026-07-28` only. Clients that speak only `2025-11-25` or older cannot connect. |
+| Sessions          | None. Each `POST` is stateless.                                                  |
+| Request body      | At most 16,248,832 bytes                                                         |
+
+A missing or wrong key returns `401`. If the API cannot verify the key, the server returns `503`.
+
+## Tools
+
+Each tool wraps one HTTP operation and is named `<resource>_<operation>`, such as `agents_createAgent` for `POST /v1/agents`. Call `tools/list` for the full set.
+
+Tool arguments accept up to four top-level keys; unknown keys are rejected:
+
+```json
+{
+	"path": { "agent_id": "agent_..." },
+	"query": { "limit": 10 },
+	"body": { "name": "Assistant", "model": "claude-sonnet-5-5" },
+	"idempotency_key": "create-assistant-1"
+}
+```
+
+A successful call returns the API's JSON response in `structuredContent`. A failed call returns `isError: true` with the [error envelope](/reference/errors) as text. Results over 200,000 characters fail: reads return `invalid_request_error`, and writes return `response_too_large` (the write itself was accepted).
+
+## Operations with no tool
+
+| Operation                                                      | Instead                                                                                                                         |
+| :------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| Streaming session events                                       | Page through `sessions_listEvents` with `next_page`.                                                                            |
+| File upload and download, single-file raw Artifact download    | Use the [CLI](/reference/cli) or [HTTP API](/reference/http-api). `artifacts_getArtifactFile` reads one file as text or base64. |
+| Creating or updating a Credential, rotating a repository token | Secrets are excluded from MCP tool schemas. Use the HTTP API, CLI, or [Dashboard](/dashboard).                                  |

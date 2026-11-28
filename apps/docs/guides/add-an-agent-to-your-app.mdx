@@ -1,0 +1,193 @@
+---
+title: "Add an agent to your app"
+description: "Run Sessions from your server, stream their events to the browser, and answer tool calls."
+---
+
+Your server keeps the API key, creates a Session per conversation, and relays its events to the browser. When the agent calls a tool your app owns, the turn pauses until your server sends back the result.
+
+## Create the Agent
+
+Give the Agent a custom tool that your server will run:
+
+```sh
+curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/agents" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" -H "Content-Type: application/json" \
+  -d '{
+    "name": "Support",
+    "model": "claude-sonnet-5-5",
+    "system": "Help customers with their orders. Use lookup_order before you answer.",
+    "tools": [{
+      "type": "custom",
+      "name": "lookup_order",
+      "description": "Look up an order by ID and return its status.",
+      "input_schema": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] }
+    }]
+  }'
+```
+
+## The server
+
+```ts server.mts
+import { createHash } from "node:crypto"
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import { text as readText } from "node:stream/consumers"
+import Checkfu, { type JsonSessionEvent } from "@checkfu/sdk"
+
+const client = new Checkfu()
+type ToolCall = Extract<JsonSessionEvent, { type: "agent.custom_tool_use" | "agent.mcp_tool_use" }>
+
+const tools: Record<string, (input: Record<string, unknown>) => Promise<unknown>> = {
+	lookup_order: async ({ order_id }) => ({ order_id, status: "shipped" }),
+}
+
+async function answer(sessionId: string, call: ToolCall) {
+	if (call.type !== "agent.custom_tool_use") return // MCP calls wait for the user
+	const run =
+		tools[call.name] ??
+		(async () => {
+			throw new Error(`Unknown tool ${call.name}`)
+		})
+	const [text, isError] = await run(call.input).then(
+		(out) => [JSON.stringify(out), false] as const,
+		(e) => [String(e), true] as const,
+	)
+	const id = `result-${createHash("sha256").update(call.id).digest("hex")}` // safe to resend
+	await client.sessions.events
+		.send(sessionId, {
+			events: [
+				{
+					id,
+					type: "user.custom_tool_result",
+					custom_tool_use_id: call.id,
+					content: [{ type: "text", text }],
+					is_error: isError,
+				},
+			],
+		})
+		.catch((error) => {
+			if (!(error instanceof Checkfu.ConflictError)) throw error
+		}) // 409: no longer waiting
+}
+
+async function findCall(sessionId: string, id: string) {
+	const types = ["agent.custom_tool_use", "agent.mcp_tool_use"] as const
+	for await (const event of client.sessions.events.list(sessionId, {
+		order: "desc",
+		types: [...types],
+	})) {
+		if (
+			(event.type === "agent.custom_tool_use" || event.type === "agent.mcp_tool_use") &&
+			event.id === id
+		)
+			return event
+	}
+}
+
+async function relay(req: IncomingMessage, res: ServerResponse, sessionId: string) {
+	const last = Number(req.headers["last-event-id"])
+	const controller = new AbortController()
+	req.on("close", () => controller.abort())
+	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
+	const calls = new Map<string, ToolCall>()
+	try {
+		const after = Number.isInteger(last) && last >= 0 ? { after: last } : undefined
+		for await (const event of await client.sessions.events.stream(sessionId, after, {
+			signal: controller.signal,
+		})) {
+			res.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+			if (event.type === "agent.custom_tool_use" || event.type === "agent.mcp_tool_use")
+				calls.set(event.id, event)
+			if (event.type === "session.status_idle" && event.stop_reason.type === "requires_action") {
+				for (const id of event.stop_reason.event_ids) {
+					const call = calls.get(id) ?? (await findCall(sessionId, id))
+					if (call !== undefined) void answer(sessionId, call).catch(console.error)
+				}
+			}
+		}
+	} catch (error) {
+		if (!controller.signal.aborted) console.error(error)
+	}
+	res.end()
+}
+
+const json = async (req: IncomingMessage) => JSON.parse((await readText(req)) || "{}")
+
+createServer(async (req, res) => {
+	const [, resource, sessionId, action] = new URL(
+		req.url ?? "/",
+		"http://localhost",
+	).pathname.split("/")
+	try {
+		if (resource !== "sessions") {
+			res.writeHead(404).end()
+		} else if (req.method === "POST" && !sessionId) {
+			const session = await client.waitForPending(
+				await client.sessions.create({
+					agent: process.env.AGENT_ID!,
+					environment_id: process.env.ENVIRONMENT_ID!,
+				}),
+			)
+			res.end(JSON.stringify({ id: session.id }))
+		} else if (req.method === "GET" && sessionId && action === "events") {
+			await relay(req, res, sessionId) // In a real app, check that the user owns this Session.
+		} else if (req.method === "POST" && sessionId && action === "messages") {
+			const { text } = await json(req)
+			await client.sessions.events.send(sessionId, {
+				events: [{ type: "user.message", content: [{ type: "text", text }] }],
+			})
+			res.end()
+		} else if (req.method === "POST" && sessionId && action === "confirmations") {
+			const { tool_use_id, result } = await json(req)
+			await client.sessions.events.send(sessionId, {
+				events: [{ type: "user.tool_confirmation", tool_use_id, result }],
+			})
+			res.end()
+		} else {
+			res.writeHead(404).end()
+		}
+	} catch (error) {
+		if (!res.headersSent)
+			res.writeHead(error instanceof Checkfu.APIError ? error.status : 500).end(String(error))
+	}
+}).listen(3000, () => console.log("Listening on http://localhost:3000"))
+```
+
+Start the server in one terminal with `CHECKFU_BASE_URL` and `CHECKFU_API_KEY` exported:
+
+```sh
+AGENT_ID=... ENVIRONMENT_ID=... npx tsx server.mts
+```
+
+Then drive it from a second terminal:
+
+```sh
+SESSION_ID=$(curl -s -X POST http://localhost:3000/sessions | jq -r .id)
+curl -N "http://localhost:3000/sessions/$SESSION_ID/events" &
+curl -X POST "http://localhost:3000/sessions/$SESSION_ID/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Where is order 1042?"}'
+```
+
+You should see the tool call, the `requires_action` pause, your server's tool result, and the agent's final reply stream past.
+
+## Stream events to the browser
+
+Because the relay writes each event's `seq` as the SSE `id`, `EventSource` picks up where it left off after a reconnect while keeping the API key on your server:
+
+```js
+const source = new EventSource(`/sessions/${sessionId}/events`)
+source.addEventListener("agent.message", (e) => showReply(JSON.parse(e.data)))
+source.addEventListener("agent.mcp_tool_use", (e) => {
+	const call = JSON.parse(e.data)
+	if (call.evaluated_permission === "ask") askUser(call) // then POST /sessions/:id/confirmations
+})
+```
+
+## Handle tool calls
+
+A pause arrives as `session.status_idle` with stop reason `requires_action`. Answer every ID in `stop_reason.event_ids`; the turn resumes once the last answer arrives.
+
+- Answer `agent.custom_tool_use` with `user.custom_tool_result`.
+- Answer `agent.mcp_tool_use` that has `evaluated_permission: "ask"` with `user.tool_confirmation` (`result: "allow"` or `"deny"`).
+
+Give each answer a deterministic event `id`: resending with the same `id` returns the original receipt, so two server instances won't answer twice. While paused, the Session waits without making any model requests. See [Tools](/concepts/tools) and [Resume a stream](/guides/resume-a-stream).

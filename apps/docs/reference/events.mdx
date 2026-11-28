@@ -1,0 +1,166 @@
+---
+title: "Session events"
+sidebarTitle: "Events"
+description: "Session event types, stop reasons, send limits, and the list and stream endpoints."
+---
+
+Every stored event carries `id`, `seq`, `type`, `created_at`, and `processed_at`. `seq` increases monotonically with each event; use it as your stream cursor. Text content is an array of text blocks: `[{ "type": "text", "text": "..." }]`.
+
+```json
+{
+	"id": "sevt_sess_..._12",
+	"seq": 12,
+	"type": "session.status_idle",
+	"created_at": "2026-11-27T10:00:04.120Z",
+	"processed_at": "2026-11-27T10:00:04.120Z",
+	"stop_reason": { "type": "requires_action", "event_ids": ["sevt_sess_..._tool_..."] },
+	"turn": 2
+}
+```
+
+## Input events
+
+You send these events, and they also appear in the Session's event history.
+
+| Type                      | Fields                                      | Meaning                                                                           |
+| :------------------------ | :------------------------------------------ | :-------------------------------------------------------------------------------- |
+| `user.message`            | `content`                                   | Starts a turn, or queues behind the running one.                                  |
+| `user.interrupt`          |                                             | Stops the running turn.                                                           |
+| `user.tool_confirmation`  | `tool_use_id`, `result`, `deny_message`     | Allows or denies a waiting `agent.mcp_tool_use`. `deny_message` only with `deny`. |
+| `user.custom_tool_result` | `custom_tool_use_id`, `content`, `is_error` | Answers an `agent.custom_tool_use`.                                               |
+| `system.message`          | `content`                                   | Adds privileged context to the system instructions.                               |
+
+## Agent events
+
+| Type                    | Fields                                                                                 | Meaning                                                                                  |
+| :---------------------- | :------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------- |
+| `agent.message`         | `content`, `truncated`                                                                 | The agent's reply.                                                                       |
+| `agent.thinking`        |                                                                                        | Marks a thinking step; the reasoning text is only streamed in live previews, not stored. |
+| `agent.tool_use`        | `tool_use_id`, `name`, `input`, `truncated`                                            | A built-in tool call.                                                                    |
+| `agent.tool_result`     | `tool_use_id`, `content`, `is_error`, `rejected`, `truncated`                          | Its result.                                                                              |
+| `agent.mcp_tool_use`    | `tool_use_id`, `mcp_server_name`, `name`, `input`, `evaluated_permission`, `truncated` | An MCP tool call. `ask` means it pauses for confirmation.                                |
+| `agent.mcp_tool_result` | `tool_use_id`, `content`, `is_error`, `rejected`, `truncated`                          | Its result.                                                                              |
+| `agent.custom_tool_use` | `tool_use_id`, `name`, `input`                                                         | A custom tool call for your application to run.                                          |
+
+On tool use events, `id` equals `tool_use_id`. `rejected` is `unavailable`, `invalid_arguments`, or `blocked`. `truncated: true` marks shortened text or tool inputs.
+
+## Session and span events
+
+| Type                        | Fields                                              | Meaning                                |
+| :-------------------------- | :-------------------------------------------------- | :------------------------------------- |
+| `session.status_running`    | `turn`                                              | A turn started or resumed.             |
+| `session.status_idle`       | `stop_reason`, `turn`, `cancelled_event_ids`        | A turn stopped.                        |
+| `session.error`             | `error`                                             | A turn failed.                         |
+| `session.status_terminated` | `cancelled_event_ids`                               | The Session ended.                     |
+| `session.archived`          |                                                     | The Session was archived. Always last. |
+| `span.model_request_start`  | `model_request_start_id`                            | A model request started.               |
+| `span.model_request_end`    | `model_request_start_id`, `model_usage`, `is_error` | It finished, with token usage.         |
+
+`cancelled_event_ids` lists tool calls that were still waiting when the turn or Session ended; they can no longer be answered.
+
+## Stop reasons
+
+| `stop_reason.type`  | Meaning                                         |
+| :------------------ | :---------------------------------------------- |
+| `end_turn`          | The agent finished.                             |
+| `requires_action`   | Paused. Answer every call in `event_ids`.       |
+| `interrupted`       | A `user.interrupt` stopped the turn.            |
+| `retries_exhausted` | The turn failed. A `session.error` precedes it. |
+| `budget_reached`    | The model hit its output length limit.          |
+| `refusal`           | The model refused.                              |
+
+## session.error
+
+```json
+{
+	"error": {
+		"type": "repository_unavailable",
+		"message": "Could not clone ...",
+		"retry_status": { "type": "exhausted" }
+	}
+}
+```
+
+| `retry_status.type` | Meaning                                                     |
+| :------------------ | :---------------------------------------------------------- |
+| `exhausted`         | The turn ended. The Session still accepts new messages.     |
+| `terminal`          | The Session ends. `session.status_terminated` follows.      |
+| `retrying`          | Present in the schema for retried failures (informational). |
+
+## Send events
+
+`POST /v1/sessions/{session_id}/events` with `{ "events": [...] }` returns one receipt per event in `data`. A `user.message` receipt includes `turn` and `queued`.
+
+| Limit                          | Value                                                              |
+| :----------------------------- | :----------------------------------------------------------------- |
+| Events per request             | 1 to 8                                                             |
+| Request body                   | 802,816 UTF-8 bytes. Over it: `413`, nothing accepted.             |
+| `user.message` text            | 16,384 UTF-16 code units, after joining blocks with `\n`           |
+| `user.custom_tool_result` text | 16,384 UTF-16 code units after joining with `\n` (up to 64 blocks) |
+| `system.message`               | 1,000 blocks per event; 100,000 cumulative JSON chars per Session  |
+| `deny_message`                 | 4,096 characters                                                   |
+| Messages queued behind a turn  | 8. Over it: `429`.                                                 |
+
+| Error                           | Cause                                                                                                                              |
+| :------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------- |
+| `409` `session_awaiting_action` | Sending `user.message` or `system.message` while the turn is paused waiting for tool answers.                                      |
+| `409`                           | Sending `user.interrupt` with no running turn, answering a call that is not waiting, or writing to an archived/terminated Session. |
+| `409` `idempotency_key_reused`  | Same `Idempotency-Key` sent with a different batch.                                                                                |
+
+To retry safely, give each event an `id` (up to 128 characters) or pass an `Idempotency-Key`; resending returns the original receipts. If a later event in a batch fails (`index > 0`), the error body includes `accepted` (receipts for earlier events) and `failed_index`. If the server could not confirm whether an event was recorded, you get `unconfirmed_index` (including `0`, plus `accepted` when earlier events succeeded); resend with the same IDs.
+
+## List events
+
+```sh
+curl --fail-with-body "$CHECKFU_BASE_URL/v1/sessions/$SESSION_ID/events?limit=100&types=agent.message" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY"
+```
+
+Query parameters: `limit` (1 to 100, default 50), `order` (`asc` or `desc`), `page` (previous `next_page`), and `types` (repeatable).
+
+## Stream events
+
+```sh
+curl -N --fail-with-body "$CHECKFU_BASE_URL/v1/sessions/$SESSION_ID/events/stream?after=42" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY"
+```
+
+```text
+id: 43
+event: agent.message
+data: {"id":"sevt_...","seq":43,"type":"agent.message","created_at":"...","processed_at":"...","content":[{"type":"text","text":"Done."}]}
+
+: keepalive
+```
+
+- `after` or the `Last-Event-ID` header sends only events with a greater `seq`. If both are set, `Last-Event-ID` wins.
+- The stream replays stored events first, then follows live events. It sends `: keepalive` every 15 seconds and closes each connection after about 4 minutes.
+- It ends after `session.archived`, and returns `204` if the Session is already archived and you have read every event.
+- Passing `event_deltas[]=agent.message` (or `agent.thinking`) enables live previews.
+
+See [Resume a stream](/guides/resume-a-stream).
+
+### Live previews
+
+```text
+event: event_start
+data: {"type":"event_start","event":{"id":"sevt_..._agent.message_2_...","type":"agent.message"}}
+
+event: event_delta
+data: {"type":"event_delta","event_id":"sevt_..._agent.message_2_...","delta":{"type":"content_delta","index":0,"content":{"type":"text","text":"Do"}}}
+```
+
+Previews have no `seq` and do not advance the cursor. Append each delta to block `index`, then replace the preview when the stored `agent.message` with the same `id` arrives. The SDK's `accumulateSessionEvent` handles this for you:
+
+```ts
+import Checkfu, { accumulateSessionEvent, type SessionMessagePreview } from "@checkfu/sdk"
+
+const client = new Checkfu()
+let preview: SessionMessagePreview | undefined
+for await (const event of await client.sessions.events.stream(process.argv[2]!, undefined, {
+	event_deltas: ["agent.message"],
+})) {
+	preview = accumulateSessionEvent(preview, event)
+	if (event.type === "session.status_idle") break
+}
+```

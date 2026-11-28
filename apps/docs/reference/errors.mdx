@@ -1,0 +1,79 @@
+---
+title: "Errors"
+description: "The error envelope, status codes, error codes, and SDK error classes."
+---
+
+```json
+{
+	"type": "error",
+	"error": {
+		"type": "conflict_error",
+		"message": "Idempotency-Key was already used for a different request.",
+		"code": "idempotency_key_reused"
+	},
+	"request_id": "req_..."
+}
+```
+
+Every `/v1` error uses this shape. Branch on the HTTP status, `error.type`, and `error.code`; don't parse `message`. Batch event sends can add `accepted`, `failed_index`, and `unconfirmed_index`; see [Session events](/reference/events#send-events).
+
+## Status codes
+
+| Status | `error.type`             | Meaning                                                                               | Retry                |
+| :----- | :----------------------- | :------------------------------------------------------------------------------------ | :------------------- |
+| `400`  | `invalid_request_error`  | Invalid input or invalid JSON                                                         | No                   |
+| `401`  | `authentication_error`   | Missing or wrong API key                                                              | No                   |
+| `404`  | `not_found_error`        | No such resource or route                                                             | No                   |
+| `409`  | `conflict_error`         | Stale `version`, archived resource, reused key, storage cap, or waiting on tool calls | No. Read and decide. |
+| `413`  | `payload_too_large`      | Body over the [limit](/reference/limits#request-bodies)                               | No                   |
+| `415`  | `unsupported_media_type` | JSON endpoint without `Content-Type: application/json`                                | No                   |
+| `429`  | `rate_limit_error`       | A [capacity or rate limit](/reference/limits#rate-limits)                             | Yes, after a delay   |
+| `500`  | `internal_error`         | Unexpected failure                                                                    | Yes                  |
+| `503`  | `service_unavailable`    | Timed out, dependency not ready, or no `CHECKFU_API_KEY`                              | Yes                  |
+
+A `202` is not an error; it is a [pending receipt](/reference/http-api#pending-receipts) (or background Vault/Credential erasure).
+
+## Error codes
+
+| `code`                             | Status       | When                                                                                                                              |
+| :--------------------------------- | :----------- | :-------------------------------------------------------------------------------------------------------------------------------- |
+| `idempotency_key_reused`           | `409`        | The key was used with a different body (or retried for a deleted File).                                                           |
+| `session_awaiting_action`          | `409`        | The turn is waiting on tool calls. Answer them before sending new messages.                                                       |
+| `agent_model_unavailable`          | `400`        | A keyed Agent create names a model this deployment does not support.                                                              |
+| `automation_reference_unavailable` | `404`, `409` | On `POST /v1/automations`, the Agent, version, or Environment is missing or archived (updates return `404`/`409` without `code`). |
+| `automation_schedule_unusable`     | `400`        | The cron expression must name one minute, fire at most once an hour, and use an IANA time zone.                                   |
+| `automation_capacity_reached`      | `429`        | 100 live Automations. Archive one; waiting does not help.                                                                         |
+| `credential_url_taken`             | `409`        | The Vault already has an active Credential for this MCP server URL.                                                               |
+| `mcp_server_blocked`               | `400`        | The Environment's network rules block the Agent's MCP server.                                                                     |
+| `mcp_server_credential_invalid`    | `400`        | The chosen Credential cannot be used for that MCP server.                                                                         |
+| `mcp_server_credentials_ambiguous` | `400`        | Several Credentials match. Pick one with `mcp_server_credentials`.                                                                |
+
+## Retries
+
+Retry `429`, `500`, `503`, and network errors with backoff. Retry a write only with the same `Idempotency-Key` and body, and honor `Retry-After` or `Retry-After-Ms` when present.
+
+## SDK error classes
+
+| Class                        | Cause                                                                 | `retryable`           |
+| :--------------------------- | :-------------------------------------------------------------------- | :-------------------- |
+| `BadRequestError`            | `400`, or client-side parameter / schema encoding validation failure  | No                    |
+| `AuthenticationError`        | `401`                                                                 | No                    |
+| `PermissionDeniedError`      | `403` (not returned by `/v1`)                                         | No                    |
+| `NotFoundError`              | `404`                                                                 | No                    |
+| `ConflictError`              | `409`                                                                 | No                    |
+| `PayloadTooLargeError`       | `413`                                                                 | No                    |
+| `UnsupportedMediaTypeError`  | `415`                                                                 | No                    |
+| `UnprocessableEntityError`   | `422` (not returned by `/v1`)                                         | No                    |
+| `RateLimitError`             | `429`                                                                 | Yes                   |
+| `InternalServerError`        | `500` and other `5xx`                                                 | Yes                   |
+| `ServiceUnavailableError`    | `503`                                                                 | Yes                   |
+| `UnexpectedStatusError`      | Any other status                                                      | Only `408`            |
+| `APIConnectionError`         | Network failure, or a response that failed to decode                  | Network failures only |
+| `APIConnectionTimeoutError`  | Request, stream, or `waitForPending` timed out                        | Yes                   |
+| `APIUserAbortError`          | You aborted                                                           | No                    |
+| `PaginationCursorCycleError` | A list repeated a cursor                                              | No                    |
+| `CheckfuConfigError`         | Bad client options, such as a missing API key or invalid option usage | No                    |
+
+API errors carry `status`, `errorType`, `message`, `requestId`, `headers`, and `body`.
+
+A failed [MCP](/reference/mcp#tools) tool call returns `isError: true` with the error envelope as text. The CLI maps failures to its [exit codes](/reference/cli#exit-codes).
