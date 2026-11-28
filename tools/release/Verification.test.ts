@@ -70,3 +70,41 @@ it("keeps untouched surfaces, actual browser behavior and unsupported promises o
 	expect(report.blockers.map((blocker) => blocker.id)).toContain("deployment-source")
 	expect(report.releaseQualified).toBe(false)
 })
+
+it("credits the project interfaces only for the actions each performs", () => {
+	const template = execution().runner?.testResults[0]?.assertionResults[0]
+	expect(template).toBeDefined()
+	const evidence: Evidence = {
+		...execution(),
+		group: "project",
+		runner: {
+			success: true,
+			testResults: [
+				{
+					name: "/checkout/apps/api/test/workerd/PiSession.workerd.ts",
+					assertionResults: [
+						{
+							...template!,
+							tags: ["acceptance", "authored-project-cli", "authored-project-mcp"],
+						},
+					],
+				},
+			],
+		},
+	}
+	const report = matrix(source, [evidence])
+	expect(report.cases.filter(({ group }) => group === "project")).toMatchObject([
+		{ id: "authored-project-cli", surfaces: ["yaml", "cli"], status: "passed" },
+		{ id: "authored-project-mcp", surfaces: ["mcp"], status: "passed" },
+	])
+	expect(
+		report.cells.find(({ promise }) => promise.includes("prune"))?.surfaces["mcp"],
+	).toMatchObject({ status: "unverified" })
+	expect(
+		report.cells.find(({ promise }) => promise.includes("Read automation pins"))?.surfaces["mcp"],
+	).toMatchObject({ status: "passed", cases: ["authored-project-mcp"] })
+	const failedProducer = matrix(source, [{ ...evidence, exitCode: 1 }])
+	expect(
+		failedProducer.cases.filter(({ group }) => group === "project").map(({ status }) => status),
+	).toEqual(["unverified", "unverified"])
+})

@@ -95,7 +95,7 @@ describe("PiSession real Durable Object under workerd", () => {
 
 	it(
 		"takes a YAML project through the installed npm CLI and an independent MCP client without losing history or competing edits",
-		{ timeout: 120_000, tags: ["acceptance", "authored-project"] },
+		{ timeout: 120_000, tags: ["acceptance", "authored-project-cli", "authored-project-mcp"] },
 		async () => {
 			const deadline = Date.now() + 15_000
 			let mcpUrl: string | undefined

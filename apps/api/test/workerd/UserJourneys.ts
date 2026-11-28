@@ -243,7 +243,7 @@ export const authoredProjectJourney = async (options: {
 			},
 			(error: unknown) => decodeExecError(error),
 		)
-		expect(refused.code).toBe(1)
+		expect(refused.code).toBe(2)
 		expect(refused.stderr).toContain("--force")
 		expect((await sdk.agents.retrieve(agentId)).name).toBe("A teammate's edit")
 		await cli("apply", "--yes", "--force")
@@ -277,7 +277,7 @@ export const authoredProjectJourney = async (options: {
 			}
 		} else {
 			const error = decodeExecError(fromCli.error)
-			expect(error.code).toBe(1)
+			expect(error.code).toBe(5)
 			expect(error.stderr).toContain("409 conflict_error")
 			expect(fromMcp.isError).not.toBe(true)
 		}

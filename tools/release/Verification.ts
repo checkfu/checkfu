@@ -96,13 +96,22 @@ export const journeys: ReadonlyArray<Journey> = [
 		boundary: "independent official MCP clients; protocol negotiation and production HTTP/domain",
 	},
 	{
-		id: "authored-project",
+		id: "authored-project-cli",
 		group: "project",
 		promise:
-			"Preview, apply, run and prune authored resources while preserving pins, output bytes and concurrent edits",
-		surfaces: ["yaml", "cli", "mcp"],
+			"Preview, apply, run and prune an authored project while preserving pinned history, output bytes and competing edits",
+		surfaces: ["yaml", "cli"],
 		boundary:
-			"installed candidate CLI; independent MCP client; local Alchemy Workers, DOs, R2 and real sandbox; model protocol fixture",
+			"installed candidate CLI with authored Markdown and YAML; independent SDK and HTTP verify stored history and output bytes; local Alchemy Workers, DOs, R2 and sandbox",
+	},
+	{
+		id: "authored-project-mcp",
+		group: "project",
+		promise:
+			"Read automation pins, edit an agent and enforce the revision when CLI and MCP compete",
+		surfaces: ["mcp"],
+		boundary:
+			"independent MCP client reads pins established by CLI apply, writes a competing edit and observes one winning revision; local Alchemy Workers and DOs",
 	},
 	{
 		id: "file-mount",

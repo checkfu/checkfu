@@ -235,6 +235,11 @@ jobs:
           name: verification-matrix
           path: .checkfu/verification/
           include-hidden-files: true
+      - if: ${{ always() }}
+        name: Require the evidence producers to pass
+        run: test "$RESULT" = success
+        env:
+          RESULT: ${{ needs.acceptance-evidence.result }}
 
   # A deployable main includes its sandbox image. This is independent of npm CLI versions.
   cli-platforms:
