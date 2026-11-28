@@ -1,0 +1,15 @@
+# Artifact data result retention
+
+Large artifact-data replies are stored as immutable JSON payloads. The tool returns a result path and, for lists, a continuation cursor. A model reads a result with byte offsets. Persisted tool outputs can contain these paths, so the session may need a result again after the turn that wrote it.
+
+The Workerd fixture lists two pages twice and checks that each request allocates a distinct path. It measures payload bytes at the final UTF-8 offset and compares repeated reads. It also waits for the sandbox machine to sleep, wakes it with a shell command, and reads each previously returned path. Result files live in the workspace object's filesystem storage. The machine snapshot is a separate store for the workspace and session output mounts. The measurement counts readable payload bytes and does not estimate SQLite storage overhead or machine snapshot size. Workspace discard clears the result files along with that filesystem.
+
+The four measured paths carried 161,778 bytes. The two repeated requests with unchanged data accounted for 80,889 bytes, or half of the measured payload. The fixture compared selected chunks and did not hash every payload byte. All four measured paths returned the same final chunks after waking the machine. A final separate list checked that a fresh read remains available. The sample, including the sleep and wake cycle, took about 62 seconds on the local runner.
+
+## Decision
+
+Keep existing retention until a sustained workload shows that result payloads are a material share of workspace storage. Use content-addressed reuse first if that evidence warrants a change. Within one session, identical encoded payloads can share bytes while keeping all previously returned paths readable. Publish a result reference only after its bytes are durable. An interrupted write must leave no visible partial result. Clear both references and shared bytes on workspace discard.
+
+A key derived from the tool operation and task can make retried tasks reuse their original result. It does not reduce copies from independently repeated reads, and the original response must remain stable even when the underlying collection changes. A time-based policy would expire paths that still appear in a model's history. A lifecycle policy with earlier deletion needs reachability from durable tool outputs and in-flight readers before it can reclaim a result. The read failure should identify an unavailable result and allow safe read operations to be issued again. Mutations keep their existing delivery and idempotency rules.
+
+A reuse implementation should reduce the two-page repeated sample from four stored payloads to two and cut payload bytes by half. Every returned path must keep returning the same chunks and continuation offsets across writes that race, a failed write, machine sleep and wake, and a workspace restart. Verify cleanup on discard and isolation between sessions. Those checks qualify storage reuse independently of any change to tool or event payloads.

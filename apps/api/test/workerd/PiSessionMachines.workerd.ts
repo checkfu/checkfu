@@ -7,7 +7,7 @@ import { startFakeMcpServer } from "./FakeMcpServer.ts"
 import { startScriptedMcpServer } from "./ScriptedMcpServer.ts"
 import { toolUseOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { toolUseIdFromEvent } from "@checkfu/domain/Session/Session.id"
-import type { SessionResource } from "./WorkerdStack.ts"
+import type { SessionEventItem, SessionResource } from "./WorkerdStack.ts"
 import {
 	TEST_API_KEY,
 	TEST_GITHUB_TOKEN,
@@ -1338,6 +1338,152 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		const caughtUp = await openStream(ending.at(-1)?.id)
 		expect(caughtUp.res.status).toBe(204)
 	}, 60_000)
+
+	it("measures artifact data result retention across machine sleep", async () => {
+		const startedAt = performance.now()
+		const session = await createSession()
+		let turn = 0
+		let replySeq = 0
+		const ask = async (...actions: ReadonlyArray<FakeOpenAIAction>) => {
+			fakeOpenAI.setHandler(
+				(request) =>
+					actions[request.toolOutputs.length] ?? {
+						kind: "reply",
+						text: request.toolOutputs.at(-1) ?? "",
+					},
+			)
+			turn += 1
+			const path = `/v1/sessions/${session.id}/events`
+			const sent = await apiJson(path, {
+				method: "POST",
+				body: { events: [userMessage(`Measure artifact result storage, turn ${turn}.`)] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(
+				session.id,
+				(state) => state.status === "idle" && state.turn === turn,
+				90_000,
+			)
+			let reply: SessionEventItem | undefined
+			await expect
+				.poll(async () => {
+					const history = await apiJson<{ readonly data: ReadonlyArray<SessionEventItem> }>(
+						`${path}?order=desc&limit=1&types=agent.message`,
+					)
+					expect(history.status).toBe(200)
+					reply = history.body.data[0]
+					return reply?.seq ?? 0
+				})
+				.toBeGreaterThan(replySeq)
+			if (reply === undefined) {
+				throw new Error("The measurement turn returned no reply.")
+			}
+			replySeq = reply.seq
+			return reply.content?.[0]?.text ?? ""
+		}
+		try {
+			const saved = await ask(
+				{
+					kind: "tool_call",
+					name: "bash",
+					arguments: {
+						command:
+							"mkdir -p /workspace/retention && printf '<p>Retention</p>' > /workspace/retention/index.html",
+					},
+				},
+				{
+					kind: "tool_call",
+					name: "save_artifact",
+					arguments: { name: "Retention", directory: "/workspace/retention" },
+				},
+			)
+			const artifactId = /art_[0-9a-f]{32}/u.exec(saved)?.[0]
+			expect(artifactId).toBeDefined()
+			for (let index = 0; index < 4; index++) {
+				const put = await apiJson(`/v1/artifacts/${artifactId}/data/samples/part-${index}`, {
+					method: "PUT",
+					body: { data: String(index).repeat(20_000) },
+				})
+				expect(put.status).toBe(200)
+			}
+			const list = async (page?: string) => {
+				const result = await ask({
+					kind: "tool_call",
+					name: "artifact_data",
+					arguments: {
+						name: "Retention",
+						collection: "samples",
+						operation: "list",
+						limit: 2,
+						...(page === undefined ? {} : { page }),
+					},
+				})
+				return JSON.parse(result) as { readonly path: string; readonly next_page: string | null }
+			}
+			const first = await list()
+			expect(first.next_page).not.toBeNull()
+			const second = await list(first.next_page ?? undefined)
+			expect(second.next_page).toBeNull()
+			const firstAgain = await list()
+			const secondAgain = await list(first.next_page ?? undefined)
+			const paths = [first.path, second.path, firstAgain.path, secondAgain.path]
+			for (const path of paths) {
+				expect(path).toMatch(/^\/mnt\/artifact-data-results\/[0-9a-f-]+\.json$/u)
+			}
+			expect(new Set(paths).size).toBe(4)
+
+			const read = (path: string, byteOffset: number) =>
+				ask({ kind: "tool_call", name: "read", arguments: { path, byteOffset } })
+			const firstChunk = await read(first.path, 0)
+			expect(firstChunk).toContain('"next_byte_offset":4096')
+			expect(await read(firstAgain.path, 0)).toBe(firstChunk)
+			expect(await read(first.path, 4096)).toContain('"next_byte_offset":8192')
+			const ends: Array<{ readonly text: string; readonly next_byte_offset: number | null }> = []
+			for (const path of paths) {
+				const end = JSON.parse(await read(path, 40_000)) as (typeof ends)[number]
+				expect(end.next_byte_offset).toBeNull()
+				expect(end.text.length).toBeGreaterThan(0)
+				ends.push(end)
+			}
+			expect(ends[0]).toEqual(ends[2])
+			expect(ends[1]).toEqual(ends[3])
+			expect(ends[0]).not.toEqual(ends[1])
+			const sizes = ends.map(({ text }) => 40_000 + new TextEncoder().encode(text).length)
+			const measuredBytes = sizes.reduce((total, bytes) => total + bytes, 0)
+			const repeatBytes = (sizes[2] ?? 0) + (sizes[3] ?? 0)
+			expect(measuredBytes).toBeGreaterThan(160_000)
+			expect(repeatBytes).toBe(measuredBytes / 2)
+
+			const sleepCount = () =>
+				stripAnsi(workerLogs.join(""))
+					.split("\n")
+					.filter((line) => line.includes(session.id) && line.includes("Machine asleep")).length
+			const earlierSleeps = sleepCount()
+			await expect
+				.poll(sleepCount, { timeout: 120_000, interval: 250 })
+				.toBeGreaterThan(earlierSleeps)
+			expect(
+				await ask({ kind: "tool_call", name: "bash", arguments: { command: "printf awake" } }),
+			).toBe("awake")
+			for (const [index, path] of paths.entries()) {
+				expect(JSON.parse(await read(path, 40_000))).toEqual(ends[index])
+			}
+			expect(await read(first.path, 4096)).toContain('"next_byte_offset":8192')
+			const fresh = await list()
+			expect(await read(fresh.path, 0)).toBe(firstChunk)
+			process.stdout.write(
+				`${JSON.stringify({ suite: "artifact data result retention", measuredPaths: paths.length, measuredBytes, repeatBytes, readableAfterWake: paths.length, elapsedMs: Math.round(performance.now() - startedAt) })}\n`,
+			)
+		} finally {
+			fakeOpenAI.setHandler((request) => ({
+				kind: "reply",
+				text: `Echo: ${request.lastUserText}`,
+				inputTokens: 17,
+				outputTokens: 9,
+			}))
+			await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		}
+	}, 240_000)
 
 	it("starts a machine at the first command and keeps the workspace and outputs, but no other files, across sleep", async () => {
 		const dir = "/workspace/shell"
