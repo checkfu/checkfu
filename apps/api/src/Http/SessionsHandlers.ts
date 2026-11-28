@@ -154,7 +154,7 @@ import {
 	sha256Json,
 	toApiError,
 } from "./HttpHelpers.ts"
-import { listPage, makeLister } from "./Listing.ts"
+import { LIST_PAGE_BYTES, hydratePage, listPage, makeLister } from "./Listing.ts"
 import { SessionPreviewSource } from "./SessionPreviewSource.ts"
 import { ViewEventsOverObjectSockets, objectSocketChanges } from "./ObjectSocketEvents.ts"
 
@@ -171,6 +171,10 @@ export const SseMaxConnectionDuration = Context.Reference<Duration.Input>(
 	"@checkfu/api/SseMaxConnectionDuration",
 	{ defaultValue: () => DEFAULT_SSE_MAX_CONNECTION_DURATION },
 )
+
+// Reserve enough room for the list envelope and its largest sequence cursor.
+const historyDataBytes =
+	LIST_PAGE_BYTES - (JSON.stringify(listPage([], Number.MAX_SAFE_INTEGER)).length - 2)
 
 const decodeCursor = Schema.decodeEffect(CursorFromString)
 
@@ -1484,9 +1488,15 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							: { where: { OR: query.types.map((type) => eventTypeFilters[type]) } }),
 					})
 					const publishedEvent = yield* publishedEvents(page.entries.length, false)
+					const { data, lastHandled, firstOmitted } = yield* hydratePage(
+						page.entries,
+						publishedEvent,
+						historyDataBytes,
+					)
+					// The sequence bound is exclusive in both orders.
 					return listPage(
-						yield* Effect.forEach(page.entries, publishedEvent, { concurrency: 8 }),
-						page.cursor,
+						data,
+						firstOmitted === undefined ? page.cursor : (lastHandled?.envelope.seq ?? page.cursor),
 					)
 				}).pipe(handled),
 			)

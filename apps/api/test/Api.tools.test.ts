@@ -12,6 +12,7 @@ import { ToolTask, defineExtension, hook } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
+import { LIST_PAGE_BYTES } from "../src/Http/Listing.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	HarnessLimits,
@@ -232,6 +233,105 @@ describe("Tool calls on the session log", () => {
 						truncated: true,
 					})
 					expect(turn[4]).toMatchObject({ content: [{ type: "text", text: "Both done." }] })
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("limits session history response bytes and resumes in either direction", async () => {
+		const escapedOutput = "\u0000".repeat(MAX_TOOL_RESULT_TEXT_LENGTH)
+		const { layer, closeAll } = makePiDurableTestLayer(
+			async (model, context) => {
+				const lastUser = context.messages.findLastIndex((message) => message.role === "user")
+				if (context.messages.slice(lastUser + 1).some((message) => message.role === "toolResult")) {
+					return makeAssistantReply(model, null, "Done.", 1, 1)
+				}
+				return callTools(
+					model,
+					Array.from({ length: 8 }, (_, index) => ({ id: `call-${index}`, name: "escaped" })),
+				)
+			},
+			{
+				registry: () => {
+					const registry = createCheckfuRegistry()
+					registry.install({
+						name: "history",
+						tools: [
+							{
+								name: "escaped",
+								description: "Return text that expands when serialized to JSON.",
+								parameters: { type: "object", properties: {} },
+								replay: "safe",
+								execute: () => Promise.resolve({ output: [{ type: "text", text: escapedOutput }] }),
+							},
+						],
+					})
+					return registry
+				},
+			},
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch)
+					for (let turn = 1; turn <= 7; turn++) {
+						yield* sendAndSettle(apiFetch, session.id, [`Tool samples for turn ${turn}.`], turn)
+					}
+
+					const read = (query: URLSearchParams) =>
+						Effect.gen(function* () {
+							const response = yield* sendRequest(apiFetch, {
+								method: "GET",
+								path: `/v1/sessions/${session.id}/events?${query}`,
+								headers: AUTH_HEADERS,
+							})
+							expect(response.status).toBe(200)
+							const bytes = yield* Effect.promise(() => response.arrayBuffer())
+							const page = JSON.parse(new TextDecoder().decode(bytes)) as {
+								readonly data: ReadonlyArray<{ readonly seq: number; readonly type: string }>
+								readonly next_page: string | null
+							}
+							return { ...page, bytes: bytes.byteLength }
+						})
+
+					const walk = (limit: number, order: "asc" | "desc", filtered: boolean) =>
+						Effect.gen(function* () {
+							const query = new URLSearchParams({ limit: String(limit), order })
+							if (filtered) {
+								query.append("types", "agent.tool_result")
+							}
+							const events: Array<{ readonly seq: number; readonly type: string }> = []
+							let trimmed = false
+							for (let index = 0; index < 30; index++) {
+								const page = yield* read(query)
+								expect(page.bytes).toBeLessThanOrEqual(LIST_PAGE_BYTES)
+								expect(page.data.length).toBeLessThanOrEqual(limit)
+								events.push(...page.data)
+								if (page.next_page === null) {
+									return { events, trimmed }
+								}
+								expect(page.data.length).toBeGreaterThan(0)
+								expect(page.next_page).toBe(String(page.data.at(-1)?.seq))
+								trimmed ||= page.data.length < limit
+								query.set("page", page.next_page)
+							}
+							return yield* Effect.die("Session history pagination did not end")
+						})
+
+					const small = yield* walk(20, "asc", false)
+					expect(small.trimmed).toBe(false)
+					const results = small.events.filter(({ type }) => type === "agent.tool_result")
+					expect(results).toHaveLength(56)
+					for (const order of ["asc", "desc"] as const) {
+						const filtered = yield* walk(100, order, true)
+						expect(filtered.trimmed).toBe(true)
+						expect(filtered.events).toEqual(order === "asc" ? results : results.toReversed())
+						const all = yield* walk(100, order, false)
+						expect(all.events).toEqual(order === "asc" ? small.events : small.events.toReversed())
+					}
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

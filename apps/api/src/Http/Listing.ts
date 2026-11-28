@@ -130,6 +130,7 @@ const ownedByVault: OwnedBy = (resource, parent) =>
 export const hydratePage = <Entry, A extends object, E, R>(
 	entries: ReadonlyArray<Entry>,
 	retrieve: (entry: Entry) => Effect.Effect<A | null, E, R>,
+	maxBytes = LIST_PAGE_BYTES,
 ) =>
 	Effect.gen(function* () {
 		const data: Array<A> = []
@@ -147,7 +148,7 @@ export const hydratePage = <Entry, A extends object, E, R>(
 					if (resource !== null) {
 						const size = utf8.encode(JSON.stringify(resource)).length
 						const next = pageBytesWith(bytes, data.length, size)
-						if (data.length > 0 && next > LIST_PAGE_BYTES) {
+						if (data.length > 0 && next > maxBytes) {
 							firstOmitted = entry
 							return false
 						}

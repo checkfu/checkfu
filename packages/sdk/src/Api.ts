@@ -2509,7 +2509,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "List session events")
 			.annotate(
 				OpenApi.Description,
-				"List persisted events for a session. Use next_page to continue through its history.",
+				"List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",

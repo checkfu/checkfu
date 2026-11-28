@@ -3672,7 +3672,7 @@ export class EffectSessionsEventsResource {
 		this.#runtime = runtime
 	}
 
-	/** List persisted events for a session. Use next_page to continue through its history. */
+	/** List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null. */
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params:
@@ -3729,7 +3729,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List persisted events for a session. Use next_page to continue through its history. */
+	/** Auto-paginate pages for List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null. */
 	listPages(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -3749,7 +3749,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Auto-paginate items for List persisted events for a session. Use next_page to continue through its history. */
+	/** Auto-paginate items for List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null. */
 	listStream(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -6449,7 +6449,7 @@ export class SessionsEventsResource {
 		this.#runtime = runtime
 	}
 
-	/** List persisted events for a session. Use next_page to continue through its history. */
+	/** List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null. */
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,

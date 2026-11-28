@@ -3770,7 +3770,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_listEvents",
 		title: "List session events",
 		description:
-			"List persisted events for a session. Use next_page to continue through its history.",
+			"List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null.",
 		method: "GET",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: true,

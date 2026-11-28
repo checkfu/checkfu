@@ -3434,7 +3434,7 @@ const sessionsEventsListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsEventsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List persisted events for a session. Use next_page to continue through its history.",
+		"List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null.",
 	),
 )
 

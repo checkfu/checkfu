@@ -14085,7 +14085,7 @@
 						}
 					}
 				},
-				"description": "List persisted events for a session. Use next_page to continue through its history.",
+				"description": "List persisted events for a session. Large events can make a page shorter than the requested limit. Continue with next_page until it is null.",
 				"summary": "List session events",
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "list",
