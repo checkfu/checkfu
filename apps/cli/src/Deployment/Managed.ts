@@ -10,8 +10,9 @@ import type { CheckoutRequest, ResolveCheckout } from "../Commands/Deploy.ts"
 import { configError } from "../Errors.ts"
 import type { CliFailure } from "../Errors.ts"
 import { configDirectory } from "../SavedConnection.ts"
-import { extract, installRuntime, REVISION, STAGE } from "./Distribution.ts"
+import { extract, installRuntime, REVISION } from "./Distribution.ts"
 import type { Distribution } from "./Distribution.ts"
+import { STAGE_PATTERN, stagePathComponent } from "./Stage.ts"
 
 const decodeRevision = Schema.decodeUnknownSync(Schema.Struct({ revision: Schema.String }))
 const decodeActive = Schema.decodeUnknownSync(Schema.Struct({ stage: Schema.String }))
@@ -212,10 +213,10 @@ export const prepareManaged = async (
 		}
 	}
 	stage ??= DEFAULT_STAGE
-	if (!STAGE.test(stage)) {
+	if (!STAGE_PATTERN.test(stage)) {
 		throw new Error("Invalid deployment stage. Nothing was changed.")
 	}
-	const dataRoot = join(base, "stages", stage)
+	const dataRoot = join(base, "stages", stagePathComponent(stage))
 	const revisionFile = join(dataRoot, ".checkfu", "revision.json")
 	let revision: string
 	if (request.operation === "destroy") {

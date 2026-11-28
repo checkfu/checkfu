@@ -1640,6 +1640,24 @@ describe("checkfu destroy", () => {
 		}),
 	)
 
+	it.live("leaves room for an atomic write suffix on long stage records", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
+			const stage = "Q".repeat(120)
+			const options = { env: deployEnv, files, spawn: fakeAlchemy([]) }
+			expect((yield* cli.run(["deploy", "--yes", "--stage", stage], options)).exitCode).toBe(0)
+			const path = Object.keys(files).find((file) => file.includes("/deployments/stage-"))
+			expect(path).toMatch(/\/stage-~~[a-f0-9]{64}\.json$/u)
+			if (path === undefined) {
+				throw new Error("Expected an owned checkout record.")
+			}
+			expect(files[path]).toBe(record(stage))
+			expect((yield* cli.run(["destroy", "--yes", "--stage", stage], options)).exitCode).toBe(0)
+			expect(files[path]).toBeUndefined()
+		}),
+	)
+
 	it.live("refuses a record that does not own the stage named by its file", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()

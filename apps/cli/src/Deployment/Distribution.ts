@@ -6,7 +6,6 @@ import { unpackTar } from "modern-tar"
 import { readResponseBytes } from "./ResponseBytes.ts"
 
 export const REVISION = /^[a-f0-9]{40}$/
-export const STAGE = /^[a-z0-9]+[-_a-z0-9]*$/i
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 const RUNTIME_MODE = 0o700
 

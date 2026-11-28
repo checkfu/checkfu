@@ -37,6 +37,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
+import { STAGE_PATTERN, stagePathComponent } from "../Deployment/Stage.ts"
 import {
 	INTERRUPTED_EXIT_CODE,
 	FAILURE_EXIT_CODE,
@@ -211,7 +212,7 @@ export const setDotEnvValue = (
 		),
 	)
 
-const StageName = Schema.String.check(Schema.isPattern(/^[a-z0-9]+[-_a-z0-9]*$/i))
+const StageName = Schema.String.check(Schema.isPattern(STAGE_PATTERN))
 const isStageName = Schema.is(StageName)
 
 const stageFlag = Flag.String("stage").pipe(
@@ -241,13 +242,15 @@ const DeploymentRecord = Schema.fromJsonString(
 )
 type DeploymentRecord = typeof DeploymentRecord.Type
 
-const stageRecordName = (stage: string): string =>
-	`stage-${stage.replaceAll(/[A-Z]/g, (letter) => `~${letter.toLowerCase()}`)}.json`
-
 const deploymentRecordPath = (checkout: Checkout, stage: string) =>
 	Effect.map(Path.Path, (path) =>
 		checkout.dataRoot === undefined
-			? path.join(checkout.root, ".checkfu", "deployments", stageRecordName(stage))
+			? path.join(
+					checkout.root,
+					".checkfu",
+					"deployments",
+					`stage-${stagePathComponent(stage)}.json`,
+				)
 			: path.join(checkout.dataRoot, ".checkfu", "deployment.json"),
 	)
 

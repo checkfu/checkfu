@@ -292,6 +292,47 @@ describe("managed deployment lifecycle", () => {
 		).rejects.toThrow("Invalid deployment stage")
 	})
 
+	it.each([
+		["QA", "qa"],
+		["qa", "QA"],
+		["Q".repeat(128), "q".repeat(128)],
+	])(
+		"records and recovers case-distinct managed stages in %s, %s order",
+		async (firstStage, secondStage) => {
+			const directory = await temporary()
+			const f = await fixture()
+			const prepare = (stage: string, operation: "deploy" | "destroy") =>
+				prepareManaged(directory, { operation, stage }, f.options, signal())
+			const firstDeployment = await prepare(firstStage, "deploy")
+			await firstDeployment.record()
+			await writeFile(join(firstDeployment.dataRoot, ".env"), `STAGE=${firstStage}\n`)
+			f.next()
+			const secondDeployment = await prepare(secondStage, "deploy")
+			await secondDeployment.record()
+			await writeFile(join(secondDeployment.dataRoot, ".env"), `STAGE=${secondStage}\n`)
+			expect(firstDeployment.dataRoot.toLowerCase()).not.toBe(
+				secondDeployment.dataRoot.toLowerCase(),
+			)
+			expect(firstDeployment.stage).toBe(firstStage)
+			expect(secondDeployment.stage).toBe(secondStage)
+			const downloads = [...f.calls]
+			for (const deployment of [firstDeployment, secondDeployment]) {
+				const recovered = await prepare(deployment.stage, "destroy")
+				expect(recovered).toMatchObject({
+					stage: deployment.stage,
+					revision: deployment.revision,
+					dataRoot: deployment.dataRoot,
+				})
+				expect(await readFile(join(recovered.dataRoot, ".env"), "utf8")).toBe(
+					`STAGE=${deployment.stage}\n`,
+				)
+			}
+			expect(firstDeployment.revision).toBe(first)
+			expect(secondDeployment.revision).toBe(second)
+			expect(f.calls).toEqual(downloads)
+		},
+	)
+
 	it("keeps shared and partially deployed revisions visible to a source-cache inventory", async () => {
 		const directory = await temporary()
 		const f = await fixture()
