@@ -12,12 +12,16 @@ import {
 	SOURCE_ARTIFACT_DECLARATION_MESSAGE,
 } from "../Artifacts/ArtifactFiles.ts"
 import {
+	isArtifactCaptureDirectory,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
 	MAX_TOOL_ARTIFACT_TOTAL_BYTES,
 } from "./SessionArtifactTool.ts"
-import type { SavedSessionArtifact, SavedSessionFile } from "./SessionArtifactTool.ts"
-import { SESSION_OUTPUTS_PATH } from "./SessionOutputs.ts"
+import type {
+	ArtifactCapturePath,
+	SavedSessionArtifact,
+	SavedSessionFile,
+} from "./SessionArtifactTool.ts"
 import type { OutputFiles } from "./SessionOutputs.ts"
 import type { WorkspaceToolResult } from "./WorkspaceTools.ts"
 
@@ -38,7 +42,10 @@ const isFileName = Schema.is(FileName)
 
 export interface ArtifactToolPorts {
 	readonly capture: (directory: string) => OutputFiles
-	readonly saveFile: (path: string, bytes: Uint8Array) => Promise<SavedSessionFile>
+	readonly saveFile: (
+		capturePath: ArtifactCapturePath,
+		bytes: Uint8Array,
+	) => Promise<SavedSessionFile>
 	readonly saveArtifact: (
 		name: string,
 		entries: ReadonlyArray<{ readonly path: string; readonly file_id: string }>,
@@ -92,12 +99,7 @@ export const saveArtifact = async (
 		.filter((part) => part !== "" && part !== ".")
 		.join("/")
 	const directory = `/${relative}`
-	if (
-		!isArtifactPath(relative) ||
-		!["/workspace", SESSION_OUTPUTS_PATH].some(
-			(root) => directory === root || directory.startsWith(`${root}/`),
-		)
-	) {
+	if (!isArtifactCaptureDirectory(directory)) {
 		return refused("Choose a directory under /workspace or /mnt/session/outputs.")
 	}
 	signal?.throwIfAborted()
@@ -202,7 +204,7 @@ export const saveArtifact = async (
 		if (total > MAX_TOOL_ARTIFACT_TOTAL_BYTES) {
 			return tooMuch
 		}
-		const saved = await ports.saveFile(path, bytes).catch(() => null)
+		const saved = await ports.saveFile({ directory, path }, bytes).catch(() => null)
 		signal?.throwIfAborted()
 		if (saved === null) {
 			return refused(`Saving ${path} failed; try again.`)

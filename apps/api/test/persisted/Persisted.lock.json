@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "artifact-mount-subtree",
-			"cut_at": "2026-11-28T00:31:56.157Z",
+			"label": "artifact-capture-path",
+			"cut_at": "2026-11-28T00:37:06.467Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -356,7 +356,7 @@
 				"api-call:Api.artifactFiles/result": "b8d570353fd5a7163ea22d9446f83f2d8a67da7363fbaab629060624b5ccbe49",
 				"api-call:Api.artifactRead/args": "96e05fa19519d18635f01d7bf70f88a873166919aea8aec1dbfe52d5b1c8b046",
 				"api-call:Api.artifactRead/result": "f214bbedb0a7063b9d2f4ee91e509ebea6cdfd1453854f0170c721de7681ec3c",
-				"api-call:Api.sessionFileSave/args": "6a66c561a71d417886ff0bbd0317525d61df1bae2c1f5fdaae13af96429ea87a",
+				"api-call:Api.sessionFileSave/args": "146b49ded7ab7dd5199184d6b7354276eb79a6eed3a8780078f67e3350b0a0dd",
 				"api-call:Api.sessionFileSave/result": "5202d677d6d59fe97ce65457968dd7b6729c47c2db5e846dc9956cdf74968ea5",
 				"api-call:Api.sessionArtifactSave/args": "e1d6c53bf6513ee9abdc5fd2bacddda4d0ee9441194d0cf06d40b1a97494b5d7",
 				"api-call:Api.sessionArtifactSave/result": "6909679e100df092df688ab9e5b6d825a1c53e8ba7b551b7b4af13a7aec51c12",
@@ -19648,50 +19648,74 @@
 					[
 						"\ud800",
 						87,
-						"\t",
-						"BgQE/fgH/zlp/w=="
+						{
+							"directory": "\t",
+							"path": "-1"
+						},
+						"CQEBp/gH/zlp/w=="
 					],
 					[
 						"\u0000",
 						101,
-						"😀",
-						"/3wFAwIO0wXTAA=="
+						{
+							"directory": "😀",
+							"path": "\t"
+						},
+						""
 					],
 					[
 						"\ud800",
 						97,
-						"9 V=3#",
-						""
+						{
+							"directory": "9 V=3#",
+							"path": ""
+						},
+						"TTU="
 					],
 					[
 						"\\9$'",
 						95,
-						"__proto__",
-						"qsMF+gD6Fpfs+Q=="
+						{
+							"directory": "__proto__",
+							"path": "-1"
+						},
+						"wwX6APoWlw=="
 					],
 					[
 						"toString",
 						6,
-						"",
+						{
+							"directory": "",
+							"path": " "
+						},
 						""
 					],
 					[
 						"Kg\"i&cyY+=",
 						49,
-						"",
-						"EgAElwM="
+						{
+							"directory": "",
+							"path": "&'().&X|X"
+						},
+						""
 					],
 					[
 						"H9Sao0",
 						89,
-						"kK@p~UD\\kz",
-						"JjkG"
+						{
+							"directory": "kK@p~UD\\kz",
+							"path": ".k5HZqbsm!"
+						},
+						"9wcCkgRCxMn7tg=="
 					],
 					[
 						"\t",
 						16,
-						"toString",
-						""
+						{
+							"directory": "toString",
+							"path": "\udc00"
+						},
+						"YQLzADC4AXYB0g=="
 					]
 				],
 				"api-call:Api.sessionFileSave/result": [

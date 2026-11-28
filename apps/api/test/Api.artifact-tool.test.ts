@@ -1,5 +1,6 @@
 import { File } from "@checkfu/domain/File/File.aggregate"
 import { FileId } from "@checkfu/domain/File/File.id"
+import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -36,6 +37,8 @@ const request = (apiFetch: ApiFetch, method: string, path: string, body?: unknow
 
 const json = <A>(response: Response) => Effect.promise(() => response.json() as Promise<A>)
 
+const captured = (path: string) => ({ directory: "/workspace", path })
+
 const idIn = (text: string) => /art_[0-9a-f]{32}/u.exec(text)?.[0] ?? ""
 
 const withSessions = async (
@@ -44,6 +47,7 @@ const withSessions = async (
 		world: Pick<
 			World,
 			| "workspaceFiles"
+			| "saveOutputs"
 			| "saveSessionArtifact"
 			| "sessionArtifactData"
 			| "sessionArtifactSaves"
@@ -152,6 +156,62 @@ interface DataArguments {
 	readonly page?: string | null
 }
 
+it("keeps identical artifact and output files independent across turns", () =>
+	withSessions(
+		(apiFetch, { createSession, workspaceFiles, sessionArtifactSaves, runInWorld, saveOutputs }) =>
+			Effect.gen(function* () {
+				const session = yield* createSession
+				const output = (turn: number) =>
+					saveOutputs({ session_id: SessionId.make(session.id), turn }).pipe(
+						Effect.andThen(request(apiFetch, "GET", `/v1/sessions/${session.id}/outputs`)),
+						Effect.flatMap(
+							json<{
+								readonly files: ReadonlyArray<{
+									id: string
+									origin: { turn: number; path: string }
+								}>
+								readonly skipped: ReadonlyArray<unknown>
+							}>,
+						),
+					)
+				const contents = "same file"
+				workspaceFiles(session.id).set("/mnt/session/outputs/index.html", contents)
+				const save = (directory: string, path = "index.html") =>
+					Effect.promise(() =>
+						runInWorld(
+							sessionArtifactSaves().sessionFileSave(
+								session.id,
+								1,
+								{ directory, path },
+								new TextEncoder().encode(contents),
+							),
+						),
+					)
+				const tool = yield* save("/workspace/site")
+				const same = yield* save("/workspace/site")
+				const other = yield* save("/workspace/other")
+				const nested = yield* save("/workspace/site", "sub/index.html")
+				const nestedRoot = yield* save("/workspace/site/sub")
+				expect(nested).toMatchObject({ ok: true })
+				expect(nestedRoot).toMatchObject({ ok: true })
+				expect(nested).not.toEqual(nestedRoot)
+				expect(same).toEqual(tool)
+				expect(other).not.toEqual(tool)
+				if (!tool.ok || !other.ok) {
+					throw new Error("The artifact files were not saved.")
+				}
+				expect((yield* request(apiFetch, "DELETE", `/v1/files/${tool.file_id}`)).status).toBe(200)
+				const first = yield* output(1)
+				expect(first.skipped).toEqual([])
+				expect(first.files).toMatchObject([{ origin: { turn: 1, path: "index.html" } }])
+				expect(first.files[0]?.id).not.toBe(tool.file_id)
+				expect(first.files[0]?.id).not.toBe(other.file_id)
+				const next = yield* output(2)
+				expect(next.files).toEqual(first.files)
+				expect(next.skipped).toEqual([])
+			}),
+	))
+
 describe("An artifact the agent saves", () => {
 	it("resolves each File once, checks every path, and keeps the storage-time guard", () =>
 		withSessions((apiFetch, { createSession, sessionArtifactSaves, runInWorld }) =>
@@ -162,7 +222,12 @@ describe("An artifact the agent saves", () => {
 					Effect.gen(function* () {
 						const saved = yield* Effect.promise(() =>
 							runInWorld(
-								saves.sessionFileSave(session.id, 1, path, new TextEncoder().encode(data)),
+								saves.sessionFileSave(
+									session.id,
+									1,
+									captured(path),
+									new TextEncoder().encode(data),
+								),
 							),
 						)
 						if (!saved.ok) {
@@ -341,7 +406,12 @@ describe("An artifact the agent saves", () => {
 					const saves = sessionArtifactSaves()
 					const run = <A>(effect: Effect.Effect<A>) => Effect.promise(() => runInWorld(effect))
 					const stolen = yield* run(
-						saves.sessionFileSave(theirs.id, 1, "secret.txt", new TextEncoder().encode("secret")),
+						saves.sessionFileSave(
+							theirs.id,
+							1,
+							captured("secret.txt"),
+							new TextEncoder().encode("secret"),
+						),
 					)
 					expect(stolen.ok).toBe(true)
 					const refused = yield* run(
@@ -369,7 +439,7 @@ describe("An artifact the agent saves", () => {
 						),
 					).toEqual({ ok: false, message: "x.txt is not a file this session saved." })
 					expect(
-						yield* run(saves.sessionFileSave(mine.id, 1, "../up.txt", new Uint8Array(1))),
+						yield* run(saves.sessionFileSave(mine.id, 1, captured("../up.txt"), new Uint8Array(1))),
 					).toMatchObject({ ok: false })
 					expect(yield* run(saves.sessionArtifactSave(mine.id, 1, "", [], ""))).toMatchObject({
 						ok: false,
@@ -422,7 +492,7 @@ describe("An artifact the agent saves", () => {
 				const saves = sessionArtifactSaves()
 				const contents = new TextEncoder().encode("shared")
 				const save = Effect.promise(() =>
-					runInWorld(saves.sessionFileSave(session.id, 1, "assets/common.txt", contents)),
+					runInWorld(saves.sessionFileSave(session.id, 1, captured("assets/common.txt"), contents)),
 				)
 				const firstStaged = Promise.withResolvers<void>()
 				const secondStaged = Promise.withResolvers<void>()
@@ -519,21 +589,26 @@ describe("An artifact the agent saves", () => {
 				const session = yield* createSession
 				const saves = sessionArtifactSaves()
 				const run = <A>(effect: Effect.Effect<A>) => Effect.promise(() => runInWorld(effect))
-				expect(yield* run(saves.sessionFileSave(session.id, 0, "a.txt", new Uint8Array()))).toEqual(
-					{
-						ok: false,
-						message: "Invalid session file save.",
-					},
-				)
-				expect(yield* run(saves.sessionFileSave(session.id, 2, "a.txt", new Uint8Array()))).toEqual(
-					{
-						ok: false,
-						message: "The turn is no longer running.",
-					},
-				)
+				expect(
+					yield* run(saves.sessionFileSave(session.id, 0, captured("a.txt"), new Uint8Array())),
+				).toEqual({
+					ok: false,
+					message: "Invalid session file save.",
+				})
+				expect(
+					yield* run(saves.sessionFileSave(session.id, 2, captured("a.txt"), new Uint8Array())),
+				).toEqual({
+					ok: false,
+					message: "The turn is no longer running.",
+				})
 				expect(
 					yield* run(
-						saves.sessionFileSave(session.id, 1, "a.txt", new Uint8Array(8 * 1024 * 1024 + 1)),
+						saves.sessionFileSave(
+							session.id,
+							1,
+							captured("a.txt"),
+							new Uint8Array(8 * 1024 * 1024 + 1),
+						),
 					),
 				).toEqual({
 					ok: false,
@@ -1104,7 +1179,9 @@ describe("An artifact the agent saves", () => {
 					const ended = { ok: false, message: "The session has ended." }
 					expect(
 						yield* Effect.promise(() =>
-							runInWorld(saves.sessionFileSave(session.id, 1, "b.txt", new Uint8Array(1))),
+							runInWorld(
+								saves.sessionFileSave(session.id, 1, captured("b.txt"), new Uint8Array(1)),
+							),
 						),
 					).toEqual(ended)
 					expect(

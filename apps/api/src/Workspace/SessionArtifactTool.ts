@@ -1,6 +1,8 @@
 import { CLIENT_EVENT_ID_MAX_LENGTH } from "@checkfu/sdk/IdempotencyKey"
 import { MAX_ARTIFACT_DOCUMENT_BYTES } from "@checkfu/sdk/Limits"
+import { ArtifactPath } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
+import { SESSION_OUTPUTS_PATH } from "./SessionOutputs.ts"
 
 export const MAX_TOOL_ARTIFACT_FILES = 256
 export const MAX_TOOL_ARTIFACT_FILE_BYTES = 8 * 1024 * 1024
@@ -16,6 +18,17 @@ export const SavedSessionFile = Schema.Union([
 	Refused,
 ])
 export type SavedSessionFile = typeof SavedSessionFile.Type
+
+const isArtifactPath = Schema.is(ArtifactPath)
+
+export const isArtifactCaptureDirectory = (directory: string): boolean =>
+	isArtifactPath(directory.slice(1)) &&
+	["/workspace", SESSION_OUTPUTS_PATH].some(
+		(root) => directory === root || directory.startsWith(`${root}/`),
+	)
+
+const ArtifactCapturePath = Schema.Struct({ directory: Schema.String, path: Schema.String })
+export type ArtifactCapturePath = typeof ArtifactCapturePath.Type
 
 export const SessionArtifactEntry = Schema.Struct({ path: Schema.String, file_id: Schema.String })
 export type SessionArtifactEntry = typeof SessionArtifactEntry.Type
@@ -63,7 +76,7 @@ export type SessionDataResult = typeof SessionDataResult.Type
 
 export const SessionArtifactToolCalls = {
 	sessionFileSave: {
-		args: Schema.Tuple([Session, Turn, Schema.String, Schema.Uint8Array]),
+		args: Schema.Tuple([Session, Turn, ArtifactCapturePath, Schema.Uint8Array]),
 		result: SavedSessionFile,
 	},
 	sessionArtifactSave: {

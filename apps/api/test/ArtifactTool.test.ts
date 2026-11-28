@@ -46,7 +46,8 @@ const workspace = (
 				return new Uint8Array(typeof size === "number" ? Math.min(size, limit) : 0)
 			},
 		}),
-		saveFile: async (path) => {
+		saveFile: async ({ directory, path }) => {
+			expect(directory).toMatch(/^\/(workspace|mnt\/session\/outputs)/)
 			saved.push(path)
 			return { ok: true, file_id: `file_${path}` }
 		},

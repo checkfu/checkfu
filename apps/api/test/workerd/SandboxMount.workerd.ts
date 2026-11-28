@@ -399,7 +399,8 @@ describe("a session's machine, in a container of its image", () => {
 		const capture = () =>
 			saveArtifact(input, {
 				capture: (directory) => makeSandboxOutputFiles(directory, inContainer),
-				saveFile: async (path, bytes) => {
+				saveFile: async ({ directory, path }, bytes) => {
+					expect(directory).toBe(root)
 					saved.set(path, new TextDecoder().decode(bytes))
 					return { ok: true, file_id: path }
 				},

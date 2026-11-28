@@ -55,16 +55,24 @@ class OutputsNotSaved extends Schema.TaggedError<
 const utf8Encoder = new TextEncoder()
 const isFileName = Schema.is(FileName)
 
-export const outputFileId = (
+export const sessionFileId = (
 	digest: Digest.Digest["Service"],
 	sessionId: string,
-	path: string,
+	location:
+		| { readonly type: "output"; readonly path: string }
+		| { readonly type: "artifact-tool"; readonly directory: string; readonly path: string },
 	sha256: string,
 ): Effect.Effect<FileId> =>
 	Effect.map(
 		digest.digestHex(
 			Digest.sha256,
-			utf8Encoder.encode(JSON.stringify(["session", "output", sessionId, path, sha256])),
+			utf8Encoder.encode(
+				JSON.stringify(
+					location.type === "output"
+						? ["session", location.type, sessionId, location.path, sha256]
+						: ["session", location.type, sessionId, location.directory, location.path, sha256],
+				),
+			),
 		),
 		(hash) => FileId.make(`file_${hash.slice(0, 32)}`),
 	)
@@ -134,7 +142,12 @@ export const makeOutputsSaver = Effect.gen(function* () {
 				skipped.push({ path: file.path, reason: "Its name is too long for a file." })
 				continue
 			}
-			const id = yield* outputFileId(digest, sessionId, file.path, file.sha256)
+			const id = yield* sessionFileId(
+				digest,
+				sessionId,
+				{ type: "output", path: file.path },
+				file.sha256,
+			)
 			const held = yield* files.get(id)
 			if (held.status === "ready") {
 				saved.push({

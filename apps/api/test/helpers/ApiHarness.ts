@@ -647,8 +647,8 @@ export const makePiDurableTestLayer = (
 					read: async (path, limit) =>
 						encoder.encode(files.get(`${root}/${path}`) ?? "").subarray(0, limit),
 				}),
-				saveFile: (path, bytes) =>
-					built().run(built().saves.sessionFileSave(sessionId, turn, path, bytes)),
+				saveFile: (capturePath, bytes) =>
+					built().run(built().saves.sessionFileSave(sessionId, turn, capturePath, bytes)),
 				saveArtifact: (artifactName, entries, source) =>
 					built().run(
 						built().saves.sessionArtifactSave(sessionId, turn, artifactName, entries, source),

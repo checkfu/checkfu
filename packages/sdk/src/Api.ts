@@ -1316,7 +1316,7 @@ export const FileOrigin = Schema.Union([
 	}),
 ]).annotate({
 	description:
-		"Where the file came from: an upload, or a session that left it in its outputs directory at a turn",
+		"Where the file came from: an upload or a session. Session file paths are relative to the directory where they were saved.",
 })
 
 export const FileResource = Schema.Struct({

@@ -34,7 +34,7 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { DocumentCalls, DocumentRefused, isDocumentRefused } from "./ArtifactData/DocumentCalls.ts"
-import { outputFileId } from "./Files/OutputsSaverLive.ts"
+import { sessionFileId } from "./Files/OutputsSaverLive.ts"
 import { SessionResources } from "./SessionResources.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
 import {
@@ -45,6 +45,7 @@ import {
 } from "./Http/ArtifactsHandlers.ts"
 import type { ResolvedFiles } from "./Http/ArtifactsHandlers.ts"
 import {
+	isArtifactCaptureDirectory,
 	DEFAULT_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
 	MAX_TOOL_ARTIFACT_FILES,
@@ -280,9 +281,13 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 				"Saving the file",
 				args[0],
 				Effect.gen(function* () {
-					const [sessionId, turn, path, bytes] = args
+					const [sessionId, turn, capturePath, bytes] = args
 					if (!isFileSave(args) || !isSessionId(sessionId)) {
 						return refused("Invalid session file save.")
+					}
+					const { directory, path } = capturePath
+					if (!isArtifactCaptureDirectory(directory)) {
+						return refused("Choose a directory under /workspace or /mnt/session/outputs.")
 					}
 					if (bytes.byteLength > MAX_TOOL_ARTIFACT_FILE_BYTES) {
 						return refused("The file exceeds the artifact file size limit.")
@@ -294,7 +299,12 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 					const sha256 = yield* digest.digestHex(Digest.sha256, bytes)
 					const save = (hash: string) =>
 						Effect.gen(function* () {
-							const id = yield* outputFileId(digest, sessionId, path, hash)
+							const id = yield* sessionFileId(
+								digest,
+								sessionId,
+								{ type: "artifact-tool", directory, path },
+								hash,
+							)
 							const ended = yield* stopped(sessionId, turn)
 							if (ended !== undefined) {
 								return Option.some(ended)
