@@ -20,11 +20,19 @@ const resourceKey = Schema.String.check(
 )
 const resourceId = Schema.String.check(Schema.isPattern(/^(?:agent|env|auto)_[A-Za-z0-9_-]+$/u))
 
+const ownerPrefix = { agent: "agent_", environment: "env_", automation: "auto_" } as const
+
 const LockEntry = Schema.Struct({
 	kind: Schema.Literals(resourceKinds),
 	id: resourceId,
 	hash: fingerprint,
-})
+}).check(
+	Schema.makeFilter(
+		({ kind, id }) =>
+			id.startsWith(ownerPrefix[kind]) ||
+			`Expected a ${kind} resource ID, got ${JSON.stringify(id)}.`,
+	),
+)
 export type LockEntry = typeof LockEntry.Type
 
 const resourceOwners = <Entry>(identityOf: (entry: Entry) => string) =>
