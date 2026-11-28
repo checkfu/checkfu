@@ -207,7 +207,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [clients, ui, mcp, domain]
+        group: [clients, ui, mcp, api, domain]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -240,7 +240,7 @@ jobs:
       - name: Derive the feature matrix from executed cases
         shell: bash
         run: |
-          mapfile -t reports < <(find .checkfu/results -type f -regextype posix-extended -regex '.*/(clients|ui|mcp|project|machines|domain)\.json' | sort)
+          mapfile -t reports < <(find .checkfu/results -type f -regextype posix-extended -regex '.*/(clients|ui|mcp|api|project|machines|domain)\.json' | sort)
           bun run verify report "${reports[@]}"
         env:
           CHECKFU_VERIFICATION_DIR: .checkfu/verification

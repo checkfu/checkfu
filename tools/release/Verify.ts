@@ -114,6 +114,10 @@ for (const row of report.cells) {
 		`| ${row.promise} | ${surfaces.map((surface) => row.surfaces[surface]?.status ?? "unverified").join(" | ")} |`,
 	)
 }
+lines.push("", "| Domain guarantee | Result | Scope |", "|---|---|---|")
+for (const row of report.cases.filter((row) => row.surfaces.length === 0)) {
+	lines.push(`| ${row.promise} | ${row.status} | ${row.boundary} |`)
+}
 lines.push(
 	"",
 	...report.gaps.map((gap) => `- **${gap.status}**: ${gap.id}: ${gap.reason}`),

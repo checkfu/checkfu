@@ -10,42 +10,58 @@ import {
 	CheckMemoryStoreDecision,
 } from "./fixtures/MountedResourceGuard.ts"
 
-it.each([
+const checks = [
 	{
 		name: "file",
+		id: "file-admission-guard",
 		decision: CheckFileDecision,
 		rule: "TheAcceptedFileIsReadyAndMatchesItsContent",
 		verdict: { _tag: "Bounded", reason: "command.resources was tried with up to 2 items" },
 	},
 	{
 		name: "artifact or skill",
+		id: "artifact-admission-guard",
 		decision: CheckArtifactDecision,
 		rule: "TheAcceptedArtifactIsActiveAtThePinnedVersion",
 		verdict: { _tag: "Proved" },
 	},
 	{
 		name: "memory store",
+		id: "memory-admission-guard",
 		decision: CheckMemoryStoreDecision,
 		rule: "TheAcceptedMemoryStoreIsActive",
 		verdict: { _tag: "Proved" },
 	},
-])(
-	"checks the production $name keys and refusal against a separate acceptance marker",
-	async ({ decision, rule, verdict }) => {
-		const report = await Effect.runPromise(
-			Prove.decisionReport(decision, {
-				source: "./test/fixtures/MountedResourceGuard.ts",
-			}).pipe(Effect.provide(NodeServices.layer)),
-		)
-		const description = Prove.renderDecision(report)
-		expect(report.accepted, description).toBe(true)
-		expect(report.rules.find((entry) => entry.name === rule)?.verdict, description).toEqual(verdict)
-		for (const result of [report.schema, ...report.rules.map((entry) => entry.verdict)]) {
-			expect(["Proved", "Bounded"], description).toContain(result._tag)
-		}
-	},
-	60_000,
-)
+]
+
+for (const { name, id, decision, rule, verdict } of checks) {
+	it(
+		`checks the production ${name} keys and refusal against a separate acceptance marker`,
+		{ timeout: 60_000, tags: ["acceptance", id] },
+		async ({ task }) => {
+			const report = await Effect.runPromise(
+				Prove.decisionReport(decision, {
+					source: "./test/fixtures/MountedResourceGuard.ts",
+				}).pipe(Effect.provide(NodeServices.layer)),
+			)
+			const description = Prove.renderDecision(report)
+			Object.assign(task.meta, {
+				admission: {
+					rule,
+					schema: report.schema,
+					rules: report.rules.map(({ name, verdict }) => ({ name, verdict })),
+				},
+			})
+			expect(report.accepted, description).toBe(true)
+			expect(report.rules.find((entry) => entry.name === rule)?.verdict, description).toEqual(
+				verdict,
+			)
+			for (const result of [report.schema, ...report.rules.map((entry) => entry.verdict)]) {
+				expect(["Proved", "Bounded"], description).toContain(result._tag)
+			}
+		},
+	)
+}
 
 it.runIf(process.env.CHECKFU_FULL_MOUNT_REPORT === "1")(
 	"records the pinned solver standing for all mounted admission participants",

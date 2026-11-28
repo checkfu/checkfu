@@ -6,6 +6,7 @@ export const groups = {
 	clients: { cwd: "tools/release", script: "test", files: ["Package.test.ts"] },
 	ui: { cwd: "apps/app", script: "test", files: ["test/user-journey.test.tsx"] },
 	mcp: { cwd: "apps/mcp", script: "test", files: ["test/Mcp.interoperability.test.ts"] },
+	api: { cwd: "apps/api", script: "test", files: ["test/Api.mounted-admission.test.ts"] },
 	project: {
 		cwd: "apps/api",
 		script: "test:workerd",
@@ -16,7 +17,11 @@ export const groups = {
 		script: "test:workerd",
 		files: ["test/workerd/PiSessionMachines.workerd.ts"],
 	},
-	domain: { cwd: "packages/domain", script: "test", files: ["test/Files.verify.test.ts"] },
+	domain: {
+		cwd: "packages/domain",
+		script: "test",
+		files: ["test/Files.verify.test.ts", "test/MountedSession.verify.test.ts"],
+	},
 } as const
 export type Group = keyof typeof groups
 
@@ -121,6 +126,15 @@ export const journeys: ReadonlyArray<Journey> = [
 		boundary: "authenticated HTTP; real Workers/storage/sandbox and model protocol fixture",
 	},
 	{
+		id: "mounted-admission-races",
+		group: "api",
+		promise:
+			"Refuse mounts changed, archived or deleted after selection before creating any session",
+		surfaces: ["api"],
+		boundary:
+			"authenticated production HTTP/domain; lifecycle changes injected at admission commit in idle, start and queue modes; in-memory stores, not Worker/storage atomicity",
+	},
+	{
 		id: "artifact-mount",
 		group: "machines",
 		promise: "Read a pinned artifact as files and refuse writes",
@@ -166,6 +180,30 @@ export const journeys: ReadonlyArray<Journey> = [
 		boundary:
 			"Alchemy/Z3: 18 required proved invariants; bounded liveness/exploration and replay are separate standings",
 	},
+	{
+		id: "file-admission-guard",
+		group: "domain",
+		promise: "Check mounted file admission against production keys and original content",
+		surfaces: [],
+		boundary:
+			"Alchemy/Z3; shared production mount guard; file resource lists bounded to two items; not an unbounded admission transaction proof",
+	},
+	{
+		id: "artifact-admission-guard",
+		group: "domain",
+		promise: "Prove an admitted artifact or skill is active at its pinned version",
+		surfaces: [],
+		boundary:
+			"Alchemy/Z3; shared production mount guard with one artifact/skill participant; full multi-participant admission is separate",
+	},
+	{
+		id: "memory-admission-guard",
+		group: "domain",
+		promise: "Prove an admitted memory store is active",
+		surfaces: [],
+		boundary:
+			"Alchemy/Z3; shared production mount guard with one memory-store participant; full multi-participant admission is separate",
+	},
 ]
 
 export const verificationTags = [
@@ -197,7 +235,7 @@ export const gaps = [
 		id: "mounted-admission-proof",
 		status: "unverified",
 		reason:
-			"Mounted file admission is bounded to two items; the full admission report is opt-in and accepts path-limit Unknown verdicts. The artifact/skill guard is proved separately. These do not establish an unbounded full-admission proof.",
+			"Mounted file admission is bounded to two items; the full admission report is opt-in and accepts path-limit Unknown verdicts. The single-participant artifact/skill and memory-store guards are proved separately. These do not establish an unbounded full-admission proof.",
 		source: "packages/domain/test/MountedSession.verify.test.ts",
 	},
 ] as const
@@ -223,7 +261,7 @@ export const Source = Schema.Struct({
 })
 export type Source = typeof Source.Type
 export const Evidence = Schema.Struct({
-	group: Schema.Literals(["clients", "ui", "mcp", "project", "machines", "domain"]),
+	group: Schema.Literals(["clients", "ui", "mcp", "api", "project", "machines", "domain"]),
 	source: Source,
 	finishedSource: Source,
 	startedAt: Schema.String,
