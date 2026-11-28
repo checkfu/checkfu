@@ -37,6 +37,8 @@ export {
 	SessionsEventsResource,
 	SessionsResource,
 } from "./generated/Resources.ts"
+export { EffectFiles, Files } from "./FileTransfer.ts"
+export type { FileBytes, UploadFileParams } from "./FileTransfer.ts"
 export {
 	emptySessionFold,
 	foldSessionEvent,
