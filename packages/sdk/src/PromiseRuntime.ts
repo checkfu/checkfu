@@ -8,6 +8,8 @@ import * as Fiber from "effect/Fiber"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
+
 import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -158,6 +160,9 @@ const toWebResponse = async <A>(
 	}
 	headers.delete("content-encoding")
 	headers.delete("content-length")
+	if (Predicate.isUint8Array(jsonData)) {
+		return new Response(new Uint8Array(jsonData), { status: res.status, statusText, headers })
+	}
 	const rawBytes = await runtime.runPromise(Effect.option(res.response.arrayBuffer))
 	if (Option.isSome(rawBytes)) {
 		return new Response(rawBytes.value.slice(0), {
@@ -521,13 +526,16 @@ export const executeUnaryPromise = <A, Key extends string = never>(
 		}
 		const exit = await runtime.runExit((effectRuntime) => run(effectRuntime, effectOpts), signal)
 		const raw = unwrapPromiseExit(exit, isSignalAborted(signal))
-		const data = toIsoJson(raw.data)
+		const responseData = toIsoJson(raw.data)
+		const data = Predicate.isUint8Array(responseData)
+			? bytesAsIsoDateTimes<A>(responseData.slice())
+			: responseData
 		return {
 			data,
 			status: raw.status,
 			headers: raw.headers,
 			requestId: raw.requestId,
-			buildResponse: () => toWebResponse(runtime, raw, data),
+			buildResponse: () => toWebResponse(runtime, raw, responseData),
 		}
 	})()
 	return new APIPromise(promise)
