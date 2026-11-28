@@ -123,6 +123,20 @@ describe("CLI help, errors, and resource commands", () => {
 					const agentUpdateHelp = yield* cli.run(["agents", "update", "--help"], { env: {} })
 					expect(agentUpdateHelp.exitCode).toBe(0)
 					expect(agentUpdateHelp.stdout).toContain("--current-version")
+					for (const command of [
+						["agents", "retrieve"],
+						["artifacts", "publish"],
+						["artifacts:versions", "retrieve"],
+					]) {
+						const help = yield* cli.run([...command, "--help"], { env: {} })
+						expect(help.stdout).toContain("--at-version")
+						expect(help.stdout).not.toContain("--current-version")
+					}
+					for (const resource of ["agents", "environments"]) {
+						const help = yield* cli.run([resource, "archive", "--help"], { env: {} })
+						expect(help.stdout).toContain("--current-version")
+						expect(help.stdout).not.toContain("--at-version")
+					}
 				}),
 			),
 		)
@@ -1130,7 +1144,7 @@ describe("CLI help, errors, and resource commands", () => {
 					const cli = yield* makeTestServer()
 					let requests = 0
 					const missing = yield* cli.run(
-						["artifacts:versions", "file", "--artifact-id", "art_1", "--current-version", "1"],
+						["artifacts:versions", "file", "--artifact-id", "art_1", "--at-version", "1"],
 						{
 							interceptFetch: async (next, request) => {
 								requests += 1

@@ -157,7 +157,7 @@ const downloaded = await run([
 	"artifacts:versions",
 	"file",
 	...artifactId,
-	"--current-version",
+	"--at-version",
 	"1",
 	"--file",
 	"bytes.bin",
@@ -170,11 +170,10 @@ await run(["artifacts:versions", "create", ...artifactId], {
 })
 assert.equal((await get(`artifacts/${artifact.id}/versions/1`)).files.length, 2)
 assert.equal(
-	(await run(["artifacts:versions", "retrieve", ...artifactId, "--current-version", "2"])).files
-		.length,
+	(await run(["artifacts:versions", "retrieve", ...artifactId, "--at-version", "2"])).files.length,
 	1,
 )
-const link = await run(["artifacts:versions", "link", ...artifactId, "--current-version", "2"], {})
+const link = await run(["artifacts:versions", "link", ...artifactId, "--at-version", "2"], {})
 assert.equal(link.artifact_id, artifact.id)
 assert.match(link.url, /^https?:\/\//)
 const published = await run(["artifacts", "publish", ...artifactId], { version: "latest" })

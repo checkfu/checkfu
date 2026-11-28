@@ -41,6 +41,7 @@ interface CliExtension {
 	readonly textOrObjectFields?: ReadonlyArray<string>
 	readonly repeatArrayField?: RepeatArraySpec
 	readonly intQueryParams?: Readonly<Record<string, IntQuerySpec>>
+	readonly versionFlag?: "at-version" | "current-version"
 	readonly examples?: ReadonlyArray<ExampleSpec>
 	readonly maxInputBytes?: number
 }
@@ -128,6 +129,7 @@ const readCliExtension = (method: Method): CliExtension => {
 
 	const fileFields = stringList("fileFields")
 	const textOrObjectFields = stringList("textOrObjectFields")
+	const versionFlag = raw["versionFlag"]
 
 	return {
 		...(typeof raw["groupDescription"] === "string"
@@ -137,6 +139,7 @@ const readCliExtension = (method: Method): CliExtension => {
 		...(textOrObjectFields !== undefined ? { textOrObjectFields } : {}),
 		...(repeatArrayField !== undefined ? { repeatArrayField } : {}),
 		...(intQueryParams !== undefined ? { intQueryParams } : {}),
+		...(versionFlag === "at-version" || versionFlag === "current-version" ? { versionFlag } : {}),
 		...(examples !== undefined ? { examples } : {}),
 		...(typeof raw["maxInputBytes"] === "number" && Number.isSafeInteger(raw["maxInputBytes"])
 			? { maxInputBytes: raw["maxInputBytes"] }
@@ -185,10 +188,14 @@ const RESERVED_GLOBAL_FLAG_NAMES = new Set([
 	"r",
 ])
 
-const resolveCliFlagName = (field: Field): string => {
+const resolveCliFlagName = (
+	field: Field,
+	location: FlagSpec["location"],
+	versionFlag: CliExtension["versionFlag"],
+): string => {
 	const raw = field.name.kebab()
 	if (raw === "version") {
-		return "current-version"
+		return versionFlag ?? (location === "body" ? "current-version" : "at-version")
 	}
 	if (RESERVED_GLOBAL_FLAG_NAMES.has(raw)) {
 		return `param-${raw}`
@@ -307,7 +314,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	for (const field of pathFields) {
 		pushFlag({
 			propName: field.name.camel(),
-			flagName: resolveCliFlagName(field),
+			flagName: resolveCliFlagName(field, "path", cliExt.versionFlag),
 			wireName: field.wireName,
 			location: "path",
 			kind: "string",
@@ -320,7 +327,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	for (const field of queryFields) {
 		const intSpec = intQueryParams[field.wireName]
 		const literals = extractStringLiterals(field.type)
-		const flagName = resolveCliFlagName(field)
+		const flagName = resolveCliFlagName(field, "query", cliExt.versionFlag)
 		const repeat = cliExt.repeatArrayField
 		if (repeat?.field === field.wireName) {
 			const max = repeat.max ?? extractArrayMaxItems(field.type)
@@ -404,7 +411,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		}
 
 		const literals = extractStringLiterals(field.type)
-		const flagName = resolveCliFlagName(field)
+		const flagName = resolveCliFlagName(field, "body", cliExt.versionFlag)
 		if (fileFields.has(field.wireName)) {
 			pushFlag({
 				propName: field.name.camel(),
@@ -492,7 +499,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		for (const header of method.headers.fields) {
 			pushFlag({
 				propName: header.name.camel(),
-				flagName: resolveCliFlagName(header),
+				flagName: resolveCliFlagName(header, "header", cliExt.versionFlag),
 				wireName: header.wireName.toLowerCase(),
 				location: "header",
 				kind: "string",

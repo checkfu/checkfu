@@ -273,7 +273,7 @@ const agentsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "current-version",
+			flagName: "at-version",
 			wireName: "version",
 			location: "query",
 			kind: "int",
@@ -287,7 +287,7 @@ const agentsRetrieveCommand = CommandMake(
 	"retrieve",
 	{
 		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
-		version: FlagInt("current-version").pipe(
+		version: FlagInt("at-version").pipe(
 			FlagWithMetavar("N"),
 			FlagWithDescription("Agent version. Omit to retrieve the latest version."),
 			FlagOptional,
@@ -660,7 +660,7 @@ const artifactsPublishCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "current-version",
+			flagName: "at-version",
 			wireName: "version",
 			location: "body",
 			kind: "structured",
@@ -700,7 +700,7 @@ const artifactsPublishCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact ID"),
 		),
-		version: FlagString("current-version").pipe(
+		version: FlagString("at-version").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
 				'Version to serve, or "latest" (the default) to serve each new version as it is added (JSON, YAML, or @file)',
@@ -1264,7 +1264,7 @@ const artifactsVersionsFileCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "current-version",
+			flagName: "at-version",
 			wireName: "version",
 			location: "path",
 			kind: "string",
@@ -1288,7 +1288,7 @@ const artifactsVersionsFileCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact ID"),
 		),
-		version: FlagString("current-version").pipe(
+		version: FlagString("at-version").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact version number"),
 		),
@@ -1319,7 +1319,7 @@ const artifactsVersionsLinkCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "current-version",
+			flagName: "at-version",
 			wireName: "version",
 			location: "path",
 			kind: "string",
@@ -1351,7 +1351,7 @@ const artifactsVersionsLinkCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact ID"),
 		),
-		version: FlagString("current-version").pipe(
+		version: FlagString("at-version").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact version number"),
 		),
@@ -1375,7 +1375,7 @@ const artifactsVersionsLinkCommand = CommandMake(
 	CommandWithExamples([
 		{
 			command:
-				"checkfu artifacts:versions link --artifact-id art_123 --current-version 1 --expires-in 600",
+				"checkfu artifacts:versions link --artifact-id art_123 --at-version 1 --expires-in 600",
 			description: "Create a link that works for ten minutes",
 		},
 	]),
@@ -1397,7 +1397,7 @@ const artifactsVersionsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "current-version",
+			flagName: "at-version",
 			wireName: "version",
 			location: "path",
 			kind: "string",
@@ -1413,7 +1413,7 @@ const artifactsVersionsRetrieveCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact ID"),
 		),
-		version: FlagString("current-version").pipe(
+		version: FlagString("at-version").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact version number"),
 		),

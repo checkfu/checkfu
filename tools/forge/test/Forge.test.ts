@@ -539,7 +539,15 @@ describe("Cloudflare Forge pipeline", () => {
 		)
 		expect(cliCommands).toContain("accepts flags and/or JSON/YAML on stdin")
 		expect(cliCommands).toContain('FlagInt("current-version")')
-		expect(cliCommands).toContain('"flagName":"current-version","wireName":"version"')
+		expect(cliCommands).toContain(
+			'"flagName":"current-version","wireName":"version","location":"body"',
+		)
+		expect(cliCommands).toContain('"flagName":"at-version","wireName":"version","location":"query"')
+		expect(cliCommands).toContain('"flagName":"at-version","wireName":"version","location":"path"')
+		expect(cliCommands).toContain('"flagName":"at-version","wireName":"version","location":"body"')
+		expect(cliCommands).toContain(
+			'"flagName":"current-version","wireName":"version","location":"query"',
+		)
 		expect(cliCommands).not.toContain('FlagInt("version")')
 		expect(cliCommands).not.toContain('FlagString("authorization-token")')
 		expect(cliCommands).not.toContain('FlagString("auth")')

@@ -4695,7 +4695,8 @@
 							"min": 1,
 							"metavar": "N"
 						}
-					}
+					},
+					"versionFlag": "current-version"
 				}
 			}
 		},
@@ -8123,7 +8124,8 @@
 							"min": 1,
 							"metavar": "N"
 						}
-					}
+					},
+					"versionFlag": "current-version"
 				}
 			}
 		},
@@ -29256,7 +29258,7 @@
 				"x-checkfu-cli": {
 					"examples": [
 						{
-							"command": "checkfu artifacts:versions link --artifact-id art_123 --current-version 1 --expires-in 600",
+							"command": "checkfu artifacts:versions link --artifact-id art_123 --at-version 1 --expires-in 600",
 							"description": "Create a link that works for ten minutes"
 						}
 					]
@@ -30044,6 +30046,7 @@
 					"name": "artifacts_publishArtifact"
 				},
 				"x-checkfu-cli": {
+					"versionFlag": "at-version",
 					"examples": [
 						{
 							"command": "checkfu artifacts publish --artifact-id art_123",

@@ -2214,7 +2214,10 @@ const Agents = HttpApiGroup.make("agents")
 				"x-checkfu-endpoint": { group: "agents", endpoint: "archive" },
 				"x-checkfu-mcp": { name: "agents_archiveAgent" },
 				"x-checkfu-idempotent": true,
-				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
+				"x-checkfu-cli": {
+					intQueryParams: { version: { min: 1, metavar: "N" } },
+					versionFlag: "current-version",
+				},
 			}),
 	)
 	.annotate(OpenApi.Description, "Create and manage versioned agent configurations")
@@ -2336,7 +2339,10 @@ const Environments = HttpApiGroup.make("environments")
 				"x-checkfu-endpoint": { group: "environments", endpoint: "archive" },
 				"x-checkfu-mcp": { name: "environments_archiveEnvironment" },
 				"x-checkfu-idempotent": true,
-				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
+				"x-checkfu-cli": {
+					intQueryParams: { version: { min: 1, metavar: "N" } },
+					versionFlag: "current-version",
+				},
 			}),
 	)
 	.annotate(OpenApi.Description, "Create and manage environments where agents run")
@@ -3194,7 +3200,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 					examples: [
 						{
 							command:
-								"checkfu artifacts:versions link --artifact-id art_123 --current-version 1 --expires-in 600",
+								"checkfu artifacts:versions link --artifact-id art_123 --at-version 1 --expires-in 600",
 							description: "Create a link that works for ten minutes",
 						},
 					],
@@ -3220,6 +3226,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 				"x-checkfu-endpoint": { group: "artifacts", endpoint: "publish" },
 				"x-checkfu-mcp": { name: "artifacts_publishArtifact" },
 				"x-checkfu-cli": {
+					versionFlag: "at-version",
 					examples: [
 						{
 							command: "checkfu artifacts publish --artifact-id art_123",
