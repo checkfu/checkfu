@@ -1,6 +1,8 @@
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
+import * as Schedule from "effect/Schedule"
 import { Sandboxes, TIMED_OUT } from "../src/Sandbox/Sandboxes.ts"
 import type { ExecResult, Sandbox, SandboxError } from "../src/Sandbox/Sandboxes.ts"
 
@@ -45,6 +47,11 @@ const inMachine = (key: string, use: (sandbox: Sandbox) => Checked): Checked =>
 const patterned = (length: number): Uint8Array =>
 	Uint8Array.from({ length }, (_, index) => (index * 31 + (index >> 8) * 7) % 256)
 
+const processMarker = "/tmp/checkfu-contract-process"
+const directProcess = String.raw`awk '{ print $1, $22 }' "/proc/$$/stat" > "$1"; exec sleep 60`
+const matchesProcess = String.raw`[ -r "/proc/$1/stat" ] || exit 1
+awk -v started="$2" '$3 != "Z" && $22 == started { found = 1 } END { exit !found }' "/proc/$1/stat" 2>/dev/null`
+
 export const sandboxesContract: ReadonlyArray<SandboxesClause> = [
 	{
 		name: "opening a running machine again returns the same machine",
@@ -63,6 +70,33 @@ export const sandboxesContract: ReadonlyArray<SandboxesClause> = [
 					)
 				}),
 			),
+	},
+	{
+		name: "independent keys keep their files and lifecycles separate",
+		check: (key) => {
+			const other = `${key}-other`
+			const marker = "/workspace/contract-owner"
+			return inMachine(key, (first) =>
+				inMachine(other, (second) =>
+					Effect.gen(function* () {
+						const sandboxes = yield* Sandboxes
+						yield* first.writeFile(marker, key)
+						yield* second.writeFile(marker, other)
+						const checkMarker = (owner: Sandbox, expected: string) =>
+							Effect.flatMap(owner.readTextFile(marker), (found) =>
+								holds(found === expected, `expected marker ${expected}, got ${found}`),
+							)
+						yield* checkMarker(yield* sandboxes.open(key), key)
+						yield* checkMarker(yield* sandboxes.open(other), other)
+						yield* sandboxes.remove(key)
+						const replacement = yield* sandboxes.open(key)
+						yield* exits(yield* replacement.exec(["test", "-e", marker]), 1, "")
+						yield* checkMarker(second, other)
+						yield* checkMarker(yield* sandboxes.open(other), other)
+					}),
+				),
+			)
+		},
 	},
 	{
 		name: "the next open after remove is a new, empty machine",
@@ -199,20 +233,43 @@ export const sandboxesContract: ReadonlyArray<SandboxesClause> = [
 		name: `a command past its timeout is stopped with exit ${TIMED_OUT}`,
 		check: (key) =>
 			inMachine(key, (sandbox) =>
-				Effect.gen(function* () {
-					const [took, result] = yield* Effect.timed(
-						sandbox.exec(["sleep", "60"], { timeout: "2 seconds" }),
-					)
-					yield* holds(
-						result.exitCode === TIMED_OUT,
-						`a timed-out command exited ${result.exitCode}, not ${TIMED_OUT}`,
-					)
-					yield* holds(
-						Duration.isLessThan(took, Duration.seconds(30)),
-						`a 2 second timeout took ${Duration.format(took)}`,
-					)
-					yield* exits(yield* sandbox.exec(["echo", "after"]), 0, "after\n")
-				}),
+				Effect.scoped(
+					Effect.gen(function* () {
+						const command = Effect.timed(
+							sandbox.exec(["sh", "-c", directProcess, "direct-process", processMarker], {
+								timeout: "8 seconds",
+							}),
+						)
+						const running = yield* Effect.forkScoped(command)
+						const readMarker = sandbox
+							.readTextFile(processMarker)
+							.pipe(Effect.retry({ times: 20, schedule: Schedule.spaced("100 millis") }))
+						const identity = (yield* readMarker).trim()
+						yield* holds(
+							/^\d+ \d+$/u.test(identity),
+							"the direct process did not report its identity",
+						)
+						const observe = ["sh", "-c", matchesProcess, "observe", ...identity.split(" ")]
+						yield* exits(yield* sandbox.exec(observe), 0, "")
+						const [took, result] = yield* Fiber.join(running)
+						yield* holds(
+							result.exitCode === TIMED_OUT,
+							`a timed-out command exited ${result.exitCode}, expected ${TIMED_OUT}`,
+						)
+						yield* holds(
+							Duration.isLessThan(took, Duration.seconds(30)),
+							`an 8 second timeout took ${Duration.format(took)}`,
+						)
+						const checkExited = Effect.gen(function* () {
+							const result = yield* sandbox.exec(observe)
+							yield* exits(result, 1, "")
+						})
+						yield* checkExited.pipe(
+							Effect.retry({ times: 10, schedule: Schedule.spaced("100 millis") }),
+						)
+						yield* exits(yield* sandbox.exec(["echo", "after"]), 0, "after\n")
+					}),
+				),
 			),
 	},
 ]
