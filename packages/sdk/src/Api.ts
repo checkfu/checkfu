@@ -1,3 +1,4 @@
+import { MAX_FILE_MOUNT_RELATIVE_LENGTH } from "./PathSegment.ts"
 import * as Effect from "effect/Effect"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
@@ -794,8 +795,6 @@ export const SkillMountParams = Schema.Struct({
 		PositiveInt.annotate({ description: "Version to use (default: the current version)" }),
 	),
 })
-
-const MAX_FILE_MOUNT_RELATIVE_LENGTH = MAX_MOUNT_PATH_LENGTH - FILE_MOUNT_ROOT.length - 1
 
 export const FileMountParams = Schema.Struct({
 	type: Schema.Literal("file"),

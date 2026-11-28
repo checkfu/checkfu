@@ -5,7 +5,7 @@ import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-heade
 import type { JsonSession } from "@checkfu/sdk/client"
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link } from "@tanstack/react-router"
-import { lazy, Suspense, useState } from "react"
+import { Suspense, lazy, useState } from "react"
 import type * as React from "react"
 import { ActionReceipt } from "../action-receipt.tsx"
 import { checkfu } from "../api.ts"
@@ -15,11 +15,14 @@ import type { SessionResourceItem } from "../session-resources.ts"
 import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
-import { SessionBindings } from "./session-bindings.tsx"
 import { sendFailure } from "./tool-call.tsx"
 import type { SendAnswer } from "./tool-call.tsx"
 import { Transcript } from "./transcript.tsx"
 import { useSessionEvents } from "./use-session-events.ts"
+
+const SessionBindings = lazy(async () => ({
+	default: (await import("./session-bindings.tsx")).SessionBindings,
+}))
 
 const SessionFiles = lazy(async () => ({
 	default: (await import("./session-files.tsx")).SessionFiles,
@@ -148,7 +151,9 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 				),
 			)}
 			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
-			<SessionBindings session={session} />
+			<Suspense fallback={null}>
+				<SessionBindings session={session} />
+			</Suspense>
 			{earlier === null ? null : (
 				<div className="space-y-2">
 					<Button

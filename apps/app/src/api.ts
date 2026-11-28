@@ -299,6 +299,10 @@ const webhooks = {
 }
 
 export const checkfu = {
+	files: {
+		retrieve: (file_id: string, signal?: AbortSignal) =>
+			request("files.retrieve", { path: { file_id }, ...withSignal(signal) }),
+	},
 	webhooks,
 	models: {
 		list: (search: string, page?: string, signal?: AbortSignal) =>

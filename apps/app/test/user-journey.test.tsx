@@ -9,6 +9,7 @@ import { act } from "react"
 import { Headers as HttpHeaders, Request as HttpRequest, Response as HttpResponse } from "undici"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { makeTestServer, TEST_API_KEY } from "../../mcp/test/helpers/McpHarness.ts"
+import { sessionOutputsQuery } from "../src/queries.ts"
 import { queryClient, router as configuredRouter } from "../src/router.tsx"
 import dashboard from "../worker.ts"
 import { button, click, settle, type } from "./dom.tsx"
@@ -368,6 +369,144 @@ const sessionJourney = async (apiFetch: typeof globalThis.fetch) => {
 	}
 }
 
+const fileJourney = async (apiFetch: typeof globalThis.fetch) => {
+	vi.stubGlobal("Request", HttpRequest)
+	vi.stubGlobal("Response", HttpResponse)
+	vi.stubGlobal("Headers", HttpHeaders)
+	const owner = new Checkfu({ baseUrl: "https://api.test", apiKey: TEST_API_KEY, fetch: apiFetch })
+	try {
+		const suggestion = (await owner.models.list({ limit: 1 })).data[0]
+		if (suggestion === undefined) {
+			throw new Error("The test deployment has no configured model")
+		}
+		const agent = await owner.waitForPending(
+			await owner.agents.create({ name: "File reader", model: suggestion.id }),
+		)
+		const environment = await owner.waitForPending(
+			await owner.environments.create({ name: "File reader environment" }),
+		)
+		const first = await owner.waitForPending(
+			await owner.sessions.create({
+				title: "Source workspace",
+				agent: agent.id,
+				environment_id: environment.id,
+			}),
+		)
+		const bytes = new Uint8Array([0, 127, 255])
+		const uploaded = await apiFetch("https://api.test/v1/files?filename=source.bin", {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${TEST_API_KEY}`,
+				"content-type": "application/octet-stream",
+				"content-length": String(bytes.byteLength),
+			},
+			body: bytes,
+		})
+		const uploadedText = await uploaded.text()
+		expect(uploaded.status, uploadedText).toBe(201)
+		const file = JSON.parse(uploadedText) as Awaited<ReturnType<Checkfu["files"]["retrieve"]>>
+		const path = `/sessions/${first.id}`
+		const browserRequests: Array<{ method: string; path: string }> = []
+		const browserFetch: typeof globalThis.fetch = async (input, init) => {
+			const request = new Request(input, init)
+			const pathname = new URL(request.url).pathname
+			browserRequests.push({ method: request.method, path: pathname })
+			if (pathname === `/v1/sessions/${first.id}/outputs`) {
+				return Response.json({
+					type: "session_outputs",
+					session_id: first.id,
+					status: "saved",
+					turn: 1,
+					reason: null,
+					recorded_at: file.created_at,
+					files: [file],
+					skipped: [],
+				})
+			}
+			return apiFetch(request)
+		}
+		const page = await open(browserFetch, path)
+		const clickAndNavigate = async (element: HTMLElement) => {
+			const navigate = page.router.navigate
+			const loaded = Promise.withResolvers<void>()
+			const navigation = vi.spyOn(page.router, "navigate").mockImplementationOnce((options) => {
+				const destination = navigate(options)
+				loaded.resolve(destination)
+				return destination
+			})
+			try {
+				await act(async () => {
+					element.click()
+					await loaded.promise
+				})
+			} finally {
+				navigation.mockRestore()
+			}
+		}
+		try {
+			const fileAction = () =>
+				page.container.querySelector<HTMLAnchorElement>(
+					'[aria-label="Use in new session: source.bin"]',
+				)
+			await waitFor(() => expect(fileAction()).not.toBeNull())
+			const action = fileAction()
+			if (action === null) {
+				throw new Error("Missing saved File action")
+			}
+			expect(new URL(action.getAttribute("href") ?? "", ORIGIN).searchParams.get("file")).toBe(
+				file.id,
+			)
+			action.focus()
+			expect(document.activeElement).toBe(action)
+			await clickAndNavigate(action)
+			await waitFor(() => expect(page.container.textContent).toContain("source.bin · read-only"))
+			expect(page.router.state.location.pathname).toBe("/sessions/new")
+			expect(
+				browserRequests.filter(
+					(request) => request.method === "POST" && request.path === "/v1/sessions",
+				),
+			).toHaveLength(0)
+			await type(field(page.container, "File mount path"), "../outside")
+			expect(button(page.container, "Start session").disabled).toBe(true)
+			await type(field(page.container, "File mount path"), "reference/source.bin")
+			await type(field(page.container, "Title"), "Uses saved File")
+			await clickAndNavigate(button(page.container, "Start session"))
+			await waitFor(() => {
+				expect(page.container.querySelector("h1")?.textContent).toBe("Uses saved File")
+				expect(page.router.state.location.pathname).toMatch(/^\/sessions\/sess_/u)
+				expect(page.router.state.location.pathname).not.toBe(path)
+			})
+			const id = page.router.state.location.pathname.split("/").at(-1)
+			if (id === undefined) {
+				throw new Error("The second session ID was missing")
+			}
+			await act(async () => {
+				await queryClient.fetchQuery(sessionOutputsQuery(id))
+				expect((await owner.sessions.retrieve(id)).resources).toMatchObject([
+					{
+						type: "file",
+						file_id: file.id,
+						mount_path: "/mnt/session/uploads/reference/source.bin",
+					},
+				])
+				expect((await owner.files.retrieve(file.id)).sha256).toBe(file.sha256)
+			})
+			expect(
+				browserRequests.filter(
+					(request) => request.method === "POST" && request.path === "/v1/sessions",
+				),
+			).toHaveLength(1)
+			expect(
+				browserRequests.filter((request) => request.path.includes(`/files/${file.id}/content`)),
+			).toEqual([])
+		} finally {
+			page.unmount()
+		}
+	} finally {
+		await owner.close()
+	}
+}
+
 beforeEach(() => {
 	vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true)
 	consoleErrors = []
@@ -383,6 +522,20 @@ afterEach(() => {
 })
 
 describe("dashboard journeys through the production HTTP boundary and domain", () => {
+	it(
+		"opens a draft from a saved File row and admits its identity without moving bytes",
+		{ timeout: 25_000 },
+		async () => {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const server = yield* makeTestServer
+					yield* Effect.promise(() => fileJourney(server.apiFetch))
+				}).pipe(Effect.scoped),
+			)
+			expect(consoleErrors).toEqual([])
+		},
+	)
+
 	it(
 		"rejects an invalid skill without partial admission and preserves the form to create a corrected session",
 		{ timeout: 20_000, tags: ["acceptance", "ui-session-admission"] },

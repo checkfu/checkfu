@@ -10,7 +10,7 @@ import { MAX_SESSION_VAULTS } from "@checkfu/sdk/Limits"
 import { act, Suspense } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { NewSessionPage } from "../src/pages/new-session.tsx"
-import { button, click, mount, settle, stubApi, submit } from "./dom.tsx"
+import { button, click, mount, settle, stubApi, submit, type } from "./dom.tsx"
 
 const AT = "2026-11-24T00:00:00.000Z"
 
@@ -78,6 +78,7 @@ const report: JsonArtifact = {
 const page = (data: ReadonlyArray<unknown>) => ({ data, next_page: null })
 
 const server = () => {
+	const fileId = "file_selected"
 	const state = {
 		vaults: [vault("vlt_work"), vault("vlt_personal")],
 		credentials: new Map([
@@ -91,6 +92,8 @@ const server = () => {
 		vaultsDown: false,
 		memoryStores: [notes],
 		artifacts: [report],
+		fileStatus: 200,
+		createStatus: 200,
 		mountListsDown: false,
 		goneLists: new Set<string>(),
 		existing: {
@@ -107,7 +110,25 @@ const server = () => {
 	const down = { status: 503, body: { error: { type: "api_error", message: "Unavailable." } } }
 	const sent = stubApi(({ method, path }) => {
 		if (method === "POST") {
+			if (state.createStatus === 404) {
+				state.fileStatus = 404
+				return {
+					...gone,
+					body: { error: { type: "not_found_error", message: "Saved file has been deleted." } },
+				}
+			}
 			return { body: { id: "sesn_1", type: "session" } }
+		}
+		if (path === `/v1/files/${fileId}`) {
+			if (state.fileStatus === 401) {
+				return {
+					status: 401,
+					body: { error: { type: "authentication_error", message: "Signed out." } },
+				}
+			}
+			return state.fileStatus === 404
+				? gone
+				: { body: { type: "file", id: fileId, filename: "input.bin" } }
 		}
 		const mount = /^\/v1\/(memory_stores|artifacts)\/([^/?]+)$/u.exec(path)
 		if (mount !== null) {
@@ -158,13 +179,13 @@ const server = () => {
 		}
 		return { body: page([state.agent, ...state.others]) }
 	})
-	return { state, started: () => sent.filter((request) => request.method === "POST") }
+	return { state, fileId, started: () => sent.filter((request) => request.method === "POST") }
 }
 
-const open = async () => {
+const open = async (fileId?: string) => {
 	const mounted = await mount(
 		<Suspense fallback={null}>
-			<NewSessionPage />
+			<NewSessionPage fileId={fileId} />
 		</Suspense>,
 	)
 	await settle()
@@ -831,4 +852,68 @@ it("displays the checked version even when the picker still has an older listing
 	)
 	expect(button(mounted.container, START).disabled).toBe(false)
 	mounted.unmount()
+})
+
+it.each([
+	[401, "Sign in again"],
+	[404, "This saved file is no longer available."],
+] as const)(
+	"keeps a saved File draft recoverable after an unavailable metadata read (%i)",
+	async (status, message) => {
+		const { state, fileId, started } = server()
+		state.fileStatus = status
+		const page = await open(fileId)
+		try {
+			await vi.waitFor(() => expect(page.container.textContent).toContain(message))
+			expect(button(page.container, "Start session").disabled).toBe(true)
+			expect(started()).toEqual([])
+			expect(page.container.querySelector('[aria-label="Remove file"]')).not.toBeNull()
+		} finally {
+			page.unmount()
+		}
+	},
+)
+
+it("retains the selected File and path when the owner refuses an explicit create", async () => {
+	const { state, fileId, started } = server()
+	const fetch = globalThis.fetch
+	const refreshed = Promise.withResolvers<void>()
+	vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+		if (input === `/v1/files/${fileId}` && state.fileStatus === 404) {
+			await refreshed.promise
+		}
+		return fetch(input, init)
+	})
+	const page = await open(fileId)
+	try {
+		await vi.waitFor(() => expect(page.container.textContent).toContain("input.bin · read-only"))
+		const path = [...page.container.querySelectorAll("label")].find(
+			(label) => label.textContent === "File mount path",
+		)?.control
+		if (!path || path.tagName !== "INPUT") {
+			throw new Error("Missing File mount path input")
+		}
+		await type(path as HTMLInputElement, "reference/input.bin")
+		state.createStatus = 404
+		await click(button(page.container, "Start session"))
+		await vi.waitFor(() =>
+			expect(page.container.textContent).toContain("Saved file has been deleted."),
+		)
+		expect(started()).toHaveLength(1)
+		expect(started()[0]?.body).toMatchObject({
+			resources: [{ type: "file", file_id: fileId, mount_path: "reference/input.bin" }],
+		})
+		expect((path as HTMLInputElement).value).toBe("reference/input.bin")
+		expect(page.container.textContent).toContain("Checking saved file…")
+		expect(path.closest("fieldset")?.disabled).toBe(false)
+		expect(button(page.container, "Start session").disabled).toBe(true)
+		refreshed.resolve()
+		await vi.waitFor(() =>
+			expect(page.container.textContent).toContain("This saved file is no longer available."),
+		)
+		expect(button(page.container, "Start session").disabled).toBe(true)
+	} finally {
+		refreshed.resolve()
+		page.unmount()
+	}
 })

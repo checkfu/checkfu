@@ -1,3 +1,4 @@
+import { isRelativeFileMountPath } from "@checkfu/sdk/PathSegment"
 import type { CreateSessionBody } from "@checkfu/sdk/Api"
 import type { JsonSession } from "@checkfu/sdk/client"
 
@@ -20,10 +21,11 @@ export type ResourceDraft =
 			readonly instructions: string
 	  }
 	| { readonly type: "artifact" | "skill"; readonly artifactId: string; readonly version: string }
+	| { readonly type: "file"; readonly fileId: string; readonly mountPath: string }
 
 export type ResourceType = ResourceDraft["type"]
 
-export type CreateSessionRequest = CreateSessionBody
+export type CreateSessionRequest = typeof CreateSessionBody.Encoded
 
 export type ResourceBody = NonNullable<CreateSessionRequest["resources"]>[number]
 
@@ -67,9 +69,10 @@ export const RESOURCE_LABELS: Readonly<Record<ResourceType, string>> = {
 	memory_store: "Memory store",
 	artifact: "Artifact files",
 	skill: "Skill",
+	file: "File",
 }
 
-export const emptyDraft = (type: ResourceType): ResourceDraft =>
+export const emptyDraft = (type: Exclude<ResourceType, "file">): ResourceDraft =>
 	type === "github_repository"
 		? {
 				type,
@@ -89,13 +92,22 @@ export const namesResource = (draft: ResourceDraft): boolean =>
 		? draft.url
 		: draft.type === "memory_store"
 			? draft.memoryStoreId
-			: draft.artifactId
+			: draft.type === "file"
+				? draft.fileId
+				: draft.artifactId
 	).trim() !== ""
 
 const filled = (value: string): string | undefined => {
 	const trimmed = value.trim()
 	return trimmed === "" ? undefined : trimmed
 }
+
+export const fileMountError = (draft: ResourceDraft): string | undefined =>
+	draft.type === "file" &&
+	draft.mountPath.trim() !== "" &&
+	!isRelativeFileMountPath(draft.mountPath.trim())
+		? "Enter a relative path inside the session's uploads directory."
+		: undefined
 
 const versionOf = (version: string): { readonly version?: number } => {
 	const trimmed = version.trim()
@@ -130,6 +142,14 @@ export const resourceBody = (draft: ResourceDraft): ResourceBody => {
 		case "artifact":
 		case "skill":
 			return { type: draft.type, artifact_id: draft.artifactId.trim(), ...versionOf(draft.version) }
+		case "file": {
+			const path = filled(draft.mountPath)
+			return {
+				type: "file",
+				file_id: draft.fileId,
+				...(path === undefined ? {} : { mount_path: path }),
+			}
+		}
 	}
 }
 
@@ -178,7 +198,7 @@ export const describeResource = (resource: SessionResourceItem): ResourceSummary
 			return {
 				label: "File",
 				name: resource.mount_path,
-				detail: `${resource.size.toLocaleString("en-US")} bytes`,
+				detail: `${resource.size.toLocaleString("en-US")} bytes · read-only`,
 			}
 	}
 }

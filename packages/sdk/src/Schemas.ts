@@ -25,7 +25,14 @@ export const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
-import { SINGLE_PATH_SEGMENT_MESSAGE } from "./PathSegment.ts"
+import {
+	ARTIFACT_FILE_NAME,
+	ARTIFACT_PATH,
+	FILE_MOUNT_ROOT,
+	MAX_MOUNT_PATH_LENGTH,
+	SINGLE_PATH_SEGMENT_MESSAGE,
+} from "./PathSegment.ts"
+export { FILE_MOUNT_ROOT, MAX_MOUNT_PATH_LENGTH } from "./PathSegment.ts"
 
 export { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./PathSegment.ts"
 
@@ -468,7 +475,6 @@ export const SessionEventFields = {
 export type SessionEventType = keyof typeof SessionEventFields
 
 export const MAX_SESSION_REPOSITORIES = 8
-export const MAX_MOUNT_PATH_LENGTH = 1024
 export const MAX_BRANCH_NAME_LENGTH = 255
 export const REPOSITORY_MOUNT_ROOT = "/workspace"
 
@@ -633,7 +639,6 @@ export const ArtifactMount = Schema.Struct({
 export type ArtifactMount = typeof ArtifactMount.Type
 
 export const MAX_SESSION_FILES = 32
-export const FILE_MOUNT_ROOT = "/mnt/session/uploads"
 
 export const FileMountPath = MountPath.check(
 	Schema.isPattern(/^\/mnt\/session\/uploads\/.+$/u, {
@@ -904,10 +909,6 @@ export const ArtifactName = Schema.String.check(
 	Schema.isMaxCodePoints(MAX_ARTIFACT_NAME_LENGTH),
 )
 
-const PATH_EXCLUDED = String.raw`/\\\u0000-\u001f\u007f-\u009f\u2028\u2029`
-const PATH_SEGMENT = String.raw`(?:[^.${PATH_EXCLUDED}][^${PATH_EXCLUDED}]*|\.[^.${PATH_EXCLUDED}][^${PATH_EXCLUDED}]*|\.\.[^${PATH_EXCLUDED}]+)`
-const ARTIFACT_PATH = new RegExp(String.raw`^${PATH_SEGMENT}(?:/${PATH_SEGMENT})*$`, "u")
-
 export const ArtifactPath = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxCodePoints(MAX_ARTIFACT_PATH_LENGTH),
@@ -933,7 +934,7 @@ export const FileName = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxCodePoints(MAX_FILE_NAME_LENGTH),
 	Schema.makeFilter((name) => (name.isWellFormed() ? undefined : "Expected well-formed Unicode")),
-	Schema.isPattern(new RegExp(String.raw`^${PATH_SEGMENT}$`, "u")),
+	Schema.isPattern(ARTIFACT_FILE_NAME),
 )
 export type FileName = typeof FileName.Type
 
