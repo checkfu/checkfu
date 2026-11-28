@@ -268,3 +268,39 @@ export const present = <T>(query: { readonly data: T; readonly error: unknown })
 	}
 	return query.data
 }
+
+const nextWebhookPage = (
+	{ next_page }: { readonly next_page: string | null },
+	_pages: unknown,
+	_current: unknown,
+	seen: ReadonlyArray<string | undefined>,
+) =>
+	next_page === null || next_page.trim() === "" || seen.includes(next_page) ? undefined : next_page
+
+export const webhooksQuery = () =>
+	infiniteQueryOptions({
+		queryKey: ["webhooks", "directory"],
+		queryFn: ({ pageParam, signal }) => checkfu.webhooks.list(pageParam, signal),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: nextWebhookPage,
+	})
+
+export const webhookQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["webhooks", id, "endpoint"],
+		queryFn: ({ signal }) => checkfu.webhooks.retrieve(id, signal),
+	})
+
+export const webhookDeliveriesQuery = (id: string) =>
+	infiniteQueryOptions({
+		queryKey: ["webhooks", id, "deliveries"],
+		queryFn: ({ pageParam, signal }) => checkfu.webhooks.deliveries(id, pageParam, signal),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: nextWebhookPage,
+	})
+
+export const webhookDeliveryQuery = (webhookId: string, deliveryId: string) =>
+	queryOptions({
+		queryKey: ["webhooks", webhookId, "deliveries", deliveryId],
+		queryFn: ({ signal }) => checkfu.webhooks.delivery(webhookId, deliveryId, signal),
+	})
