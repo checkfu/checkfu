@@ -3,9 +3,9 @@ import type { MemoryId } from "@checkfu/domain/Memory/Memory.id"
 import { MemoryIndex } from "@checkfu/domain/Memory/MemoryIndex.view"
 import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import type { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
-import type { WritePrecondition } from "@checkfu/domain/Memory/MemoryTypes"
 import { MemoryView } from "@checkfu/domain/Memory/MemoryView.view"
 import { WriteMemory } from "@checkfu/domain/Memory/WriteMemory.command"
+import type { MemoryWritePrecondition } from "@checkfu/domain/Memory/WriteMemory.command"
 import { WriteMemoryDecision } from "@checkfu/domain/Memory/WriteMemory.decision"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
@@ -36,7 +36,7 @@ export interface MemoryWrite {
 	readonly content: string
 	readonly content_sha256: string
 	readonly content_size_bytes: number
-	readonly precondition: WritePrecondition
+	readonly precondition: MemoryWritePrecondition
 	readonly sessionId: string | null
 }
 

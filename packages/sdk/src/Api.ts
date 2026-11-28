@@ -3710,7 +3710,10 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Create a memory")
-			.annotate(OpenApi.Description, "Create a memory at a path that holds none")
+			.annotate(
+				OpenApi.Description,
+				"Create a memory at a path. Repeating the same content returns the existing memory. If the path holds different content, the request returns 409.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "memoryStores.memories",
 				"x-forge-method-name": "create",

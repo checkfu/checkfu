@@ -37,7 +37,13 @@ export class WriteMemoryDecision extends Domain.Decision(WriteMemory, {
 			return new MemoryPlacedElsewhere({ memory_id: memory.id })
 		}
 		const present = memory.state.status === "present"
-		if (cmd.precondition.type === "absent" && present) {
+		if (
+			present &&
+			[
+				cmd.precondition.type === "exclusive",
+				cmd.precondition.type === "absent" && memory.state.content_sha256 !== cmd.content_sha256,
+			].some((refused) => refused)
+		) {
 			return new MemoryAlreadyExists({ memory_id: memory.id })
 		}
 		if (cmd.precondition.type === "present" && !present) {
@@ -125,6 +131,10 @@ export class WriteMemoryDecision extends Domain.Decision(WriteMemory, {
 			].some((ok) => ok),
 		AnAbsentPreconditionNeverOverwrites: ({ before, command }) =>
 			[command.precondition.type !== "absent", before.memory.status !== "present"].some((ok) => ok),
+		AnExclusivePreconditionNeverOverwrites: ({ before, command }) =>
+			[command.precondition.type !== "exclusive", before.memory.status !== "present"].some(
+				(ok) => ok,
+			),
 	},
 	reply: (states) => ({ version: states.memory.version }),
 }) {}

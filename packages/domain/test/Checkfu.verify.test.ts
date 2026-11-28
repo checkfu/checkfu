@@ -326,6 +326,7 @@ const STANDING = {
 	"WriteMemory.ANewMemoryCountsOnceAndWithinTheLimit": "proved",
 	"WriteMemory.ANewPathCommitsOnlyAtTheLayoutItWasCheckedAgainst": "proved",
 	"WriteMemory.AnAbsentPreconditionNeverOverwrites": "proved",
+	"WriteMemory.AnExclusivePreconditionNeverOverwrites": "proved",
 	"DeleteMemory.AnExpectedHashIsTheStoredHash": "proved",
 	"DeleteMemory.ADeleteRemovesOnePresentMemory": "proved",
 	"Checkfu.APresentMemoryIsInAStoreThatWasCreated": "proved",

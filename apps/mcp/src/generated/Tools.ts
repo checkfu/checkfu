@@ -2812,7 +2812,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "memoryStores_createMemory",
 		title: "Create a memory",
-		description: "Create a memory at a path that holds none",
+		description:
+			"Create a memory at a path. Repeating the same content returns the existing memory. If the path holds different content, the request returns 409.",
 		method: "POST",
 		path: "/v1/memory_stores/{memory_store_id}/memories",
 		readOnly: false,

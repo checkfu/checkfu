@@ -15,6 +15,12 @@ import {
 	WritePrecondition,
 } from "./MemoryTypes.ts"
 
+const MemoryWritePrecondition = Schema.Union([
+	WritePrecondition,
+	Schema.Struct({ type: Schema.Literal("exclusive") }),
+])
+export type MemoryWritePrecondition = typeof MemoryWritePrecondition.Type
+
 export class MemoryWritten extends Domain.Event("memory.written", {
 	memory_store_id: MemoryStoreId,
 	path: RecordedMemoryPath,
@@ -78,7 +84,7 @@ export class WriteMemory extends Domain.Command("WriteMemory", {
 		content: MemoryContent,
 		content_sha256: RecordedSha256,
 		content_size_bytes: MemorySize,
-		precondition: WritePrecondition,
+		precondition: MemoryWritePrecondition,
 		layout_version: NonNegativeInt,
 		session_id: Schema.NullOr(Schema.String),
 	},

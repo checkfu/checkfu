@@ -881,6 +881,10 @@
 			"Session.ATruncatedReplyNeverEndsTheTurnAsFinished": {
 				"kind": "transition",
 				"source": "({ command, events }) =>\n\t\t\tcommand._tag !== \"CommitModelReply\" ||\n\t\t\tcommand.truncated !== true ||\n\t\t\tevents.every(\n\t\t\t\t(event) => event._tag !== \"session.status_idle\" || event.stop_reason.type !== \"end_turn\",\n\t\t\t)"
+			},
+			"WriteMemory.AnExclusivePreconditionNeverOverwrites": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[command.precondition.type !== \"exclusive\", before.memory.status !== \"present\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
 			}
 		}
 	}

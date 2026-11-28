@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto"
 import { describe, expect, it } from "@effect/vitest"
 import { WaitTimeout } from "@alchemy.run/domain"
-import { SessionMemoryAccess } from "../src/SessionMemoryAccess.ts"
+import { readableMemoryStores, SessionMemoryAccess } from "../src/SessionMemoryAccess.ts"
 import { MemoryIndex } from "@checkfu/domain/Memory/MemoryIndex.view"
+import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
+import { SessionResourceId } from "@checkfu/domain/Session/SessionResource"
+import type { MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
 import { MemoryView } from "@checkfu/domain/Memory/MemoryView.view"
 import * as Effect from "effect/Effect"
 import { makeApiHandler } from "../src/Http/Router.ts"
@@ -61,7 +64,9 @@ const request = (
 
 const json = <A>(response: Response) => Effect.promise(() => response.json() as Promise<A>)
 
-const withApi = async (run: (apiFetch: ApiFetch) => Effect.Effect<void>) => {
+const withApi = async (
+	run: (apiFetch: ApiFetch) => Effect.Effect<void, never, Effect.Services<typeof MemoryStore>>,
+) => {
 	const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 		makeAssistantReply(model, null, "ok", 1, 1),
 	)
@@ -78,6 +83,36 @@ const withApi = async (run: (apiFetch: ApiFetch) => Effect.Effect<void>) => {
 }
 
 describe("Memory stores", () => {
+	it("keeps a readable mount when another owner's lookup fails", () =>
+		withApi((apiFetch) =>
+			Effect.gen(function* () {
+				const live = yield* json<StoreBody>(
+					yield* request(apiFetch, "POST", "/v1/memory_stores", { name: "Ready" }),
+				)
+				const owner = yield* MemoryStore
+				const mounted = (id: string, name: string): MemoryStoreResource => ({
+					id: SessionResourceId.make(`sesrsc_${name}`),
+					type: "memory_store",
+					memory_store_id: id,
+					access: "read_write",
+					instructions: null,
+					name,
+					description: "",
+					mount_path: `/mnt/memory/${name}`,
+				})
+				const ready = mounted(live.id, "ready")
+				const failed = mounted("memstore_unavailable", "unavailable")
+				const found = yield* readableMemoryStores([failed, ready]).pipe(
+					Effect.provideService(MemoryStore, {
+						...owner,
+						get: (id) =>
+							id === failed.memory_store_id ? Effect.die("owner unavailable") : owner.get(id),
+					}),
+				)
+				expect(found).toEqual([ready])
+			}),
+		))
+
 	it("creates, reads, renames, lists, archives and deletes a store", () =>
 		withApi((apiFetch) =>
 			Effect.gen(function* () {
@@ -216,6 +251,9 @@ describe("Memory stores", () => {
 					content_size_bytes: 21,
 					version: 1,
 				})
+				const replay = yield* create("/preferences/formatting.md", "Tabs, not spaces. ✓")
+				expect(replay.status).toBe(201)
+				expect(yield* json<MemoryBody>(replay)).toEqual(formatting)
 				expect((yield* create("/preferences/formatting.md", "again")).status).toBe(409)
 
 				yield* create("/preferences/tone.md", "Brief.")
@@ -696,7 +734,12 @@ describe("Memory stores in a session", () => {
 		let edit: () => void | Promise<void> = () => undefined
 		const { layer, closeAll, memoryFiles, sessionMemoryCalls } = makePiDurableTestLayer(
 			async (model, context) => {
-				systems.push(extractSystemText(context))
+				systems.push(
+					extractSystemText({
+						...context,
+						messages: context.messages.filter(({ role }) => role === "system").slice(-1),
+					}),
+				)
 				await edit()
 				return makeAssistantReply(model, null, "ok", 1, 1)
 			},
@@ -915,8 +958,31 @@ describe("Memory stores in a session", () => {
 			}),
 		))
 
+	it("describes an archived read-write mount as read-only on the next turn", () =>
+		withSessions((apiFetch, { sessionMemoryCalls, systems }) =>
+			Effect.gen(function* () {
+				const { store, createSession } = yield* setUp(apiFetch, { "/rules.md": "Be kind." })
+				const session = yield* json<{ id: string }>(
+					yield* createSession([{ type: "memory_store", memory_store_id: store.id }]),
+				)
+				yield* sendAndSettle(apiFetch, session.id, ["Read the notes."], 1)
+				expect(systems[0]).toContain(`- ${MOUNT} (read and write): Team Notes.`)
+				const exclusive = yield* Effect.promise(() =>
+					sessionMemoryCalls(session.id).write("team-notes", "/rules.md", "Be kind.", true),
+				)
+				expect(exclusive).toMatchObject({ ok: false, code: "EEXIST" })
+				expect(
+					(yield* request(apiFetch, "POST", `/v1/memory_stores/${store.id}/archive`)).status,
+				).toBe(200)
+				yield* sendAndSettle(apiFetch, session.id, ["Read the notes again."], 2)
+				expect(systems[1]).toContain(`- ${MOUNT} (read-only): Team Notes.`)
+				expect(systems[1]).not.toContain("(read and write)")
+				expect(systems[1]).not.toContain("saved as you write it")
+			}),
+		))
+
 	it("stops serving a store once it is deleted, also to a session attached before", () =>
-		withSessions((apiFetch, { memoryFiles, onTurn }) =>
+		withSessions((apiFetch, { memoryFiles, systems, onTurn }) =>
 			Effect.gen(function* () {
 				const { store, createSession } = yield* setUp(apiFetch, { "/secret.md": "Launch code." })
 				const resources = [{ type: "memory_store", memory_store_id: store.id }]
@@ -939,6 +1005,8 @@ describe("Memory stores in a session", () => {
 				})
 				yield* sendAndSettle(apiFetch, early.id, ["Read it again."], 2)
 				expect([seen, read, written]).toEqual([[], null, "EROFS"])
+				expect(systems[1]).not.toContain(MOUNT)
+				expect(systems[1]).toContain("No attached memory stores are currently available.")
 				expect((yield* request(apiFetch, "GET", `/v1/memory_stores/${store.id}`)).status).toBe(404)
 			}),
 		))

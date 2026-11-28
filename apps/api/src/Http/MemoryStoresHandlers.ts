@@ -111,9 +111,22 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 							MemoryViewLagging: () => reject(503, "Timed out waiting for view consistency."),
 						}),
 					)
-				const result = yield* memoryViews
-					.get(Memory.ref(memoryId), commit === undefined ? {} : { atLeast: commit })
-					.pipe(orPendingWithin(memoryId, "memory", { memory_store_id: storeId }))
+				const ref = Memory.ref(memoryId)
+				const read = Effect.gen(function* () {
+					if (commit !== undefined) {
+						return yield* memoryViews.get(ref, { atLeast: commit })
+					}
+					const timeout = yield* MemoryReadWaitTimeout
+					const written = yield* memoryViews.waitFor(
+						ref,
+						{ version: { gte: receipt.reply.version } },
+						{ timeout },
+					)
+					return Option.some(written)
+				})
+				const result = yield* read.pipe(
+					orPendingWithin(memoryId, "memory", { memory_store_id: storeId }),
+				)
 				if (isPending(result)) {
 					return result
 				}

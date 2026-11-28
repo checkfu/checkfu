@@ -51365,7 +51365,7 @@
 						}
 					}
 				},
-				"description": "Create a memory at a path that holds none",
+				"description": "Create a memory at a path. Repeating the same content returns the existing memory. If the path holds different content, the request returns 409.",
 				"summary": "Create a memory",
 				"requestBody": {
 					"content": {

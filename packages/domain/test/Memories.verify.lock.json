@@ -129,6 +129,10 @@
 			"DeleteMemory.AnExpectedHashIsTheStoredHash": {
 				"kind": "transition",
 				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tcommand.expected_content_sha256 === null,\n\t\t\t\tbefore.memory.content_sha256 === command.expected_content_sha256,\n\t\t\t].some((ok) => ok)"
+			},
+			"WriteMemory.AnExclusivePreconditionNeverOverwrites": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[command.precondition.type !== \"exclusive\", before.memory.status !== \"present\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
 			}
 		}
 	}

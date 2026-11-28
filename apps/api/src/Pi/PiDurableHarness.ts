@@ -46,6 +46,8 @@ import * as Redacted from "effect/Redacted"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
+import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
+import { readableMemoryStores } from "../SessionMemoryAccess.ts"
 import {
 	configuredApiCustomProviders,
 	resolveCatalogModel,
@@ -241,6 +243,7 @@ export const describeMounts = (
 	artifacts: ReadonlyArray<ArtifactMount> = [],
 	skills: ReadonlyArray<SkillMount> = [],
 	files: ReadonlyArray<FileMount> = [],
+	hasUnavailableMemoryStores = false,
 ): string | null => {
 	const sections = [
 		...(system === null || system.length === 0 ? [] : [system]),
@@ -256,11 +259,22 @@ export const describeMounts = (
 					].join("\n"),
 				]),
 		...(stores.length === 0
-			? []
+			? hasUnavailableMemoryStores
+				? ["No attached memory stores are currently available."]
+				: []
 			: [
 					[
-						`Memory stores mounted in your workspace outlast this session. What you write there is saved as you write it. Each file holds at most ${MAX_MEMORY_CONTENT_BYTES} bytes of UTF-8 text, and each store holds at most ${MAX_MEMORIES_PER_STORE} files.`,
+						[
+							"Memory stores currently mounted in your workspace outlast this session.",
+							...(stores.some(({ access }) => access === "read_write")
+								? ["What you write there is saved as you write it."]
+								: []),
+							`Each file holds at most ${MAX_MEMORY_CONTENT_BYTES} bytes of UTF-8 text, and each store holds at most ${MAX_MEMORIES_PER_STORE} files.`,
+						].join(" "),
 						...stores.map(describeStore),
+						...(hasUnavailableMemoryStores
+							? ["Some attached memory stores are currently unavailable."]
+							: []),
 					].join("\n"),
 				]),
 		...(artifacts.length === 0
@@ -293,9 +307,7 @@ export const describeMounts = (
 					].join("\n"),
 				]),
 	]
-	return repositories.length + stores.length + artifacts.length + skills.length + files.length === 0
-		? system
-		: sections.join("\n\n")
+	return sections.length === 0 ? system : sections.join("\n\n")
 }
 
 export const allowedHostsOf = (config: EnvironmentConfig | null): ReadonlyArray<string> | null =>
@@ -312,6 +324,7 @@ export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const environments = yield* Environment
+		const memoryStores = yield* MemoryStore
 		const executor = yield* PiTurnExecutor
 		const customProviders = yield* configuredApiCustomProviders
 		const sessions = yield* Session
@@ -488,7 +501,6 @@ export const PiDurableHarnessLive = boundedHarness(
 
 					const token = { turn: args.turn }
 					const repositories = repositoriesOf(args.resources)
-					const stores = memoryStoresOf(args.resources)
 					const artifacts = artifactsOf(args.resources)
 					const prepared = yield* withRetry(
 						executor.prepareWorkspace(
@@ -518,6 +530,10 @@ export const PiDurableHarnessLive = boundedHarness(
 						})
 					}
 					const skills = skillsOf(args.resources)
+					const attachedStores = memoryStoresOf(args.resources)
+					const stores = yield* readableMemoryStores(attachedStores).pipe(
+						Effect.provideService(MemoryStore, memoryStores),
+					)
 					const system = describeMounts(
 						version.system,
 						repositories,
@@ -525,6 +541,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						artifacts,
 						skills,
 						filesOf(args.resources),
+						stores.length < attachedStores.length,
 					)
 
 					const mcp =

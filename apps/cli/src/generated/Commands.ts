@@ -2847,7 +2847,7 @@ const memoryStoresMemoriesCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(memoryStoresMemoriesCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"Create a memory at a path that holds none (accepts flags and/or JSON/YAML on stdin)",
+		"Create a memory at a path. Repeating the same content returns the existing memory. If the path holds different content, the request returns 409. (accepts flags and/or JSON/YAML on stdin)",
 	),
 )
 

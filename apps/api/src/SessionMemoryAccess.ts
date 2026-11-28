@@ -36,6 +36,35 @@ const accessOf = (store: MemoryStoreResource, status: string): MemoryMountInfo["
 
 const isLive = (status: string) => status === "active" || status === "archived"
 
+export const readableMemoryStores = (resources: ReadonlyArray<MemoryStoreResource>) =>
+	Effect.gen(function* () {
+		if (resources.length === 0) {
+			return []
+		}
+		const stores = yield* MemoryStore
+		const resolved = yield* Effect.forEach(
+			resources,
+			(store) =>
+				stores.get(MemoryStoreId.make(store.memory_store_id)).pipe(
+					Effect.map(({ status }) =>
+						isLive(status) ? { ...store, access: accessOf(store, status) } : null,
+					),
+					Effect.catchDefect((cause) =>
+						Effect.as(
+							Effect.logWarning(
+								"Could not read a session memory store",
+								store.memory_store_id,
+								cause,
+							),
+							null,
+						),
+					),
+				),
+			{ concurrency: 8 },
+		)
+		return resolved.filter((store) => store !== null)
+	})
+
 const rejection = (tag: string, path: string): MemoryOutcome => {
 	switch (tag) {
 		case "MemoryStoreNotFound":
@@ -174,7 +203,7 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 						path,
 						content,
 						...measured,
-						precondition: exclusive ? { type: "absent" } : { type: "none" },
+						precondition: exclusive ? { type: "exclusive" } : { type: "none" },
 						sessionId,
 					})
 					.pipe(

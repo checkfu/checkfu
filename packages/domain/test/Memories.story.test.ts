@@ -199,6 +199,12 @@ describe("Memories", () => {
 				updated_at: t0,
 			}),
 
+			Story.when(write(notes, "/notes.md", "tabs", sha("a"), { type: "absent" })),
+			Story.then(notes),
+			Story.then(store),
+			Story.replied({ version: 1 }),
+			Story.when(write(notes, "/notes.md", "tabs", sha("a"), { type: "exclusive" }, "sess_1")),
+			Story.rejected(new MemoryAlreadyExists({ memory_id: notes.id })),
 			Story.when(write(notes, "/notes.md", "spaces", sha("b"), { type: "absent" })),
 			Story.rejected(new MemoryAlreadyExists({ memory_id: notes.id })),
 			Story.when(

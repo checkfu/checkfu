@@ -3052,7 +3052,7 @@ export class EffectMemoryStoresMemoriesResource {
 		this.#runtime = runtime
 	}
 
-	/** Create a memory at a path that holds none */
+	/** Create a memory at a path. Repeating the same content returns the existing memory. If the path holds different content, the request returns 409. */
 	create(
 		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "createMemory">,
@@ -6212,7 +6212,7 @@ export class MemoryStoresMemoriesResource {
 		this.#runtime = runtime
 	}
 
-	/** Create a memory at a path that holds none */
+	/** Create a memory at a path. Repeating the same content returns the existing memory. If the path holds different content, the request returns 409. */
 	create(
 		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
 		params: EndpointBody<"memory_stores", "createMemory">,
