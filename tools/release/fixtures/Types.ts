@@ -97,6 +97,8 @@ const transferFile = async (bytes: Uint8Array): Promise<Uint8Array> => {
 		),
 	)
 }
+const artifactBytes = (artifactId: string, version: number): Promise<Uint8Array> =>
+	client.artifacts.versions.content(artifactId, version, { file: "assets/image.bin" })
 const vaultErased = async (vaultId: string): Promise<boolean> => {
 	const vault = await client.vaults.delete(vaultId)
 	return vault.secrets === "erased"
@@ -116,6 +118,7 @@ export {
 	fileContentForbidsKey,
 	responseType,
 	transferFile,
+	artifactBytes,
 	vaultErased,
 	credentialErased,
 }

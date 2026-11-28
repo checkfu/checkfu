@@ -84,6 +84,38 @@ try {
 	assert.equal(downloaded.status, 200)
 	assert.equal(downloaded.headers["content-type"], "application/octet-stream")
 	assert.deepEqual(downloaded.data, binary)
+	const pinnedFile = "assets/résumé #1.bin"
+	const originalBytes = Uint8Array.of(0, 127, 255)
+	const original = await client.artifacts.create({
+		name: "Pinned binary asset",
+		files: [
+			{
+				path: pinnedFile,
+				content: Buffer.from(originalBytes).toString("base64"),
+				encoding: "base64",
+			},
+		],
+	})
+	const newer = await client.artifacts.versions.create(original.id, {
+		version: original.version,
+		files: [{ path: pinnedFile, content: "new content" }],
+	})
+	assert.equal(newer.version, 2)
+	const pinned = await client.artifacts.versions.content(original.id, 1, { file: pinnedFile })
+	assert.deepEqual(pinned, originalBytes)
+	const pinnedEffect = await Effect.runPromise(
+		Effect.gen(function* () {
+			const sdk = yield* CheckfuClient
+			return yield* sdk.artifacts.versions.content(
+				original.id,
+				1,
+				{ file: pinnedFile },
+				{ withResponse: true },
+			)
+		}).pipe(Effect.provide(CheckfuClient.layerFetch({ apiKey, baseUrl }))),
+	)
+	assert.equal(pinnedEffect.status, 200)
+	assert.deepEqual(pinnedEffect.data, originalBytes)
 	const environment = await client.waitForPending(
 		await client.environments.create({ name: "Installed SDK environment" }),
 	)

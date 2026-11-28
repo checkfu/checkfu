@@ -1,3 +1,4 @@
+import { ArtifactsWithContent } from "./ArtifactContent.ts"
 import { secret } from "./Secret.ts"
 import { Files } from "./FileTransfer.ts"
 import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
@@ -251,6 +252,7 @@ export class Checkfu extends PromiseResources {
 	/** Wrap a `Redacted` request field (a vault credential's `auth.token`). See `secret`. */
 	static readonly secret = secret
 
+	override readonly artifacts: ArtifactsWithContent
 	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */
 	override readonly files: Files
 	readonly baseUrl: string
@@ -280,6 +282,7 @@ export class Checkfu extends PromiseResources {
 		)
 		super(promiseRuntime)
 		this.files = new Files(promiseRuntime)
+		this.artifacts = new ArtifactsWithContent(promiseRuntime)
 		this.#config = resolved
 		this.baseUrl = resolved.baseUrl
 		this.#runtime = managed

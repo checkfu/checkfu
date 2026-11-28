@@ -108,7 +108,7 @@ await client.agents.archive(agentId, { version: 2 })
 
 Checkout-built SDK packages expose File metadata and binary transfers on both clients. With the registry build of `@checkfu/sdk@0.0.1`, use the HTTP File endpoints on a deployment that serves them. See [Files](/concepts/files) for both examples.
 
-For a raw Artifact file, use the version-specific [HTTP download](/api-reference/artifacts/download-an-artifact-file). The high-level `artifacts.versions.file` method returns JSON with text or base64 content.
+Checkout-built SDK packages also expose `artifacts.versions.content(id, version, { file })` for raw bytes from a pinned version. The registry build can use the [HTTP download](/api-reference/artifacts/download-an-artifact-file). The high-level `artifacts.versions.file` method returns JSON with text or base64 content.
 
 ## Pending receipts
 
