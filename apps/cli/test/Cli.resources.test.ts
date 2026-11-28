@@ -1,3 +1,11 @@
+import {
+	AUTH_EXIT_CODE,
+	CONFLICT_EXIT_CODE,
+	FAILURE_EXIT_CODE,
+	NOT_FOUND_EXIT_CODE,
+	RETRY_EXIT_CODE,
+	USAGE_EXIT_CODE,
+} from "../src/Errors.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
@@ -77,6 +85,9 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(rootHelp.stdout).toContain("environments")
 					expect(rootHelp.stdout).toContain("sessions")
 					expect(rootHelp.stdout).toContain("sessions:events")
+					expect(rootHelp.stdout).toContain("Exit codes")
+					expect(rootHelp.stdout).toContain(`${NOT_FOUND_EXIT_CODE}  Resource not found`)
+					expect(rootHelp.stdout).toContain("130  Interrupted")
 					expect(rootHelp.stdout.toLowerCase()).not.toContain("beta")
 
 					const eventsHelp = yield* cli.run(["sessions:events", "--help"], { env: {} })
@@ -117,6 +128,28 @@ describe("CLI help, errors, and resource commands", () => {
 		)
 	})
 
+	it("uses the HTTP status when a proxy does not return an API error envelope", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					for (const [status, exitCode] of [
+						[403, AUTH_EXIT_CODE],
+						[412, CONFLICT_EXIT_CODE],
+						[500, FAILURE_EXIT_CODE],
+						[503, RETRY_EXIT_CODE],
+					] as const) {
+						const result = yield* cli.run(["agents", "retrieve", "--agent-id", "agt_123"], {
+							interceptFetch: () => Promise.resolve(new Response("proxy response", { status })),
+						})
+						expect(result.exitCode).toBe(exitCode)
+						expect(result.stdout).toBe("")
+					}
+				}),
+			),
+		)
+	})
+
 	it("rejects a YAML stream passed to a resource command", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
@@ -125,7 +158,7 @@ describe("CLI help, errors, and resource commands", () => {
 					const result = yield* cli.run(["environments", "create"], {
 						stdin: "name: First\n---\nname: Second\n",
 					})
-					expect(result.exitCode).toBe(1)
+					expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(result.stderr).toContain("multiple documents")
 					expect(result.stdout).toBe("")
 				}),
@@ -140,28 +173,28 @@ describe("CLI help, errors, and resource commands", () => {
 					const cli = yield* makeTestServer()
 
 					const unknown = yield* cli.run(["unknown-cmd"])
-					expect(unknown.exitCode).toBe(1)
+					expect(unknown.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(unknown.stdout).toBe("")
 					expect(unknown.stderr).toContain("unknown-cmd")
 
 					const missingKey = yield* cli.run(["agents", "retrieve", "--agent-id", "agt_123"], {
 						env: {},
 					})
-					expect(missingKey.exitCode).toBe(1)
+					expect(missingKey.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(missingKey.stdout).toBe("")
 					expect(missingKey.stderr).toContain("CHECKFU_API_KEY")
 
 					const badKey = yield* cli.run(["agents", "retrieve", "--agent-id", "agt_123"], {
 						env: { CHECKFU_API_KEY: "wrong-key" },
 					})
-					expect(badKey.exitCode).toBe(1)
+					expect(badKey.exitCode).toBe(AUTH_EXIT_CODE)
 					expect(badKey.stdout).toBe("")
 					expect(badKey.stderr).toContain("401 authentication_error")
 
 					const ttyInvalid = yield* cli.run(["agents", "bad\u001b]52;c;evil\u0007cmd"], {
 						stderrIsTerminal: true,
 					})
-					expect(ttyInvalid.exitCode).toBe(1)
+					expect(ttyInvalid.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(ttyInvalid.stdout).toBe("")
 					expect(ttyInvalid.stderr).toContain("ERROR")
 					expect(ttyInvalid.stderr).not.toContain(String.raw`\x1b[1m`)
@@ -176,18 +209,18 @@ describe("CLI help, errors, and resource commands", () => {
 						"--environment-id",
 						"env_123",
 					])
-					expect(blankUrl.exitCode).toBe(1)
+					expect(blankUrl.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(blankUrl.stdout).toBe("")
 					expect(blankUrl.stderr).toContain("API base URL must not be empty")
 
 					for (const badId of [".", "..", "foo/bar"]) {
 						const badAgentPath = yield* cli.run(["agents", "retrieve", "--agent-id", badId])
-						expect(badAgentPath.exitCode).toBe(1)
+						expect(badAgentPath.exitCode).toBe(USAGE_EXIT_CODE)
 						expect(badAgentPath.stdout).toBe("")
 						expect(badAgentPath.stderr).toContain("Invalid --agent-id")
 
 						const badSessionPath = yield* cli.run(["sessions", "connect", "--session-id", badId])
-						expect(badSessionPath.exitCode).toBe(1)
+						expect(badSessionPath.exitCode).toBe(USAGE_EXIT_CODE)
 						expect(badSessionPath.stdout).toBe("")
 						expect(badSessionPath.stderr).toContain("Invalid --session-id")
 					}
@@ -265,7 +298,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"--name",
 						"Stale",
 					])
-					expect(conflict.exitCode).toBe(1)
+					expect(conflict.exitCode).toBe(CONFLICT_EXIT_CODE)
 					expect(conflict.stdout).toBe("")
 					expect(conflict.stderr).toContain("409")
 
@@ -417,7 +450,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"--schedule",
 						'{"type":"cron","expression":"0 9 * * *","timezone":"UTC"}',
 					])
-					expect(twoEvents.exitCode).toBe(1)
+					expect(twoEvents.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(twoEvents.stdout).toBe("")
 
 					const id = ["--automation-id", automation.id]
@@ -505,7 +538,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"--environment-id",
 						envId,
 					])
-					expect(badAgent.exitCode).toBe(1)
+					expect(badAgent.exitCode).toBe(NOT_FOUND_EXIT_CODE)
 					expect(badAgent.stderr).toContain('Agent "agt_missing_agent" was not found.')
 
 					const badEnv = yield* cli.run([
@@ -516,7 +549,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"--environment-id",
 						"env_missing_env",
 					])
-					expect(badEnv.exitCode).toBe(1)
+					expect(badEnv.exitCode).toBe(NOT_FOUND_EXIT_CODE)
 					expect(badEnv.stderr).toContain('Environment "env_missing_env" was not found.')
 
 					for (const badArgs of [
@@ -525,7 +558,7 @@ describe("CLI help, errors, and resource commands", () => {
 						["sessions", "create", "--agent", ".", "--environment-id", ".."],
 					]) {
 						const dotRes = yield* cli.run(badArgs)
-						expect(dotRes.exitCode).toBe(1)
+						expect(dotRes.exitCode).toBe(NOT_FOUND_EXIT_CODE)
 						expect(dotRes.stdout).toBe("")
 						expect(dotRes.stderr).toContain("404 not_found_error")
 						expect(dotRes.stderr).not.toContain("Unexpected error")
@@ -674,7 +707,7 @@ describe("CLI help, errors, and resource commands", () => {
 					const typoTopLevel = yield* cli.run(["environments", "create"], {
 						stdin: "name: typo-env\nconfg:\n  type: cloud\n",
 					})
-					expect(typoTopLevel.exitCode).toBe(1)
+					expect(typoTopLevel.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(typoTopLevel.stdout).toBe("")
 					expect(typoTopLevel.stderr).toContain("confg")
 
@@ -682,7 +715,7 @@ describe("CLI help, errors, and resource commands", () => {
 						stdin:
 							"name: typo-env\nconfig:\n  type: cloud\n  netwroking:\n    type: unrestricted\n",
 					})
-					expect(typoNested.exitCode).toBe(1)
+					expect(typoNested.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(typoNested.stdout).toBe("")
 					expect(typoNested.stderr).toContain("netwroking")
 
@@ -749,7 +782,7 @@ describe("CLI help, errors, and resource commands", () => {
 						],
 						{ files: { "huge.txt": hugeVirtualFile } },
 					)
-					expect(hugeFileAgent.exitCode).toBe(1)
+					expect(hugeFileAgent.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(hugeFileAgent.stdout).toBe("")
 					expect(hugeFileAgent.stderr).toContain("exceeds 2097152 byte limit")
 					expect(fileChunksPulled).toBeLessThanOrEqual(35)
@@ -787,7 +820,7 @@ describe("CLI help, errors, and resource commands", () => {
 							},
 						},
 					)
-					expect(badFileRes.exitCode).toBe(1)
+					expect(badFileRes.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(badFileRes.stdout).toBe("")
 					expect(badFileRes.stderr).toContain("bad-utf8.txt")
 					expect(badFileRes.stderr).toContain("not valid UTF-8")
@@ -806,7 +839,7 @@ describe("CLI help, errors, and resource commands", () => {
 							return next(request)
 						},
 					})
-					expect(badStdinRes.exitCode).toBe(1)
+					expect(badStdinRes.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(badStdinRes.stdout).toBe("")
 					expect(badStdinRes.stderr).toContain("stdin")
 					expect(badStdinRes.stderr).toContain("not valid UTF-8")
@@ -887,7 +920,7 @@ describe("CLI help, errors, and resource commands", () => {
 							return next(request)
 						},
 					})
-					expect(tooLarge.exitCode).toBe(1)
+					expect(tooLarge.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(tooLarge.stdout).toBe("")
 					expect(tooLarge.stderr).toContain(`stdin payload exceeds ${MAX_INPUT_BYTES} byte limit`)
 					expect(requests).toBe(0)
@@ -970,7 +1003,7 @@ describe("CLI help, errors, and resource commands", () => {
 						stdin: "just text\n",
 						interceptFetch: countRequests,
 					})
-					expect(scalar.exitCode).toBe(1)
+					expect(scalar.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(scalar.stdout).toBe("")
 					expect(scalar.stderr).toContain(
 						"Expected stdin to be { files: [...] }, an array, or a single item object.",
@@ -980,7 +1013,7 @@ describe("CLI help, errors, and resource commands", () => {
 						stdin: JSON.stringify({ name: "Mixed", path: "a.txt", content: "a" }),
 						interceptFetch: countRequests,
 					})
-					expect(mixed.exitCode).toBe(1)
+					expect(mixed.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(mixed.stdout).toBe("")
 					expect(mixed.stderr).toContain("Invalid artifacts create payload")
 
@@ -988,7 +1021,7 @@ describe("CLI help, errors, and resource commands", () => {
 						stdin: JSON.stringify({ type: "user.message", content: "a" }),
 						interceptFetch: countRequests,
 					})
-					expect(badItem.exitCode).toBe(1)
+					expect(badItem.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(badItem.stdout).toBe("")
 					expect(badItem.stderr).toContain("Invalid artifacts create payload")
 					expect(requests).toBe(0)
@@ -1033,7 +1066,7 @@ describe("CLI help, errors, and resource commands", () => {
 							},
 						},
 					)
-					expect(tooLarge.exitCode).toBe(1)
+					expect(tooLarge.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(tooLarge.stdout).toBe("")
 					expect(tooLarge.stderr).toContain(
 						`File "big.json" exceeds ${MAX_INPUT_BYTES} byte limit.`,
@@ -1079,7 +1112,7 @@ describe("CLI help, errors, and resource commands", () => {
 							},
 						},
 					)
-					expect(tooLarge.exitCode).toBe(1)
+					expect(tooLarge.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(tooLarge.stderr).toContain(
 						`File "b.json" exceeds ${MAX_ARTIFACT_BODY_BYTES} byte limit`,
 					)
@@ -1105,7 +1138,7 @@ describe("CLI help, errors, and resource commands", () => {
 							},
 						},
 					)
-					expect(missing.exitCode).toBe(1)
+					expect(missing.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(missing.stdout).toBe("")
 					expect(missing.stderr).toContain("--file")
 					expect(requests).toBe(0)

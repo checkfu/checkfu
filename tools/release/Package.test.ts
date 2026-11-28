@@ -306,12 +306,12 @@ it(
 						return child
 					}
 					await expect(run(["agents", "list"])).rejects.toMatchObject({
-						code: 1,
+						code: 2,
 						stderr: expect.stringContaining("Missing CHECKFU_API_KEY"),
 					})
 					await expect(
 						run(["--base-url", url, "login"], { CHECKFU_API_KEY: "invalid" }),
-					).rejects.toMatchObject({ code: 1 })
+					).rejects.toMatchObject({ code: 6 })
 					await expect(readFile(join(config, "config.json"))).rejects.toMatchObject({
 						code: "ENOENT",
 					})
@@ -407,7 +407,7 @@ it(
 						code: "ENOENT",
 					})
 					await run(["logout"])
-					await expect(run(["agents", "list"])).rejects.toMatchObject({ code: 1 })
+					await expect(run(["agents", "list"])).rejects.toMatchObject({ code: 2 })
 				})
 			}).pipe(Effect.scoped),
 		)

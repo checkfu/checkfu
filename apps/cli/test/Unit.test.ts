@@ -1,3 +1,4 @@
+import { USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -92,13 +93,13 @@ describe("normalizeApiUrl", () => {
 				for (const bad of cases) {
 					const err = yield* Effect.flip(normalizeApiUrl(bad))
 					expect(err._tag).toBe("CliFailure")
-					expect(err.exitCode).toBe(1)
+					expect(err.exitCode).toBe(USAGE_EXIT_CODE)
 				}
 
 				const malformedWithCreds = yield* Effect.flip(
 					normalizeApiUrl("https://alice:supersecret@badhost:99999"),
 				)
-				expect(malformedWithCreds.exitCode).toBe(1)
+				expect(malformedWithCreds.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(malformedWithCreds.message).not.toContain("alice")
 				expect(malformedWithCreds.message).not.toContain("supersecret")
 				expect(malformedWithCreds.message).not.toContain("badhost")

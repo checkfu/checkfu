@@ -93,6 +93,7 @@ export type HaltedQueueSnapshotDecision =
 	| { readonly action: "continue_waiting" }
 	| { readonly action: "retry_snapshot" }
 	| { readonly action: "fail"; readonly message: string }
+	| { readonly action: "unconfirmed"; readonly message: string }
 
 export const createInitialConnectState = (init: {
 	readonly trackPipedTurns: boolean
@@ -520,7 +521,10 @@ export const evaluateHaltedQueueSnapshot = (
 		return { action: "fail", message: haltedMessage }
 	}
 	if (retriesExhausted) {
-		return { action: "fail", message: haltedMessage }
+		return {
+			action: "unconfirmed",
+			message: `Could not confirm whether queued turn ${checkedState.targetTurn} started. Reconnect to check its progress.`,
+		}
 	}
 	return { action: "retry_snapshot" }
 }

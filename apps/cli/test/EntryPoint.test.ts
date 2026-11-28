@@ -1,3 +1,4 @@
+import { USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { spawnSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -40,11 +41,11 @@ describe.skipIf(process.platform === "win32")("the CLI started from another proj
 				"--session-id",
 				"s",
 			])
-			expect(call.status).toBe(1)
+			expect(call.status).toBe(USAGE_EXIT_CODE)
 			expect(call.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(call.stderr).not.toContain("planted")
 			const login = run(["login"])
-			expect(login.status).toBe(1)
+			expect(login.status).toBe(USAGE_EXIT_CODE)
 			expect(login.stderr).toContain("Pass the deployment URL")
 		} finally {
 			rmSync(project, { recursive: true, force: true })

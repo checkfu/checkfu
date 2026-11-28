@@ -1,7 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { CliFailure } from "./Errors.ts"
+import { failure } from "./Errors.ts"
+import type { CliFailure } from "./Errors.ts"
 
 const UNSAFE_FOR_HUMANS = /(?![\t\n])[\p{Cc}\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu
 const UNSAFE_IN_JSON = /[\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g
@@ -31,7 +32,7 @@ export const writeStdout = (text: string): Effect.Effect<void, CliFailure, Stdio
 		const stdio = yield* Stdio.Stdio
 		yield* Stream.make(text).pipe(
 			Stream.run(stdio.stdout({ endOnDone: false })),
-			Effect.mapError((err) => new CliFailure({ message: err.message, exitCode: 1 })),
+			Effect.mapError((err) => failure(err.message)),
 		)
 	})
 
@@ -40,7 +41,7 @@ export const writeStderr = (text: string): Effect.Effect<void, CliFailure, Stdio
 		const stdio = yield* Stdio.Stdio
 		yield* Stream.make(text).pipe(
 			Stream.run(stdio.stderr({ endOnDone: false })),
-			Effect.mapError((err) => new CliFailure({ message: err.message, exitCode: 1 })),
+			Effect.mapError((err) => failure(err.message)),
 		)
 	})
 

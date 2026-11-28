@@ -1,3 +1,4 @@
+import { USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { expect, it } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
@@ -40,7 +41,7 @@ it("prints actionable destroy guidance from the real helper when confirmation is
 					Schema.Struct({ code: Schema.Int, stdout: Schema.String, stderr: Schema.String }),
 				)(error),
 		)
-		expect(failure.code).toBe(1)
+		expect(failure.code).toBe(USAGE_EXIT_CODE)
 		expect(failure.stdout).toBe("")
 		expect(failure.stderr).toContain("checkfu destroy --stage confirmation-qa --yes")
 	} finally {

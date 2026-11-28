@@ -1,5 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
-import { formatApiErrorEnvelope } from "../src/Errors.ts"
+import {
+	AUTH_EXIT_CODE,
+	CONFLICT_EXIT_CODE,
+	FAILURE_EXIT_CODE,
+	NOT_FOUND_EXIT_CODE,
+	RETRY_EXIT_CODE,
+	apiFailure,
+	formatApiErrorEnvelope,
+} from "../src/Errors.ts"
 
 describe("formatApiErrorEnvelope", () => {
 	it("appends the request id when present", () => {
@@ -60,12 +68,19 @@ describe("formatApiErrorEnvelope", () => {
 		}
 	})
 
-	it("keeps exitCode set to 1", () => {
-		const failure = formatApiErrorEnvelope({
-			type: "error",
-			error: { type: "internal_error", message: "Internal server error." },
-			request_id: "req_123",
-		})
-		expect(failure.exitCode).toBe(1)
+	it.each([
+		[400, FAILURE_EXIT_CODE],
+		[401, AUTH_EXIT_CODE],
+		[403, AUTH_EXIT_CODE],
+		[404, NOT_FOUND_EXIT_CODE],
+		[409, CONFLICT_EXIT_CODE],
+		[412, CONFLICT_EXIT_CODE],
+		[429, RETRY_EXIT_CODE],
+		[500, FAILURE_EXIT_CODE],
+		[502, RETRY_EXIT_CODE],
+		[503, RETRY_EXIT_CODE],
+		[504, RETRY_EXIT_CODE],
+	] as const)("classifies HTTP %i as exit code %i", (status, code) => {
+		expect(apiFailure(status, "api_error", "Request failed.").exitCode).toBe(code)
 	})
 })

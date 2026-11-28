@@ -37,7 +37,17 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
-import { CliFailure, configError, networkFailure, usageError } from "../Errors.ts"
+import {
+	INTERRUPTED_EXIT_CODE,
+	FAILURE_EXIT_CODE,
+	USAGE_EXIT_CODE,
+	configError,
+	failure,
+	interrupted,
+	networkFailure,
+	usageError,
+} from "../Errors.ts"
+import type { CliFailure } from "../Errors.ts"
 import {
 	readSavedConnection,
 	removeSavedConnection,
@@ -324,7 +334,7 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const managedOperation =
 			target.checkout.managed && (args[0] === "deploy" || args[0] === "destroy")
-		return yield* spawner
+		const code = yield* spawner
 			.exitCode(
 				ChildProcess.make(
 					target.checkout.runtime,
@@ -345,8 +355,31 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 					{ ...inCheckout(target), stdin: "inherit", stdout: "inherit", stderr: "inherit" },
 				),
 			)
-			.pipe(Effect.mapError((error) => configError(`Could not start Alchemy: ${error}`)))
+			.pipe(
+				Effect.mapError(({ reason }) => {
+					if (reason.module === "ChildProcess" && reason.method === "exitCode") {
+						const cause = reason.cause
+						return cause instanceof Error &&
+							cause.message === "Process interrupted due to receipt of signal: 'SIGINT'"
+							? interrupted("Deployment interrupted.")
+							: failure(`Could not read the Alchemy process exit status: ${reason.message}`)
+					}
+					return configError(`Could not start Alchemy: ${reason.message}`)
+				}),
+			)
+		return code === 0 ||
+			code === INTERRUPTED_EXIT_CODE ||
+			(managedOperation && code === USAGE_EXIT_CODE)
+			? code
+			: FAILURE_EXIT_CODE
 	})
+
+const deploymentFailure = (exitCode: number, message: string): CliFailure =>
+	exitCode === INTERRUPTED_EXIT_CODE
+		? interrupted(message)
+		: exitCode === USAGE_EXIT_CODE
+			? configError(message)
+			: failure(message)
 
 const ANSWER_PREFIX = "@checkfu "
 
@@ -442,7 +475,7 @@ const promptForProviderKey = (retry: string) =>
 						? Effect.fail("An API key is required.")
 						: Effect.succeed(value),
 			}),
-		).pipe(Effect.mapError(() => new CliFailure({ message: "Deploy cancelled.", exitCode: 130 })))
+		).pipe(Effect.mapError(() => interrupted("Deploy cancelled.")))
 		return Redacted.value(key).trim()
 	})
 
@@ -771,10 +804,10 @@ const requireAccount = (target: Target, signIn: Option.Option<{ readonly retry: 
 			const exitCode = yield* run(target, ["profile", "edit", "--add", "Cloudflare"])
 			answer = yield* ask(target, AccountAnswer, ["account"])
 			if (exitCode !== 0 || answer.status === "not-configured") {
-				return yield* new CliFailure({
-					message: `Cloudflare sign-in did not finish. Run \`${signIn.value.retry}\` again to retry.`,
-					exitCode: exitCode === 0 ? 1 : exitCode,
-				})
+				return yield* deploymentFailure(
+					exitCode,
+					`Cloudflare sign-in did not finish. Run \`${signIn.value.retry}\` again to retry.`,
+				)
 			}
 		}
 		switch (answer.status) {
@@ -907,10 +940,10 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			...(input.yes ? ["--yes"] : []),
 		])
 		if (exitCode !== 0) {
-			return yield* new CliFailure({
-				message: `Deploy did not finish. Run \`${retry}\` again when you are ready.`,
+			return yield* deploymentFailure(
 				exitCode,
-			})
+				`Deploy did not finish. Run \`${retry}\` again when you are ready.`,
+			)
 		}
 
 		const known = Option.filter(
@@ -1012,7 +1045,7 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 			...(input.yes ? ["--yes"] : []),
 		])
 		if (exitCode !== 0) {
-			return yield* new CliFailure({ message: "Destroy did not finish.", exitCode })
+			return yield* deploymentFailure(exitCode, "Destroy did not finish.")
 		}
 		yield* writeStderrLine(`Removed the "${stage}" deployment and all of its data.`)
 		yield* removeIfPresent(yield* deploymentRecordPath(checkout, stage))

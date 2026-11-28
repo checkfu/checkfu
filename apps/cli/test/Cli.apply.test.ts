@@ -1,3 +1,4 @@
+import { RETRY_EXIT_CODE, USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { IsSupportedAgentModel } from "@checkfu/api/Http/AgentsHandlers"
 import { agentProjectFiles } from "@checkfu/authoring/document"
 import { ProjectLockfile, formatProjectLockfile } from "@checkfu/authoring/lockfile"
@@ -65,7 +66,7 @@ describe("YAML projects", () => {
 								return next(request)
 							},
 						})
-						expect(result.exitCode).toBe(1)
+						expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 						expect(result.stderr).toContain(
 							`agent ${entry.id} is owned by both ${active} and ${missing}.`,
 						)
@@ -133,7 +134,7 @@ describe("YAML projects", () => {
 						"---\nname: Legacy\nmodel: fixture-model\nharness: pi\n---\n",
 					)
 					const invalid = yield* apply("--yes", automationFile)
-					expect(invalid.exitCode).toBe(1)
+					expect(invalid.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(invalid.stderr).toContain("./agents/support.md")
 					expect(invalid.stderr).toContain("harness")
 					expect(yield* fs.exists(lockFile)).toBe(false)
@@ -373,7 +374,7 @@ describe("YAML projects", () => {
 							return response
 						},
 					}
-					expect((yield* cli.run(attempts, options)).exitCode).toBe(1)
+					expect((yield* cli.run(attempts, options)).exitCode).toBe(RETRY_EXIT_CODE)
 					const pendingText = yield* fs.readFileString(lockFile)
 					const pendingLock = yield* Schema.decodeEffect(ProjectLockfile)(pendingText)
 					const original = "./agent.yaml"
@@ -388,7 +389,7 @@ describe("YAML projects", () => {
 					})
 					yield* fs.writeFileString(lockFile, duplicatePending)
 					const duplicate = yield* cli.run(attempts, options)
-					expect(duplicate.exitCode).toBe(1)
+					expect(duplicate.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(duplicate.stderr).toContain(`is owned by both ${original} and ${copied}.`)
 					expect(yield* fs.readFileString(lockFile)).toBe(duplicatePending)
 					expect(keys).toHaveLength(1)
@@ -420,7 +421,7 @@ describe("YAML projects", () => {
 						["apply", "--yes", "--prune", "--force", "--lock-file", lockFile, root],
 						options,
 					)
-					expect(outcome.exitCode).toBe(1)
+					expect(outcome.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(outcome.stderr).toContain(`agent ${id}, already owned by ${original}.`)
 					expect(yield* fs.readFileString(lockFile)).toBe(copiedPending)
 					const retrieved = yield* cli.run(["agents", "retrieve", "--agent-id", id])

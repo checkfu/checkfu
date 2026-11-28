@@ -1,3 +1,9 @@
+import {
+	CONFLICT_EXIT_CODE,
+	NOT_FOUND_EXIT_CODE,
+	RETRY_EXIT_CODE,
+	USAGE_EXIT_CODE,
+} from "../src/Errors.ts"
 import { IsSupportedAgentModel } from "@checkfu/api/Http/AgentsHandlers"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { expect, it } from "@effect/vitest"
@@ -111,7 +117,7 @@ it.each([
 	{ choice: "Cancel", exitCode: 0, message: "Cancelled. Nothing was applied." },
 	{
 		choice: "end of input",
-		exitCode: 1,
+		exitCode: USAGE_EXIT_CODE,
 		message:
 			"The confirmation prompt was interrupted. Nothing was applied. Use --yes to apply without a prompt.",
 	},
@@ -218,13 +224,13 @@ it("uses tracked kinds on pathless and directory applies and validates authored 
 
 				yield* write(report, reportSource("Report", "{path: ../a.yaml, id: agent_other}"))
 				const ambiguous = yield* apply([report], ["--dry-run"])
-				expect(ambiguous.exitCode).toBe(1)
+				expect(ambiguous.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(ambiguous.stderr).toContain("agent")
 
 				yield* write(report, reportSource("Report", "../a.yaml"))
 				yield* write("a.yaml", "name: [broken")
 				const malformed = yield* apply(["."], ["--dry-run"])
-				expect(malformed.exitCode).toBe(1)
+				expect(malformed.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(malformed.stderr).toContain("./a.yaml")
 			}),
 		),
@@ -270,12 +276,12 @@ it("rejects explicit inputs and references beneath a symlinked directory", () =>
 				yield* fs.writeFileString(path.join(outside, "agent.yaml"), agentSource("Outside"))
 				yield* fs.symlink(outside, file("linked"))
 				const explicit = yield* apply(["linked/agent.yaml"], ["--dry-run"])
-				expect(explicit.exitCode).toBe(1)
+				expect(explicit.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(explicit.stderr).toContain("symbolic link")
 				yield* write(cloud, "name: Cloud\n")
 				yield* write(report, reportSource("Report", "../linked/agent.yaml"))
 				const reference = yield* apply([report], ["--dry-run"])
-				expect(reference.exitCode).toBe(1)
+				expect(reference.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(reference.stderr).toContain("symbolic link")
 				expect(yield* fs.exists(file("checkfu-lock.json"))).toBe(false)
 			}),
@@ -293,7 +299,7 @@ it("clears a definitive create rejection so an archived reference can be correct
 				expect((yield* run(["agents", "archive", "--agent-id", archivedId])).exitCode).toBe(0)
 				yield* write(report, reportSource("Report", archivedId, idOf(created, cloud)))
 				const refused = yield* apply([report])
-				expect(refused.exitCode).toBe(1)
+				expect(refused.exitCode).toBe(CONFLICT_EXIT_CODE)
 				expect(refused.stderr).toContain("archived")
 				expect(yield* readLock).not.toHaveProperty("pending_creates")
 
@@ -338,7 +344,7 @@ it("sends an automation patch with a revision and preserves a concurrent schedul
 					},
 				})
 				expect(sent).toEqual({ name: "New name", revision: 1 })
-				expect(attempted.exitCode).toBe(1)
+				expect(attempted.exitCode).toBe(CONFLICT_EXIT_CODE)
 				expect(attempted.stderr).toContain("automation changed")
 				const current = yield* run(["automations", "retrieve", "--automation-id", id])
 				expect(JSON.parse(current.stdout)).toMatchObject({
@@ -404,7 +410,7 @@ it("uses the literal agent version reviewed during each apply", () =>
 				expect((yield* remote()).agent).toEqual(expectedAgent(1))
 
 				const approval = yield* apply([report], [])
-				expect(approval.exitCode).toBe(1)
+				expect(approval.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(approval.stderr).toContain("--yes")
 				expect(JSON.parse(approval.stdout)).toMatchObject([{ action: "update", fields: ["agent"] }])
 				yield* write(report, reportSource("Updated report", agentId, environmentId))
@@ -607,7 +613,7 @@ it("keeps an automation active when capacity is full and another create receipt 
 						return response
 					},
 				})
-				expect(lost.exitCode).toBe(1)
+				expect(lost.exitCode).toBe(RETRY_EXIT_CODE)
 				const pending = (yield* readLock).pending_creates?.[`./${report}`]
 				if (pending?.kind !== "automation") {
 					throw new Error("The lock did not retain the pending automation create")
@@ -634,7 +640,7 @@ it("keeps an automation active when capacity is full and another create receipt 
 							: next(request)
 					},
 				})
-				expect(applied.exitCode).toBe(1)
+				expect(applied.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(applied.stderr).toContain(`Confirm the pending create for ./${copied}`)
 				expect(posts).toEqual(["/v1/automations"])
 				expect(yield* fs.readFileString(file("checkfu-lock.json"))).toBe(lock)
@@ -664,7 +670,7 @@ it("keeps idempotency conflicts pending and records a successful create receipt 
 							{ status: 409 },
 						),
 				})
-				expect(conflict.exitCode).toBe(1)
+				expect(conflict.exitCode).toBe(CONFLICT_EXIT_CODE)
 				expect(yield* readLock).toMatchObject({
 					pending_creates: { [`./${reporter}`]: { kind: "agent" } },
 				})
@@ -676,7 +682,7 @@ it("keeps idempotency conflicts pending and records a successful create receipt 
 						return Response.json({ ...body, name: "Another writer" }, { status: response.status })
 					},
 				})
-				expect(moved.exitCode).toBe(1)
+				expect(moved.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(moved.stderr).toContain("differs from the confirmed create")
 				const saved = yield* readLock
 				expect(saved).not.toHaveProperty("pending_creates")
@@ -734,7 +740,7 @@ it.each([
 							return archived
 						},
 					})
-					expect(result.exitCode).toBe(1)
+					expect(result.exitCode).toBe(CONFLICT_EXIT_CODE)
 					expect(yield* readLock).toMatchObject({ resources: { [`./${source}`]: { id } } })
 				}),
 			),
@@ -770,7 +776,7 @@ it("blocks pruning IDs used by retained automations, including outside a selecte
 						return next(request)
 					},
 				})
-				expect(scoped.exitCode).toBe(1)
+				expect(scoped.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(scoped.stderr).toContain(`./${reporter}: Automation dependencies in ./${report}`)
 				yield* fs.remove(file(report))
 				expect(rows(yield* apply([], ["--yes", "--prune"]))[0]).toEqual({
@@ -783,11 +789,23 @@ it("blocks pruning IDs used by retained automations, including outside a selecte
 	))
 
 it.each([
-	{ source: reporter, group: "agents", removalMethod: "POST", removalSuffix: "/archive" },
-	{ source: cloud, group: "environments", removalMethod: "DELETE", removalSuffix: "" },
+	{
+		source: reporter,
+		group: "agents",
+		removalMethod: "POST",
+		removalSuffix: "/archive",
+		replayExitCode: USAGE_EXIT_CODE,
+	},
+	{
+		source: cloud,
+		group: "environments",
+		removalMethod: "DELETE",
+		removalSuffix: "",
+		replayExitCode: NOT_FOUND_EXIT_CODE,
+	},
 ])(
 	"checks the live $group after a lost create response",
-	({ source, group, removalMethod, removalSuffix }) =>
+	({ source, group, removalMethod, removalSuffix, replayExitCode }) =>
 		Effect.runPromise(
 			testProject((project) =>
 				Effect.gen(function* () {
@@ -810,7 +828,7 @@ it.each([
 						},
 					})
 					expect(id).toBeDefined()
-					expect(interrupted.exitCode).toBe(1)
+					expect(interrupted.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(yield* readLock).toHaveProperty("pending_creates")
 
 					const methods: Array<string> = []
@@ -825,7 +843,7 @@ it.each([
 						},
 					})
 					expect(methods).toEqual(["POST", "GET"])
-					expect(replayed.exitCode).toBe(1)
+					expect(replayed.exitCode).toBe(replayExitCode)
 					const saved = yield* readLock
 					expect(saved).not.toHaveProperty("pending_creates")
 					expect(saved).toMatchObject({ resources: { [`./${source}`]: { id } } })
@@ -860,7 +878,7 @@ it("replays the saved automation references before reconciling a newer agent ver
 					},
 				})
 				expect(id).toBeDefined()
-				expect(interrupted.exitCode).toBe(1)
+				expect(interrupted.exitCode).toBe(RETRY_EXIT_CODE)
 				expect(yield* readLock).toMatchObject({
 					pending_creates: {
 						[`./${report}`]: {
@@ -912,7 +930,7 @@ it("clears a replayed create rejected before any agent was created", () =>
 				const interrupted = yield* apply([reporter], ["--yes"], {
 					interceptFetch: () => Promise.reject(new Error("Connection lost before send.")),
 				})
-				expect(interrupted.exitCode).toBe(1)
+				expect(interrupted.exitCode).toBe(RETRY_EXIT_CODE)
 				expect(yield* readLock).toHaveProperty("pending_creates")
 
 				const rejected = yield* apply([reporter])
@@ -943,7 +961,7 @@ it("keeps nested project definitions out of the parent discovery scope", () =>
 				])
 				for (const input of [nested, `${nested}/${reporter}`]) {
 					const explicit = yield* apply([input], ["--dry-run"])
-					expect(explicit.exitCode).toBe(1)
+					expect(explicit.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(explicit.stderr).toContain("nested project")
 					expect(explicit.stderr).toContain(nestedLock)
 				}
@@ -1000,7 +1018,7 @@ it("blocks pruning a dependency used by an automation outside the project", () =
 					},
 				})
 				expect(cursors).toEqual([null, "1:fixture"])
-				expect(rejected.exitCode).toBe(1)
+				expect(rejected.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(rejected.stderr).toContain(`./${reporter}: Automation dependencies in ${external}`)
 				expect(rejected.stderr).toContain(`./${cloud}: Automation dependencies in ${external}`)
 
@@ -1020,7 +1038,7 @@ it("blocks pruning a dependency used by an automation outside the project", () =
 					},
 				})
 				expect(listings).toBe(1)
-				expect(late.exitCode).toBe(1)
+				expect(late.exitCode).toBe(CONFLICT_EXIT_CODE)
 				expect(late.stderr).toContain(`Automation ${external} still references this resource`)
 			}),
 		),
@@ -1041,7 +1059,7 @@ it("clears a pending create only when a not-found response identifies admission 
 							? Promise.reject(new Error("Connection lost before send."))
 							: next(request),
 				})
-				expect(interrupted.exitCode).toBe(1)
+				expect(interrupted.exitCode).toBe(RETRY_EXIT_CODE)
 				expect(yield* readLock).toHaveProperty("pending_creates")
 
 				const ambiguous = yield* apply([report], ["--yes"], {
@@ -1059,11 +1077,11 @@ it("clears a pending create only when a not-found response identifies admission 
 									),
 								),
 				})
-				expect(ambiguous.exitCode).toBe(1)
+				expect(ambiguous.exitCode).toBe(NOT_FOUND_EXIT_CODE)
 				expect(yield* readLock).toHaveProperty("pending_creates")
 
 				const rejected = yield* apply([report])
-				expect(rejected.exitCode).toBe(1)
+				expect(rejected.exitCode).toBe(NOT_FOUND_EXIT_CODE)
 				expect(rejected.stderr).toContain("Environment does not exist")
 				expect(yield* readLock).not.toHaveProperty("pending_creates")
 
@@ -1094,7 +1112,7 @@ it.each([true, false])(
 								? Promise.reject(new Error("Connection lost before send."))
 								: next(request),
 					})
-					expect(interrupted.exitCode).toBe(1)
+					expect(interrupted.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(yield* readLock).toMatchObject({
 						pending_creates: {
 							[`./${report}`]: {
@@ -1107,7 +1125,7 @@ it.each([true, false])(
 					})
 					yield* fs.remove(file(reporter))
 					const refused = yield* apply([reporter], ["--yes", "--prune"])
-					expect(refused.exitCode).toBe(1)
+					expect(refused.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(refused.stderr).toContain(`Automation dependencies in ./${report}`)
 					yield* write(reporter, agentSource("Reporter"))
 					expect(rows(yield* apply([report])).at(-1)?.action).toBe("create")
@@ -1144,7 +1162,7 @@ it("rechecks an unchanged dependency immediately before using it", () =>
 					},
 				})
 				expect(reads).toBe(2)
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.stderr).toContain(`./${cloud}: the resource changed after planning`)
 				expect(yield* readLock).not.toHaveProperty("pending_creates")
 			}),
@@ -1169,7 +1187,7 @@ it("skips JSON Schemas during directory discovery and rejects selecting them exp
 					`./${reporter}`,
 				])
 				const explicit = yield* apply([schema], ["--dry-run"])
-				expect(explicit.exitCode).toBe(1)
+				expect(explicit.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(explicit.stderr).toContain("found a JSON Schema")
 			}),
 		),
@@ -1192,7 +1210,7 @@ it("clears a pending create after replay definitively rejects its schedule", () 
 						throw new Error("Connection lost before reading the rejection.")
 					},
 				})
-				expect(lost.exitCode).toBe(1)
+				expect(lost.exitCode).toBe(RETRY_EXIT_CODE)
 				expect(yield* readLock).toHaveProperty("pending_creates")
 				const rejected = yield* apply([report])
 				expect(rejected.exitCode).toBe(1)

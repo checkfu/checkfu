@@ -1,3 +1,4 @@
+import { USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { writeFile } from "node:fs/promises"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
@@ -76,7 +77,7 @@ describe("CLI files", () => {
 									)
 								: next(request),
 					})
-					expect(corrupt.exitCode).toBe(1)
+					expect(corrupt.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(corrupt.errorMessage).toContain("failed integrity verification")
 					expect(corrupt.errorMessage).toContain(diagnostic)
 					expect(yield* fs.readDirectory(root)).toEqual(["source.bin"])
@@ -170,7 +171,7 @@ describe("CLI files", () => {
 					expect(new Uint8Array(yield* fs.readFile(target))).toEqual(data)
 
 					const again = yield* run("files", "download", "--file-id", file.id, "--output", target)
-					expect(again.exitCode).toBe(1)
+					expect(again.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(again.errorMessage).toContain("already exists")
 
 					const raced = path.join(root, "raced.csv")
@@ -186,7 +187,7 @@ describe("CLI files", () => {
 							},
 						},
 					)
-					expect(racedDownload.exitCode).toBe(1)
+					expect(racedDownload.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(racedDownload.errorMessage).toContain("already exists")
 					expect(yield* fs.readFileString(raced)).toBe("another writer")
 					yield* fs.remove(raced)
@@ -245,7 +246,7 @@ describe("CLI files", () => {
 					expect((yield* fs.readDirectory(physical)).sort()).toEqual(["child", "copy.csv"])
 
 					const missing = yield* run("files", "upload", path.join(root, "absent.txt"))
-					expect(missing.exitCode).toBe(1)
+					expect(missing.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(missing.errorMessage).toContain("no such file")
 
 					for (const [length, change] of [
@@ -274,7 +275,7 @@ describe("CLI files", () => {
 								return next(request)
 							},
 						})
-						expect(result.exitCode).toBe(1)
+						expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 						expect(result.errorMessage).toContain(`${change} while it was being read`)
 					}
 					expect((yield* run("files", "upload", source)).exitCode).toBe(0)

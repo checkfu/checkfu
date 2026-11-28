@@ -16,6 +16,16 @@ import * as Schema from "effect/Schema"
 export { apiErrorStatus, isApiErrorEnvelope, isTransientHttpError, isTransientHttpStatus }
 export type { ApiErrorEnvelope }
 
+export const SUCCESS_EXIT_CODE = 0
+export const FAILURE_EXIT_CODE = 1
+export const USAGE_EXIT_CODE = 2
+export const ACTION_REQUIRED_EXIT_CODE = 3
+export const NOT_FOUND_EXIT_CODE = 4
+export const CONFLICT_EXIT_CODE = 5
+export const AUTH_EXIT_CODE = 6
+export const RETRY_EXIT_CODE = 7
+export const INTERRUPTED_EXIT_CODE = 130
+
 export class CliFailure extends Data.TaggedError("CliFailure")<{
 	readonly message: string
 	readonly exitCode: number
@@ -33,20 +43,45 @@ export const isCliFailure = (value: unknown): value is CliFailure =>
 	"exitCode" in value &&
 	typeof value.exitCode === "number"
 
-export const usageError = (message: string): CliFailure => new CliFailure({ message, exitCode: 1 })
+export const failure = (message: string): CliFailure =>
+	new CliFailure({ message, exitCode: FAILURE_EXIT_CODE })
 
-export const configError = (message: string): CliFailure => new CliFailure({ message, exitCode: 1 })
+export const usageError = (message: string): CliFailure =>
+	new CliFailure({ message, exitCode: USAGE_EXIT_CODE })
+
+export const configError = usageError
 
 export const networkFailure = (message: string): CliFailure =>
-	new CliFailure({ message, exitCode: 1 })
-
-export const ACTION_REQUIRED_EXIT_CODE = 3
+	new CliFailure({ message, exitCode: RETRY_EXIT_CODE })
 
 export const actionRequired = (message: string): CliFailure =>
 	new CliFailure({ message, exitCode: ACTION_REQUIRED_EXIT_CODE })
 
+export const interrupted = (message: string): CliFailure =>
+	new CliFailure({ message, exitCode: INTERRUPTED_EXIT_CODE })
+
+export const httpFailure = (status: number, message: string): CliFailure => {
+	switch (status) {
+		case 404:
+			return new CliFailure({ message, exitCode: NOT_FOUND_EXIT_CODE })
+		case 409:
+		case 412:
+			return new CliFailure({ message, exitCode: CONFLICT_EXIT_CODE })
+		case 401:
+		case 403:
+			return new CliFailure({ message, exitCode: AUTH_EXIT_CODE })
+		case 429:
+		case 502:
+		case 503:
+		case 504:
+			return networkFailure(message)
+		default:
+			return failure(message)
+	}
+}
+
 export const apiFailure = (status: number, type: string, message: string): CliFailure =>
-	new CliFailure({ message: `API error (${status} ${type}): ${message}`, exitCode: 1 })
+	httpFailure(status, `API error (${status} ${type}): ${message}`)
 
 const PRINTABLE_REQUEST_ID = /^[\w-]{1,128}$/
 export const formatApiErrorEnvelope = (
@@ -87,18 +122,24 @@ export const formatClientError = (
 	if (HttpClientError.isHttpClientError(error)) {
 		const reason = error.reason
 		if (reason._tag === "StatusCodeError") {
-			return networkFailure(`HTTP ${reason.response.status}: ${error.message}`)
+			return httpFailure(reason.response.status, `HTTP ${reason.response.status}: ${error.message}`)
 		}
 		if (reason._tag === "TransportError") {
 			return networkFailure(`Request failed: ${error.message}`)
 		}
-		return networkFailure(error.message)
+		if (
+			(reason._tag === "DecodeError" || reason._tag === "EmptyBodyError") &&
+			reason.response.status >= 400
+		) {
+			return httpFailure(reason.response.status, error.message)
+		}
+		return failure(error.message)
 	}
 	if (Schema.isSchemaError(error)) {
-		return networkFailure(`Response validation failed: ${error.message}`)
+		return failure(`Response validation failed: ${error.message}`)
 	}
 	if ("_tag" in error && error._tag === "SseError") {
-		return networkFailure(`Event stream decode failed: ${error.message}`)
+		return failure(`Event stream decode failed: ${error.message}`)
 	}
 	if (Sse.Retry.is(error)) {
 		return networkFailure("Event stream requested retry.")

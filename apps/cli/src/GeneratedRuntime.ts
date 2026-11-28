@@ -453,6 +453,7 @@ export const invokeGeneratedStream = (
 								new APIConnectionError({
 									message: `Invalid SSE event payload: ${err.message}`,
 									cause: err,
+									transient: false,
 								}),
 						),
 					),

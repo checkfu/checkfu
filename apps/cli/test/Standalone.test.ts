@@ -1,3 +1,4 @@
+import { USAGE_EXIT_CODE } from "../src/Errors.ts"
 import { spawn, spawnSync } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
 import {
@@ -56,11 +57,11 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 					timeout: 30_000,
 				})
 			const call = run(["sessions", "retrieve", "--session-id", "sess_x"])
-			expect(call.status).toBe(1)
+			expect(call.status).toBe(USAGE_EXIT_CODE)
 			expect(call.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(call.stderr).not.toContain("planted")
 			const login = run(["login"])
-			expect(login.status).toBe(1)
+			expect(login.status).toBe(USAGE_EXIT_CODE)
 			expect(login.stderr).toContain("Pass the deployment URL")
 			expect(existsSync(join(hostile, "PRELOAD_RAN"))).toBe(false)
 
@@ -281,10 +282,10 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 				})
 
 				const nothingExported = await run(checkout, base)
-				expect(nothingExported.status).toBe(1)
+				expect(nothingExported.status).toBe(USAGE_EXIT_CODE)
 				expect(nothingExported.stderr).toContain("Missing CHECKFU_API_KEY")
 				const login = await run(checkout, base, ["login"])
-				expect(login.status).toBe(1)
+				expect(login.status).toBe(USAGE_EXIT_CODE)
 				expect(login.stderr).toContain("Pass the deployment URL")
 
 				const sameAsTheFile = await run(checkout, {

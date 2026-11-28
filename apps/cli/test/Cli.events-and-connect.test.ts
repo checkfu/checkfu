@@ -59,7 +59,14 @@ const createReadySession = (cli: TestCli) =>
 		return sessionId
 	})
 
-import { ACTION_REQUIRED_EXIT_CODE } from "../src/Errors.ts"
+import {
+	ACTION_REQUIRED_EXIT_CODE,
+	AUTH_EXIT_CODE,
+	CONFLICT_EXIT_CODE,
+	FAILURE_EXIT_CODE,
+	RETRY_EXIT_CODE,
+	USAGE_EXIT_CODE,
+} from "../src/Errors.ts"
 
 describe("CLI sessions:events and sessions connect", () => {
 	it("sends events with auto and explicit idempotency keys, lists, and streams events", async () => {
@@ -248,7 +255,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							return next(request)
 						},
 					})
-					expect(scalar.exitCode).toBe(1)
+					expect(scalar.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(scalar.stdout).toBe("")
 					expect(scalar.stderr).toContain(
 						"Expected stdin to be { events: [...] }, an array, or a single item object.",
@@ -657,7 +664,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							})
 						},
 					})
-					expect(badJson.exitCode).toBe(1)
+					expect(badJson.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(badJsonRequests).toBe(1)
 					expect(badJson.stderr).toContain("Invalid SSE event payload")
 
@@ -929,7 +936,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							return res
 						},
 					})
-					expect(unexpectedEnd.exitCode).toBe(1)
+					expect(unexpectedEnd.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(unexpectedEnd.stderr).toContain("Event stream ended before turn 4 completed.")
 				}),
 			),
@@ -958,7 +965,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(htmlRes.exitCode).toBe(1)
+					expect(htmlRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(htmlRequests).toBe(1)
 					expect(htmlRes.stderr).toContain("Expected text/event-stream")
 
@@ -966,7 +973,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", baseSessionId, "--after", "99"],
 						{ stdin: "should not send\n" },
 					)
-					expect(futureCursor.exitCode).toBe(1)
+					expect(futureCursor.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(futureCursor.stderr).toContain("beyond the latest session event sequence")
 
 					const terminalCli = yield* makeTestServer({
@@ -1249,7 +1256,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(queuedRefusal.exitCode).toBe(1)
+					expect(queuedRefusal.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(queuedRefusal.stderr).toContain("[status: idle (refusal)]")
 					expect(queuedRefusal.stderr).toContain(
 						"Queued turn 2 did not start because turn 1 stopped with refusal.",
@@ -1284,7 +1291,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						{ stdin: "in-flight message\n" },
 					)
 					yield* Fiber.await(archiverFiber)
-					expect(archivedMidTurn.exitCode).toBe(1)
+					expect(archivedMidTurn.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(archivedMidTurn.stderr).toContain("Session terminated before turn 1 completed.")
 
 					const replayArchived = yield* archiveCli.run([
@@ -1300,7 +1307,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", archiveSessionId],
 						{ stdin: "message to dead session\n" },
 					)
-					expect(pipedToArchived.exitCode).toBe(1)
+					expect(pipedToArchived.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(pipedToArchived.stdout).toBe("")
 					expect(pipedToArchived.stderr).toContain("already archived")
 
@@ -1358,7 +1365,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(lookupFailed.exitCode).toBe(1)
+					expect(lookupFailed.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(statusGetsAfterStart).toBe(3)
 					expect(lookupFailed.stderr).toContain("503")
 
@@ -1369,7 +1376,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", idleSessionId],
 						{ stdin: "/interrupt\n" },
 					)
-					expect(pipedInterrupt.exitCode).toBe(1)
+					expect(pipedInterrupt.exitCode).toBe(CONFLICT_EXIT_CODE)
 					expect(pipedInterrupt.stderr).toContain("409 conflict_error")
 
 					const ttyInterrupt = yield* idleCli.run(
@@ -1769,7 +1776,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(unconfirmedRes.exitCode).toBe(1)
+					expect(unconfirmedRes.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(unconfirmedKeys.length).toBe(3)
 					expect(new Set(unconfirmedKeys).size).toBe(1)
 					const usedKey = unconfirmedKeys[0] ?? ""
@@ -1914,7 +1921,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(gateway502Res.exitCode).toBe(1)
+					expect(gateway502Res.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(gateway502Keys).toHaveLength(3)
 					expect(new Set(gateway502Keys).size).toBe(1)
 					const key502 = gateway502Keys[0] ?? ""
@@ -1958,7 +1965,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						},
 					)
 					yield* Fiber.await(liveArchiver)
-					expect(archiveLookupRes.exitCode).toBe(1)
+					expect(archiveLookupRes.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(sessionGetCount).toBe(4)
 					expect(archiveLookupRes.stderr.length).toBeGreaterThan(0)
 
@@ -1979,7 +1986,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							),
 						},
 					)
-					expect(lateInputRes.exitCode).toBe(1)
+					expect(lateInputRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(lateInputRes.stderr).toContain(
 						`Cannot send input: session ${archiveLookupSessionId} is already archived.`,
 					)
@@ -2003,7 +2010,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							),
 						},
 					)
-					expect(latePartialRes.exitCode).toBe(1)
+					expect(latePartialRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(latePartialRes.stderr).toContain(
 						`Cannot send input: session ${archiveLookupSessionId} is already archived.`,
 					)
@@ -2057,6 +2064,8 @@ describe("CLI sessions:events and sessions connect", () => {
 						{ data: [{ type: "user.message" }] },
 						{ data: [{ turn: 7 }] },
 						{ data: [{ type: "user.interrupt", turn: 7 }] },
+						"{broken",
+						"",
 					]) {
 						let capturedKey = ""
 						const badReceiptRes = yield* decodeRetryCli.run(
@@ -2066,16 +2075,19 @@ describe("CLI sessions:events and sessions connect", () => {
 								interceptFetch: async (next, request) => {
 									if (request.method === "POST" && request.url.endsWith("/events")) {
 										capturedKey = request.headers.get("idempotency-key") ?? ""
-										return new Response(JSON.stringify(badBody), {
-											status: 200,
-											headers: { "content-type": "application/json" },
-										})
+										return new Response(
+											typeof badBody === "string" ? badBody : JSON.stringify(badBody),
+											{
+												status: 200,
+												headers: { "content-type": "application/json" },
+											},
+										)
 									}
 									return next(request)
 								},
 							},
 						)
-						expect(badReceiptRes.exitCode).toBe(1)
+						expect(badReceiptRes.exitCode).toBe(RETRY_EXIT_CODE)
 						expect(capturedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 						expect(badReceiptRes.stderr).toContain(`Idempotency-Key: ${capturedKey}`)
 					}
@@ -2269,7 +2281,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						},
 					})
 					yield* Fiber.await(archiverFiber)
-					expect(intRes.exitCode).toBe(1)
+					expect(intRes.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(interruptedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 					expect(intRes.stderr).toContain(`Idempotency-Key: ${interruptedKey}`)
 
@@ -2287,7 +2299,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", activeSessId],
 						{ stdin: hugeActiveStdin },
 					)
-					expect(hugeActiveRes.exitCode).toBe(1)
+					expect(hugeActiveRes.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(hugeActiveRes.stderr).toContain("exceeds maximum message length")
 					expect(activeChunksPulled).toBeLessThanOrEqual(20)
 
@@ -2302,7 +2314,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", intSessionId],
 						{ stdin: hugeEndedStdin },
 					)
-					expect(hugeEndedRes.exitCode).toBe(1)
+					expect(hugeEndedRes.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(hugeEndedRes.stderr).toContain("exceeds maximum message length")
 					expect(endedChunksPulled).toBeLessThanOrEqual(20)
 				}),
@@ -2475,7 +2487,7 @@ describe("CLI sessions:events and sessions connect", () => {
 				child.on("error", reject)
 				child.on("close", (code) => resolve({ code, stdout, stderr }))
 			})
-			expect(badDotSubproc.code).toBe(1)
+			expect(badDotSubproc.code).toBe(USAGE_EXIT_CODE)
 			expect(badDotSubproc.stdout).toBe("")
 			expect(badDotSubproc.stderr).toContain("Invalid --agent-id")
 
@@ -2620,7 +2632,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(rotatedRes.exitCode).toBe(1)
+					expect(rotatedRes.exitCode).toBe(AUTH_EXIT_CODE)
 					expect(rotatedKeys).toHaveLength(2)
 					expect(rotatedKeys[1]).toBe(rotatedKeys[0])
 					expect(rotatedRes.stderr).toContain(`Idempotency-Key: ${rotatedKeys[0]}`)
@@ -2657,7 +2669,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						},
 					)
 					yield* Fiber.await(ttyArchiver)
-					expect(stalledTtyRes.exitCode).toBe(1)
+					expect(stalledTtyRes.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(ttyInterruptedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 					expect(stalledTtyRes.stderr).toContain(`Idempotency-Key: ${ttyInterruptedKey}`)
 
@@ -2681,7 +2693,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							},
 						},
 					)
-					expect(validBeforeOverflow.exitCode).toBe(1)
+					expect(validBeforeOverflow.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(validBeforeOverflow.stderr).toContain("exceeds maximum message length")
 					expect(sentPayloads).toHaveLength(1)
 					expect(sentPayloads[0]).toContain("valid first line")
@@ -2947,7 +2959,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							stdin: Stream.concat(Stream.make(encoder.encode("hello")), Stream.never),
 						}),
 					)
-					expect(helloRes.exitCode).toBe(1)
+					expect(helloRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(Duration.toMillis(helloElapsed)).toBeLessThan(1000)
 					expect(helloRes.stderr).toContain(
 						`Cannot send input: session ${endedSessionId} is already archived.`,
@@ -2957,7 +2969,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", endedSessionId],
 						{ stdin: "/ex" },
 					)
-					expect(partialPrefixEofRes.exitCode).toBe(1)
+					expect(partialPrefixEofRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(partialPrefixEofRes.stderr).toContain(
 						`Cannot send input: session ${endedSessionId} is already archived.`,
 					)
@@ -2970,7 +2982,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							),
 						}),
 					)
-					expect(divergedPrefixRes.exitCode).toBe(1)
+					expect(divergedPrefixRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(Duration.toMillis(divergedElapsed)).toBeLessThan(1000)
 					expect(divergedPrefixRes.stderr).toContain(
 						`Cannot send input: session ${endedSessionId} is already archived.`,
@@ -3043,7 +3055,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					const otherClientRes = yield* Fiber.join(otherClientFiber)
 					expect(otherClientRes.exitCode).toBe(0)
-					expect(sharedRes.exitCode).toBe(1)
+					expect(sharedRes.exitCode).toBe(CONFLICT_EXIT_CODE)
 					expect(sharedRes.stdout).toContain("[user] shared hello")
 					expect(sharedRes.stderr).toContain("409 conflict_error")
 				}),
@@ -3663,7 +3675,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					yield* Fiber.await(archiver1)
-					expect(liveBufferedRes.exitCode).toBe(1)
+					expect(liveBufferedRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(liveBufferedRes.stderr).toContain("ended before buffered input was submitted")
 
 					const liveSecondSessionId = yield* createReadySession(cli)
@@ -3687,7 +3699,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					yield* Fiber.await(archiver2)
-					expect(liveSecondRes.exitCode).toBe(1)
+					expect(liveSecondRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(liveSecondRes.stderr).toContain("ended before buffered input was submitted")
 
 					const queueFullSessionId = yield* createReadySession(cli)
@@ -3717,7 +3729,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(confirmed429Calls).toBe(3)
-					expect(confirmed429Res.exitCode).toBe(1)
+					expect(confirmed429Res.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(confirmed429Res.stderr).toContain("429 rate_limit_error")
 					expect(confirmed429Res.stderr).not.toContain("delivery unconfirmed")
 					expect(confirmed429Res.stderr).not.toContain("Idempotency-Key:")
@@ -3752,7 +3764,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					)
 					expect(mixedKeys).toHaveLength(3)
 					expect(new Set(mixedKeys).size).toBe(1)
-					expect(mixed429Res.exitCode).toBe(1)
+					expect(mixed429Res.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(mixed429Res.stderr).toContain("delivery unconfirmed")
 					expect(mixed429Res.stderr).toContain(`Idempotency-Key: ${mixedKeys[0]}`)
 
@@ -3779,7 +3791,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(unconfirmed429Keys).toHaveLength(3)
-					expect(unconfirmed429Res.exitCode).toBe(1)
+					expect(unconfirmed429Res.exitCode).toBe(RETRY_EXIT_CODE)
 					expect(unconfirmed429Res.stderr).toContain("delivery unconfirmed")
 					expect(unconfirmed429Res.stderr).toContain(`Idempotency-Key: ${unconfirmed429Keys[0]}`)
 
@@ -3915,7 +3927,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 								return next(request)
 							},
 						})
-						expect(badIntRes.exitCode).toBe(1)
+						expect(badIntRes.exitCode).toBe(RETRY_EXIT_CODE)
 						expect(capturedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 						expect(badIntRes.stderr).toContain("delivery unconfirmed")
 						expect(badIntRes.stderr).toContain(`Idempotency-Key: ${capturedKey}`)
@@ -4727,11 +4739,11 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			expect(evilHits).toBe(0)
 
 			const nothingExported = await runBun([...PINNED_BUN_FLAGS, mainPath, ...retrieve], baseEnv)
-			expect(nothingExported.status).toBe(1)
+			expect(nothingExported.status).toBe(USAGE_EXIT_CODE)
 			expect(nothingExported.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(nothingExported.stderr).not.toContain("PRELOAD_EXECUTED")
 			const login = await runBun([...PINNED_BUN_FLAGS, mainPath, "login"], baseEnv)
-			expect(login.status).toBe(1)
+			expect(login.status).toBe(USAGE_EXIT_CODE)
 			expect(login.stderr).toContain("Pass the deployment URL")
 			expect(login.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(evilHits).toBe(0)
@@ -4925,7 +4937,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					)
 					expect(lagGets).toBe(4)
 					expect(Duration.toMillis(lagDuration)).toBeLessThan(2000)
-					expect(lagRes.exitCode).toBe(1)
+					expect(lagRes.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(lagRes.stderr).toContain(
 						"Queued turn 2 did not start because turn 1 stopped with refusal.",
 					)
@@ -5096,7 +5108,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							},
 						},
 					)
-					expect(malformedConnect.exitCode).toBe(1)
+					expect(malformedConnect.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(malformedConnect.stderr).toContain("Invalid SSE event payload")
 
 					const malformedStream = yield* malformedCli.run(
@@ -5442,7 +5454,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(haltedGets).toBe(2)
-					expect(haltedRes.exitCode).toBe(1)
+					expect(haltedRes.exitCode).toBe(AUTH_EXIT_CODE)
 					expect(haltedRes.stderr).toContain("401")
 					expect(haltedRes.stderr).toContain("Halted lookup unauthorized")
 
@@ -5461,7 +5473,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							},
 						},
 					)
-					expect(badUtf8Res.exitCode).toBe(1)
+					expect(badUtf8Res.exitCode).toBe(USAGE_EXIT_CODE)
 					expect(badUtf8Res.stderr).toContain("stdin")
 					expect(badUtf8Res.stderr).toContain("not valid UTF-8")
 					expect(badUtf8Posts).toBe(0)
@@ -5661,7 +5673,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					})
 					yield* Fiber.await(archiver)
 
-					expect(res.exitCode).toBe(1)
+					expect(res.exitCode).toBe(FAILURE_EXIT_CODE)
 					expect(res.stdout).toContain("Reply-1:first turn")
 					expect(res.stderr).toContain("ended before buffered input was submitted")
 				}),

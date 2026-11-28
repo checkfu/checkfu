@@ -15,7 +15,8 @@ import { deployCommand, destroyCommand } from "./Commands/Deploy.ts"
 import { filesCommands } from "./Commands/Files.ts"
 import { loginCommand, logoutCommand } from "./Commands/Login.ts"
 import { sessionsConnectCommand } from "./Commands/SessionsConnect.ts"
-import { CliFailure } from "./Errors.ts"
+import { failure, usageError } from "./Errors.ts"
+import type { CliFailure } from "./Errors.ts"
 import { buildGeneratedResourceCommands } from "./generated/Commands.ts"
 import { RootCommand } from "./RootCommand.ts"
 import { escapeTerminalControlCharacters, writeStderrLine } from "./TerminalOutput.ts"
@@ -101,13 +102,10 @@ export const runCli = (
 						if (error.errors.length === 0) {
 							return
 						}
-						return yield* new CliFailure({
-							message: error.errors.map((e) => e.message).join("; "),
-							exitCode: 1,
-						})
+						return yield* usageError(error.errors.map((e) => e.message).join("; "))
 					}
 					yield* writeStderrLine(`Error: ${error.message}`)
-					return yield* new CliFailure({ message: error.message, exitCode: 1 })
+					return yield* usageError(error.message)
 				}
 				yield* writeStderrLine(`Error: ${error.message}`)
 				return yield* error
@@ -121,12 +119,9 @@ export const runCli = (
 						: typeof defect === "string"
 							? defect
 							: String(defect)
-				const failure = new CliFailure({
-					message: `Unexpected error: ${detail}`,
-					exitCode: 1,
-				})
-				yield* writeStderrLine(`Error: ${failure.message}`)
-				return yield* failure
+				const unexpected = failure(`Unexpected error: ${detail}`)
+				yield* writeStderrLine(`Error: ${unexpected.message}`)
+				return yield* unexpected
 			}),
 		),
 	)

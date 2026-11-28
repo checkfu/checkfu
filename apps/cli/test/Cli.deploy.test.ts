@@ -1,3 +1,10 @@
+import {
+	FAILURE_EXIT_CODE,
+	INTERRUPTED_EXIT_CODE,
+	NOT_FOUND_EXIT_CODE,
+	RETRY_EXIT_CODE,
+	USAGE_EXIT_CODE,
+} from "../src/Errors.ts"
 import { parseCustomProvidersManifest } from "@checkfu/pi-providers/catalog"
 import { describe, expect, it } from "@effect/vitest"
 import * as Config from "effect/Config"
@@ -169,6 +176,19 @@ describe("what the CLI calls itself in messages", () => {
 describe("checkfu deploy", () => {
 	const checkout = { "/checkout/alchemy.run.ts": "" }
 
+	it.live("preserves the managed deployment helper's configuration exit code", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const result = yield* cli.run(["deploy", "--yes"], {
+				checkout: { managed: true },
+				env: deployEnv,
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([], { deployExitCode: USAGE_EXIT_CODE }),
+			})
+			expect(result.exitCode).toBe(USAGE_EXIT_CODE)
+		}),
+	)
+
 	it.live(
 		"updates an exported provider key in managed deployment settings while retaining the API key",
 		() =>
@@ -329,7 +349,7 @@ describe("checkfu deploy", () => {
 					files: { ...files },
 					spawn: fakeAlchemy(calls),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain(message)
 				expect(result.errorMessage).not.toContain("shell-key")
 				expect(calls.filter((call) => call[0] !== "query")).toEqual([])
@@ -361,7 +381,7 @@ describe("checkfu deploy", () => {
 					files: checkout,
 					spawn: fakeAlchemy(calls, { account: null }),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain("is not configured in profile 'default'")
 				expect(calls.map((call) => call[0])).toEqual(["query"])
 			}),
@@ -414,7 +434,7 @@ describe("checkfu deploy", () => {
 				files: checkout,
 				spawn: fakeAlchemy(calls, { accountError: "AuthError: Cloudflare OAuth refresh failed" }),
 			})
-			expect(result.exitCode).toBe(1)
+			expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(result.errorMessage).toContain("Cloudflare OAuth refresh failed")
 			expect(result.errorMessage).toContain("Nothing was changed")
 			expect(calls.map((call) => call[0])).toEqual(["query"])
@@ -449,7 +469,7 @@ describe("checkfu deploy", () => {
 				const calls: Array<ReadonlyArray<string>> = []
 				const files = virtualFiles(checkout)
 				const result = yield* cli.run(args, { env: deployEnv, files, spawn: fakeAlchemy(calls) })
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(calls).toEqual([])
 				expect(files[ENV_FILE]).toBeUndefined()
 			}
@@ -463,9 +483,15 @@ describe("checkfu deploy", () => {
 			const declined = { env: deployEnv, files, spawn: fakeAlchemy([], { deployExitCode: 3 }) }
 
 			const first = yield* cli.run(["deploy", "--stage", "staging"], declined)
-			expect(first.exitCode).toBe(3)
+			expect(first.exitCode).toBe(FAILURE_EXIT_CODE)
 			expect(files[recordFile("staging")]).toBe(record("staging", "default", ACCOUNT, null))
 			expect(files[CONFIG_FILE]).toBeUndefined()
+			const cancelled = yield* cli.run(["deploy", "--stage", "staging"], {
+				env: deployEnv,
+				files,
+				spawn: fakeAlchemy([], { deployExitCode: INTERRUPTED_EXIT_CODE }),
+			})
+			expect(cancelled.exitCode).toBe(INTERRUPTED_EXIT_CODE)
 
 			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy([]) })
 			expect(files[recordFile("staging")]).toBe(record("staging"))
@@ -509,7 +535,7 @@ describe("checkfu deploy", () => {
 					files,
 					spawn: fakeAlchemy(calls, elsewhere),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain(`act on account ${OTHER_ACCOUNT}`)
 				expect(result.errorMessage).toContain("Nothing was changed")
 				expect(calls).toEqual([["query", "account", "default", ""]])
@@ -570,7 +596,7 @@ describe("checkfu deploy", () => {
 					files,
 					spawn: fakeAlchemy([], { output }),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain(message)
 				expect(files[recordFile("live")]).toBe(record("live", "default", ACCOUNT, null))
 				expect(files[CONFIG_FILE]).toBeUndefined()
@@ -659,7 +685,7 @@ describe("checkfu deploy", () => {
 				spawn: fakeAlchemy([]),
 				interceptFetch: () => Promise.withResolvers<Response>().promise,
 			})
-			expect(result.exitCode).toBe(1)
+			expect(result.exitCode).toBe(RETRY_EXIT_CODE)
 			expect(result.errorMessage).toContain("did not accept its API key within")
 			expect(files[recordFile("live")]).toBe(record("live"))
 			expect(files[CONFIG_FILE]).toBeUndefined()
@@ -741,7 +767,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(brokenGwCalls),
 			})
-			expect(brokenGwResult.exitCode).toBe(1)
+			expect(brokenGwResult.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(brokenGwResult.errorMessage).toContain("CLOUDFLARE_ACCOUNT_ID")
 			expect(brokenGwCalls.filter((call) => call[0] !== "query")).toEqual([])
 
@@ -881,7 +907,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(missingCustomCalls),
 			})
-			expect(missingCustom.exitCode).toBe(1)
+			expect(missingCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(missingCustom.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
 			expect(missingCustomCalls.filter((call) => call[0] !== "query")).toEqual([])
 
@@ -905,7 +931,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(mixedBuiltinCalls),
 			})
-			expect(mixedBuiltin.exitCode).toBe(1)
+			expect(mixedBuiltin.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(mixedBuiltin.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
 			expect(mixedBuiltinCalls.filter((call) => call[0] !== "query")).toEqual([])
 
@@ -935,7 +961,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(mixedMultiCustomCalls),
 			})
-			expect(mixedMultiCustom.exitCode).toBe(1)
+			expect(mixedMultiCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(mixedMultiCustom.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
 			expect(mixedMultiCustomCalls.filter((call) => call[0] !== "query")).toEqual([])
 
@@ -1003,7 +1029,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(badCalls),
 			})
-			expect(badCustom.exitCode).toBe(1)
+			expect(badCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(badCustom.errorMessage).toContain("inline secret")
 			expect(badCalls.filter((call) => call[0] !== "query")).toEqual([])
 
@@ -1024,7 +1050,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(disallowedEnvCalls),
 			})
-			expect(disallowedEnvCustom.exitCode).toBe(1)
+			expect(disallowedEnvCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(disallowedEnvCustom.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_")
 			expect(disallowedEnvCustom.errorMessage).not.toContain("ghp_unrelated_deploy_secret")
 			expect(disallowedEnvCalls.filter((call) => call[0] !== "query")).toEqual([])
@@ -1047,7 +1073,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(badHeaderCalls),
 			})
-			expect(badHeaderCustom.exitCode).toBe(1)
+			expect(badHeaderCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(badHeaderCustom.errorMessage).toContain('Custom provider "bad" header "x-tenant"')
 			expect(badHeaderCalls.filter((call) => call[0] !== "query")).toEqual([])
 
@@ -1063,7 +1089,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy(badJsonCalls),
 			})
-			expect(badJsonCustom.exitCode).toBe(1)
+			expect(badJsonCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(badJsonCustom.errorMessage).toContain("Invalid CHECKFU_PROVIDERS JSON")
 			expect(badJsonCustom.errorMessage).not.toContain(leakedSecret)
 			expect(badJsonCustom.stderr).not.toContain(leakedSecret)
@@ -1087,7 +1113,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy([]),
 			})
-			expect(badAuthTypeCustom.exitCode).toBe(1)
+			expect(badAuthTypeCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(badAuthTypeCustom.errorMessage).toContain("auth.type")
 			expect(badAuthTypeCustom.errorMessage).not.toContain(pastedBearer)
 			expect(badAuthTypeCustom.stderr).not.toContain(pastedBearer)
@@ -1104,7 +1130,7 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy([]),
 			})
-			expect(dupObjectCustom.exitCode).toBe(1)
+			expect(dupObjectCustom.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(dupObjectCustom.errorMessage).toContain('Duplicate custom provider id "acme"')
 
 			// 13. Oversized CHECKFU_PROVIDERS (including Alchemy-packed Redacted encoding) or
@@ -1133,7 +1159,7 @@ describe("checkfu deploy", () => {
 				files: packedOverflowFiles,
 				spawn: fakeAlchemy(packedOverflowCalls),
 			})
-			expect(packedOverflow.exitCode).toBe(1)
+			expect(packedOverflow.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(packedOverflow.errorMessage).toContain("CHECKFU_PROVIDERS")
 			expect(packedOverflow.errorMessage).toContain("5120")
 			expect(packedOverflowFiles[ENV_FILE]).toBeUndefined()
@@ -1157,7 +1183,7 @@ describe("checkfu deploy", () => {
 				files: oversizedRawFiles,
 				spawn: fakeAlchemy(oversizedRawCalls),
 			})
-			expect(oversizedRaw.exitCode).toBe(1)
+			expect(oversizedRaw.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(oversizedRaw.errorMessage).toContain("CHECKFU_PROVIDERS")
 			expect(oversizedRaw.errorMessage).toContain("5120")
 			expect(oversizedRawFiles[ENV_FILE]).toBeUndefined()
@@ -1185,7 +1211,7 @@ describe("checkfu deploy", () => {
 				files: oversizedCatalogFiles,
 				spawn: fakeAlchemy(oversizedCatalogCalls),
 			})
-			expect(oversizedCatalog.exitCode).toBe(1)
+			expect(oversizedCatalog.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(oversizedCatalog.errorMessage).toContain("CHECKFU_PROVIDER_CATALOG")
 			expect(oversizedCatalog.errorMessage).toContain("5120")
 			expect(oversizedCatalogFiles[ENV_FILE]).toBeUndefined()
@@ -1217,7 +1243,7 @@ describe("checkfu deploy", () => {
 				}),
 				spawn: fakeAlchemy(newlinePrimaryCalls),
 			})
-			expect(newlinePrimary.exitCode).toBe(1)
+			expect(newlinePrimary.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(newlinePrimary.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
 			expect(newlinePrimary.errorMessage).toContain("HTTP header")
 			expect(newlinePrimary.errorMessage).not.toContain("sk-primary-line1")
@@ -1238,7 +1264,7 @@ describe("checkfu deploy", () => {
 				}),
 				spawn: fakeAlchemy(newlineHeaderCalls),
 			})
-			expect(newlineHeader.exitCode).toBe(1)
+			expect(newlineHeader.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(newlineHeader.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
 			expect(newlineHeader.errorMessage).toContain("HTTP header")
 			expect(newlineHeader.errorMessage).not.toContain("gw-secret-line1")
@@ -1258,7 +1284,7 @@ describe("checkfu deploy", () => {
 				files: nonAsciiSecretFiles,
 				spawn: fakeAlchemy(nonAsciiSecretCalls),
 			})
-			expect(nonAsciiSecret.exitCode).toBe(1)
+			expect(nonAsciiSecret.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(nonAsciiSecret.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
 			expect(nonAsciiSecret.errorMessage).toContain("HTTP header")
 			expect(nonAsciiSecret.errorMessage).not.toContain("東京")
@@ -1278,7 +1304,7 @@ describe("checkfu deploy", () => {
 				files: spacedBearerFiles,
 				spawn: fakeAlchemy([]),
 			})
-			expect(spacedBearer.exitCode).toBe(1)
+			expect(spacedBearer.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(spacedBearer.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
 			expect(spacedBearer.errorMessage).toContain("HTTP header")
 			expect(spacedBearer.errorMessage).not.toContain("sk-accidental-prefix")
@@ -1299,7 +1325,7 @@ describe("checkfu deploy", () => {
 				files: trailingNewlineShellFiles,
 				spawn: fakeAlchemy(trailingNewlineShellCalls),
 			})
-			expect(trailingNewlineShell.exitCode).toBe(1)
+			expect(trailingNewlineShell.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(trailingNewlineShell.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
 			expect(trailingNewlineShell.errorMessage).toContain("HTTP header")
 			expect(trailingNewlineShell.errorMessage).not.toContain("sk-shell-trailing-nl")
@@ -1320,7 +1346,7 @@ describe("checkfu deploy", () => {
 				files: surroundingSpaceHeaderFiles,
 				spawn: fakeAlchemy(surroundingSpaceHeaderCalls),
 			})
-			expect(surroundingSpaceHeader.exitCode).toBe(1)
+			expect(surroundingSpaceHeader.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(surroundingSpaceHeader.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
 			expect(surroundingSpaceHeader.errorMessage).toContain("HTTP header")
 			expect(surroundingSpaceHeader.errorMessage).not.toContain("gw-shell-surrounded")
@@ -1343,7 +1369,7 @@ describe("checkfu deploy", () => {
 				files: oversizedSecretFiles,
 				spawn: fakeAlchemy(oversizedSecretCalls),
 			})
-			expect(oversizedSecret.exitCode).toBe(1)
+			expect(oversizedSecret.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(oversizedSecret.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
 			expect(oversizedSecret.errorMessage).toContain("5121")
 			expect(oversizedSecret.errorMessage).toContain("5120")
@@ -1365,7 +1391,7 @@ describe("checkfu deploy", () => {
 				files: oversizedHeaderSecretFiles,
 				spawn: fakeAlchemy(oversizedHeaderSecretCalls),
 			})
-			expect(oversizedHeaderSecret.exitCode).toBe(1)
+			expect(oversizedHeaderSecret.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(oversizedHeaderSecret.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
 			expect(oversizedHeaderSecret.errorMessage).toContain("5121")
 			expect(oversizedHeaderSecret.errorMessage).toContain("5120")
@@ -1448,7 +1474,7 @@ describe("checkfu deploy", () => {
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			const result = yield* cli.run(["deploy"], { env: deployEnv, spawn: fakeAlchemy([]) })
-			expect(result.exitCode).toBe(1)
+			expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(result.errorMessage).toContain("source checkout")
 		}),
 	)
@@ -1477,7 +1503,7 @@ describe("checkfu destroy", () => {
 					stdinIsTerminal: false,
 					spawn: fakeAlchemy(calls),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain("--yes")
 				expect(calls).toEqual([])
 				expect(files[CONFIG_FILE]).toBe(savedLive)
@@ -1524,7 +1550,7 @@ describe("checkfu destroy", () => {
 					files: { ...files, [CONFIG_FILE]: savedLive },
 					spawn: fakeAlchemy(calls),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain(message)
 				expect(calls).toEqual([])
 			}
@@ -1551,7 +1577,7 @@ describe("checkfu destroy", () => {
 				...options,
 				spawn: fakeAlchemy([]),
 			})
-			expect(invalid.exitCode).toBe(1)
+			expect(invalid.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(files).toEqual(before)
 
 			const calls: Array<ReadonlyArray<string>> = []
@@ -1678,7 +1704,7 @@ describe("checkfu destroy", () => {
 					stdinIsTerminal: true,
 					spawn: fakeAlchemy(calls, options),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(result.errorMessage).toContain(message)
 				expect(calls.map((call) => call[0])).toEqual(["query"])
 				expect(files[recordFile("live")]).toBe(record("live"))
@@ -1721,7 +1747,7 @@ describe("saved connection", () => {
 					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
 					files: { [CONFIG_FILE]: broken },
 				})
-				expect(needed.exitCode).toBe(1)
+				expect(needed.exitCode).toBe(USAGE_EXIT_CODE)
 				expect(needed.errorMessage).toContain(CONFIG_FILE)
 			}
 		}),
@@ -1784,7 +1810,7 @@ describe("saved connection", () => {
 					},
 				},
 			)
-			expect(result.exitCode).toBe(1)
+			expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(result.errorMessage).toContain("is not sent to https://elsewhere.example")
 			expect(requests).toBe(0)
 		}),
@@ -1839,12 +1865,13 @@ describe("saved connection", () => {
 	it.live("login accepts only the API's own confirmation that the key is valid", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			for (const confirmation of [
-				Response.json({}),
-				Response.json({ type: "agent" }),
-				new Response("<html>ok</html>"),
-				errorEnvelope(404, "not_found_error"),
-			]) {
+			for (const [confirmation, exitCode] of [
+				[Response.json({}), USAGE_EXIT_CODE],
+				[Response.json({ type: "agent" }), USAGE_EXIT_CODE],
+				[new Response("<html>ok</html>"), USAGE_EXIT_CODE],
+				[errorEnvelope(404, "not_found_error"), NOT_FOUND_EXIT_CODE],
+				[new Response("not found", { status: 404 }), NOT_FOUND_EXIT_CODE],
+			] as const) {
 				const files = virtualFiles()
 				const result = yield* cli.run(["--base-url", "https://proxy.example", "login"], {
 					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
@@ -1856,7 +1883,7 @@ describe("saved connection", () => {
 								: errorEnvelope(401, "authentication_error"),
 						),
 				})
-				expect(result.exitCode).toBe(1)
+				expect(result.exitCode).toBe(exitCode)
 				expect(files[CONFIG_FILE]).toBeUndefined()
 			}
 
@@ -1923,7 +1950,7 @@ describe("saved connection", () => {
 				env: { CHECKFU_CONFIG_DIR: "/config" },
 				files: { [CONFIG_FILE]: Stream.empty },
 			})
-			expect(result.exitCode).toBe(1)
+			expect(result.exitCode).toBe(USAGE_EXIT_CODE)
 			expect(result.errorMessage).toContain(`Could not remove ${CONFIG_FILE}`)
 
 			const nothing = yield* cli.run(["logout"], { env: { CHECKFU_CONFIG_DIR: "/config" } })

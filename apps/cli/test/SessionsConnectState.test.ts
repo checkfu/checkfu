@@ -423,8 +423,8 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			action: "retry_snapshot",
 		})
 		expect(evaluateHaltedQueueSnapshot(afterRefusal, afterRefusal, lagRunning, true)).toEqual({
-			action: "fail",
-			message: "Queued turn 2 did not start because turn 1 stopped with refusal.",
+			action: "unconfirmed",
+			message: "Could not confirm whether queued turn 2 started. Reconnect to check its progress.",
 		})
 
 		const idleTurn1: SessionSnapshotSummary = { status: "idle", turn: 1 }

@@ -8,6 +8,17 @@ import type * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
 import { makeCheckfuClient } from "./Client.ts"
 import type { CheckfuClient } from "./Client.ts"
+import {
+	ACTION_REQUIRED_EXIT_CODE,
+	AUTH_EXIT_CODE,
+	CONFLICT_EXIT_CODE,
+	FAILURE_EXIT_CODE,
+	INTERRUPTED_EXIT_CODE,
+	NOT_FOUND_EXIT_CODE,
+	RETRY_EXIT_CODE,
+	SUCCESS_EXIT_CODE,
+	USAGE_EXIT_CODE,
+} from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { readSavedConnection } from "./SavedConnection.ts"
 import { writeStdoutLine } from "./TerminalOutput.ts"
@@ -40,7 +51,22 @@ export const SharedFlags = {
 } as const
 
 export const RootCommand = Command.make("checkfu").pipe(
-	Command.withDescription("Run managed agents in sessions and on a schedule"),
+	Command.withDescription(
+		[
+			"Run managed agents in sessions and on a schedule",
+			"",
+			"Exit codes",
+			`  ${SUCCESS_EXIT_CODE}  Success`,
+			`  ${FAILURE_EXIT_CODE}  Other failure`,
+			`  ${USAGE_EXIT_CODE}  Invalid arguments or configuration`,
+			`  ${ACTION_REQUIRED_EXIT_CODE}  Action required`,
+			`  ${NOT_FOUND_EXIT_CODE}  Resource not found`,
+			`  ${CONFLICT_EXIT_CODE}  Conflict or precondition failed`,
+			`  ${AUTH_EXIT_CODE}  Authentication or permission denied`,
+			`  ${RETRY_EXIT_CODE}  Transient service or network failure`,
+			`  ${INTERRUPTED_EXIT_CODE}  Interrupted`,
+		].join("\n"),
+	),
 	Command.withSharedFlags(SharedFlags),
 )
 

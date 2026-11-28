@@ -24,9 +24,9 @@ const raw = async (args, stdin = "") => {
 }
 const run = async (args, body) =>
 	JSON.parse((await raw(args, body === undefined ? "" : JSON.stringify(body))).stdout)
-const fails = async (args, message, body) =>
+const fails = async (args, exitCode, message, body) =>
 	assert.rejects(raw(args, body === undefined ? "" : JSON.stringify(body)), (error) => {
-		assert.equal(error.code, 1)
+		assert.equal(error.code, exitCode)
 		assert.equal(error.stdout, "")
 		assert.match(error.stderr, message)
 		return true
@@ -75,7 +75,7 @@ assert.equal(
 	(await run(["agents", "retrieve", ...agentId])).system,
 	"Exact instructions\nwith whitespace.",
 )
-await fails(["agents", "update", ...agentId, "--current-version", "1", "--name", "Stale"], /409/)
+await fails(["agents", "update", ...agentId, "--current-version", "1", "--name", "Stale"], 5, /409/)
 assert.deepEqual(
 	(await run(["agents:versions", "list", ...agentId])).data.map(({ version }) => version),
 	[2, 1],
@@ -137,6 +137,7 @@ await fails(
 		"--precondition",
 		JSON.stringify({ type: "content_sha256", content_sha256: memory.content_sha256 }),
 	],
+	5,
 	/409/,
 )
 await listed(["memory-stores:memories", "list", ...storeId], memory.id)
@@ -345,9 +346,9 @@ await listed(["files", "list"], file.id)
 const downloadPath = join(project, "download.bin")
 await run(["files", "download", ...fileId, "--output", downloadPath])
 assert.deepEqual(await readFile(downloadPath), uploadedBytes)
-await fails(["files", "download", ...fileId, "--output", downloadPath], /already exists/)
+await fails(["files", "download", ...fileId, "--output", downloadPath], 2, /already exists/)
 await run(["files", "delete", ...fileId])
-await fails(["files", "retrieve", ...fileId], /404/)
+await fails(["files", "retrieve", ...fileId], 4, /404/)
 
 await run(["artifacts", "delete", ...artifactId])
 await run(["memory-stores:memories", "delete", ...memoryId], { precondition: { type: "none" } })

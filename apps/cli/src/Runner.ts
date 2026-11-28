@@ -6,7 +6,7 @@ import type * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
-import { isCliFailure } from "./Errors.ts"
+import { INTERRUPTED_EXIT_CODE, isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
@@ -31,7 +31,7 @@ export const startCli = (
 			if (sigintController.handleSigint()) {
 				return
 			}
-			exitSignalCode = 130
+			exitSignalCode = INTERRUPTED_EXIT_CODE
 			fiber.interruptUnsafe(fiber.id)
 		}
 

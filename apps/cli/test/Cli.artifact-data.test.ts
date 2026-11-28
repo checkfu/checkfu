@@ -1,3 +1,4 @@
+import { NOT_FOUND_EXIT_CODE } from "../src/Errors.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { makeTestServer } from "./helpers/CliHarness.ts"
@@ -64,7 +65,7 @@ describe("CLI artifact data", () => {
 					type: "artifact_document_deleted",
 				})
 				const gone = yield* cli.run(["artifacts:data", "retrieve", ...pinned])
-				expect(gone.exitCode).toBe(1)
+				expect(gone.exitCode).toBe(NOT_FOUND_EXIT_CODE)
 				expect(gone.stderr).toContain("not found")
 			}),
 		),

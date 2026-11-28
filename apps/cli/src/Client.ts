@@ -34,7 +34,14 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { configError, formatApiErrorEnvelope, networkFailure, usageError } from "./Errors.ts"
+import {
+	configError,
+	failure,
+	formatApiErrorEnvelope,
+	httpFailure,
+	interrupted,
+	networkFailure,
+} from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { COMMAND } from "./Invocation.ts"
 import type { SavedConnection } from "./SavedConnection.ts"
@@ -171,10 +178,12 @@ export const verifyApiKey = (
 	apiKey: string,
 ): Effect.Effect<void, CliFailure, HttpClient.HttpClient> =>
 	Effect.gen(function* () {
-		const notCheckfu = (status: number) =>
-			networkFailure(
-				`${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path${status === 404 ? "; a deployment older than this CLI needs redeploying first" : ""}.`,
-			)
+		const notCheckfu = (status: number) => {
+			const message = `${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path.`
+			return status === 404 || (status >= 200 && status < 300)
+				? configError(message)
+				: httpFailure(status, message)
+		}
 		const anonymous = yield* probeProtectedRoute(baseUrl, Option.none())
 		if (anonymous.status !== 401 || anonymous.error?.type !== "authentication_error") {
 			return yield* notCheckfu(anonymous.status)
@@ -183,11 +192,15 @@ export const verifyApiKey = (
 		if (authed.verified) {
 			return
 		}
-		return yield* authed.error === undefined
+		if (authed.error !== undefined) {
+			return yield* httpFailure(
+				authed.status,
+				`${baseUrl} rejected the API key (HTTP ${authed.status}): ${authed.error.message}`,
+			)
+		}
+		return yield* authed.status >= 200 && authed.status < 300
 			? notCheckfu(authed.status)
-			: networkFailure(
-					`${baseUrl} rejected the API key (HTTP ${authed.status}): ${authed.error.message}`,
-				)
+			: httpFailure(authed.status, `${baseUrl} did not verify the API key (HTTP ${authed.status}).`)
 	})
 
 export interface CheckfuClient {
@@ -214,15 +227,15 @@ const mapSdkStreamError = (err: CheckfuSdkError): CliFailure => {
 		if (isApiErrorEnvelope(err.body)) {
 			return formatApiErrorEnvelope(err.body, err.status)
 		}
-		if (err._tag === "BadRequestError") {
-			return usageError(err.message)
-		}
-		return networkFailure(err.message)
+		return httpFailure(err.status, err.message)
 	}
 	if (err._tag === "CheckfuConfigError") {
 		return configError(err.message)
 	}
-	return networkFailure(err.message)
+	if (err._tag === "APIUserAbortError") {
+		return interrupted(err.message)
+	}
+	return err.retryable ? networkFailure(err.message) : failure(err.message)
 }
 
 const streamApiSse = <Event>(config: ApiSseStreamConfig<Event>): Stream.Stream<Event, CliFailure> =>

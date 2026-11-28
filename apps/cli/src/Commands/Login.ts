@@ -6,7 +6,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stdio from "effect/Stdio"
 import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
-import { CliFailure, configError, usageError } from "../Errors.ts"
+import { configError, interrupted, usageError } from "../Errors.ts"
 import { RootCommand } from "../RootCommand.ts"
 import { removeSavedConnection, writeSavedConnection } from "../SavedConnection.ts"
 import { COMMAND } from "../Invocation.ts"
@@ -31,7 +31,7 @@ const apiKeyFromEnvOrPrompt = Effect.gen(function* () {
 			validate: (value) =>
 				value.trim().length === 0 ? Effect.fail("An API key is required.") : Effect.succeed(value),
 		}),
-	).pipe(Effect.mapError(() => new CliFailure({ message: "Login cancelled.", exitCode: 130 })))
+	).pipe(Effect.mapError(() => interrupted("Login cancelled.")))
 	return Redacted.value(key).trim()
 })
 

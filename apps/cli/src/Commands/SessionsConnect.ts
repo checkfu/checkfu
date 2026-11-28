@@ -28,6 +28,7 @@ import {
 	CliFailure,
 	actionRequired,
 	apiErrorStatus,
+	failure,
 	formatClientError,
 	isApiErrorEnvelope,
 	isTransientHttpError,
@@ -129,8 +130,18 @@ const formatUnconfirmedSendError = (
 	if (!hadUnconfirmedAttempt && !isUnconfirmedSendError(err)) {
 		return formatted
 	}
+	const message = `${formatted.message} (delivery unconfirmed; retry safely with Idempotency-Key: ${idempotencyKey})`
+	const reason = HttpClientError.isHttpClientError(err) ? err.reason : undefined
+	if (
+		Schema.isSchemaError(err) ||
+		((reason?._tag === "DecodeError" || reason?._tag === "EmptyBodyError") &&
+			reason.response.status >= 200 &&
+			reason.response.status < 300)
+	) {
+		return networkFailure(message)
+	}
 	return new CliFailure({
-		message: `${formatted.message} (delivery unconfirmed; retry safely with Idempotency-Key: ${idempotencyKey})`,
+		message,
 		exitCode: formatted.exitCode,
 	})
 }
@@ -918,7 +929,7 @@ export const sessionsConnectCommand = Command.make(
 						return
 					}
 
-					const unsentInputError = networkFailure(
+					const unsentInputError = failure(
 						`Cannot send input: session ${session.id} is already ${session.archived_at !== null ? "archived" : "terminated"}.`,
 					)
 					const handleStdinOutcome = (
@@ -1096,9 +1107,7 @@ export const sessionsConnectCommand = Command.make(
 						}
 						const state = yield* Ref.get(stateRef)
 						if (state.ended) {
-							return yield* networkFailure(
-								`Cannot send input: session ${session.id} has already ended.`,
-							)
+							return yield* failure(`Cannot send input: session ${session.id} has already ended.`)
 						}
 						const action = yield* dispatchUserLine(client, sessionId, item.line, stateRef, {
 							failOnInterruptError: true,
@@ -1113,11 +1122,11 @@ export const sessionsConnectCommand = Command.make(
 
 				const failUnreadBufferedInput = Effect.gen(function* () {
 					const currentState = yield* Ref.get(stateRef)
-					return yield* networkFailure(
-						currentState.ended
-							? `Cannot send input: session ${session.id} ended before buffered input was submitted.`
-							: "Event stream ended before buffered input was submitted.",
-					)
+					return yield* currentState.ended
+						? failure(
+								`Cannot send input: session ${session.id} ended before buffered input was submitted.`,
+							)
+						: networkFailure("Event stream ended before buffered input was submitted.")
 				})
 
 				const inspectPipedItemAfterStop = (
@@ -1311,8 +1320,13 @@ export const sessionsConnectCommand = Command.make(
 								if (decision.action === "continue_waiting") {
 									break
 								}
-								if (decision.action === "fail") {
-									yield* Ref.set(incompleteTurnRef, networkFailure(decision.message))
+								if (decision.action === "fail" || decision.action === "unconfirmed") {
+									yield* Ref.set(
+										incompleteTurnRef,
+										decision.action === "unconfirmed"
+											? networkFailure(decision.message)
+											: failure(decision.message),
+									)
 									haltedQueuedTurn = true
 									break
 								}
@@ -1375,7 +1389,7 @@ export const sessionsConnectCommand = Command.make(
 					const finalState = yield* Ref.get(stateRef)
 					const finalError = resolveFinalPipedError(finalState)
 					if (finalError !== undefined) {
-						yield* Ref.set(failedTurnRef, networkFailure(finalError))
+						yield* Ref.set(failedTurnRef, failure(finalError))
 					}
 				}
 			})
