@@ -16,6 +16,7 @@ import {
 	sessionQuery,
 	sessionOutputsQuery,
 	transcriptQuery,
+	transcriptCursorBlocked,
 } from "../queries.ts"
 import { loadUntilWaitingCallsSeen, sessionCallsOf } from "../tool-calls.ts"
 
@@ -63,18 +64,30 @@ export function useSessionEvents({
 	const captured = events.findLast((event) => captureTurnOf(event) !== undefined)
 	const calls = sessionCallsOf(events)
 	const { unseen } = calls
+	const latestEvents = () => {
+		const recent = queryClient.getQueryData(live.queryKey) ?? NO_EVENTS
+		const stored = queryClient.getQueryData(transcript.queryKey)
+		return transcriptEvents(
+			stored === undefined ? [] : eventsOf(stored),
+			mergeBySeq(recent, batch.buffered()),
+		)
+	}
+	const waitingQueryKey = ["waiting-calls", session.id, unseen] as const
 	const findingCalls = useQuery({
-		queryKey: ["waiting-calls", session.id, unseen],
+		queryKey: waitingQueryKey,
 		enabled: unseen.length > 0 && history.hasNextPage,
-		queryFn: () =>
-			loadUntilWaitingCallsSeen(async () => {
-				const older = await history.fetchNextPage()
+		queryFn: ({ signal }) => {
+			const unresolved = () =>
+				!signal.aborted && sessionCallsOf(latestEvents()).unseen.some((id) => unseen.includes(id))
+			return loadUntilWaitingCallsSeen(async () => {
+				const older = await history.fetchNextPage({ cancelRefetch: false })
 				return {
-					events: transcriptEvents(older.data === undefined ? [] : eventsOf(older.data), tail),
+					events: latestEvents(),
 					more: older.hasNextPage,
 					failure: older.isFetchNextPageError ? older.error : undefined,
 				}
-			}),
+			}, unresolved)
+		},
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 	useMountEffect(() => {
@@ -93,6 +106,13 @@ export function useSessionEvents({
 			if (event.type === "agent.message" || event.type === "span.model_request_end") {
 				batch.flush()
 				setPreview(undefined)
+			}
+			if (
+				event.type === "user.tool_confirmation" ||
+				event.type === "user.custom_tool_result" ||
+				event.type === "session.status_idle"
+			) {
+				batch.flush()
 			}
 			if (CHANGES_SNAPSHOT.has(event.type)) {
 				resync()
@@ -151,9 +171,22 @@ export function useSessionEvents({
 						pending: history.hasNextPage && !findingCalls.isError,
 						error:
 							findingCalls.error === null || isSignedOut(findingCalls.error)
-								? undefined
+								? transcriptCursorBlocked(history.data)
+									? "Session history returned an invalid continuation."
+									: undefined
 								: errorMessage(findingCalls.error),
-						retry: () => void findingCalls.refetch(),
+						retry: () => {
+							if (transcriptCursorBlocked(history.data)) {
+								void queryClient.invalidateQueries({
+									queryKey: waitingQueryKey,
+									exact: true,
+									refetchType: "none",
+								})
+								void history.refetch()
+							} else {
+								void findingCalls.refetch()
+							}
+						},
 					},
 		earlier: history.hasNextPage
 			? {

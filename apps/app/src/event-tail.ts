@@ -32,6 +32,10 @@ export class EventBatch {
 		return Math.max(0, ...this.pending.map((event) => event.seq))
 	}
 
+	buffered(): ReadonlyArray<JsonSessionEvent> {
+		return this.pending
+	}
+
 	add(events: ReadonlyArray<JsonSessionEvent>): void {
 		this.pending.push(...events)
 		if (this.timer === undefined) {
