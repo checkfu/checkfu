@@ -2,6 +2,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import type * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as HttpMethod from "effect/http/HttpMethod"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as JsonSchema from "effect/JsonSchema"
@@ -70,6 +71,52 @@ const Envelope = Schema.Struct({
 })
 
 const MAX_TOOL_RESULT_CHARACTERS = 200_000
+const DECODE_SLICE_BYTES = 16_384
+const oversizedToolResult = Symbol("oversized tool result")
+const unreadableToolResult = Symbol("unreadable tool result")
+
+const readToolBody = Effect.fn(function* (response: HttpClientResponse.HttpClientResponse) {
+	const reader = yield* Effect.acquireRelease(
+		Effect.try({
+			try: () => Option.getOrUndefined(HttpClientResponse.toWeb(response))?.body?.getReader(),
+			catch: () => unreadableToolResult,
+		}),
+		(reader) =>
+			reader === undefined
+				? Effect.void
+				: Effect.sync(() => {
+						void reader.cancel().catch(() => undefined)
+						reader.releaseLock()
+					}),
+	)
+	if (reader === undefined) {
+		return undefined
+	}
+	const read = Effect.tryPromise({ try: () => reader.read(), catch: () => unreadableToolResult })
+	const decoder = new TextDecoder()
+	let text = ""
+	const append = (decoded: string) => {
+		if (text.length + decoded.length > MAX_TOOL_RESULT_CHARACTERS) {
+			return false
+		}
+		text += decoded
+		return true
+	}
+	for (;;) {
+		const next = yield* read
+		if (next.done) {
+			break
+		}
+		const chunk = next.value
+		for (let offset = 0; offset < chunk.length; offset += DECODE_SLICE_BYTES) {
+			const slice = chunk.subarray(offset, offset + DECODE_SLICE_BYTES)
+			if (!append(decoder.decode(slice, { stream: true }))) {
+				return yield* Effect.fail(oversizedToolResult)
+			}
+		}
+	}
+	return append(decoder.decode()) ? text : yield* Effect.fail(oversizedToolResult)
+})
 
 const hasLimitQuery = Schema.is(
 	Schema.Struct({
@@ -143,14 +190,19 @@ export const makeToolHandler = (client: HttpClient.HttpClient, tool: GeneratedTo
 				args.body === undefined ? (self) => self : HttpClientRequest.bodyJsonUnsafe(args.body),
 			)
 			const response = yield* Effect.mapError(client.execute(request), () => noUsableReply(tool))
-			const text = yield* response.text.pipe(Effect.orElseSucceed(() => undefined))
+			const text = yield* readToolBody(response).pipe(
+				Effect.scoped,
+				Effect.catch((error) => Effect.succeed(error === oversizedToolResult ? error : undefined)),
+			)
 			const successful = response.status >= 200 && response.status < 300
-			if (successful && text !== undefined && text.length > MAX_TOOL_RESULT_CHARACTERS) {
+			if (text === oversizedToolResult) {
 				return yield* Effect.fail(
-					toolError(
-						tool.readOnly ? "invalid_request_error" : "response_too_large",
-						`The result is ${text.length} characters, more than the ${MAX_TOOL_RESULT_CHARACTERS} a tool result can carry. ${sizeHint}`,
-					),
+					successful
+						? toolError(
+								tool.readOnly ? "invalid_request_error" : "response_too_large",
+								`The result exceeds the ${MAX_TOOL_RESULT_CHARACTERS}-character limit for tool results. ${sizeHint}`,
+							)
+						: noUsableReply(tool),
 				)
 			}
 			const body = text === undefined ? undefined : Option.getOrUndefined(decodeJsonObject(text))
