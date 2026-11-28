@@ -646,6 +646,57 @@ describe("Webhooks model stories", () => {
 		},
 	)
 
+	it.effect(
+		"expires the previous secret at its original deadline after delayed policy delivery",
+		() => {
+			let now = t0Ms
+			const platform = InMemory.make({ manual: true, now: () => now })
+			const id = WebhookId.make("whe_delayed_expiry")
+			const expiry = t0Ms + WEBHOOK_SECRET_ROTATION_GRACE_MS
+			return Effect.gen(function* () {
+				const webhooks = yield* WebhookEndpoint
+				yield* webhooks.send(
+					new CreateWebhookEndpoint({
+						webhook_id: id,
+						url: "https://hooks.example.com/delayed-expiry",
+						description: "",
+						event_types: "*",
+						secret_salt: SALT_1,
+					}),
+				)
+				yield* platform.control.drain
+				yield* webhooks.send(
+					new RotateWebhookSecret({
+						webhook_id: id,
+						next_secret_salt: SALT_2,
+						rotated_at: t0Ms,
+					}),
+				)
+				now = expiry - 1
+				yield* platform.control.drain
+				expect(yield* webhooks.get(id)).toMatchObject({
+					previous_secret_revision: 1,
+					previous_secret_expires_at: expiry,
+				})
+				now = expiry
+				yield* platform.control.drain
+				expect(yield* webhooks.get(id)).toMatchObject({
+					secret_revision: 2,
+					previous_secret_revision: 0,
+					previous_secret_expires_at: 0,
+				})
+				expect(platform.control.failures).toEqual([])
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Webhooks.layer(WebhooksHandlersLive.pipe(Layer.provide(ListingStore.memory))).pipe(
+						Layer.provide(platform.layer),
+					),
+				),
+			)
+		},
+	)
+
 	it.effect("cancels the secret expiry alarm when a rotated endpoint is deleted", () => {
 		const platform = InMemory.make({ manual: true, now: () => t0Ms })
 		const id = WebhookId.make("whe_alarm_cancel")
