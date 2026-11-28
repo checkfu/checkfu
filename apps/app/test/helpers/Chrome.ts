@@ -211,6 +211,6 @@ export const withChrome = async <A>(
 			child.kill("SIGKILL")
 			await Promise.race([exited, delay(2000, undefined, { ref: false })])
 		}
-		await rm(directory, { recursive: true, force: true })
+		await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 	}
 }
