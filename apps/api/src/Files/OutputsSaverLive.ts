@@ -23,7 +23,8 @@ import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { HarnessLimits, PiTurnExecutor } from "../Pi/PiDurableHarness.ts"
+import { HarnessLimits } from "../HarnessCall.ts"
+import { SessionWorkspaces } from "../Workspace/SessionWorkspaces.ts"
 import type { OutputFile } from "../Workspace/SessionOutputs.ts"
 import { makeStoreFile } from "./StoreFile.ts"
 
@@ -81,7 +82,7 @@ const byPath = (left: { readonly path: string }, right: { readonly path: string 
 	left.path < right.path ? -1 : left.path > right.path ? 1 : 0
 
 export const makeOutputsSaver = Effect.gen(function* () {
-	const executor = yield* PiTurnExecutor
+	const workspaces = yield* SessionWorkspaces
 	const files = yield* File
 	const outputs = yield* SessionOutputs
 	const digest = yield* Digest.Digest
@@ -99,7 +100,7 @@ export const makeOutputsSaver = Effect.gen(function* () {
 				if (asked.length === 0) {
 					return
 				}
-				const answered = yield* executor.readOutputs(
+				const answered = yield* workspaces.readOutputs(
 					sessionId,
 					turn,
 					asked.map(({ path, size }) => ({ path, size })),
@@ -126,7 +127,7 @@ export const makeOutputsSaver = Effect.gen(function* () {
 		sessionId: SessionId,
 		turn: number,
 	) {
-		const listing = yield* executor.listOutputs(sessionId, turn)
+		const listing = yield* workspaces.listOutputs(sessionId, turn)
 		if (listing === null) {
 			return yield* new OutputsSuperseded()
 		}

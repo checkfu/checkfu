@@ -58,13 +58,8 @@ import {
 	runPiDurableTurn,
 } from "../../src/Pi/PiDurableEngine.ts"
 import type { PiTurnRequest } from "../../src/Pi/PiTurn.ts"
-import {
-	HarnessCallFailed,
-	HarnessLimits,
-	PiDurableHarnessLive,
-	harnessCall,
-	makePiTurnExecutorLayer,
-} from "../../src/Pi/PiDurableHarness.ts"
+import { PiDurableHarnessLive, makePiTurnExecutorLayer } from "../../src/Pi/PiDurableHarness.ts"
+import { HarnessCallFailed, HarnessLimits, harnessCall } from "../../src/HarnessCall.ts"
 import { makeSessionOutputs, SESSION_OUTPUTS_PATH } from "../../src/Workspace/SessionOutputs.ts"
 import { makeOutputsSaver } from "../../src/Files/OutputsSaverLive.ts"
 import { OutputsSaver, OutputsUnsaved } from "@checkfu/domain/Session/OutputsSaver.external"
@@ -81,6 +76,7 @@ import {
 import { WebhookListingQueryLive } from "../../src/Http/Listing.ts"
 import { WebhookSigningMasterKeyTest } from "../../src/Webhooks/WebhookSigning.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import type { SessionWorkspaces } from "../../src/Workspace/SessionWorkspaces.ts"
 import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
 import { SessionArtifactSaves } from "../../src/SessionArtifactSaves.ts"
 import { artifactData } from "../../src/Workspace/ArtifactDataTool.ts"
@@ -252,7 +248,7 @@ export interface TestMcpTool {
 }
 
 export const checkfuWithHarness = <E, R>(
-	executor: Layer.Layer<PiTurnExecutor, E, R>,
+	executor: Layer.Layer<PiTurnExecutor | SessionWorkspaces, E, R>,
 	harness = PiDurableHarnessLive,
 ) => {
 	const hosted = Checkfu.layer(

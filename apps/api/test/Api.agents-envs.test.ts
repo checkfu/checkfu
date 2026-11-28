@@ -101,11 +101,10 @@ import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHe
 import { LIST_PAGE_BYTES, hydratePage } from "../src/Http/Listing.ts"
 import {
 	AgentVersionLookupTimeout,
-	HarnessCallFailed,
-	HarnessLimits,
 	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableHarness.ts"
+import { HarnessCallFailed, HarnessLimits } from "../src/HarnessCall.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AUTH_HEADERS,

@@ -25,7 +25,6 @@ import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { MAX_MEMORIES_PER_STORE, MAX_MEMORY_CONTENT_BYTES } from "@checkfu/sdk/Schemas"
 import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
-import * as Cause from "effect/Cause"
 import {
 	artifactsOf,
 	filesOf,
@@ -45,7 +44,6 @@ import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
-import * as Schema from "effect/Schema"
 import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import { readableMemoryStores } from "../SessionMemoryAccess.ts"
 import {
@@ -55,27 +53,11 @@ import {
 } from "./PiCatalog.ts"
 import { turnOperationId } from "./PiTurn.ts"
 import type { PiActionAnswer, PiParkedCall, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
-import type { OutputBytes, OutputRead, OutputsListing } from "../Workspace/SessionOutputs.ts"
+import { HarnessCallFailed, HarnessLimits } from "../HarnessCall.ts"
+import { SessionWorkspaces } from "../Workspace/SessionWorkspaces.ts"
+import type { SessionWorkspacesService } from "../Workspace/SessionWorkspaces.ts"
 import { PACKAGE_REGISTRY_HOSTS } from "../Workspace/MachineEgress.ts"
-import type {
-	RepositoryMount,
-	TurnToken,
-	WorkspacePreparation,
-} from "../Workspace/WorkspaceShapes.ts"
-
-export class HarnessCallFailed extends Schema.TaggedError<
-	HarnessCallFailed,
-	{ readonly brand: unique symbol }
->()("HarnessCallFailed", { cause: Schema.Unknown }) {}
-
-export const harnessCall = <A, E, R>(
-	call: Effect.Effect<A, E, R>,
-): Effect.Effect<A, HarnessCallFailed, R> =>
-	Effect.catchCause(call, (cause): Effect.Effect<never, HarnessCallFailed> =>
-		Cause.hasInterruptsOnly(cause)
-			? Effect.interrupt
-			: Effect.fail(new HarnessCallFailed({ cause })),
-	)
+import type { RepositoryMount } from "../Workspace/WorkspaceShapes.ts"
 
 export interface TurnExecutorService {
 	readonly recoverTurn: (
@@ -101,49 +83,6 @@ export interface TurnExecutorService {
 		answer: typeof PiActionAnswer.Type,
 	) => Effect.Effect<"delivered" | "gone", HarnessCallFailed>
 }
-
-export interface WorkspaceExecutorService {
-	readonly prepareWorkspace: (
-		sessionId: string,
-		token: TurnToken,
-		repositories: ReadonlyArray<RepositoryMount>,
-		allowedHosts: ReadonlyArray<string> | null,
-	) => Effect.Effect<WorkspacePreparation, HarnessCallFailed>
-	readonly storeRepositoryToken: (
-		sessionId: string,
-		resourceId: string,
-		token: string,
-		replace: boolean,
-	) => Effect.Effect<void, HarnessCallFailed>
-	readonly interruptWorkspace: (
-		sessionId: string,
-		token: TurnToken,
-	) => Effect.Effect<void, HarnessCallFailed>
-	readonly listOutputs: (
-		sessionId: string,
-		turn: number,
-	) => Effect.Effect<OutputsListing | null, HarnessCallFailed>
-	readonly readOutputs: (
-		sessionId: string,
-		turn: number,
-		files: ReadonlyArray<OutputRead>,
-	) => Effect.Effect<ReadonlyArray<OutputBytes> | null, HarnessCallFailed>
-	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
-}
-
-export const HarnessLimits = Context.Reference<{
-	readonly attempts: number
-	readonly baseDelay: Duration.Input
-	readonly interruptTimeout: Duration.Input
-	readonly settleMargin: Duration.Input
-}>("@checkfu/api/HarnessLimits", {
-	defaultValue: () => ({
-		attempts: 6,
-		baseDelay: "500 millis",
-		interruptTimeout: "30 seconds",
-		settleMargin: "1 minute",
-	}),
-})
 
 export const conversationName = (sessionId: string): string => sessionId
 
@@ -189,9 +128,7 @@ export const recordSettledToolEvents = (
 	events: ReadonlyArray<ToolEvent>,
 ) => retryRecording(recordToolEvents({ ...args, events }), args.session_id)
 
-export interface PiTurnExecutorService extends TurnExecutorService, WorkspaceExecutorService {}
-
-export class PiTurnExecutor extends Context.Service<PiTurnExecutor, PiTurnExecutorService>()(
+export class PiTurnExecutor extends Context.Service<PiTurnExecutor, TurnExecutorService>()(
 	"@checkfu/api/PiTurnExecutor",
 ) {}
 
@@ -326,6 +263,7 @@ export const PiDurableHarnessLive = boundedHarness(
 		const environments = yield* Environment
 		const memoryStores = yield* MemoryStore
 		const executor = yield* PiTurnExecutor
+		const workspaces = yield* SessionWorkspaces
 		const customProviders = yield* configuredApiCustomProviders
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
@@ -506,7 +444,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						EnvironmentId.make(args.environment_id),
 					)
 					const prepared = yield* withRetry(
-						executor.prepareWorkspace(
+						workspaces.prepareWorkspace(
 							args.session_id,
 							token,
 							repositories,
@@ -631,7 +569,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							withRetry(
 								executor.abortTurn(conversationName(args.session_id), turnOperationId(args.turn)),
 							),
-							withRetry(executor.interruptWorkspace(args.session_id, { turn: args.turn })),
+							withRetry(workspaces.interruptWorkspace(args.session_id, { turn: args.turn })),
 						],
 						{ concurrency: "unbounded", discard: true },
 					).pipe(Effect.timeout(interruptTimeout))
@@ -642,7 +580,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 				),
 			storeRepositoryToken: (args) => {
-				const store = executor.storeRepositoryToken(
+				const store = workspaces.storeRepositoryToken(
 					args.session_id,
 					args.resource_id,
 					Redacted.value(args.authorization_token),
@@ -656,7 +594,7 @@ export const PiDurableHarnessLive = boundedHarness(
 				)
 			},
 			discardWorkspace: (args) =>
-				withRetry(executor.discardWorkspace(args.session_id)).pipe(
+				withRetry(workspaces.discardWorkspace(args.session_id)).pipe(
 					Effect.tap(() => Effect.logInfo("Workspace discarded", args.session_id)),
 					Effect.tapError((error) =>
 						Effect.logError("Workspace not discarded", args.session_id, error.cause),
@@ -667,7 +605,7 @@ export const PiDurableHarnessLive = boundedHarness(
 	}),
 )
 
-const NO_WORKSPACES: WorkspaceExecutorService = {
+const NO_WORKSPACES: SessionWorkspacesService = {
 	prepareWorkspace: () => Effect.succeed({ ok: true }),
 	storeRepositoryToken: () => Effect.void,
 	interruptWorkspace: () => Effect.void,
@@ -679,12 +617,14 @@ const NO_WORKSPACES: WorkspaceExecutorService = {
 export const makePiTurnExecutorLayer = (
 	turns: Omit<TurnExecutorService, "pauseUsage" | "answerCall"> &
 		Partial<Pick<TurnExecutorService, "pauseUsage" | "answerCall">>,
-	workspaces: WorkspaceExecutorService = NO_WORKSPACES,
+	workspaces: SessionWorkspacesService = NO_WORKSPACES,
 ) =>
-	Layer.succeed(PiTurnExecutor, {
-		pauseUsage: () =>
-			Effect.fail(new HarnessCallFailed({ cause: "No turn of this harness pauses" })),
-		answerCall: () => Effect.succeed("gone" as const),
-		...turns,
-		...workspaces,
-	})
+	Layer.mergeAll(
+		Layer.succeed(PiTurnExecutor, {
+			pauseUsage: () =>
+				Effect.fail(new HarnessCallFailed({ cause: "No turn of this harness pauses" })),
+			answerCall: () => Effect.succeed("gone" as const),
+			...turns,
+		}),
+		Layer.succeed(SessionWorkspaces, workspaces),
+	)
