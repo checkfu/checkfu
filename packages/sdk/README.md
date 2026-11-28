@@ -51,8 +51,14 @@ const program = Effect.gen(function* () {
 	})
 
 	yield* client.sessions.events.stream(session.id).pipe(
-		Stream.takeUntil((event) => event.type === "session.status_idle"),
-		Stream.runForEach((event) => Effect.log(event.type)),
+		Stream.takeUntil(
+			(event) => event.type === "session.status_idle" || event.type === "session.status_terminated",
+		),
+		Stream.runForEach((event) =>
+			event.type === "session.status_idle" && event.stop_reason.type === "requires_action"
+				? Effect.log("Waiting for tool answers", event.stop_reason.event_ids, "at sequence", event.seq)
+				: Effect.log(event.type),
+		),
 	)
 }).pipe(
 	Effect.catchTag("NotFoundError", (err) => Effect.logError(`Missing resource: ${err.message}`)),
@@ -114,7 +120,13 @@ for await (const event of stream) {
 	if (event.type === "agent.message") {
 		console.log(event.content.map((b) => b.text).join(""))
 	}
+	if (event.type === "session.status_terminated") {
+		break
+	}
 	if (event.type === "session.status_idle") {
+		if (event.stop_reason.type === "requires_action") {
+			console.log("Waiting for tool answers", event.stop_reason.event_ids, "at sequence", event.seq)
+		}
 		break
 	}
 }
@@ -131,6 +143,12 @@ const { data, status, request_id, requestId } = await client.agents
 ```
 
 Pass `agent: agent.id` when creating a session to pin the latest agent version. To pin a specific version, pass `agent: { type: "agent", id: agent.id, version: agent.version }`.
+
+## Pausing and resuming a turn
+
+Both examples return control when the stream reports an idle or terminated session. A `requires_action` stop leaves the turn paused, with `stop_reason.event_ids` identifying the tool calls that need answers. Read each tool call and send a `user.tool_confirmation` for an `agent.mcp_tool_use` or a `user.custom_tool_result` for an `agent.custom_tool_use`. Then call `sessions.events.stream(session.id, { after: pauseSequence })` with the paused event's `seq` to continue reading that turn.
+
+Other idle stop reasons settle the turn, including an interrupt. A `session.error` event reports a failure or a retry, with details in `error.retry_status`. A terminal failure emits `session.status_terminated` and may leave the stream open. For an archived session the stream closes after any remaining events. If the cursor already covers those events, it closes immediately.
 
 ## Sending session events
 

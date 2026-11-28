@@ -52,9 +52,17 @@ Every interface talks to the same API.
   })
   for await (const event of await client.sessions.events.stream(session.id)) {
     if (event.type === "agent.message") console.log(event.content.map((b) => b.text).join(""))
-    if (event.type === "session.status_idle") break
+    if (event.type === "session.status_terminated") break
+    if (event.type === "session.status_idle") {
+      if (event.stop_reason.type === "requires_action") {
+        console.log("Waiting for tool answers", event.stop_reason.event_ids, "at sequence", event.seq)
+      }
+      break
+    }
   }
   ```
+
+  A `requires_action` stop pauses the turn. Send the matching tool answers and reopen the stream with `{ after: event.seq }` from the pause. Other idle reasons end the turn, and a terminal failure can end the session. An archived session's stream closes once its final events have been read.
 
 - **HTTP API (`/v1/*`):** REST + SSE with `Authorization: Bearer $CHECKFU_API_KEY`, plus `GET /openapi.json` for client generation.
 
