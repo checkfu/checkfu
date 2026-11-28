@@ -343,6 +343,56 @@ it.each([
 		),
 )
 
+it("validates all settled lock owner kinds before planning, including prune and force", () =>
+	Effect.runPromise(
+		testProject((project) =>
+			Effect.gen(function* () {
+				const { apply, file, fs, write } = project
+				yield* standardProject(project)
+				const kinds = ["agent", "environment", "automation"] as const
+				const ids = ["agent_good-1", "env_good-1", "auto_good-1"] as const
+				const key = `./${reporter}`
+				const lockfile = "checkfu-lock.json"
+				for (const [expected, kind] of kinds.entries()) {
+					for (const [actual, id] of ids.entries()) {
+						const contents = JSON.stringify({
+							version: 1,
+							base_url: "http://localhost:1337",
+							resources: { [key]: { kind, id, hash: lockHash } },
+						})
+						if (actual === expected) {
+							const lock = yield* Schema.decodeEffect(ProjectLockfile)(contents)
+							expect(lock.resources[key]).toMatchObject({
+								kind,
+								id,
+							})
+							continue
+						}
+						for (const flags of [
+							["--dry-run", "--force"],
+							["--yes", "--prune"],
+						]) {
+							yield* write(lockfile, contents)
+							const requests: Array<string> = []
+							const result = yield* apply(["."], flags, {
+								interceptFetch: (next, request) => {
+									requests.push(request.method)
+									return next(request)
+								},
+							})
+							expect(result.exitCode).toBe(USAGE_EXIT_CODE)
+							expect(result.stderr).toContain("invalid lockfile")
+							expect(result.stderr).toContain(key)
+							expect(result.stderr).toContain(id)
+							expect(requests).toEqual([])
+							expect(yield* fs.readFileString(file(lockfile))).toBe(contents)
+						}
+					}
+				}
+			}),
+		),
+	))
+
 it("rejects explicit inputs and references beneath a symlinked directory", () =>
 	Effect.runPromise(
 		testProject(({ fs, file, write, apply }) =>
