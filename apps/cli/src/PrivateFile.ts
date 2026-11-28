@@ -1,5 +1,3 @@
-import * as SecureRandom from "effect/crypto/SecureRandom"
-import * as Hex from "effect/encoding/Hex"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import type * as Option from "effect/Option"
@@ -48,19 +46,18 @@ export const restrictToOwner = (
 export const writePrivate = (
 	file: string,
 	contents: string,
-): Effect.Effect<void, CliFailure, FileSystem.FileSystem | Path.Path | SecureRandom.SecureRandom> =>
+): Effect.Effect<void, CliFailure, FileSystem.FileSystem | Path.Path> =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		const random = yield* SecureRandom.SecureRandom
-		const suffix = Hex.encode(yield* random.randomBytes(6))
-		const temporary = `${file}.${suffix}.tmp`
-		yield* Effect.gen(function* () {
-			yield* fs.makeDirectory(path.dirname(file), { recursive: true, mode: 0o700 })
-			yield* fs.writeFileString(temporary, contents, { flag: "wx", mode: 0o600 })
-			yield* fs.rename(temporary, file)
-		}).pipe(
-			Effect.onError(() => Effect.ignore(fs.remove(temporary))),
-			Effect.mapError((error) => configError(`Could not write ${file}: ${error.message}`)),
-		)
+		const directory = path.dirname(file)
+		yield* Effect.scoped(
+			Effect.gen(function* () {
+				yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
+				const staging = yield* fs.makeTempDirectoryScoped({ directory, prefix: ".checkfu-write-" })
+				const temporary = path.join(staging, "value")
+				yield* fs.writeFileString(temporary, contents, { flag: "wx", mode: 0o600 })
+				yield* fs.rename(temporary, file)
+			}),
+		).pipe(Effect.mapError((error) => configError(`Could not write ${file}: ${error.message}`)))
 	})

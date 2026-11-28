@@ -236,6 +236,27 @@ it("uses tracked kinds on pathless and directory applies and validates authored 
 		),
 	))
 
+it("saves a long custom project lock through apply", () =>
+	Effect.runPromise(
+		testProject((project) =>
+			Effect.gen(function* () {
+				yield* standardProject(project)
+				const lock = project.file("x".repeat(235) + ".json")
+				const outcome = yield* project.run([
+					"apply",
+					"--yes",
+					"--lock-file",
+					lock,
+					project.file(reporter),
+				])
+				const id = idOf(rows(outcome), reporter)
+				const contents = yield* project.fs.readFileString(lock)
+				const written = yield* Schema.decodeEffect(ProjectLockfile)(contents)
+				expect(written.resources["./" + reporter]).toMatchObject({ id, kind: "agent" })
+			}),
+		),
+	))
+
 it("accepts a project-root alias while preserving the physical project's lock and resource identities", () =>
 	Effect.runPromise(
 		testProject(({ fs, file, write, run }) =>
