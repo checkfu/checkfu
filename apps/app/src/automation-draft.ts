@@ -162,15 +162,23 @@ const firingFormat = (timeZone: string, withYear: boolean) =>
 		timeZoneName: "short",
 	})
 
-export const firingLabel = (iso: string, timezone: string, now = Date.now()): string => {
-	const at = new Date(iso)
-	const withYear = at.getUTCFullYear() !== new Date(now).getUTCFullYear()
+const yearFormat = (timeZone: string) =>
+	new Intl.DateTimeFormat("en", { calendar: "gregory", year: "numeric", timeZone })
+
+const firingYear = (timeZone: string) => {
 	try {
-		return firingFormat(timezone, withYear).format(at)
+		return yearFormat(timeZone)
 	} catch (error) {
 		if (error instanceof RangeError) {
-			return firingFormat("UTC", withYear).format(at)
+			return yearFormat("UTC")
 		}
 		throw error
 	}
+}
+
+export const firingLabel = (iso: string, timezone: string, now = Date.now()): string => {
+	const at = new Date(iso)
+	const year = firingYear(timezone)
+	const withYear = year.format(at) !== year.format(now)
+	return firingFormat(year.resolvedOptions().timeZone, withYear).format(at)
 }

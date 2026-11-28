@@ -200,6 +200,23 @@ describe("firing times in other years and unknown zones", () => {
 		expect(firingLabel("2032-02-29T23:59:00.000Z", "UTC", now)).toContain("2032")
 	})
 
+	it("includes the year across local New Year even within one UTC year", () => {
+		const before = Date.parse("2026-12-31T09:00:00Z")
+		expect(firingLabel("2026-12-31T11:00:00Z", "Pacific/Kiritimati", before)).toContain("2027")
+	})
+
+	it("omits the year when only UTC crosses New Year", () => {
+		const before = Date.parse("2026-12-31T23:00:00Z")
+		expect(firingLabel("2027-01-01T02:00:00Z", "America/Los_Angeles", before)).not.toMatch(
+			/202[67]/,
+		)
+	})
+
+	it("compares years in UTC when the requested zone is unsupported", () => {
+		const before = Date.parse("2026-12-31T23:00:00Z")
+		expect(firingLabel("2027-01-01T02:00:00Z", "Mars/Olympus", before)).toContain("2027")
+	})
+
 	it("fall back to UTC when the browser does not know the zone", () => {
 		const label = firingLabel("2026-12-01T14:00:00.000Z", "Mars/Olympus", now)
 		expect(label).toContain("UTC")
