@@ -5,7 +5,7 @@ import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-heade
 import type { JsonSession } from "@checkfu/sdk/client"
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { lazy, Suspense, useState } from "react"
 import type * as React from "react"
 import { ActionReceipt } from "../action-receipt.tsx"
 import { checkfu } from "../api.ts"
@@ -16,11 +16,14 @@ import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { SessionBindings } from "./session-bindings.tsx"
-import { SessionFiles } from "./session-files.tsx"
 import { sendFailure } from "./tool-call.tsx"
 import type { SendAnswer } from "./tool-call.tsx"
 import { Transcript } from "./transcript.tsx"
 import { useSessionEvents } from "./use-session-events.ts"
+
+const SessionFiles = lazy(async () => ({
+	default: (await import("./session-files.tsx")).SessionFiles,
+}))
 
 const detail = getRouteApi("/_app/sessions/$sessionId")
 
@@ -160,7 +163,9 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 				</div>
 			)}
 			{session.resources.length === 0 ? null : <SessionResources session={session} open={open} />}
-			<SessionFiles sessionId={session.id} turn={outputTurn} recovery={outputRecovery} />
+			<Suspense fallback={<p role="status">Loading saved files…</p>}>
+				<SessionFiles sessionId={session.id} turn={outputTurn} recovery={outputRecovery} />
+			</Suspense>
 			<Transcript
 				events={events}
 				preview={preview}

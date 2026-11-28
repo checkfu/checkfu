@@ -40,6 +40,7 @@ import {
 	randomId,
 	requestPath,
 } from "./HttpHelpers.ts"
+import { ModelsLive } from "./ModelsHandlers.ts"
 import { MemoryStoresLive } from "./MemoryStoresHandlers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
 import { VaultsLive } from "./VaultsHandlers.ts"
@@ -93,6 +94,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		HealthLive,
 		AuthLive,
 		AgentsLive,
+		ModelsLive,
 		EnvironmentsLive,
 		SessionsLive,
 		AutomationsLive,

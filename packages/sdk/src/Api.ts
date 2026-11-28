@@ -2103,6 +2103,50 @@ const Auth = HttpApiGroup.make("auth")
 	.annotate(OpenApi.Description, "Check a credential")
 	.middleware(Authentication)
 
+const ModelResource = Schema.Struct({
+	type: Schema.Literal("model"),
+	id: Schema.String,
+})
+
+const MAX_MODEL_SEARCH_LENGTH = 256
+
+const ModelListPage = Schema.String.check(
+	// A JSON-escaped model ID may use six bytes per code unit, then base64 expands it.
+	Schema.isMaxLength(Math.ceil(((6 * MAX_MODEL_SEARCH_LENGTH + 100) * 4) / 3)),
+	Schema.isPattern(/^[A-Za-z0-9_-]+$/u),
+).annotate({
+	description: "Page token returned by a previous list request with the same model search.",
+})
+
+const Models = HttpApiGroup.make("models")
+	.add(
+		HttpApiEndpoint.get("list", "/v1/models", {
+			query: {
+				page: Schema.optionalKey(ModelListPage),
+				limit: Schema.optionalKey(ListLimitFromString),
+				search: Schema.optionalKey(
+					Schema.String.check(Schema.isMaxLength(MAX_MODEL_SEARCH_LENGTH)),
+				),
+			},
+			success: listResponse(ModelResource),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List suggested models")
+			.annotate(
+				OpenApi.Description,
+				"List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "models",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "models", endpoint: "list" },
+				"x-checkfu-mcp": { name: "models_listModels" },
+				"x-checkfu-cli": { intQueryParams: { limit: { min: 1, max: 100 } } },
+			}),
+	)
+	.annotate(OpenApi.Description, "Discover models for agent authoring")
+	.middleware(Authentication)
+
 const Agents = HttpApiGroup.make("agents")
 	.add(
 		HttpApiEndpoint.post("create", "/v1/agents", {
@@ -4112,6 +4156,7 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
 	.add(Auth)
 	.add(Agents)
+	.add(Models)
 	.add(Environments)
 	.add(Sessions)
 	.add(Automations)

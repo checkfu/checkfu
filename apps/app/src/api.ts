@@ -300,6 +300,16 @@ const webhooks = {
 
 export const checkfu = {
 	webhooks,
+	models: {
+		list: (search: string, page?: string, signal?: AbortSignal) =>
+			request("models.list", {
+				query: {
+					...(search === "" ? {} : { search }),
+					...(page === undefined ? {} : { page }),
+				},
+				...withSignal(signal),
+			}),
+	},
 	agents: {
 		list: (page?: string, signal?: AbortSignal) =>
 			request("agents.list", { query: newestFirst(page), ...withSignal(signal) }),

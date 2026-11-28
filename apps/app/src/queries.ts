@@ -318,3 +318,15 @@ export const webhookDeliveryQuery = (webhookId: string, deliveryId: string) =>
 		queryKey: ["webhooks", webhookId, "deliveries", deliveryId],
 		queryFn: ({ signal }) => checkfu.webhooks.delivery(webhookId, deliveryId, signal),
 	})
+
+export const modelSuggestionsQuery = (search: string) =>
+	infiniteQueryOptions({
+		queryKey: ["model-suggestions", search],
+		queryFn: ({ signal, pageParam }) => checkfu.models.list(search, pageParam, signal),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: ({ next_page }, _, __, seen) =>
+			next_page === null || next_page.trim() === "" || seen.includes(next_page)
+				? undefined
+				: next_page,
+		staleTime: 30_000,
+	})

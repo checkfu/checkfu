@@ -800,6 +800,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/memory_stores/{memory_store_id}/archive",
 						"/v1/memory_stores/{memory_store_id}/memories",
 						"/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+						"/v1/models",
 						"/v1/sessions",
 						"/v1/sessions/{session_id}",
 						"/v1/sessions/{session_id}/archive",

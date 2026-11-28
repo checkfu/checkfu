@@ -481,6 +481,14 @@ export interface CheckfuOperations {
 		EndpointJsonSuccess<"memory_stores", "updateMemory">,
 		EndpointJsonBody<"memory_stores", "updateMemory">
 	>
+	readonly "models.list": OperationShape<
+		EndpointParams<"models", "list">,
+		RelaxOptionalProps<EndpointQuery<"models", "list">>,
+		EndpointBody<"models", "list">,
+		EndpointSuccess<"models", "list">,
+		EndpointJsonSuccess<"models", "list">,
+		EndpointJsonBody<"models", "list">
+	>
 	readonly "sessions.archive": OperationShape<
 		EndpointParams<"sessions", "archive">,
 		EndpointQuery<"sessions", "archive">,
@@ -3665,6 +3673,90 @@ export class EffectMemoryStoresResource {
 	}
 }
 
+export class EffectModelsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results. */
+	list(
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"models", "list">> & AnyRequestOptions<never>)
+			| undefined,
+		options: WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"models", "list">>, CheckfuSdkError>
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"models", "list">> & WithResponseRequestOptions<never>,
+	): Effect<WithResponse<EndpointSuccess<"models", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"models", "list">> & RequestOptions<never>,
+		options?: RequestOptions<never>,
+	): Effect<EndpointSuccess<"models", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"models", "list">> & AnyRequestOptions<never>,
+		options?: AnyRequestOptions<never>,
+	): Effect<
+		EndpointSuccess<"models", "list"> | WithResponse<EndpointSuccess<"models", "list">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		options = snapshotRequestOptions(options)
+		return unwrapResponse(
+			EffectFlatMap(forbidIdempotencyKey("models.list", options, params), () =>
+				executeWithRetries(this.#runtime, "checkfu.models.list", "idempotent", options, () =>
+					this.#runtime.raw.models.list({
+						query: {
+							...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+							...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+							...(params?.["search"] === undefined ? {} : { search: params["search"] }),
+						},
+						responseMode: "decoded-and-response",
+					}),
+				),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"models", "list">>,
+		options?: RequestOptions<never>,
+	): Stream<EndpointSuccess<"models", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(page) =>
+				this.list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Auto-paginate items for List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"models", "list">>,
+		options?: RequestOptions<never>,
+	): Stream<ItemOf<EndpointSuccess<"models", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(page) =>
+				this.list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+}
+
 export class EffectSessionsEventsResource {
 	readonly #runtime: EffectSdkRuntime
 
@@ -5482,6 +5574,7 @@ export class EffectResources {
 	readonly environments: EffectEnvironmentsResource
 	readonly files: EffectFilesResource
 	readonly memoryStores: EffectMemoryStoresResource
+	readonly models: EffectModelsResource
 	readonly sessions: EffectSessionsResource
 	readonly vaults: EffectVaultsResource
 	readonly webhooks: EffectWebhooksResource
@@ -5494,6 +5587,7 @@ export class EffectResources {
 		this.environments = new EffectEnvironmentsResource(runtime)
 		this.files = new EffectFilesResource(runtime)
 		this.memoryStores = new EffectMemoryStoresResource(runtime)
+		this.models = new EffectModelsResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
 		this.vaults = new EffectVaultsResource(runtime)
 		this.webhooks = new EffectWebhooksResource(runtime)
@@ -6442,6 +6536,37 @@ export class MemoryStoresResource {
 	}
 }
 
+export class ModelsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"models", "list">>,
+		options?: PromiseRequestOptions<never>,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"models", "list">>>,
+		ItemOf<EndpointJsonSuccess<"models", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.page,
+			options,
+			(effectRuntime, page, effectOpts) =>
+				new EffectModelsResource(effectRuntime).list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+}
+
 export class SessionsEventsResource {
 	readonly #runtime: PromiseSdkRuntime
 
@@ -7064,6 +7189,7 @@ export class PromiseResources {
 	readonly environments: EnvironmentsResource
 	readonly files: FilesResource
 	readonly memoryStores: MemoryStoresResource
+	readonly models: ModelsResource
 	readonly sessions: SessionsResource
 	readonly vaults: VaultsResource
 	readonly webhooks: WebhooksResource
@@ -7076,6 +7202,7 @@ export class PromiseResources {
 		this.environments = new EnvironmentsResource(runtime)
 		this.files = new FilesResource(runtime)
 		this.memoryStores = new MemoryStoresResource(runtime)
+		this.models = new ModelsResource(runtime)
 		this.sessions = new SessionsResource(runtime)
 		this.vaults = new VaultsResource(runtime)
 		this.webhooks = new WebhooksResource(runtime)

@@ -18,6 +18,7 @@ import { checkfu, deploymentApiUrl } from "../api.ts"
 import { agentQuery, agentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { ActionReceipt } from "../action-receipt.tsx"
+import { ModelField } from "../model-field.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import {
 	bodyOf,
@@ -222,9 +223,7 @@ function AgentForm<Saved>({
 						<Field label="Name">
 							<Input required value={draft.name} onChange={set("name")} />
 						</Field>
-						<Field label="Model" description="Enter a model ID configured for this deployment.">
-							<Input required value={draft.model} onChange={set("model")} className="font-mono" />
-						</Field>
+						<ModelField value={draft.model} onChange={set("model")} />
 						<Field label="System prompt">
 							<Textarea rows={8} value={draft.system ?? ""} onChange={set("system")} />
 						</Field>
