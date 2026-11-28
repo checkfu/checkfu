@@ -5,34 +5,148 @@ description: "Get a signed HTTPS request when a Session, Automation, Artifact, o
 
 A Webhook is an HTTPS endpoint of yours that Checkfu calls when something happens, such as a Session going idle or a scheduled run failing. Requests are signed with the [Standard Webhooks](https://www.standardwebhooks.com/) scheme and retried on failure. For a complete Node.js receiver, see [Receive webhooks](/guides/receive-webhooks).
 
-<CodeGroup>
+Configure the URL, a stable registration key, and an operator-owned file excluded from source control. Reuse the key and file when checking an uncertain result.
 
-```ts TypeScript
+```sh
+export CHECKFU_WEBHOOK_URL="https://hooks.example.com/checkfu"
+export CHECKFU_WEBHOOK_REGISTRATION_KEY="your-stable-registration-id"
+export CHECKFU_WEBHOOK_RECEIPT=".checkfu/webhook-receipt.json"
+```
+
+```ts registration.ts
+import { link, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import { WebhookId } from "@checkfu/sdk"
+import type Checkfu from "@checkfu/sdk"
+
+const eventTypes = ["session.status_idled", "automation_run.failed"] as const
+
+export class ReceiptWriteError extends Error {
+	constructor(readonly webhookId: string) {
+		super(
+			"Could not save the receipt for " +
+				webhookId +
+				". Fix the private path and retry with the same registration key.",
+		)
+	}
+}
+
+type Registration = {
+	id: WebhookId
+	key: string
+	url: string
+	secret_revision: number
+	signing_secret: string
+}
+
+async function readReceipt(path: string): Promise<Registration | undefined> {
+	try {
+		const info = await lstat(path)
+		if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0)) {
+			throw new Error("The webhook receipt must be an owner-only file.")
+		}
+		const stored: Registration = JSON.parse(await readFile(path, "utf8"))
+		if (
+			typeof stored?.id !== "string" ||
+			typeof stored.key !== "string" ||
+			typeof stored.url !== "string" ||
+			typeof stored.signing_secret !== "string" ||
+			!Number.isSafeInteger(stored.secret_revision)
+		) {
+			throw new Error("The private receipt is invalid.")
+		}
+		return { ...stored, id: WebhookId.make(stored.id) }
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+		throw error
+	}
+}
+
+async function saveReceipt(path: string, receipt: Registration) {
+	await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+	const directory = await mkdtemp(join(dirname(path), ".webhook-receipt-"))
+	try {
+		const staged = join(directory, "receipt.json")
+		await writeFile(staged, JSON.stringify(receipt), { flag: "wx", mode: 0o600 })
+		await link(staged, path)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+}
+
+export async function register(
+	client: Pick<Checkfu, "webhooks">,
+	url: string,
+	key: string,
+	path: string,
+) {
+	if (key.trim() === "") throw new Error("Set a stable registration key.")
+	let stored = await readReceipt(path)
+	if (stored !== undefined && (stored.key !== key || stored.url !== url)) {
+		throw new Error("The receipt already belongs to another registration.")
+	}
+	if (stored === undefined) {
+		const created = await client.webhooks.create(
+			{ url, event_types: eventTypes },
+			{ idempotencyKey: key },
+		)
+		stored = {
+			id: WebhookId.make(created.id),
+			url,
+			key,
+			secret_revision: "secret_revision" in created ? created.secret_revision : 1,
+			signing_secret: created.signing_secret,
+		}
+		try {
+			await saveReceipt(path, stored)
+		} catch {
+			throw new ReceiptWriteError(created.id)
+		}
+	}
+	// The filtered listing confirms that the registration is visible.
+	const listing = await client.webhooks.list({ id: stored.id, limit: 1 }).catch(() => undefined)
+	const ready = listing?.data.find((webhook) => webhook.id === stored.id)
+
+	if (ready === undefined)
+		return { id: stored.id, next: "Receipt saved. Run this again to check visibility." }
+	if (ready.secret_revision !== stored.secret_revision) {
+		return {
+			id: stored.id,
+			next: "Receipt saved. The signing revision has moved. Reconcile the current secret before starting the receiver.",
+		}
+	}
+	return { id: stored.id, next: "Receipt saved. Configure your receiver from the private file." }
+}
+```
+
+```ts register-webhook.mts
 import Checkfu from "@checkfu/sdk"
+import { ReceiptWriteError, register } from "./registration.ts"
 
 const client = new Checkfu()
-
-const webhook = await client.waitForPending(
-	await client.webhooks.create(
-		{
-			url: "https://hooks.example.com/checkfu",
-			event_types: ["session.status_idled", "automation_run.failed"],
-		},
-		{ idempotencyKey: crypto.randomUUID() },
-	),
-)
-console.log(webhook.signing_secret) // whsec_...
+try {
+	const url = process.env.CHECKFU_WEBHOOK_URL ?? ""
+	const key = process.env.CHECKFU_WEBHOOK_REGISTRATION_KEY ?? ""
+	const receipt = process.env.CHECKFU_WEBHOOK_RECEIPT ?? ".checkfu/webhook-receipt.json"
+	const result = await register(client, url, key, receipt)
+	console.log(result.id, result.next)
+} catch (error) {
+	console.error(
+		error instanceof ReceiptWriteError
+			? error.message
+			: "Registration could not finish. Preserve the operation key and check the private receipt path before retrying.",
+	)
+	process.exitCode = 1
+} finally {
+	await client.close()
+}
 ```
 
-```sh CLI
-checkfu webhooks create --url "https://hooks.example.com/checkfu" \
-  --event-types '["session.status_idled","automation_run.failed"]'
-```
-
-</CodeGroup>
+Run `npx tsx register-webhook.mts`. The file is created with owner-only permissions on POSIX systems. Use an owner-only directory on Windows. Use its `signing_secret` as `CHECKFU_WEBHOOK_SECRET` in [Receive webhooks](/guides/receive-webhooks). If visibility fails, keep the receipt and run the same command again.
 
 <Warning>
-	The create response is the only time you see `signing_secret`. Store it right away.
+	Save the creation receipt privately before checking visibility. Reading a Webhook omits
+	`signing_secret`.
 </Warning>
 
 The URL must be public HTTPS. A Webhook only receives events that happen after it is created.

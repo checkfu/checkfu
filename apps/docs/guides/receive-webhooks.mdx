@@ -135,8 +135,11 @@ createServer(async (request, response) => {
 }).listen(3000, () => console.log("Listening on http://localhost:3000"))
 ```
 
+Use the [private registration example](/concepts/webhooks), then load its receipt before starting the receiver.
+
 ```sh
-export CHECKFU_WEBHOOK_SECRET="whsec_..."
+export CHECKFU_WEBHOOK_RECEIPT=".checkfu/webhook-receipt.json"
+export CHECKFU_WEBHOOK_SECRET="$(jq -er .signing_secret "$CHECKFU_WEBHOOK_RECEIPT")"
 export CHECKFU_BASE_URL="https://<api-worker>.workers.dev"
 export CHECKFU_API_KEY="<key>"
 npx tsx server.ts
@@ -168,9 +171,10 @@ const event = await unwrapWebhookEvent(body, request.headers, {
 
 Checkfu delivers only to public HTTPS URLs, and skips outbound delivery under `bun run dev`. Use a deployed stage and a tunnel such as `cloudflared tunnel --url http://localhost:3000`:
 
+Once the receiver is running with its signing secret, test the webhook ID from the same receipt:
+
 ```sh
-checkfu webhooks create --url "https://<your-tunnel-host>/" --event-types '["session.status_idled"]'
-# export the printed signing_secret as CHECKFU_WEBHOOK_SECRET and restart the receiver
+WEBHOOK_ID="$(jq -er .id "$CHECKFU_WEBHOOK_RECEIPT")"
 checkfu webhooks test --webhook-id "$WEBHOOK_ID"
 checkfu webhooks:deliveries list --webhook-id "$WEBHOOK_ID"
 ```
