@@ -67,6 +67,7 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 						title: state.name,
 						text: state.text,
 					}),
+					{ commandId: event.session_id },
 				)
 				.pipe(
 					Effect.as({ opened: true as const }),
