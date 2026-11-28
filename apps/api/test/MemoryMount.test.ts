@@ -424,6 +424,24 @@ describe("memory mount", () => {
 		])
 	})
 
+	it("does not remove the source when the destination write reports a full store", async () => {
+		const bytes = "Keep these bytes."
+		const files = new Map([["/before.md", bytes]])
+		const calls: Array<string> = []
+		const mount = makeMemoryMount({
+			...fakeMemory(files, "read_write", calls),
+			write: async (name, path, value, exclusive) => {
+				expect([name, path, value, exclusive]).toEqual(["notes", "/after.md", bytes, false])
+				calls.push(`refuse ${path}`)
+				return { ok: false, code: "ENOSPC", message: "Full store." }
+			},
+		})
+		expect(await code(mount.rename?.("notes/before.md", "notes/after.md", {}))).toBe("ENOSPC")
+		expect(calls.filter((call) => !call.startsWith("read"))).toEqual(["refuse /after.md"])
+		expect(await text(mount, "notes/before.md")).toEqual(utf8.encode(bytes))
+		expect(await text(mount, "notes/after.md")).toBeNull()
+	})
+
 	it("refuses to move onto a directory that holds memories, or a directory onto a memory", async () => {
 		const files = new Map([
 			["/draft/notes.md", "Draft."],

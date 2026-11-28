@@ -359,28 +359,47 @@ describe("Memories", () => {
 		),
 	)
 
-	it.effect(
-		"refuses a new memory in a full store but still takes changes to the ones it holds",
-		() =>
-			story(
-				Story.clock(t0),
-				Story.given(
-					store,
-					created,
-					...Array.from(
-						{ length: MAX_MEMORIES_PER_STORE },
-						(_, index) => new MemoryAdded({ memory_count: index + 1 }),
-					),
+	it.effect("refuses a destination write at capacity without changing the source or layout", () =>
+		story(
+			Story.clock(t0),
+			Story.given(
+				store,
+				created,
+				...Array.from(
+					{ length: MAX_MEMORIES_PER_STORE },
+					(_, index) => new MemoryAdded({ memory_count: index + 1 }),
 				),
-				Story.given(notes, written("/notes.md", "tabs", sha("a"), 1, "created")),
-				Story.when(write(todo, "/todo.md", "ship", sha("d"))),
-				Story.rejected(
-					new MemoryStoreFull({ memory_store_id: store.id, memory_count: MAX_MEMORIES_PER_STORE }),
-				),
-				Story.when(write(notes, "/notes.md", "spaces", sha("b"))),
-				Story.then(notes, written("/notes.md", "spaces", sha("b"), 2, "modified")),
-				Story.then(store),
 			),
+			Story.given(notes, written("/notes.md", "tabs", sha("a"), 1, "created")),
+			Story.when(
+				write(
+					todo,
+					"/todo.md",
+					"tabs",
+					sha("a"),
+					{ type: "none" },
+					"sess_1",
+					MAX_MEMORIES_PER_STORE,
+				),
+			),
+			Story.rejected(
+				new MemoryStoreFull({ memory_store_id: store.id, memory_count: MAX_MEMORIES_PER_STORE }),
+			),
+			Story.state(store, {
+				memory_count: MAX_MEMORIES_PER_STORE,
+				layout_version: MAX_MEMORIES_PER_STORE,
+			}),
+			Story.view(MemoryView, notes, {
+				path: "/notes.md",
+				content: "tabs",
+				content_sha256: sha("a"),
+				version: 1,
+			}),
+			Story.view(MemoryView, todo, Story.none),
+			Story.when(write(notes, "/notes.md", "spaces", sha("b"))),
+			Story.then(notes, written("/notes.md", "spaces", sha("b"), 2, "modified")),
+			Story.then(store),
+		),
 	)
 
 	it.effect("makes an archived store read-only and a deleted one unreachable", () =>
