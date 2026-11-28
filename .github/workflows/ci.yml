@@ -147,7 +147,8 @@ jobs:
         run: git diff --exit-code
 
   # Builds the image of the sessions' machines and runs them under the runner's Docker.
-  # Each PiSession file starts one Alchemy stack for its tests and runs on a runner of its own.
+  # Each PiSession file starts one Alchemy stack for its tests and runs on a runner of its own,
+  # and so does the sandbox contract, which starts a machine for each clause.
   # Every other workerd file shares one more.
   workerd-tests:
     name: workerd (${{ matrix.leg.name }})
@@ -161,9 +162,12 @@ jobs:
             evidence: project
           - name: pi-session-machines
             evidence: machines
+          - name: sandboxes
+            evidence: ""
+            args: test/workerd/Sandboxes.workerd.ts
           - name: rest
             evidence: ""
-            args: --exclude test/workerd/PiSession.workerd.ts --exclude test/workerd/PiSessionMachines.workerd.ts
+            args: --exclude test/workerd/PiSession.workerd.ts --exclude test/workerd/PiSessionMachines.workerd.ts --exclude test/workerd/Sandboxes.workerd.ts
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
