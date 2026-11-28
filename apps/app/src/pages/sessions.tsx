@@ -8,6 +8,7 @@ import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
 import {
 	useInfiniteQuery,
+	useQueries,
 	useQueryClient,
 	useSuspenseInfiniteQuery,
 	useSuspenseQuery,
@@ -17,18 +18,22 @@ import { PlusIcon, XIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
-import { checkfu, errorMessage, isSignedOut } from "../api.ts"
+import { checkfu, errorMessage } from "../api.ts"
 import { choicesOf, OptionPicker } from "../option-picker.tsx"
 import {
 	agentChoices,
 	artifactChoices,
+	artifactQuery,
 	environmentChoices,
+	lookup,
 	memoryStoreChoices,
+	memoryStoreQuery,
 	present,
 	sessionQuery,
 	sessionsPage,
 	vaultChoices,
 } from "../queries.ts"
+import type { Lookup } from "../queries.ts"
 import { selection } from "../selection.ts"
 import {
 	RESOURCE_LABELS,
@@ -140,6 +145,78 @@ const NO_CREDENTIALS: ExplicitCredentials = {}
 
 type ResourceDraftRow = ResourceDraft & { readonly key: string }
 
+type MountCheck = Lookup<string> & { readonly retry: () => void }
+
+const mountCheck = <T,>(
+	query: {
+		readonly data: T | undefined
+		readonly error: unknown
+		readonly isFetching: boolean
+		readonly refetch: () => void
+	},
+	describe: (item: T) => string,
+	active?: (item: T) => boolean,
+): MountCheck => {
+	const retry = () => void query.refetch()
+	const status = lookup(query, active)
+	if (query.isFetching) {
+		return { state: "pending", retry }
+	}
+	return status.state === "active"
+		? { state: "active", found: describe(status.found), retry }
+		: { ...status, retry }
+}
+
+const useMountChecks = (drafts: ReadonlyArray<ResourceDraftRow>) => {
+	const storeIds = [
+		...new Set(
+			drafts.flatMap((draft) =>
+				draft.type === "memory_store" && draft.memoryStoreId !== "" ? [draft.memoryStoreId] : [],
+			),
+		),
+	]
+	const artifactIds = [
+		...new Set(
+			drafts.flatMap((draft) =>
+				(draft.type === "artifact" || draft.type === "skill") && draft.artifactId !== ""
+					? [draft.artifactId]
+					: [],
+			),
+		),
+	]
+	const stores = useQueries({
+		queries: storeIds.map((id) => ({ ...memoryStoreQuery(id), retry: false })),
+		combine: (results) =>
+			results.map((query) =>
+				mountCheck(
+					query,
+					(store) => store.name,
+					(store) => store.archived_at === null,
+				),
+			),
+	})
+	const artifacts = useQueries({
+		queries: artifactIds.map((id) => ({ ...artifactQuery(id), retry: false })),
+		combine: (results) =>
+			results.map((query) =>
+				mountCheck(query, (artifact) => `${artifact.name} (v${artifact.version})`),
+			),
+	})
+	const checks = new Map<string, MountCheck>()
+	for (const draft of drafts) {
+		const result =
+			draft.type === "memory_store"
+				? stores[storeIds.indexOf(draft.memoryStoreId)]
+				: draft.type === "github_repository"
+					? undefined
+					: artifacts[artifactIds.indexOf(draft.artifactId)]
+		if (result !== undefined) {
+			checks.set(draft.key, result)
+		}
+	}
+	return checks
+}
+
 export function NewSessionPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const agentOptions = choicesOf(useSuspenseInfiniteQuery(agentChoices))
@@ -154,10 +231,17 @@ export function NewSessionPage(): React.JSX.Element {
 	const environmentId = environment.id
 	const [title, setTitle] = useState("")
 	const [resources, setResources] = useState<ReadonlyArray<ResourceDraftRow>>([])
+	const mountChecks = useMountChecks(resources)
 	const ready =
 		agentId !== "" &&
 		environmentId !== "" &&
-		resources.every((resource) => namesResource(resource) && checkoutError(resource) === undefined)
+		resources.every(
+			(resource) =>
+				namesResource(resource) &&
+				checkoutError(resource) === undefined &&
+				(resource.type === "github_repository" ||
+					mountChecks.get(resource.key)?.state === "active"),
+		)
 	const [picked, setPicked] = useState<{
 		readonly agentId: string
 		readonly vaultIds: ReadonlyArray<string>
@@ -274,7 +358,7 @@ export function NewSessionPage(): React.JSX.Element {
 						<Field label="Title">
 							<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 						</Field>
-						<ResourcesEditor drafts={resources} onChange={setResources} />
+						<ResourcesEditor drafts={resources} checks={mountChecks} onChange={setResources} />
 						<SessionCredentialFields
 							agent={agents.find((option) => option.id === agentId)}
 							vaultList={vaultList}
@@ -512,9 +596,11 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 
 function ResourcesEditor({
 	drafts,
+	checks,
 	onChange,
 }: {
 	readonly drafts: ReadonlyArray<ResourceDraftRow>
+	readonly checks: ReadonlyMap<string, MountCheck>
 	readonly onChange: (drafts: ReadonlyArray<ResourceDraftRow>) => void
 }): React.JSX.Element {
 	const types: ReadonlyArray<ResourceType> = [
@@ -547,6 +633,7 @@ function ResourcesEditor({
 					</div>
 					<ResourceFields
 						draft={draft}
+						check={checks.get(draft.key)}
 						onChange={(next) => onChange(drafts.with(index, { ...next, key: draft.key }))}
 					/>
 				</div>
@@ -569,9 +656,11 @@ function ResourcesEditor({
 
 function ResourceFields({
 	draft,
+	check,
 	onChange,
 }: {
 	readonly draft: ResourceDraft
+	readonly check: MountCheck | undefined
 	readonly onChange: (draft: ResourceDraft) => void
 }): React.JSX.Element {
 	switch (draft.type) {
@@ -654,6 +743,7 @@ function ResourceFields({
 				<>
 					<MemoryStorePicker
 						chosen={draft.memoryStoreId}
+						check={check}
 						onChange={(memoryStoreId) => onChange({ ...draft, memoryStoreId })}
 					/>
 					<Field label="Access">
@@ -685,6 +775,7 @@ function ResourceFields({
 					<ArtifactPicker
 						skill={draft.type === "skill"}
 						chosen={draft.artifactId}
+						check={check}
 						onChange={(artifactId) => onChange({ ...draft, artifactId })}
 					/>
 					<Field label="Version" description="Defaults to the current version.">
@@ -715,6 +806,7 @@ function LazyPicker<T extends { readonly id: string }>({
 	placeholder,
 	empty,
 	chosen,
+	check,
 	onChange,
 	describe,
 }: {
@@ -724,39 +816,70 @@ function LazyPicker<T extends { readonly id: string }>({
 	readonly placeholder: string
 	readonly empty: React.ReactNode
 	readonly chosen: string
+	readonly check: MountCheck | undefined
 	readonly onChange: (id: string) => void
 	readonly describe: (option: T) => string
 }): React.JSX.Element {
 	const { data, error, isFetchingNextPage, hasNextPage, fetchNextPage } = query
-	if (data === undefined) {
-		return error === null || isSignedOut(error) ? (
+	const options = choicesOf({
+		data: data ?? { pages: [] },
+		error,
+		isFetchingNextPage,
+		hasNextPage,
+		fetchNextPage,
+	})
+	if (chosen === "" && options.items.length === 0 && options.more === null) {
+		if (options.error !== undefined) {
+			return <Callout tone="error">{options.error}</Callout>
+		}
+		return data === undefined ? (
 			<p className="text-control text-muted-foreground">Loading {noun}…</p>
 		) : (
-			<Callout tone="error">{errorMessage(error)}</Callout>
+			<Callout>{empty}</Callout>
 		)
 	}
-	const options = choicesOf({ data, error, isFetchingNextPage, hasNextPage, fetchNextPage })
-	if (options.items.length === 0 && options.more === null) {
-		return <Callout>{empty}</Callout>
+	const items = options.items.map((item) => ({
+		id: item.id,
+		label: item.id === chosen && check?.state === "active" ? check.found : describe(item),
+	}))
+	if (chosen !== "" && !items.some((item) => item.id === chosen)) {
+		items.unshift({ id: chosen, label: check?.state === "active" ? check.found : chosen })
 	}
 	return (
-		<OptionPicker
-			label={label}
-			noun={noun}
-			placeholder={placeholder}
-			options={options}
-			value={chosen === "" ? { id: "", gone: false } : selection(options.items, chosen)}
-			onChange={onChange}
-			describe={describe}
-		/>
+		<div className="space-y-2">
+			<OptionPicker
+				label={label}
+				noun={noun}
+				placeholder={placeholder}
+				options={{ ...options, items }}
+				value={{ id: chosen, gone: check?.state === "gone" }}
+				onChange={onChange}
+				describe={(item) => item.label}
+			/>
+			{check?.state === "pending" ? (
+				<p className="text-control text-muted-foreground">
+					Checking selected {label.toLowerCase()}…
+				</p>
+			) : null}
+			{check?.state === "failed" ? (
+				<Callout tone="error">
+					Could not check the selected {label.toLowerCase()}.{" "}
+					<Button variant="ghost" size="sm" onClick={check.retry}>
+						Retry
+					</Button>
+				</Callout>
+			) : null}
+		</div>
 	)
 }
 
 function MemoryStorePicker({
 	chosen,
+	check,
 	onChange,
 }: {
 	readonly chosen: string
+	readonly check: MountCheck | undefined
 	readonly onChange: (id: string) => void
 }): React.JSX.Element {
 	return (
@@ -775,6 +898,7 @@ function MemoryStorePicker({
 				</>
 			}
 			chosen={chosen}
+			check={check}
 			onChange={onChange}
 			describe={(memoryStore) => memoryStore.name}
 		/>
@@ -784,10 +908,12 @@ function MemoryStorePicker({
 function ArtifactPicker({
 	skill,
 	chosen,
+	check,
 	onChange,
 }: {
 	readonly skill: boolean
 	readonly chosen: string
+	readonly check: MountCheck | undefined
 	readonly onChange: (id: string) => void
 }): React.JSX.Element {
 	return (
@@ -798,6 +924,7 @@ function ArtifactPicker({
 			placeholder={skill ? "Choose an artifact with a SKILL.md at its root" : "Choose an artifact"}
 			empty="There are no artifacts yet. Create one with the CLI or the API."
 			chosen={chosen}
+			check={check}
 			onChange={onChange}
 			describe={(artifact) => `${artifact.name} (v${artifact.version})`}
 		/>

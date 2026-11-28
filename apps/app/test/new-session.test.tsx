@@ -1,5 +1,11 @@
 // @vitest-environment happy-dom
-import type { JsonAgent, JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
+import type {
+	JsonAgent,
+	JsonArtifact,
+	JsonMemoryStore,
+	JsonVault,
+	JsonVaultCredential,
+} from "@checkfu/sdk/client"
 import { MAX_SESSION_VAULTS } from "@checkfu/sdk/Limits"
 import { act, Suspense } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -45,6 +51,30 @@ const credential = (id: string, vaultId: string): JsonVaultCredential => ({
 	archived_at: null,
 })
 
+const notes: JsonMemoryStore = {
+	type: "memory_store",
+	id: "mstore_notes",
+	name: "Notes",
+	description: "",
+	created_at: AT,
+	updated_at: AT,
+	archived_at: null,
+}
+const report: JsonArtifact = {
+	type: "artifact",
+	id: "art_report",
+	name: "Report",
+	version: 2,
+	capabilities: {},
+	made_from: null,
+	file_count: 0,
+	total_bytes: 0,
+	files: [],
+	publication: null,
+	created_at: AT,
+	updated_at: AT,
+}
+
 const page = (data: ReadonlyArray<unknown>) => ({ data, next_page: null })
 
 const server = () => {
@@ -59,8 +89,13 @@ const server = () => {
 		failing: new Set<string>(),
 		failingLists: new Set<string>(),
 		vaultsDown: false,
+		memoryStores: [notes],
+		artifacts: [report],
+		mountListsDown: false,
 		goneLists: new Set<string>(),
 		existing: {
+			memoryStores: [notes],
+			artifacts: [report],
 			vaults: [vault("vlt_work"), vault("vlt_personal")],
 			credentials: [
 				credential("vcrd_work", "vlt_work"),
@@ -73,6 +108,21 @@ const server = () => {
 	const sent = stubApi(({ method, path }) => {
 		if (method === "POST") {
 			return { body: { id: "sesn_1", type: "session" } }
+		}
+		const mount = /^\/v1\/(memory_stores|artifacts)\/([^/?]+)$/u.exec(path)
+		if (mount !== null) {
+			const id = mount[2] ?? ""
+			if (state.failing.has(id)) {
+				return down
+			}
+			const resources =
+				mount[1] === "artifacts" ? state.existing.artifacts : state.existing.memoryStores
+			const found = resources.find((resource) => resource.id === id)
+			return found === undefined ? gone : { body: found }
+		}
+		if (path.startsWith("/v1/memory_stores") || path.startsWith("/v1/artifacts")) {
+			const resources = path.startsWith("/v1/memory_stores") ? state.memoryStores : state.artifacts
+			return state.mountListsDown ? down : { body: page(resources) }
 		}
 		const one = /^\/v1\/vaults\/([^/?]+)\/credentials\/([^/?]+)$/u.exec(path)
 		if (one !== null) {
@@ -701,4 +751,84 @@ describe("reading a chosen credential by its id", () => {
 		expect(api.started()).toEqual([])
 		mounted.unmount()
 	})
+})
+
+const chosenMount = (container: HTMLElement, id: string): HTMLSelectElement => {
+	const field = [...container.querySelectorAll("select")].find((select) =>
+		[...select.options].some((option) => option.value === id),
+	)
+	if (field === undefined) {
+		throw new Error(`Selected mount field for ${id} disappeared.`)
+	}
+	return field
+}
+
+it.each(["deleted", "archived"] as const)(
+	"blocks a selected mount when its store was %s",
+	async (state) => {
+		const api = server()
+		const mounted = await open()
+		await click(button(mounted.container, "Memory store"))
+		await choose(chosenMount(mounted.container, notes.id), notes.id)
+		expect(button(mounted.container, START).disabled).toBe(false)
+		api.state.memoryStores = []
+		api.state.existing.memoryStores = state === "deleted" ? [] : [{ ...notes, archived_at: AT }]
+		await refetch(mounted)
+		expect(chosenMount(mounted.container, notes.id).value).toBe(notes.id)
+		expect(mounted.container.textContent).toContain("The store you chose is no longer available.")
+		expect(button(mounted.container, START).disabled).toBe(true)
+		await submit(mounted.container.querySelector("form"))
+		expect(api.started()).toEqual([])
+		mounted.unmount()
+	},
+)
+
+it.each(["Artifact files", "Skill"] as const)(
+	"keeps selected %s when the listing fails and retries its detail",
+	async (type) => {
+		const api = server()
+		const mounted = await open()
+		await click(button(mounted.container, type))
+		await choose(chosenMount(mounted.container, report.id), report.id)
+		expect(button(mounted.container, START).disabled).toBe(false)
+		api.state.artifacts = []
+		api.state.mountListsDown = true
+		api.state.failing.add(report.id)
+		await refetch(mounted)
+		expect(chosenMount(mounted.container, report.id).value).toBe(report.id)
+		expect(button(mounted.container, START).disabled).toBe(true)
+		await submit(mounted.container.querySelector("form"))
+		expect(api.started()).toEqual([])
+		api.state.failing.delete(report.id)
+		await click(button(mounted.container, "Retry"))
+		const field = chosenMount(mounted.container, report.id)
+		expect(field.value).toBe(report.id)
+		expect(field.selectedOptions[0]?.textContent).toBe("Report (v2)")
+		expect(button(mounted.container, START).disabled).toBe(false)
+		await submit(mounted.container.querySelector("form"))
+		expect(api.started().map(({ body }) => body)).toEqual([
+			expect.objectContaining({
+				resources: [
+					expect.objectContaining({
+						type: type === "Skill" ? "skill" : "artifact",
+						artifact_id: report.id,
+					}),
+				],
+			}),
+		])
+		mounted.unmount()
+	},
+)
+
+it("displays the checked version even when the picker still has an older listing", async () => {
+	const api = server()
+	api.state.existing.artifacts = [{ ...report, version: 3 }]
+	const mounted = await open()
+	await click(button(mounted.container, "Artifact files"))
+	await choose(chosenMount(mounted.container, report.id), report.id)
+	expect(chosenMount(mounted.container, report.id).selectedOptions[0]?.textContent).toBe(
+		"Report (v3)",
+	)
+	expect(button(mounted.container, START).disabled).toBe(false)
+	mounted.unmount()
 })
