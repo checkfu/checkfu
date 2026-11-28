@@ -69,6 +69,21 @@ try {
 		}).pipe(Effect.provide(CheckfuClient.layerFetch({ apiKey, baseUrl }))),
 	)
 	assert.equal(effectId, first.id)
+	const binary = new Uint8Array([0, 127, 255, 128])
+	const uploaded = await client.files.upload({
+		filename: "fixture.bin",
+		content_type: "application/octet-stream",
+		body: binary,
+	})
+	const downloaded = await Effect.runPromise(
+		Effect.gen(function* () {
+			const effectClient = yield* CheckfuClient
+			return yield* effectClient.files.content(uploaded.id, { withResponse: true })
+		}).pipe(Effect.provide(CheckfuClient.layerFetch({ apiKey, baseUrl }))),
+	)
+	assert.equal(downloaded.status, 200)
+	assert.equal(downloaded.headers["content-type"], "application/octet-stream")
+	assert.deepEqual(downloaded.data, binary)
 	const environment = await client.waitForPending(
 		await client.environments.create({ name: "Installed SDK environment" }),
 	)

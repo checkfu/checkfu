@@ -5,16 +5,16 @@ description: "Browse and edit resources, watch Sessions live, and export agents 
 
 Open the `Dashboard` URL that `checkfu deploy` prints and sign in with the deployment's `CHECKFU_API_KEY`. Anyone who signs in has full access. Your browser session expires in seven days.
 
-| Section      | What you can do                                                                          |
-| :----------- | :--------------------------------------------------------------------------------------- |
-| Sessions     | Watch live, send messages, interrupt, allow or deny tool calls, and answer custom tools. |
-| Agents       | Create, edit, archive, and **Export as code**.                                           |
-| Environments | Edit networking policy and allowed hosts.                                                |
-| Automations  | Create, run now, pause, resume, and see runs.                                            |
-| Artifacts    | Browse versions and files, create viewing links, publish, and delete.                    |
-| Memory       | Create stores and edit memories.                                                         |
-| Vaults       | Create vaults and add or replace MCP credentials.                                        |
+| Section      | What you can do                                                                    |
+| :----------- | :--------------------------------------------------------------------------------- |
+| Sessions     | Watch live, send messages, interrupt, answer tool calls, and download saved Files. |
+| Agents       | Create, edit, archive, and **Export as code**.                                     |
+| Environments | Edit networking policy and allowed hosts.                                          |
+| Automations  | Create, run now, pause, resume, and see runs.                                      |
+| Artifacts    | Browse versions and files, create viewing links, publish, and delete.              |
+| Memory       | Create stores and edit memories.                                                   |
+| Vaults       | Create vaults and add or replace MCP credentials.                                  |
 
-Use the [CLI](/reference/cli) or [HTTP API](/reference/http-api) for Files and Webhooks.
+On a server running this revision, open **Webhooks** to inspect registered endpoints and their delivery attempts. Use the [CLI](/reference/cli) or [HTTP API](/reference/http-api) to register, rotate, or redeliver. Upload Files through the checkout-built CLI or HTTP API.
 
 **Export as code** downloads `agents/<name>.md` and a `checkfu-lock.json`. Unzip it into a project and run `checkfu apply . --dry-run`. See [Agents as code](/guides/agents-as-code).

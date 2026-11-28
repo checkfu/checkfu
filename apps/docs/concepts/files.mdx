@@ -7,7 +7,7 @@ A File is an immutable upload or session output with a filename and content type
 
 <CodeGroup>
 
-```sh CLI
+```sh Checkout CLI
 checkfu files upload ./report.pdf
 checkfu files download --file-id "$FILE_ID" -o report.pdf
 ```
@@ -24,11 +24,34 @@ curl --fail-with-body -o report.pdf "$CHECKFU_BASE_URL/v1/files/$FILE_ID/content
 
 </CodeGroup>
 
-Neither the Promise nor the Effect high-level `files` resource has raw-byte upload or download methods (see [Upload a file](/api-reference/files/upload-a-file)). Use `fetch` or the CLI for binary transfers.
+Use the HTTP commands above with the registry packages `@checkfu/sdk@0.0.1` or `checkfu@0.0.2`. File metadata and byte transfer commands are available in checkout builds on deployments that serve the File endpoints.
+
+## Transfer bytes with a checkout build
+
+A candidate package built from this checkout provides `files.upload` and `files.content` on both SDK clients. Install the candidate tarball from the checkout you are running.
+
+```ts
+import Checkfu from "@checkfu/sdk"
+import { readFile, writeFile } from "node:fs/promises"
+
+const client = new Checkfu()
+try {
+	const file = await client.files.upload({
+		filename: "report.pdf",
+		content_type: "application/pdf",
+		body: await readFile("report.pdf"),
+	})
+	await writeFile("downloaded-report.pdf", await client.files.content(file.id))
+} finally {
+	await client.close()
+}
+```
+
+The signed-in dashboard downloads saved Files from the Files panel of the session that captured them.
 
 ## Attach a File to a Session
 
-Pass a `file` resource when you create the Session:
+Pass a `file` resource when you create the Session. This example uses a checkout-built SDK:
 
 ```ts
 import Checkfu, { FileId } from "@checkfu/sdk"
@@ -48,7 +71,7 @@ The agent reads it at `/mnt/session/uploads/q3/report.pdf`. Its file tools can r
 
 ## Files from Session outputs
 
-When a turn ends with `end_turn`, `budget_reached`, or `refusal`, Checkfu saves each file the agent wrote to `/mnt/session/outputs` as a File (subject to [Session output limits](/reference/limits#session-outputs)):
+When a turn ends with `end_turn`, `budget_reached`, or `refusal`, Checkfu saves each file the agent wrote to `/mnt/session/outputs` as a File (subject to [Session output limits](/reference/limits#session-outputs)). Read the File list with a checkout-built SDK:
 
 ```ts
 const outputs = await client.sessions.outputs.retrieve(session.id)
