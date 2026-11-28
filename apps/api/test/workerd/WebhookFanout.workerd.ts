@@ -1,7 +1,6 @@
 import { createServer } from "node:http"
 import { expect, it } from "vitest"
 import { WEBHOOK_FANOUT_PAGE_SIZE } from "../../src/Webhooks/WebhookEventsLive.ts"
-import { WEBHOOK_FANOUT_DEDUPE_TTL_MS } from "../../src/Webhooks/WebhookFanout.do.ts"
 import { WEBHOOK_EGRESS_TARGET_HEADER } from "../../src/Webhooks/WebhookEgressConfig.ts"
 import type { FanoutStatus } from "./WebhookFanoutFixture.ts"
 import {
@@ -30,35 +29,22 @@ it("retries one failed enqueue after the durable fan-out scan completes", async 
 	}
 	try {
 		await send("/publish")
-		await expect.poll(status, { timeout: 15_000 }).toMatchObject({
-			started: true,
-			scanDone: true,
-			pendingCount: 1,
-			retryPending: true,
-		})
+		await expect
+			.poll(
+				async () => {
+					const observed = await status()
+					return [observed.jobs.map(({ callback }) => callback), observed.deliveries.length]
+				},
+				{ timeout: 15_000 },
+			)
+			.toEqual([["retrySubscriber"], WEBHOOK_FANOUT_PAGE_SIZE * 2])
 		const pending = await status()
-		expect(pending.jobs.map(({ callback }) => callback)).toContain("retrySubscriber")
-		expect(pending.jobs.map(({ callback }) => callback)).not.toContain("cleanup")
-		expect(pending.deliveries).toHaveLength(pending.subscriberCount - 1)
 		expect(
 			pending.deliveries.some(({ webhookId }) => webhookId === pending.retrySubscriberId),
 		).toBe(false)
-		const releasedAt = Date.now()
 		await send("/release")
-		await expect.poll(status, { timeout: 15_000 }).toMatchObject({
-			started: true,
-			scanDone: true,
-			pendingCount: null,
-			retryPending: null,
-			jobs: [{ callback: "cleanup" }],
-		})
+		await expect.poll(status, { timeout: 15_000 }).toMatchObject({ jobs: [] })
 		const settled = await status()
-		expect(settled.jobs[0]?.scheduled_at).toBeGreaterThanOrEqual(
-			releasedAt + WEBHOOK_FANOUT_DEDUPE_TTL_MS,
-		)
-		expect(settled.jobs[0]?.scheduled_at).toBeLessThanOrEqual(
-			Date.now() + WEBHOOK_FANOUT_DEDUPE_TTL_MS,
-		)
 		const retried = settled.attempts.filter(
 			({ webhookId }) => webhookId === settled.retrySubscriberId,
 		)
@@ -69,19 +55,13 @@ it("retries one failed enqueue after the durable fan-out scan completes", async 
 		).toEqual(pending.deliveries)
 		expect(settled.deliveries).toEqual([...pending.deliveries, retried[0]])
 		await send("/publish")
+		await expect.poll(status, { timeout: 15_000 }).toMatchObject({ jobs: [] })
 		const replay = await status()
-		expect(replay.attempts).toHaveLength(settled.attempts.length + WEBHOOK_FANOUT_PAGE_SIZE)
+		expect(replay.attempts.slice(settled.attempts.length)).toEqual(
+			expect.arrayContaining([...settled.deliveries]),
+		)
+		expect(replay.attempts).toHaveLength(settled.attempts.length + settled.subscriberCount)
 		expect(replay.deliveries).toEqual(settled.deliveries)
-		expect(replay.jobs.map(({ callback }) => callback)).toEqual(["cleanup"])
-		await send("/cleanup")
-		await expect.poll(status, { timeout: 10_000 }).toMatchObject({
-			started: null,
-			scanDone: null,
-			pendingCount: null,
-			retryPending: null,
-			jobs: [],
-			deliveries: settled.deliveries,
-		})
 	} finally {
 		await worker.stop()
 	}

@@ -31,7 +31,6 @@ import {
 } from "../../src/Webhooks/WebhookEventsLive.ts"
 
 const eventId = "evt_fanout_retry_fixture"
-const jobId = `cleanup:${eventId}`
 const subscriberId = (index: number): WebhookId =>
 	WebhookId.make(`whe_retry_fixture_${String(index).padStart(3, "0")}`)
 const retrySubscriberId = subscriberId(WEBHOOK_FANOUT_PAGE_SIZE + 1)
@@ -45,10 +44,6 @@ interface DeliveryAttempt {
 export interface FanoutStatus {
 	readonly retrySubscriberId: WebhookId
 	readonly subscriberCount: number
-	readonly started: boolean | null
-	readonly scanDone: boolean | null
-	readonly pendingCount: number | null
-	readonly retryPending: boolean | null
 	readonly jobs: ReadonlyArray<{ readonly callback: string; readonly scheduled_at: number }>
 	readonly attempts: ReadonlyArray<DeliveryAttempt>
 	readonly deliveries: ReadonlyArray<DeliveryAttempt>
@@ -58,7 +53,6 @@ interface FixtureShape {
 	readonly publish: () => Effect.Effect<void, never, RuntimeContext>
 	readonly snapshot: () => Effect.Effect<FanoutStatus, never, RuntimeContext>
 	readonly releaseRetry: () => Effect.Effect<void>
-	readonly advanceCleanup: () => Effect.Effect<void, never, RuntimeContext>
 }
 
 class FanoutFixture extends Cloudflare.DurableObject<FanoutFixture, FixtureShape>()(
@@ -190,14 +184,7 @@ const FixtureLive = FanoutFixture.make(
 								.pipe(Effect.orDie)
 						}),
 					snapshot: () =>
-						Effect.gen(function* () {
-							const key = `ev:${eventId}`
-							const started = (yield* state.storage.get<boolean>(`${key}:started`)) ?? null
-							const scanDone = (yield* state.storage.get<boolean>(`${key}:done`)) ?? null
-							const pendingCount =
-								(yield* state.storage.get<number>(`${key}:pending_count`)) ?? null
-							const retryPending =
-								(yield* state.storage.get<boolean>(`${key}:retry:${retrySubscriberId}`)) ?? null
+						Effect.sync(() => {
 							const jobs = state.raw.storage.sql
 								.exec<{ callback: string; scheduled_at: number }>(
 									"SELECT callback, scheduled_at FROM alchemy_alarm_callbacks ORDER BY callback",
@@ -206,28 +193,12 @@ const FixtureLive = FanoutFixture.make(
 							return {
 								retrySubscriberId,
 								subscriberCount: retrySubscriberCount,
-								started,
-								scanDone,
-								pendingCount,
-								retryPending,
 								jobs,
 								attempts: [...attempts],
 								deliveries: [...deliveries.values()],
 							}
-						}).pipe(Effect.orDie),
-					releaseRetry: () => Deferred.succeed(release, undefined).pipe(Effect.asVoid),
-					advanceCleanup: () =>
-						Effect.gen(function* () {
-							const now = yield* Clock.currentTimeMillis
-							// Advance the fixture's scheduled deadline and let the real alarm run cleanup.
-							state.raw.storage.sql.exec(
-								"UPDATE alchemy_alarm_callbacks SET run_at = ?, scheduled_at = ? WHERE callback = 'cleanup' AND id = ?",
-								now,
-								now,
-								jobId,
-							)
-							yield* Effect.promise(() => state.raw.storage.setAlarm(now))
 						}),
+					releaseRetry: () => Deferred.succeed(release, undefined).pipe(Effect.asVoid),
 				} satisfies FixtureShape
 			}),
 	),
@@ -257,9 +228,6 @@ export default FanoutTestWorker.make(
 				}
 				if (request.method === "POST" && path === "/release") {
 					yield* fixture.releaseRetry()
-				}
-				if (request.method === "POST" && path === "/cleanup") {
-					yield* fixture.advanceCleanup()
 				}
 				return path === "/status"
 					? HttpServerResponse.jsonUnsafe(yield* fixture.snapshot())

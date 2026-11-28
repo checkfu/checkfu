@@ -289,7 +289,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		Effect.gen(function* () {
 			const pageId = "webhook-callback:WebhookFanout/fanoutPage"
 			const retryId = "webhook-callback:WebhookFanout/retrySubscriber"
-			const cleanupId = "webhook-callback:WebhookFanout/cleanup"
 			const page = {
 				event: {
 					event_id: "evt_automation_run_arun_fixture_1",
@@ -313,9 +312,8 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				},
 				webhookId: "whe_fixture",
 			}
-			const cleanup = { eventId: page.event.event_id }
 			const callbacks = persistedShapes.filter(({ kind }) => kind === "webhook-callback")
-			expect(callbacks.map(({ id }) => id)).toEqual([pageId, retryId, cleanupId])
+			expect(callbacks.map(({ id }) => id)).toEqual([pageId, retryId])
 			expect(
 				registryProblems(persistedShapes.filter(({ kind }) => kind !== "webhook-callback")),
 			).toEqual(["no webhook-callback shape was found"])
@@ -331,7 +329,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				baselines: [
 					{
 						...baseline,
-						shapes: { [pageId]: [page], [retryId]: [retry], [cleanupId]: [cleanup] },
+						shapes: { [pageId]: [page], [retryId]: [retry] },
 					},
 				],
 			}

@@ -4,7 +4,6 @@ import * as Schema from "effect/Schema"
 
 export const FANOUT_PAGE_CALLBACK = "fanoutPage"
 export const RETRY_SUBSCRIBER_CALLBACK = "retrySubscriber"
-export const CLEANUP_CALLBACK = "cleanup"
 
 const Publication = Schema.Struct({
 	event_id: Schema.String,
@@ -29,11 +28,7 @@ export const RetrySubscriberPayload = Schema.Struct({
 })
 export type RetrySubscriberPayload = typeof RetrySubscriberPayload.Type
 
-export const CleanupPayload = Schema.Struct({ eventId: Schema.String })
-export type CleanupPayload = typeof CleanupPayload.Type
-
 export const WEBHOOK_FANOUT_PAYLOADS = {
 	[FANOUT_PAGE_CALLBACK]: FanoutPagePayload,
 	[RETRY_SUBSCRIBER_CALLBACK]: RetrySubscriberPayload,
-	[CLEANUP_CALLBACK]: CleanupPayload,
 } as const
