@@ -1282,6 +1282,123 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 		}).pipe(Effect.scoped),
 	)
 
+	it.live("counts the result limit in UTF-16 across split UTF-8 characters", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const headers = { authorization: `Bearer ${TEST_API_KEY}` }
+			const prefix = '{"data":"'
+			const value = "🌱".repeat(99_994) + "x"
+			const exact = `${prefix}${value}"}`
+			expect(exact.length).toBe(200_000)
+			const encoder = new TextEncoder()
+			const result = (payload: string) => {
+				const bytes = encoder.encode(payload)
+				const split = prefix.length + 2
+				const stream = new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(bytes.subarray(0, split))
+						controller.enqueue(bytes.subarray(split))
+						controller.close()
+					},
+				})
+				return server
+					.fetch(
+						callToolRequest("sessions_listEvents", { path: { session_id: "sess_1" } }, headers),
+						afterCredentialCheck(() => Promise.resolve(new Response(stream))),
+					)
+					.pipe(Effect.flatMap((response) => Effect.promise(() => response.text())))
+			}
+			const accepted = yield* result(exact)
+			expect(accepted).toContain(value)
+			expect(accepted).not.toContain('"isError":true')
+			const oversize = yield* result(`${exact} `)
+			expect(oversize).toContain("200000-character limit")
+			expect(oversize).toContain("Call again with a smaller limit.")
+			expect(oversize.length).toBeLessThan(5000)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("releases oversized streams even when upstream cancellation hangs or fails", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const headers = { authorization: `Bearer ${TEST_API_KEY}` }
+			const request = () =>
+				callToolRequest("environments_createEnvironment", { body: { name: "default" } }, headers)
+			const encoder = new TextEncoder()
+			const result = (reply: Response) =>
+				server
+					.fetch(
+						request(),
+						afterCredentialCheck(() => Promise.resolve(reply)),
+					)
+					.pipe(Effect.flatMap((response) => Effect.promise(() => response.text())))
+			for (const status of [201, 409]) {
+				const payload = encoder.encode(
+					'{"type":"error","error":{"type":"conflict_error","message":"' + "x".repeat(200_001),
+				)
+				let pulls = 0
+				let canceled = false
+				const stream = new ReadableStream<Uint8Array>(
+					{
+						pull(controller) {
+							pulls += 1
+							if (pulls === 1) {
+								controller.enqueue(payload)
+							} else {
+								controller.enqueue(encoder.encode('"}}'))
+								controller.close()
+							}
+						},
+						cancel() {
+							canceled = true
+							return status === 201
+								? new Promise<void>(() => {})
+								: Promise.reject(new Error("upstream cancellation failed"))
+						},
+					},
+					{ highWaterMark: 0 },
+				)
+				const text = yield* result(new Response(stream, { status }))
+				expect(pulls).toBe(1)
+				expect(canceled).toBe(true)
+				expect(stream.locked).toBe(false)
+				expect(text.length).toBeLessThan(5000)
+				expect(text).toContain(
+					status === 201
+						? "The API accepted the request"
+						: "whether this call took effect is unknown",
+				)
+			}
+
+			const smallError = yield* result(
+				Response.json(
+					{ type: "error", error: { type: "conflict_error", message: "Already configured." } },
+					{ status: 409 },
+				),
+			)
+			expect(smallError).toContain("conflict_error")
+			expect(smallError).toContain("Already configured.")
+
+			let pulledPrefix = false
+			const broken = new ReadableStream<Uint8Array>(
+				{
+					pull(controller) {
+						if (!pulledPrefix) {
+							pulledPrefix = true
+							controller.enqueue(encoder.encode('{"data":'))
+						} else {
+							controller.error(new Error("connection dropped while reading"))
+						}
+					},
+				},
+				{ highWaterMark: 0 },
+			)
+			const interruptedWrite = yield* result(new Response(broken, { status: 201 }))
+			expect(interruptedWrite).toContain("whether this call took effect is unknown")
+			expect(broken.locked).toBe(false)
+		}).pipe(Effect.scoped),
+	)
+
 	it.live("substitutes every declared path parameter, whatever its name", () =>
 		Effect.gen(function* () {
 			const urls: Array<string> = []
