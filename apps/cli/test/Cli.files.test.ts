@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schedule from "effect/Schedule"
+import * as Stream from "effect/Stream"
 import { makeTestServer } from "./helpers/CliHarness.ts"
 import type { CliRunResult } from "./helpers/CliHarness.ts"
 
@@ -18,6 +19,61 @@ interface Uploaded {
 }
 
 describe("CLI files", () => {
+	it.live("refuses a read error or oversized chunk before posting an upload", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const path = yield* Path.Path
+				const root = yield* fs.makeTempDirectoryScoped()
+				const source = path.join(root, "source.bin")
+				yield* fs.writeFile(source, Uint8Array.of(1, 2, 3, 4))
+				const cli = yield* makeTestServer()
+				let reachedTail = false
+				const prefix = Stream.fromIterable([Uint8Array.of(1), Uint8Array.of(2)])
+				const failReading = Stream.fromEffect(
+					fs.stat(path.join(root, "missing.bin")).pipe(Effect.as(Uint8Array.of(3))),
+				)
+				const oversized = Stream.concat(
+					Stream.succeed(Uint8Array.of(3, 4, 5, 6, 7)),
+					Stream.fromEffect(
+						Effect.sync(() => {
+							reachedTail = true
+							return Uint8Array.of(8)
+						}),
+					),
+				)
+				for (const [rest, reason] of [
+					[failReading, "missing.bin"],
+					[oversized, "grew while it was being read"],
+				] as const) {
+					const posts: Array<string> = []
+					const result = yield* cli.run(["files", "upload", source], {
+						fileSystem: Layer.succeed(FileSystem.FileSystem, {
+							...fs,
+							stream: (file, options) => {
+								if (file !== source) {
+									return fs.stream(file, options)
+								}
+								expect(Number(options?.bytesToRead)).toBe(5)
+								return Stream.concat(prefix, rest)
+							},
+						}),
+						interceptFetch: (next, request) => {
+							if (request.method === "POST") {
+								posts.push(request.url)
+							}
+							return next(request)
+						},
+					})
+					expect(result.exitCode).toBe(USAGE_EXIT_CODE)
+					expect(result.errorMessage).toContain(reason)
+					expect(posts).toEqual([])
+				}
+				expect(reachedTail).toBe(false)
+			}),
+		).pipe(Effect.provide(Layer.merge(NodeFileSystem.layer, Path.layer))),
+	)
+
 	it.live("publishes only downloads that match the stored size and SHA-256", () =>
 		Effect.scoped(
 			Effect.gen(function* () {

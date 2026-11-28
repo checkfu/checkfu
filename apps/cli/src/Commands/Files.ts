@@ -50,23 +50,23 @@ const uploadCommand = Command.make(
 			if (size > MAX_FILE_BYTES) {
 				return yield* usageError(`${input.path}: a file may be at most ${MAX_FILE_BYTES} bytes.`)
 			}
-			const chunks = yield* Stream.runCollect(
-				fs.stream(input.path, { bytesToRead: size + 1 }),
-			).pipe(Effect.mapError((error) => usageError(`${input.path}: ${error.message}`)))
-			const received = chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
-			if (received > size) {
-				return yield* usageError(`${input.path}: the file grew while it was being read. Try again.`)
-			}
-			if (received < size) {
+			const bytes = new Uint8Array(size)
+			let offset = 0
+			yield* fs.stream(input.path, { bytesToRead: size + 1 }).pipe(
+				Stream.mapError((error) => usageError(`${input.path}: ${error.message}`)),
+				Stream.runForEach((chunk) => {
+					if (chunk.byteLength > size - offset) {
+						return usageError(`${input.path}: the file grew while it was being read. Try again.`)
+					}
+					bytes.set(chunk, offset)
+					offset += chunk.byteLength
+					return Effect.void
+				}),
+			)
+			if (offset !== size) {
 				return yield* usageError(
 					`${input.path}: the file shrank while it was being read. Try again.`,
 				)
-			}
-			const bytes = new Uint8Array(received)
-			let offset = 0
-			for (const chunk of chunks) {
-				bytes.set(chunk, offset)
-				offset += chunk.byteLength
 			}
 			const client = yield* getClient
 			const key = Option.isSome(input.idempotencyKey)
