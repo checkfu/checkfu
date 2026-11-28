@@ -22,6 +22,8 @@ import * as Fiber from "effect/Fiber"
 import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
+import * as Schema from "effect/Schema"
+import { PiTurnReply } from "../src/Pi/PiTurn.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
@@ -91,6 +93,20 @@ import {
 	reportPauseMeasurement,
 	waitForPauseProbe,
 } from "./helpers/PiPauseProbe.ts"
+
+it("rejects invalid token counts on the harness reply wire", () => {
+	const reply = {
+		thinking: null,
+		text: "done",
+		input_tokens: 1,
+		output_tokens: 2,
+		stop_reason: { type: "end_turn" },
+	}
+	const validReply = Schema.is(PiTurnReply)
+	expect(validReply(reply)).toBe(true)
+	expect(validReply({ ...reply, input_tokens: -1 })).toBe(false)
+	expect(validReply({ ...reply, output_tokens: 1.5 })).toBe(false)
+})
 
 describe("PiDurableEngine storage, compaction, and provider error classification", () => {
 	it("supports OpenAI + Anthropic only and surfaces missing_api_key_error / unknown_model_error", async () => {

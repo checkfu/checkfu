@@ -1,12 +1,7 @@
 import { EnvironmentNetworking } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { AgentToolsText, McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
-import {
-	CacheCreationUsage,
-	ModelUsage,
-	NonNegativeInt,
-	ToolEvent,
-} from "@checkfu/domain/Session/SessionTypes"
+import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { OutputBytes, OutputRead, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { HeldSecret, PutMode, PutOutcome } from "../Connection/SecretCustody.ts"
@@ -52,11 +47,7 @@ export const PiTurnReply = Schema.Struct({
 	response_started_at: Schema.optionalKey(Schema.Int),
 	thinking: Schema.NullOr(Schema.String),
 	text: Schema.String,
-	input_tokens: Schema.Finite,
-	output_tokens: Schema.Finite,
-	cache_read_input_tokens: Schema.optionalKey(NonNegativeInt),
-	cache_creation_input_tokens: Schema.optionalKey(NonNegativeInt),
-	cache_creation: Schema.optionalKey(CacheCreationUsage),
+	...ModelUsage.fields,
 	stop_reason: ModelStopReason,
 })
 

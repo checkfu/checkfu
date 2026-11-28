@@ -5,7 +5,12 @@ import { CommitModelReply } from "./CommitModelReply.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
 import { PauseTurn } from "./PauseTurn.command.ts"
-import { HARNESS_UNAVAILABLE, HARNESS_UNAVAILABLE_MESSAGE, Harness } from "./Harness.external.ts"
+import {
+	HARNESS_UNAVAILABLE,
+	HARNESS_UNAVAILABLE_MESSAGE,
+	Harness,
+	usageOf,
+} from "./Harness.external.ts"
 import { RecordModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import {
 	TurnOutcome,
@@ -120,17 +125,7 @@ export const RunTurnLive = RunTurn.toLayer(
 								: { response_started_at: reply.response_started_at }),
 							text: reply.text,
 							truncated: reply.truncated,
-							input_tokens: reply.input_tokens,
-							output_tokens: reply.output_tokens,
-							...(reply.cache_read_input_tokens === undefined
-								? {}
-								: { cache_read_input_tokens: reply.cache_read_input_tokens }),
-							...(reply.cache_creation_input_tokens === undefined
-								? {}
-								: { cache_creation_input_tokens: reply.cache_creation_input_tokens }),
-							...(reply.cache_creation === undefined
-								? {}
-								: { cache_creation: reply.cache_creation }),
+							...usageOf(reply),
 							stop_reason: reply.stop_reason,
 						})),
 						Effect.catchTag(
@@ -270,19 +265,7 @@ export const RunTurnLive = RunTurn.toLayer(
 								: { response_started_at: generated.response_started_at }),
 							text: generated.text,
 							truncated: generated.truncated,
-							model_usage: {
-								input_tokens: generated.input_tokens,
-								output_tokens: generated.output_tokens,
-								...(generated.cache_read_input_tokens === undefined
-									? {}
-									: { cache_read_input_tokens: generated.cache_read_input_tokens }),
-								...(generated.cache_creation_input_tokens === undefined
-									? {}
-									: { cache_creation_input_tokens: generated.cache_creation_input_tokens }),
-								...(generated.cache_creation === undefined
-									? {}
-									: { cache_creation: generated.cache_creation }),
-							},
+							model_usage: usageOf(generated),
 							stop_reason: generated.stop_reason,
 						}),
 					)

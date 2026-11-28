@@ -4,7 +4,6 @@ import { Activity } from "effect/workflow"
 import { RequestFailureDisposition } from "./FailModelRequest.command.ts"
 import { ModelStopReason } from "./Harness.external.ts"
 import {
-	CacheCreationUsage,
 	ErrorMessage,
 	ErrorType,
 	MessageText,
@@ -24,11 +23,7 @@ export const TurnOutcome = Schema.Union([
 		thinking: Schema.NullOr(ThinkingText),
 		text: MessageText,
 		truncated: Schema.optional(Schema.Literal(true)),
-		input_tokens: NonNegativeInt,
-		output_tokens: NonNegativeInt,
-		cache_read_input_tokens: Schema.optionalKey(NonNegativeInt),
-		cache_creation_input_tokens: Schema.optionalKey(NonNegativeInt),
-		cache_creation: Schema.optionalKey(CacheCreationUsage),
+		...ModelUsage.fields,
 		stop_reason: ModelStopReason,
 	}),
 	Schema.Struct({

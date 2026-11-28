@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "webhook-fanout-callbacks",
-			"cut_at": "2026-11-28T00:12:36.966Z",
+			"label": "harness-reply-usage",
+			"cut_at": "2026-11-28T00:23:41.776Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -277,9 +277,9 @@
 				"pi-doc:checkfu.settled-usage": "83c18d851c10b8c7b0262cc04373e6d8735c781cd0fe85e60cbfcb9b7fed3153",
 				"pi-doc:checkfu.session-system-context": "f45e9316164abe2de7d601016d6598c9bd2696418fbe3c860823b553f53d8550",
 				"harness-call:PiHarness.recoverTurn/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
-				"harness-call:PiHarness.recoverTurn/result": "cb527be74d5bd322be0d653824ac33a44cfb3ec12edf377a29027e717835cdec",
+				"harness-call:PiHarness.recoverTurn/result": "9ddb2ec3084239f8129fb162a9a8f713e1a49a2908b46ec6723b06990b6c8eea",
 				"harness-call:PiHarness.runTurn/args": "d287112b1279668cdf402a487e68ecc26df3934775916789408b08e6cc2ef9ab",
-				"harness-call:PiHarness.runTurn/result": "453d14aeeca627ab462af10246652c016b4a100b9e77d8157d64aac2d9146839",
+				"harness-call:PiHarness.runTurn/result": "f019d944f88435f297c0dadcbae37229d31d22793cd713c7217fc601ee45184a",
 				"harness-call:PiHarness.abortTurn/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
 				"harness-call:PiHarness.abortTurn/result": "b1d9840fedc4cbfc93f17bd28b384777654f2b7afdb086f525bed2b01533da3f",
 				"harness-call:PiHarness.listOutputs/args": "42aedf4c2a50de3a59ca84dc04fdea89bd158d6447ecdd0422886a87a283944b",
@@ -13964,19 +13964,19 @@
 					{
 						"ok": true,
 						"reply": {
-							"response_started_at": 4,
+							"response_started_at": -82,
 							"thinking": null,
 							"text": "__proto__",
-							"input_tokens": -3.9585206269451144e-69,
-							"output_tokens": -1.797693134862312e+308,
-							"cache_read_input_tokens": 99,
-							"cache_creation_input_tokens": 93,
+							"input_tokens": 30,
+							"output_tokens": 6,
+							"cache_read_input_tokens": 97,
+							"cache_creation_input_tokens": 99,
 							"cache_creation": {
-								"ephemeral_5m_input_tokens": 77,
-								"ephemeral_1h_input_tokens": 97
+								"ephemeral_5m_input_tokens": 82,
+								"ephemeral_1h_input_tokens": 77
 							},
 							"stop_reason": {
-								"type": "refusal"
+								"type": "budget_reached"
 							}
 						}
 					},
@@ -13985,8 +13985,8 @@
 						"reply": {
 							"thinking": null,
 							"text": "\udc00",
-							"input_tokens": -2e-323,
-							"output_tokens": -5.4e-323,
+							"input_tokens": 1,
+							"output_tokens": 0,
 							"cache_creation_input_tokens": 0,
 							"stop_reason": {
 								"type": "budget_reached"

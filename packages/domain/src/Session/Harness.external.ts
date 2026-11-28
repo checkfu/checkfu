@@ -3,10 +3,10 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
+import * as Struct from "effect/Struct"
 import { SessionId } from "./Session.id.ts"
 import { RepositoryToken, SessionResourceId, SessionResources } from "./SessionResource.ts"
 import {
-	CacheCreationUsage,
 	ErrorMessage,
 	ErrorType,
 	MAX_ERROR_MESSAGE_LENGTH,
@@ -74,11 +74,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			thinking: Schema.NullOr(ThinkingText),
 			text: MessageText,
 			truncated: Schema.optional(Schema.Literal(true)),
-			input_tokens: NonNegativeInt,
-			output_tokens: NonNegativeInt,
-			cache_read_input_tokens: Schema.optionalKey(NonNegativeInt),
-			cache_creation_input_tokens: Schema.optionalKey(NonNegativeInt),
-			cache_creation: Schema.optionalKey(CacheCreationUsage),
+			...ModelUsage.fields,
 			stop_reason: ModelStopReason,
 		},
 		error: [TurnFailed, TurnInterrupted, TurnPaused, HarnessUnavailable],
@@ -113,17 +109,15 @@ const clampText = (value: string, maxLength: number, fallback: string): string =
 	return truncateText(value, maxLength)
 }
 
-export interface HarnessReply {
+export interface HarnessReply extends ModelUsage {
 	readonly response_started_at?: number
 	readonly thinking: string | null
 	readonly text: string
-	readonly input_tokens: number
-	readonly output_tokens: number
-	readonly cache_read_input_tokens?: number
-	readonly cache_creation_input_tokens?: number
-	readonly cache_creation?: CacheCreationUsage
 	readonly stop_reason: ModelStopReason
 }
+
+export const usageOf = (reply: ModelUsage): ModelUsage =>
+	Struct.pick(reply, Struct.keys(ModelUsage.fields))
 
 const EMPTY_REPLY_ERROR: TurnFailed = {
 	_tag: "TurnFailed",
@@ -138,17 +132,7 @@ export const clampHarnessReply = (
 	if (reply.text.length === 0) {
 		return Effect.fail({
 			...EMPTY_REPLY_ERROR,
-			model_usage: {
-				input_tokens: reply.input_tokens,
-				output_tokens: reply.output_tokens,
-				...(reply.cache_read_input_tokens === undefined
-					? {}
-					: { cache_read_input_tokens: reply.cache_read_input_tokens }),
-				...(reply.cache_creation_input_tokens === undefined
-					? {}
-					: { cache_creation_input_tokens: reply.cache_creation_input_tokens }),
-				...(reply.cache_creation === undefined ? {} : { cache_creation: reply.cache_creation }),
-			},
+			model_usage: usageOf(reply),
 		})
 	}
 	const truncated = reply.text.length > MAX_MESSAGE_TEXT_LENGTH
