@@ -79,6 +79,7 @@ import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
 	extractLastUserText,
+	extractSystemText,
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	makeScriptedPiModels,
@@ -1119,6 +1120,37 @@ describe("turn engine", () => {
 				first,
 			)
 			expect(attempts).toBe(2)
+		} finally {
+			await backend.close()
+		}
+	})
+
+	it("compacts before sending a substantial request-only system context", async () => {
+		const mounted = "Current mounts are available under /mnt/session/uploads. ".repeat(500)
+		let summaries = 0
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				if (prompt.startsWith("<conversation>")) {
+					summaries++
+					expect(prompt).not.toContain("/mnt/session/uploads")
+					return makeAssistantReply(model, null, "Summary", 12, 3)
+				}
+				if (prompt === "First") {
+					return makeAssistantReply(model, null, "a".repeat(84_000), 110_800, 1)
+				}
+				expect(extractSystemText(context)).toContain(mounted)
+				return makeAssistantReply(model, null, "Done", 6, 2)
+			}),
+		)
+		try {
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "First"))),
+			).toMatchObject({ ok: true })
+			expect(summaries).toBe(0)
+			const second = { ...turnRequest(2, "Second"), systemContext: mounted }
+			expect(await Effect.runPromise(runPiDurableTurn(backend, second))).toMatchObject({ ok: true })
+			expect(summaries).toBe(1)
 		} finally {
 			await backend.close()
 		}

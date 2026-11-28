@@ -302,7 +302,7 @@ describe("Files in a session", () => {
 		))
 
 	it("omits deleted uploads from listings and reads without failing the session's turns", () =>
-		withSessions((apiFetch, { uploadedFiles, onTurn, createSession, upload }) =>
+		withSessions((apiFetch, { uploadedFiles, systems, onTurn, createSession, upload }) =>
 			Effect.gen(function* () {
 				const file = yield* upload("a.txt", "a")
 				const empty = yield* upload("empty.txt", "")
@@ -337,6 +337,14 @@ describe("Files in a session", () => {
 					{ listed: [`${UPLOADS}/empty.txt`], readable: [null, null, ""] },
 					{ listed: [], readable: [null, null, null] },
 				])
+				expect(systems[0]).toContain(`${UPLOADS}/a.txt`)
+				expect(systems[1]).not.toContain(`${UPLOADS}/a.txt`)
+				expect(systems[1]).toContain(`${UPLOADS}/empty.txt`)
+				expect(systems[2]).not.toContain("Files the user gave you")
+				const saved = yield* json<SessionBody>(
+					yield* request(apiFetch, "GET", `/v1/sessions/${session.id}`),
+				)
+				expect(saved.resources).toEqual(session.resources)
 			}),
 		))
 })

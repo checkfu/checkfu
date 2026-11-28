@@ -3,9 +3,11 @@ import type { McpToolOf, TurnCalls } from "@checkfu/domain/Session/ToolEventBoun
 import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
+import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate"
 import {
 	AssistantEntry,
 	CompactionEntry,
+	DEFAULT_COMPACTION_POLICY,
 	LiveDoc,
 	ROOT_CONVERSATION_ID,
 	ResetEntry,
@@ -30,6 +32,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
+import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { deliverAnswer, parkedActions, waitedOnAnAnswer } from "./PiActions.ts"
 import type { ActionAnswer, ParkedAction } from "./PiActions.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
@@ -510,9 +513,14 @@ const admitPiTurnUnderWay = (
 	request: PiTurnRequest,
 ): Effect.Effect<boolean | "missing_key"> => {
 	const operationId = request.operationId
+	const system = request.systemContext
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
 		instructions: request.system !== null && request.system.length > 0 ? request.system : null,
+		compaction: {
+			...PI_HARNESS_SETTINGS.compaction,
+			reserveTokens: DEFAULT_COMPACTION_POLICY.reserveTokens + estimateTextTokens(system ?? ""),
+		},
 	}
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
@@ -531,7 +539,11 @@ const admitPiTurnUnderWay = (
 					if (!backend.hasApiKey(request.provider)) {
 						return "missing_key"
 					}
-					await backend.ensureRoot(agent)
+					const hasRoot =
+						(await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)) !== undefined
+					if (!hasRoot) {
+						await backend.ensureRoot(agent)
+					}
 					if (backend.isCancelled(operationId)) {
 						return false
 					}
@@ -550,6 +562,13 @@ const admitPiTurnUnderWay = (
 						}
 						break
 					}
+					if (hasRoot) {
+						await backend.ensureRoot(agent)
+					}
+					if (backend.isCancelled(operationId)) {
+						await settleTurnUsage(pi, operationId)
+						return false
+					}
 					if (!(await backend.enterWorkspace(request.turn))) {
 						await settleTurnUsage(pi, operationId)
 						return false
@@ -563,7 +582,6 @@ const admitPiTurnUnderWay = (
 					if (backend.isCancelled(operationId)) {
 						return false
 					}
-					const system = request.systemContext
 					if (system !== undefined) {
 						await pi.commit(async (tx) => {
 							const stored = await tx.doc(SessionSystemContext)

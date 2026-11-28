@@ -381,7 +381,10 @@ describe("Artifacts in a session", () => {
 
 	it("stops serving an artifact once it is deleted, without failing the session's turns", () =>
 		withSessions(
-			(apiFetch, { artifactFiles, artifactStore, onTurn, createSession, createArtifact }) =>
+			(
+				apiFetch,
+				{ artifactFiles, artifactStore, systems, onTurn, createSession, createArtifact },
+			) =>
 				Effect.gen(function* () {
 					const artifact = yield* createArtifact("Q3 Data", [{ path: "a.txt", content: "a" }])
 					const early = yield* json<SessionBody>(
@@ -413,6 +416,9 @@ describe("Artifacts in a session", () => {
 						[[], null],
 						[[], null],
 					])
+					expect(systems[0]).toContain(`${MOUNT}: Q3 Data (version 1)`)
+					expect(systems[1]).not.toContain(MOUNT)
+					expect(systems[2]).not.toContain(MOUNT)
 
 					const events = yield* json<{ data: ReadonlyArray<{ type: string }> }>(
 						yield* request(apiFetch, "GET", `/v1/sessions/${late.id}/events`),
