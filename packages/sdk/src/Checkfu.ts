@@ -248,7 +248,7 @@ export class Checkfu extends PromiseResources {
 	static readonly PaginationCursorCycleError = PaginationCursorCycleError
 	static readonly CheckfuConfigError = CheckfuConfigError
 	static readonly isPendingResource = isPendingResource
-	/** Wrap a secret request field (vault credential token, repository token). See `secret`. */
+	/** Wrap a `Redacted` request field (a vault credential's `auth.token`). See `secret`. */
 	static readonly secret = secret
 
 	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */

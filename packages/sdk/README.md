@@ -146,9 +146,8 @@ Pass `agent: agent.id` when creating a session to pin the latest agent version. 
 
 ## Secrets
 
-Secret request fields, such as a vault credential's `auth.token` or a repository's
-`authorization_token`, are `Redacted` values so they never appear in logs or error messages. Wrap them
-with `secret()` (or `Checkfu.secret()`), which uses the SDK's own copy of `effect`:
+A vault credential's `auth.token` is a `Redacted` value, so it never appears in logs or error messages.
+Wrap it with `secret()` (or `Checkfu.secret()`), which uses the SDK's own copy of `effect`:
 
 ```ts
 import Checkfu, { secret } from "@checkfu/sdk"
@@ -157,14 +156,11 @@ await client.vaults.credentials.create(vault.id, {
 	display_name: "GitHub",
 	auth: { type: "static_bearer", token: secret(githubToken), mcp_server_url: "https://api.githubcopilot.com/mcp/" },
 })
-await client.sessions.create({
-	agent: agent.id,
-	environment_id: env.id,
-	resources: [{ type: "github_repository", url: "https://github.com/acme/web", authorization_token: secret(githubToken) }],
-})
 ```
 
-A plain string is refused with `Expected Redacted`. On the wire the value is sent as a normal JSON string.
+A plain string is refused with `Expected Redacted`. On the wire the value is sent as a normal JSON
+string. A repository's `authorization_token` (in `sessions.create` resources and
+`sessions.resources.update`) is a plain string.
 
 ## Files
 
