@@ -575,20 +575,24 @@ describe("PiSession real Durable Object under workerd", () => {
 			).status,
 		).toBe(200)
 
+		const middle = await apiFetch(`/v1/files/${file.id}/content`, {
+			headers: { range: "bytes=65537-131071" },
+		})
+		expect(middle.status).toBe(206)
+		expect(middle.headers.get("content-range")).toBe(
+			`bytes 65537-${data.length - 1}/${data.length}`,
+		)
+		expect(new Uint8Array(await middle.arrayBuffer())).toEqual(data.subarray(65_537))
+
 		for (const id of [file.id, empty.id]) {
 			expect((await apiFetch(`/v1/files/${id}`, { method: "DELETE" })).status).toBe(200)
 		}
+		expect((await apiFetch(`/v1/files/${file.id}/content`)).status).toBe(404)
 		const download = await apiFetch(
 			`/v1/artifacts/${created.body.id}/versions/1/content?file=data.bin`,
 		)
 		expect(download.status).toBe(200)
 		expect(new Uint8Array(await download.arrayBuffer())).toEqual(data)
-		const middle = await apiFetch(`/v1/files/${file.id}/content`, {
-			headers: { range: "bytes=65536-131071" },
-		})
-		expect(middle.status).toBe(206)
-		expect(middle.headers.get("content-range")).toBe("bytes 65536-131071/300000")
-		expect(new Uint8Array(await middle.arrayBuffer())).toEqual(data.subarray(65_536, 131_072))
 
 		const version = await apiJson<{ readonly version: number }>(
 			`/v1/artifacts/${created.body.id}/versions`,
