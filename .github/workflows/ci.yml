@@ -9,9 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Let main's proofs finish and save reusable results while new commits arrive.
-  # A newer main push replaces the pending run; PR updates cancel the running one.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -244,6 +242,9 @@ jobs:
 
   sandbox-image:
     if: github.event_name == 'push'
+    concurrency:
+      group: sandbox-image-publication
+      queue: max
     needs: [static, test, domain, domain-checkfu, workerd, cli-platforms]
     runs-on: ubuntu-latest
     timeout-minutes: 6

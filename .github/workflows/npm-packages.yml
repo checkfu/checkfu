@@ -6,10 +6,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: npm-packages-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   node22:
     strategy:
