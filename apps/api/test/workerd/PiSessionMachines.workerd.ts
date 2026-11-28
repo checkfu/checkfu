@@ -913,6 +913,82 @@ describe("PiSession real Durable Object under workerd: restarts, outputs, machin
 		])
 	}, 90_000)
 
+	it("keeps an interrupted script's output out of the replacement turn", async () => {
+		const interrupted = 'await tools.bash({command:"sleep 12"}); text("stale".repeat(24000))'
+		const live = String.raw`text("a".repeat(30000) + "\nREPLACEMENT\n" + "b".repeat(90000))`
+		let saved: string | undefined
+		fakeOpenAI.setHandler((req) => {
+			if (req.lastUserText === "Warm the workspace.") {
+				return req.toolOutputs.length > 0
+					? { kind: "reply", text: "Ready." }
+					: { kind: "tool_call", name: "bash", arguments: { command: "echo ready" } }
+			}
+			const output = req.toolOutputs.at(-1)
+			if (req.lastUserText === "Check the saved output.") {
+				return output === undefined
+					? {
+							kind: "tool_call",
+							name: "bash",
+							arguments: {
+								command: `saved='${saved ?? "/missing"}'; test "$(find /workspace/.scripts -type f)" = "$saved" && grep -qx REPLACEMENT "$saved" && echo unique-replacement`,
+							},
+						}
+					: {
+							kind: "reply",
+							text: output.includes("unique-replacement")
+								? "Found the replacement."
+								: "Output missing.",
+						}
+			}
+			if (output !== undefined) {
+				if (req.lastUserText === "Save the replacement output.") {
+					saved = /\[Full output: (\S+) /u.exec(output)?.[1]
+				}
+				return {
+					kind: "reply",
+					text: saved === undefined ? "Output unavailable." : "Output saved.",
+				}
+			}
+			return {
+				kind: "tool_call",
+				name: "codemode",
+				arguments: { code: req.lastUserText === "Interrupt the script." ? interrupted : live },
+			}
+		})
+		const session = await createSession()
+		const send = (events: ReadonlyArray<unknown>) =>
+			apiJson(`/v1/sessions/${session.id}/events`, { method: "POST", body: { events } })
+		expect((await send([userMessage("Warm the workspace.")])).status).toBe(200)
+		await waitForSession(
+			session.id,
+			(state) => state.status === "idle" && state.turn === 1,
+			120_000,
+		)
+		expect((await send([userMessage("Interrupt the script.")])).status).toBe(200)
+		await fakeOpenAI.waitForRequest((req) => req.lastUserText === "Interrupt the script.")
+		await sleep(3000)
+		expect((await send([{ type: "user.interrupt" }])).status).toBe(200)
+		await waitForSession(session.id, (state) => state.status === "idle" && state.turn === 2, 60_000)
+		expect((await send([userMessage("Save the replacement output.")])).status).toBe(200)
+		await waitForSession(
+			session.id,
+			(state) => state.status === "idle" && state.turn === 3,
+			120_000,
+		)
+		expect(saved).toMatch(/^\/workspace\/\.scripts\/pi-codemode-[^/]+\/output\.txt$/u)
+		expect((await send([userMessage("Check the saved output.")])).status).toBe(200)
+		await waitForSession(session.id, (state) => state.status === "idle" && state.turn === 4, 60_000)
+		const events = await listAllEvents(session.id)
+		const text = events
+			.filter((event) => event.type === "agent.tool_result")
+			.flatMap((event) => event.content?.map((content) => content.text) ?? [])
+			.join("\n")
+		expect(text).not.toContain("stalestale")
+		expect(events.findLast((event) => event.type === "agent.message")?.content).toEqual([
+			{ type: "text", text: "Found the replacement." },
+		])
+	}, 180_000)
+
 	it("settles a turn whose script emits an image past the result budget, with the result-size error", async () => {
 		const script = `image("data:image/png;base64,iVBORw0KGgoA" + "A".repeat(${4 * Math.ceil((1.2 * 1024 * 1024) / 3)})); return "drew"`
 		fakeOpenAI.setHandler((req) => {

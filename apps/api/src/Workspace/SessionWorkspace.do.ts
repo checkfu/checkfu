@@ -35,7 +35,7 @@ import {
 } from "./SessionOutputs.ts"
 import type { OutputBytes, OutputFiles, OutputRead, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
-import type { FencedTurn, TurnToken } from "./WorkspaceFence.ts"
+import type { FencedTurn, TurnToken, WorkspaceTaskId } from "./WorkspaceFence.ts"
 import { makeSavedDisk } from "./SavedDisk.ts"
 import type { SavedDisk } from "./SavedDisk.ts"
 import { makeWorkspaceMachine } from "./WorkspaceMachine.ts"
@@ -53,7 +53,7 @@ import {
 } from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 import { ARTIFACT_DATA_RESULTS_PATH } from "./SessionArtifactTool.ts"
-import { withCallSignal } from "./CallSignal.ts"
+import { throwIfCallStopped, withCallSignal } from "./CallSignal.ts"
 
 const DISCARDED = "discarded"
 const NEWEST_TURN = "newest-turn"
@@ -88,12 +88,14 @@ interface Files {
 	readonly capture: (root: string, signal: AbortSignal) => OutputFiles
 }
 
-const writeFileIn = async (
-	fs: Workspace["fs"],
+export const writeFileIn = async (
+	fs: Pick<Workspace["fs"], "mkdir" | "writeFile">,
 	path: string,
 	content: string | Uint8Array,
 ): Promise<void> => {
+	throwIfCallStopped()
 	await fs.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true })
+	throwIfCallStopped()
 	await fs.writeFile(path, content)
 }
 
@@ -113,7 +115,7 @@ export interface SessionWorkspaceShape {
 		token: TurnToken,
 		taskId: number,
 	) => Effect.Effect<WorkspaceToolResult>
-	readonly stopTask: (token: TurnToken, taskId: number) => Effect.Effect<void>
+	readonly stopTask: (token: TurnToken, taskId: WorkspaceTaskId) => Effect.Effect<void>
 	readonly listOutputs: (turn: number) => Effect.Effect<OutputsListing | null>
 	readonly readOutputs: (
 		turn: number,
@@ -123,6 +125,7 @@ export interface SessionWorkspaceShape {
 		path: string,
 		content: string | Uint8Array,
 		token: TurnToken,
+		taskId: WorkspaceTaskId,
 	) => Effect.Effect<string | undefined>
 	readonly prepare: (
 		token: TurnToken,
@@ -555,21 +558,30 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						path: string,
 						content: string | Uint8Array,
 						token: TurnToken,
+						taskId: WorkspaceTaskId,
 					): Effect.Effect<string | undefined> =>
-						Effect.promise(async () => {
+						Effect.promise(async (interrupted) => {
 							if (!isScriptOutputPath(path)) {
 								return `Scripts can only save files under ${SCRIPT_OUTPUT_DIRECTORY}.`
 							}
 							if (storage.kv.get(DISCARDED) === true) {
 								return "The session has ended and its workspace was discarded."
 							}
-							const written = await fence.run(token, async () => {
-								await onActive((on) => writeFileIn(on.fs, path, content))
-								return true
+							const ended = "This turn has ended; the workspace no longer accepts its calls."
+							const written = await fence.runTask(token, taskId, interrupted, async (signal) => {
+								try {
+									await withCallSignal(signal, () =>
+										onActive((on) => writeFileIn(on.fs, path, content)),
+									)
+									return { content: [], isError: false }
+								} catch (error) {
+									if (signal.aborted) {
+										return failed(ended)
+									}
+									throw error
+								}
 							})
-							return written === undefined
-								? "This turn has ended; the workspace no longer accepts its calls."
-								: undefined
+							return written?.isError === false ? undefined : ended
 						}),
 					listOutputs: (turn: number): Effect.Effect<OutputsListing | null> =>
 						Effect.promise(async () =>
@@ -587,7 +599,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 								: ((await fence.run({ turn }, () => onActive((on) => on.outputs.read(files)))) ??
 									null),
 						),
-					stopTask: (token: TurnToken, taskId: number) =>
+					stopTask: (token: TurnToken, taskId: WorkspaceTaskId) =>
 						Effect.promise(() => fence.stopTask(token, taskId)),
 					prepare: (
 						token: TurnToken,
