@@ -274,7 +274,32 @@ const isSkippedFile = (file: unknown): boolean =>
 	"reason" in file &&
 	typeof file.reason === "string"
 
+export type JsonWebhook = FetchResult<"webhooks.retrieve">
+export type JsonWebhookDelivery = FetchResult<"webhooks.deliveries.retrieve">
+
+const webhooks = {
+	list: (page?: string, signal?: AbortSignal) =>
+		request("webhooks.list", {
+			query: newestFirst(page),
+			...withSignal(signal),
+		}),
+	retrieve: (webhook_id: string, signal?: AbortSignal) =>
+		request("webhooks.retrieve", { path: { webhook_id }, ...withSignal(signal) }),
+	deliveries: (webhook_id: string, page?: string, signal?: AbortSignal) =>
+		request("webhooks.deliveries.list", {
+			path: { webhook_id },
+			query: page === undefined ? {} : { page },
+			...withSignal(signal),
+		}),
+	delivery: (webhook_id: string, delivery_id: string, signal?: AbortSignal) =>
+		request("webhooks.deliveries.retrieve", {
+			path: { webhook_id, delivery_id },
+			...withSignal(signal),
+		}),
+}
+
 export const checkfu = {
+	webhooks,
 	agents: {
 		list: (page?: string, signal?: AbortSignal) =>
 			request("agents.list", { query: newestFirst(page), ...withSignal(signal) }),

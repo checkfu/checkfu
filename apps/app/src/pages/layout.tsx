@@ -15,6 +15,7 @@ import {
 	KeyRoundIcon,
 	LogOutIcon,
 	MessagesSquareIcon,
+	WebhookIcon,
 } from "lucide-react"
 import type * as React from "react"
 import { errorMessage, isSignedOut, signOut } from "../api.ts"
@@ -73,6 +74,11 @@ export function Layout(): React.JSX.Element {
 					<NavItem>
 						<Link to="/vaults">
 							<KeyRoundIcon /> Vaults
+						</Link>
+					</NavItem>
+					<NavItem>
+						<Link to="/webhooks">
+							<WebhookIcon /> Webhooks
 						</Link>
 					</NavItem>
 				</>

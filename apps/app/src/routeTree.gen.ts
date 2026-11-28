@@ -31,8 +31,11 @@ import { Route as AppSessionsNewRouteImport } from './routes/_app/sessions/new'
 import { Route as AppVaultsIndexRouteImport } from './routes/_app/vaults/index'
 import { Route as AppVaultsVaultIdRouteImport } from './routes/_app/vaults/$vaultId'
 import { Route as AppVaultsNewRouteImport } from './routes/_app/vaults/new'
+import { Route as AppWebhooksIndexRouteImport } from './routes/_app/webhooks/index'
 import { Route as AppMemoryStoresMemoryStoreIdIndexRouteImport } from './routes/_app/memory-stores/$memoryStoreId/index'
+import { Route as AppWebhooksWebhookIdIndexRouteImport } from './routes/_app/webhooks/$webhookId/index'
 import { Route as AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport } from './routes/_app/memory-stores/$memoryStoreId/memories/$memoryId'
+import { Route as AppWebhooksWebhookIdDeliveriesDeliveryIdRouteImport } from './routes/_app/webhooks/$webhookId/deliveries/$deliveryId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -145,16 +148,33 @@ const AppVaultsNewRoute = AppVaultsNewRouteImport.update({
   path: '/vaults/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWebhooksIndexRoute = AppWebhooksIndexRouteImport.update({
+  id: '/webhooks/',
+  path: '/webhooks/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMemoryStoresMemoryStoreIdIndexRoute =
   AppMemoryStoresMemoryStoreIdIndexRouteImport.update({
     id: '/memory-stores/$memoryStoreId/',
     path: '/memory-stores/$memoryStoreId/',
     getParentRoute: () => AppRoute,
   } as any)
+const AppWebhooksWebhookIdIndexRoute =
+  AppWebhooksWebhookIdIndexRouteImport.update({
+    id: '/webhooks/$webhookId/',
+    path: '/webhooks/$webhookId/',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute =
   AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport.update({
     id: '/memory-stores/$memoryStoreId/memories/$memoryId',
     path: '/memory-stores/$memoryStoreId/memories/$memoryId',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppWebhooksWebhookIdDeliveriesDeliveryIdRoute =
+  AppWebhooksWebhookIdDeliveriesDeliveryIdRouteImport.update({
+    id: '/webhooks/$webhookId/deliveries/$deliveryId',
+    path: '/webhooks/$webhookId/deliveries/$deliveryId',
     getParentRoute: () => AppRoute,
   } as any)
 
@@ -180,8 +200,11 @@ export interface FileRoutesByFullPath {
   '/memory-stores/': typeof AppMemoryStoresIndexRoute
   '/sessions/': typeof AppSessionsIndexRoute
   '/vaults/': typeof AppVaultsIndexRoute
+  '/webhooks/': typeof AppWebhooksIndexRoute
   '/memory-stores/$memoryStoreId/': typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  '/webhooks/$webhookId/': typeof AppWebhooksWebhookIdIndexRoute
   '/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
+  '/webhooks/$webhookId/deliveries/$deliveryId': typeof AppWebhooksWebhookIdDeliveriesDeliveryIdRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
@@ -205,8 +228,11 @@ export interface FileRoutesByTo {
   '/memory-stores': typeof AppMemoryStoresIndexRoute
   '/sessions': typeof AppSessionsIndexRoute
   '/vaults': typeof AppVaultsIndexRoute
+  '/webhooks': typeof AppWebhooksIndexRoute
   '/memory-stores/$memoryStoreId': typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  '/webhooks/$webhookId': typeof AppWebhooksWebhookIdIndexRoute
   '/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
+  '/webhooks/$webhookId/deliveries/$deliveryId': typeof AppWebhooksWebhookIdDeliveriesDeliveryIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -232,8 +258,11 @@ export interface FileRoutesById {
   '/_app/memory-stores/': typeof AppMemoryStoresIndexRoute
   '/_app/sessions/': typeof AppSessionsIndexRoute
   '/_app/vaults/': typeof AppVaultsIndexRoute
+  '/_app/webhooks/': typeof AppWebhooksIndexRoute
   '/_app/memory-stores/$memoryStoreId/': typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  '/_app/webhooks/$webhookId/': typeof AppWebhooksWebhookIdIndexRoute
   '/_app/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
+  '/_app/webhooks/$webhookId/deliveries/$deliveryId': typeof AppWebhooksWebhookIdDeliveriesDeliveryIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -259,8 +288,11 @@ export interface FileRouteTypes {
     | '/memory-stores/'
     | '/sessions/'
     | '/vaults/'
+    | '/webhooks/'
     | '/memory-stores/$memoryStoreId/'
+    | '/webhooks/$webhookId/'
     | '/memory-stores/$memoryStoreId/memories/$memoryId'
+    | '/webhooks/$webhookId/deliveries/$deliveryId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
@@ -284,8 +316,11 @@ export interface FileRouteTypes {
     | '/memory-stores'
     | '/sessions'
     | '/vaults'
+    | '/webhooks'
     | '/memory-stores/$memoryStoreId'
+    | '/webhooks/$webhookId'
     | '/memory-stores/$memoryStoreId/memories/$memoryId'
+    | '/webhooks/$webhookId/deliveries/$deliveryId'
   id:
     | '__root__'
     | '/_app'
@@ -310,8 +345,11 @@ export interface FileRouteTypes {
     | '/_app/memory-stores/'
     | '/_app/sessions/'
     | '/_app/vaults/'
+    | '/_app/webhooks/'
     | '/_app/memory-stores/$memoryStoreId/'
+    | '/_app/webhooks/$webhookId/'
     | '/_app/memory-stores/$memoryStoreId/memories/$memoryId'
+    | '/_app/webhooks/$webhookId/deliveries/$deliveryId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -475,6 +513,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/webhooks/': {
+      id: '/_app/webhooks/'
+      path: '/webhooks'
+      fullPath: '/webhooks/'
+      preLoaderRoute: typeof AppWebhooksIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/memory-stores/$memoryStoreId/': {
       id: '/_app/memory-stores/$memoryStoreId/'
       path: '/memory-stores/$memoryStoreId'
@@ -482,11 +527,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppMemoryStoresMemoryStoreIdIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/webhooks/$webhookId/': {
+      id: '/_app/webhooks/$webhookId/'
+      path: '/webhooks/$webhookId'
+      fullPath: '/webhooks/$webhookId/'
+      preLoaderRoute: typeof AppWebhooksWebhookIdIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/memory-stores/$memoryStoreId/memories/$memoryId': {
       id: '/_app/memory-stores/$memoryStoreId/memories/$memoryId'
       path: '/memory-stores/$memoryStoreId/memories/$memoryId'
       fullPath: '/memory-stores/$memoryStoreId/memories/$memoryId'
       preLoaderRoute: typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/webhooks/$webhookId/deliveries/$deliveryId': {
+      id: '/_app/webhooks/$webhookId/deliveries/$deliveryId'
+      path: '/webhooks/$webhookId/deliveries/$deliveryId'
+      fullPath: '/webhooks/$webhookId/deliveries/$deliveryId'
+      preLoaderRoute: typeof AppWebhooksWebhookIdDeliveriesDeliveryIdRouteImport
       parentRoute: typeof AppRoute
     }
   }
@@ -513,8 +572,11 @@ interface AppRouteChildren {
   AppMemoryStoresIndexRoute: typeof AppMemoryStoresIndexRoute
   AppSessionsIndexRoute: typeof AppSessionsIndexRoute
   AppVaultsIndexRoute: typeof AppVaultsIndexRoute
+  AppWebhooksIndexRoute: typeof AppWebhooksIndexRoute
   AppMemoryStoresMemoryStoreIdIndexRoute: typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  AppWebhooksWebhookIdIndexRoute: typeof AppWebhooksWebhookIdIndexRoute
   AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute: typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
+  AppWebhooksWebhookIdDeliveriesDeliveryIdRoute: typeof AppWebhooksWebhookIdDeliveriesDeliveryIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -538,10 +600,14 @@ const AppRouteChildren: AppRouteChildren = {
   AppMemoryStoresIndexRoute: AppMemoryStoresIndexRoute,
   AppSessionsIndexRoute: AppSessionsIndexRoute,
   AppVaultsIndexRoute: AppVaultsIndexRoute,
+  AppWebhooksIndexRoute: AppWebhooksIndexRoute,
   AppMemoryStoresMemoryStoreIdIndexRoute:
     AppMemoryStoresMemoryStoreIdIndexRoute,
+  AppWebhooksWebhookIdIndexRoute: AppWebhooksWebhookIdIndexRoute,
   AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute:
     AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute,
+  AppWebhooksWebhookIdDeliveriesDeliveryIdRoute:
+    AppWebhooksWebhookIdDeliveriesDeliveryIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
