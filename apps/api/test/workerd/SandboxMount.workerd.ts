@@ -522,6 +522,65 @@ describe("a session's machine, in a container of its image", () => {
 		expect(await codeOf(mount.readFile("r"))).toBe("EISDIR")
 	}, 120_000)
 
+	it("creates names up to the filesystem component limit without leaving staging files", async () => {
+		const mount = makeSandboxMount("/workspace", inContainer)
+		const names = ["a".repeat(214), "b".repeat(215), "c".repeat(255), "é".repeat(127) + "d"]
+		const payload = patterned(97)
+		expect(names.map((name) => text(name).byteLength)).toEqual([214, 215, 255, 255])
+		for (const name of names) {
+			const path = `long-names/${name}`
+			await mount.writeFile?.(path, body(payload), { exclusive: true, mode: 0o640 })
+			const saved = await mount.readFile(path)
+			expect(saved?.stat).toMatchObject({ mode: 0o640, size: payload.byteLength })
+			expect(await collect(saved?.body ?? new ReadableStream())).toEqual(payload)
+		}
+		const race = "r".repeat(255)
+		const target = `long-names/${race}`
+		const created = await Promise.all(
+			["one", "two"].map((content) =>
+				codeOf(
+					mount.writeFile?.(target, body(text(content)), { exclusive: true }) ?? Promise.resolve(),
+				),
+			),
+		)
+		expect(created.toSorted()).toEqual(["EEXIST", "no error"])
+		const winner = await mount.readFile(target)
+		expect(["one", "two"]).toContain(
+			new TextDecoder().decode(await collect(winner?.body ?? new ReadableStream())),
+		)
+		expect((await mount.readdir("long-names"))?.map(({ name }) => name).toSorted()).toEqual(
+			[...names, race].toSorted(),
+		)
+		const overlong = mount.writeFile?.(`long-names/${"x".repeat(256)}`, body(payload), {
+			exclusive: true,
+		})
+		expect(await codeOf(overlong ?? Promise.resolve())).toBe("EIO")
+	}, 120_000)
+
+	it("preserves commit and refusal outcomes if removing the staged file fails", async () => {
+		const mount = makeSandboxMount("/workspace", (call) =>
+			inContainer((machine) =>
+				call({
+					...machine,
+					exec: (command, options) =>
+						typeof command !== "string" && command[2] === 'rm -f -- "$1"; rmdir -- "$2"'
+							? Effect.succeed({ exitCode: 1, stdout: "", stderr: "cleanup failed" })
+							: machine.exec(command, options),
+				}),
+			),
+		)
+		const target = "cleanup-fault/one.txt"
+		const write = (value: string) =>
+			mount.writeFile?.(target, body(text(value)), { exclusive: true }) ?? Promise.resolve()
+		try {
+			expect(await codeOf(write("first"))).toBe("no error")
+			expect(await codeOf(write("second"))).toBe("EEXIST")
+			expect(await sh("cat /workspace/cleanup-fault/one.txt")).toBe("first")
+		} finally {
+			await sh("rm -rf -- /workspace/cleanup-fault")
+		}
+	}, 120_000)
+
 	it("writes, creates, removes, renames and sets modes in the machine", async () => {
 		const mount = makeSandboxMount("/workspace", inContainer)
 		const binary = patterned(70_000)
