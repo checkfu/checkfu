@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto"
+import * as Data from "effect/Data"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { readResponseBytes } from "../src/Deployment/ResponseBytes.ts"
 
@@ -48,6 +50,100 @@ const ACCEPT = [
 	"application/vnd.docker.distribution.manifest.list.v2+json",
 	"application/vnd.docker.distribution.manifest.v2+json",
 ].join(", ")
+const ghcr = "https://ghcr.io"
+const sandboxRepository = "checkfu/sandbox"
+const validSandboxTag = /^sha256-[a-f0-9]{64}$/
+const manifestTypes = new Set(ACCEPT.split(", "))
+const decodeRegistryErrors = Schema.decodeUnknownSync(
+	Schema.Struct({ errors: Schema.Array(Schema.Struct({ code: Schema.String })) }),
+)
+const decodeTagListing = Schema.decodeUnknownSync(
+	Schema.Struct({ name: Schema.String, tags: Schema.NullOr(Schema.Array(Schema.String)) }),
+)
+
+class PublicationProbeFailure extends Data.TaggedError("PublicationProbeFailure")<{
+	readonly message: string
+}> {}
+
+export const sandboxPublication = async (
+	tag: string,
+	credentials: { readonly user: string; readonly token: string },
+	request: typeof fetch = fetch,
+): Promise<"present" | "missing"> => {
+	if (!validSandboxTag.test(tag) || credentials.user === "" || credentials.token === "") {
+		throw new Error("The sandbox image version and registry credentials are required.")
+	}
+	const image = `ghcr.io/${sandboxRepository}:${tag}`
+	const signal = AbortSignal.timeout(15_000)
+	const get = (url: string, authorization: string) =>
+		request(url, {
+			signal,
+			redirect: "error",
+			headers: { Authorization: authorization, Accept: ACCEPT },
+		})
+	const tokenUrl = new URL("/token", ghcr)
+	tokenUrl.searchParams.set("service", "ghcr.io")
+	tokenUrl.searchParams.set("scope", `repository:${sandboxRepository}:pull`)
+	try {
+		const auth = Buffer.from(`${credentials.user}:${credentials.token}`).toString("base64")
+		const tokenResponse = await get(tokenUrl.href, `Basic ${auth}`)
+		if (tokenResponse.status !== 200) {
+			throw new PublicationProbeFailure({
+				message: `Registry authorization failed for ${image} (HTTP ${tokenResponse.status}).`,
+			})
+		}
+		const { token } = decodeJson(
+			await responseBytes(tokenResponse, MAX_TOKEN_BYTES, "Registry token response was too large."),
+			decodeToken,
+		)
+		const repository = `${ghcr}/v2/${sandboxRepository}`
+		const authorization = `Bearer ${token}`
+		const manifest = await get(`${repository}/manifests/${tag}`, authorization)
+		const contentType = manifest.headers.get("content-type")?.split(";")[0]?.trim()
+		if (manifest.status === 200 && contentType !== undefined && manifestTypes.has(contentType)) {
+			void manifest.body?.cancel().catch(() => undefined)
+			return "present"
+		}
+		if (manifest.status !== 404) {
+			void manifest.body?.cancel().catch(() => undefined)
+			throw new PublicationProbeFailure({
+				message: `Registry manifest status is unconfirmed for ${image} (HTTP ${manifest.status}).`,
+			})
+		}
+		const { errors } = decodeJson(
+			await responseBytes(manifest, MAX_TOKEN_BYTES, "Registry error response was too large."),
+			decodeRegistryErrors,
+		)
+		if (errors.length !== 1 || errors[0]?.code !== "MANIFEST_UNKNOWN") {
+			throw new PublicationProbeFailure({
+				message: `Registry manifest status is unconfirmed for ${image} (HTTP 404).`,
+			})
+		}
+		// A known repository distinguishes a missing tag from a hidden repository.
+		const listing = await get(`${repository}/tags/list?n=1`, authorization)
+		if (listing.status !== 200) {
+			throw new PublicationProbeFailure({
+				message: `Registry access to ${image} is unconfirmed (HTTP ${listing.status}).`,
+			})
+		}
+		const { name, tags } = decodeJson(
+			await responseBytes(listing, MAX_TOKEN_BYTES, "Registry tag response was too large."),
+			decodeTagListing,
+		)
+		if (name !== sandboxRepository) {
+			throw new PublicationProbeFailure({
+				message: `Registry returned the wrong repository for ${image}.`,
+			})
+		}
+		return tags?.includes(tag) === true ? "present" : "missing"
+	} catch (error) {
+		if (Predicate.isTagged("PublicationProbeFailure")(error)) {
+			throw error
+		}
+		throw new Error(`Registry could not confirm the manifest for ${image}.`, { cause: error })
+	}
+}
+
 const digestOf = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`
 
 const checked = async (response: Response, expected: ReadonlyArray<number>) => {
@@ -73,12 +169,12 @@ export const copySandboxImage = async (
 	signal: AbortSignal = AbortSignal.timeout(15 * 60_000),
 ): Promise<string> => {
 	const deadlineSignal = AbortSignal.any([signal, AbortSignal.timeout(15 * 60_000)])
-	if (!/^sha256-[a-f0-9]{64}$/.test(tag)) {
+	if (!validSandboxTag.test(tag)) {
 		throw new Error("Invalid sandbox image version.")
 	}
-	const repository = "checkfu/sandbox"
+	const repository = sandboxRepository
 	const tokenResponse = await request(
-		`https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull`,
+		`${ghcr}/token?service=ghcr.io&scope=repository:${repository}:pull`,
 		{ signal: deadlineSignal },
 	)
 	if (!tokenResponse.ok) {
@@ -95,7 +191,7 @@ export const copySandboxImage = async (
 		decodeToken,
 	)
 	const source = async (path: string) => {
-		const response = await request(`https://ghcr.io/v2/${repository}/${path}`, {
+		const response = await request(`${ghcr}/v2/${repository}/${path}`, {
 			signal: deadlineSignal,
 			headers: { Authorization: `Bearer ${token}`, Accept: ACCEPT },
 		})
