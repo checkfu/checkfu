@@ -1,0 +1,125 @@
+---
+title: "CLI reference"
+description: "Install the checkfu CLI, connect it to a deployment, and look up its commands."
+sidebarTitle: "CLI"
+---
+
+```sh
+npm install -g checkfu
+checkfu --base-url "$CHECKFU_BASE_URL" login
+checkfu agents create --name Assistant --model claude-sonnet-5-5 --transform id -r
+checkfu sessions connect "$SESSION_ID"
+```
+
+The CLI requires Node.js 22.0.0 or later. Run `checkfu <command> --help` to see any command's flags.
+
+## Connect to a deployment
+
+`checkfu deploy` saves a connection for the deployment it creates. For an existing deployment, run `login` with its API URL: it reads `CHECKFU_API_KEY` or prompts for it, verifies it, and saves both. `checkfu logout` removes the saved connection. The CLI stores one connection at a time in `$CHECKFU_CONFIG_DIR`, then `$XDG_CONFIG_HOME/checkfu`, or `~/.config/checkfu` by default.
+
+The API URL comes from the first of `--base-url`, `CHECKFU_BASE_URL`, the saved connection, or `http://localhost:1337`. The key comes from `CHECKFU_API_KEY`, or the saved key if the saved URL matches. The CLI never sends a saved key to a different URL.
+
+## Global flags
+
+| Flag                               | Description                                                                                                                                              |
+| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--base-url URL`                   | API URL.                                                                                                                                                 |
+| `--format FORMAT`                  | `auto` (default), `json`, `jsonl`, `yaml`, `pretty`, or `raw`. `auto` uses `pretty` in a terminal, `json` in a pipe, and `jsonl` for streaming commands. |
+| `--transform EXPR`                 | Extract fields with a GJSON-style path.                                                                                                                  |
+| `--raw-output`, `-r`               | Print string values without quotes.                                                                                                                      |
+| `--help`, `-h` / `--version`, `-v` | Help and version.                                                                                                                                        |
+
+```sh
+checkfu agents list --transform 'data.#.id'   # every id
+checkfu agents retrieve --agent-id "$AGENT_ID" --transform '{id,name}'
+```
+
+## Input
+
+Body fields map to flags (`--name`, `--environment-id`). You can also pipe a JSON or YAML object on stdin; single-value flags override piped fields, while repeatable structured flags (`--event`, `--initial-event`, `--file`) cannot be combined with stdin. Text-body and structured flags (such as `--system`, `--content`, and JSON flags) accept `@path` to read from a file (use `@@` for a literal leading `@`).
+
+```sh
+checkfu agents create < agent.yaml
+checkfu agents update --agent-id "$AGENT_ID" --system @prompt.md
+```
+
+Writes that accept one take `--idempotency-key`. `sessions:events send` and `automations create` generate a key if omitted and print it to stderr (`files upload` also generates one automatically). Paginated list commands take `--limit` and `--page` (`sessions:resources list` is unpaginated).
+
+## Sessions
+
+`sessions connect` streams a Session and sends each line you type as a `user.message`. Pass `--after SEQ` to replay from a sequence number.
+
+| Input                                     | Effect                 |
+| :---------------------------------------- | :--------------------- |
+| A line of text                            | Send it as a message.  |
+| `/interrupt`, or Ctrl-C while a turn runs | Send `user.interrupt`. |
+| `/exit`, `/quit`, or a second Ctrl-C      | Disconnect.            |
+
+Messages (`agent.message`, `user.message`, `system.message`) print to stdout; tool calls, thinking, and status print to stderr. With piped stdin, the command waits for each turn and exits, returning code `3` if a turn pauses waiting for a tool answer:
+
+```sh
+echo "Write a short status report." | checkfu sessions connect "$SESSION_ID"
+```
+
+## Files
+
+```sh
+checkfu files upload ./report.pdf
+checkfu files download --file-id "$FILE_ID" -o ./report.pdf
+checkfu artifacts download --artifact-id "$ARTIFACT_ID" --file index.html -o ./index.html
+```
+
+Downloads refuse to overwrite an existing file and verify size and SHA-256 before writing.
+
+## Agents as code and deploy
+
+| Command                | Description                                                                                                                                         |
+| :--------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent info <file>`    | Validate an agent file offline.                                                                                                                     |
+| `apply [<path>...]`    | Reconcile local files with the deployment. `--dry-run`, `--yes`, `--force`, `--prune`, `--lock-file`. See [Agents as code](/guides/agents-as-code). |
+| `deploy`               | Deploy or update Checkfu in your Cloudflare account. `--stage NAME`, `--yes`. See [Deploy](/self-hosting/deploy).                                   |
+| `destroy --stage NAME` | Delete a deployment and its data. Prompts unless `--yes` is passed.                                                                                 |
+
+## Resource commands
+
+There is one command per HTTP endpoint. Path parameters become flags such as `--agent-id`, and subresources use a colon: `checkfu sessions:events send`.
+
+| Group                    | Commands                                                                                     |
+| :----------------------- | :------------------------------------------------------------------------------------------- |
+| `agents`                 | `create`, `list`, `retrieve`, `update`, `archive`                                            |
+| `agents:versions`        | `list`                                                                                       |
+| `environments`           | `create`, `list`, `retrieve`, `update`, `archive`, `delete`                                  |
+| `sessions`               | `create`, `list`, `retrieve`, `archive`, `connect`                                           |
+| `sessions:events`        | `send`, `list`, `stream`                                                                     |
+| `sessions:outputs`       | `retrieve`                                                                                   |
+| `sessions:resources`     | `list`, `retrieve`, `update`                                                                 |
+| `memory-stores`          | `create`, `list`, `retrieve`, `update`, `archive`, `delete`                                  |
+| `memory-stores:memories` | `create`, `list`, `retrieve`, `update`, `delete`                                             |
+| `files`                  | `upload`, `list`, `retrieve`, `download`, `delete`                                           |
+| `artifacts`              | `create`, `list`, `retrieve`, `publish`, `unpublish`, `delete`, `download`                   |
+| `artifacts:versions`     | `create`, `retrieve`, `file`, `link`                                                         |
+| `artifacts:data`         | `describe`, `list`, `add`, `put`, `retrieve`, `delete`                                       |
+| `vaults`                 | `create`, `list`, `retrieve`, `update`, `archive`, `delete`                                  |
+| `vaults:credentials`     | `create`, `list`, `retrieve`, `update`, `archive`, `delete`                                  |
+| `automations`            | `create`, `list`, `retrieve`, `update`, `pause`, `unpause`, `run`, `archive`                 |
+| `automations:runs`       | `list`, `retrieve`                                                                           |
+| `automation-runs`        | `retrieve`                                                                                   |
+| `webhooks`               | `create`, `list`, `retrieve`, `update`, `pause`, `resume`, `rotate-secret`, `test`, `delete` |
+| `webhooks:deliveries`    | `list`, `retrieve`, `redeliver`                                                              |
+
+## Exit codes
+
+| Code  | Meaning                                                            |
+| :---- | :----------------------------------------------------------------- |
+| `0`   | Success                                                            |
+| `1`   | Other failure                                                      |
+| `2`   | Invalid arguments or configuration                                 |
+| `3`   | Action required, such as a turn waiting for a tool answer          |
+| `4`   | Not found (`404`)                                                  |
+| `5`   | Conflict (`409`, `412`)                                            |
+| `6`   | Authentication or permission denied (`401`, `403`)                 |
+| `7`   | Transient failure (`429`, `502`, `503`, `504`, or network). Retry. |
+| `130` | Ctrl-C                                                             |
+| `143` | `SIGTERM`                                                          |
+
+API errors print to stderr as `Error: API error (<status> <type>): <message> [request_id: <id>]`.

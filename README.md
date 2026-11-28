@@ -8,6 +8,7 @@
 
 [![CI](https://github.com/checkfu/checkfu/actions/workflows/ci.yml/badge.svg)](https://github.com/checkfu/checkfu/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-docs.checkfu.com-black.svg)](https://docs.checkfu.com)
 
 Built on Cloudflare Workers, Durable Objects, [Pi Durable](https://github.com/earendil-works), [Alchemy](https://alchemy.run), and [Effect](https://effect.website).
 
@@ -205,6 +206,7 @@ bun run dev
 - [`apps/api`](apps/api): HTTP/SSE API, domain host, Pi harness, workspaces, connections, webhooks, content Worker
 - [`apps/app`](apps/app): TanStack Router/Query web dashboard Worker
 - [`apps/cli`](apps/cli): `checkfu` CLI
+- [`apps/docs`](apps/docs): Mintlify source for [docs.checkfu.com](https://docs.checkfu.com)
 - [`apps/mcp`](apps/mcp): Generated HTTP MCP Worker
 - [`packages/authoring`](packages/authoring): Markdown/YAML project parser, validator, and `checkfu-lock.json` codec
 - [`packages/domain`](packages/domain): Event-sourced aggregates, decisions, policies, sagas, views, and Z3 proofs

@@ -1,0 +1,58 @@
+---
+title: "Files"
+description: "Upload bytes for agents to read, and download the files Sessions produce."
+---
+
+A File is an immutable upload or session output with a filename and content type. Once created, its contents never change.
+
+<CodeGroup>
+
+```sh CLI
+checkfu files upload ./report.pdf
+checkfu files download --file-id "$FILE_ID" -o report.pdf
+```
+
+```sh curl
+curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/files?filename=report.pdf" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @report.pdf
+
+curl --fail-with-body -o report.pdf "$CHECKFU_BASE_URL/v1/files/$FILE_ID/content" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY"
+```
+
+</CodeGroup>
+
+Neither the Promise nor the Effect high-level `files` resource has raw-byte upload or download methods (see [Upload a file](/api-reference/files/upload-a-file)). Use `fetch` or the CLI for binary transfers.
+
+## Attach a File to a Session
+
+Pass a `file` resource when you create the Session:
+
+```ts
+import Checkfu, { FileId } from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const session = await client.waitForPending(
+	await client.sessions.create({
+		agent: agent.id,
+		environment_id: environment.id,
+		resources: [{ type: "file", file_id: FileId.make(file.id), mount_path: "q3/report.pdf" }],
+	}),
+)
+```
+
+The agent reads it at `/mnt/session/uploads/q3/report.pdf`. Its file tools can read uploads directly, while `bash` cannot, so the agent copies a File into `/workspace` if it needs to pass it to a shell command.
+
+## Files from Session outputs
+
+When a turn ends with `end_turn`, `budget_reached`, or `refusal`, Checkfu saves each file the agent wrote to `/mnt/session/outputs` as a File (subject to [Session output limits](/reference/limits#session-outputs)):
+
+```ts
+const outputs = await client.sessions.outputs.retrieve(session.id)
+for (const file of outputs.files) console.log(file.id, file.filename)
+```
+
+For results too large to save as session outputs, have the agent save an [Artifact](/concepts/artifacts) with `save_artifact`.

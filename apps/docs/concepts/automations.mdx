@@ -1,0 +1,86 @@
+---
+title: "Automations"
+description: "Run an agent on a cron schedule, or on demand, and keep a history of each run."
+---
+
+An Automation starts a fresh [Session](/concepts/sessions) on a cron schedule and sends it the same initial message every time. Use it for recurring jobs like a weekday report or a weekly cleanup.
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const automation = await client.waitForPending(
+	await client.automations.create(
+		{
+			name: "Morning report",
+			agent: agent.id,
+			environment_id: environment.id,
+			initial_events: [
+				{ type: "user.message", content: [{ type: "text", text: "Write the morning report." }] },
+			],
+			schedule: { type: "cron", expression: "0 9 * * 1-5", timezone: "America/New_York" },
+		},
+		{ idempotencyKey: crypto.randomUUID() },
+	),
+)
+```
+
+```sh CLI
+checkfu automations create --name "Morning report" --agent "$AGENT_ID" --environment-id "$ENVIRONMENT_ID" \
+  --initial-event '{"type":"user.message","content":[{"type":"text","text":"Write the morning report."}]}' \
+  --schedule '{"type":"cron","expression":"0 9 * * 1-5","timezone":"America/New_York"}'
+```
+
+</CodeGroup>
+
+`Idempotency-Key` is required: retrying the request with the same key returns the existing Automation, so a dropped response never leaves two duplicate schedules running. The CLI generates a key for you.
+
+Cron expressions run in an IANA time zone, so `0 9 * * 1-5` fires at 09:00 New York time year-round across daylight saving changes. An Automation can fire at most once per hour.
+
+Passing an Agent ID pins its latest version at that moment. Later edits to the Agent do not affect the Automation until you update its `agent`.
+
+## Run it now
+
+A manual run starts right away, even while the Automation is paused, without changing its schedule:
+
+```ts
+const queued = await client.automations.run(automation.id, { idempotencyKey: crypto.randomUUID() })
+```
+
+Look up the run by `id` to see whether its Session started. That endpoint returns `503` while the run is still starting, so poll with a short backoff:
+
+```ts
+const waitForRun = async (id: string, maxAttempts = 20) => {
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		try {
+			return await client.automationRuns.retrieve(id)
+		} catch (error) {
+			if (!(error instanceof Checkfu.ServiceUnavailableError) || attempt === maxAttempts - 1) {
+				throw error
+			}
+			await new Promise((resolve) => setTimeout(resolve, 500))
+		}
+	}
+	throw new Error("Timed out waiting for automation run to start.")
+}
+
+const run = await waitForRun(queued.id)
+```
+
+Each trigger records a run numbered from `1`. A run's status is `started` once its Session has been created (corresponding to the `automation_run.succeeded` [webhook](/concepts/webhooks)), or `failed` with an `error` if the Session could not be created. To see what the agent actually did, inspect the Session it created.
+
+## Pause and archive
+
+```sh
+curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/automations/$AUTOMATION_ID/pause" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY"
+```
+
+- **Pause** stops scheduled runs while still allowing manual runs.
+- **Unpause** resumes from the current time; scheduled runs missed while paused are skipped.
+- **Archive** stops the Automation permanently and frees one of your 100 live Automation slots (see [Limits](/reference/limits#vaults-automations-webhooks)).
+
+Checkfu also pauses an Automation automatically if a run fails because its Agent or Environment is missing or archived. Check `pause_reason`, fix the underlying issue, and unpause. To manage Automations in git, see [Agents as code](/guides/agents-as-code).

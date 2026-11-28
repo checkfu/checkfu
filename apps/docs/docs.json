@@ -1,0 +1,364 @@
+{
+	"$schema": "https://mintlify.com/docs.json",
+	"theme": "mint",
+	"name": "Checkfu",
+	"description": "Open-source managed agents for any model. Runs in your own Cloudflare account.",
+	"colors": {
+		"primary": "#282828",
+		"light": "#D6D6D4",
+		"dark": "#737373"
+	},
+	"logo": {
+		"light": "/assets/logo-light.svg",
+		"dark": "/assets/logo-dark.svg",
+		"href": "https://checkfu.com"
+	},
+	"favicon": "/assets/favicon.svg",
+	"appearance": {
+		"default": "light",
+		"strict": false
+	},
+	"background": {
+		"color": {
+			"light": "#FFFFFF",
+			"dark": "#171717"
+		}
+	},
+	"styling": {
+		"eyebrows": "breadcrumbs",
+		"codeblocks": {
+			"theme": {
+				"light": "github-light",
+				"dark": "github-dark"
+			}
+		}
+	},
+	"contextual": {
+		"options": ["copy", "view", "chatgpt", "claude"]
+	},
+	"markdown": {
+		"schema": true,
+		"instructions": [
+			"Checkfu is open source (https://github.com/checkfu/checkfu) and runs in the reader's own Cloudflare account. There is no shared hosted base URL: `checkfu deploy` prints the deployment's API URL (`https://<api-worker>.workers.dev` or the CHECKFU_API_DOMAIN hostname, exported as `CHECKFU_BASE_URL` for the CLI, SDK, and curl) and MCP URL (`.../mcp`). Local development serves the API on http://localhost:1337 and MCP on http://localhost:1338/mcp.",
+			"Authenticated HTTP requests send the deployment's CHECKFU_API_KEY as `Authorization: Bearer $CHECKFU_API_KEY` (or `x-api-key`) and `Content-Type: application/json` for JSON bodies. Pass `Idempotency-Key` on retriable writes.",
+			"Core workflow: create an Agent (`POST /v1/agents`) and an Environment (`POST /v1/environments`), create a Session that references both (`POST /v1/sessions`), send a `user.message` event (`POST /v1/sessions/{session_id}/events`), and follow `GET /v1/sessions/{session_id}/events/stream` until `session.status_idle`.",
+			"Other resources: Memory stores (`/v1/memory_stores`), Files (`/v1/files`), Artifacts (`/v1/artifacts`), Vaults and credentials (`/v1/vaults`), Automations (`/v1/automations`), and Webhooks (`/v1/webhooks`). The deployment serves its OpenAPI 3.1 specification at `GET /openapi.json`."
+		]
+	},
+	"navigation": {
+		"tabs": [
+			{
+				"tab": "Documentation",
+				"groups": [
+					{
+						"group": "Get started",
+						"pages": ["index", "quickstart", "dashboard"]
+					},
+					{
+						"group": "Concepts",
+						"pages": [
+							"concepts/agents",
+							"concepts/environments",
+							"concepts/sessions",
+							"concepts/models-and-providers",
+							"concepts/tools",
+							"concepts/vaults",
+							"concepts/memory-stores",
+							"concepts/files",
+							"concepts/artifacts",
+							"concepts/automations",
+							"concepts/webhooks"
+						]
+					},
+					{
+						"group": "Guides",
+						"pages": [
+							"guides/agents-as-code",
+							"guides/add-an-agent-to-your-app",
+							"guides/resume-a-stream",
+							"guides/work-on-a-github-repo",
+							"guides/publish-an-artifact",
+							"guides/receive-webhooks"
+						]
+					},
+					{
+						"group": "Self-hosting",
+						"pages": [
+							"self-hosting/deploy",
+							"self-hosting/configuration",
+							"self-hosting/architecture"
+						]
+					}
+				]
+			},
+			{
+				"tab": "Reference",
+				"groups": [
+					{
+						"group": "Interfaces",
+						"pages": [
+							"reference/http-api",
+							"reference/typescript-sdk",
+							"reference/cli",
+							"reference/mcp"
+						]
+					},
+					{
+						"group": "Specifications",
+						"pages": ["reference/events", "reference/errors", "reference/limits"]
+					},
+					{
+						"group": "HTTP API",
+						"openapi": {
+							"source": "/openapi.json",
+							"directory": "api-reference"
+						}
+					}
+				]
+			}
+		]
+	},
+	"api": {
+		"playground": {
+			"display": "simple"
+		}
+	},
+	"navbar": {
+		"links": [
+			{
+				"label": "GitHub",
+				"href": "https://github.com/checkfu/checkfu"
+			}
+		],
+		"primary": {
+			"type": "github",
+			"href": "https://github.com/checkfu/checkfu"
+		}
+	},
+	"footer": {
+		"socials": {
+			"github": "https://github.com/checkfu/checkfu"
+		},
+		"links": [
+			{
+				"header": "Documentation",
+				"items": [
+					{
+						"label": "Quickstart",
+						"href": "/quickstart"
+					},
+					{
+						"label": "Deploy",
+						"href": "/self-hosting/deploy"
+					},
+					{
+						"label": "HTTP API",
+						"href": "/reference/http-api"
+					}
+				]
+			},
+			{
+				"header": "Checkfu",
+				"items": [
+					{
+						"label": "Website",
+						"href": "https://checkfu.com"
+					},
+					{
+						"label": "GitHub",
+						"href": "https://github.com/checkfu/checkfu"
+					}
+				]
+			}
+		]
+	},
+	"search": {
+		"prompt": "Search Checkfu docs"
+	},
+	"seo": {
+		"metatags": {
+			"canonical": "https://docs.checkfu.com",
+			"og:site_name": "Checkfu documentation",
+			"og:image": "https://docs.checkfu.com/assets/og.png",
+			"twitter:card": "summary_large_image"
+		},
+		"indexing": "navigable"
+	},
+	"errors": {
+		"404": {
+			"redirect": false,
+			"title": "Page not found",
+			"description": "Return to the [documentation home](/)."
+		}
+	},
+	"redirects": [
+		{
+			"source": "/concepts/billing-and-platform-supply",
+			"destination": "/self-hosting/deploy"
+		},
+		{
+			"source": "/concepts/context",
+			"destination": "/concepts/sessions"
+		},
+		{
+			"source": "/concepts/file-trees",
+			"destination": "/concepts/files"
+		},
+		{
+			"source": "/concepts/harness-extensions",
+			"destination": "/concepts/models-and-providers"
+		},
+		{
+			"source": "/concepts/harnesses-and-models",
+			"destination": "/concepts/models-and-providers"
+		},
+		{
+			"source": "/concepts/memory",
+			"destination": "/concepts/memory-stores"
+		},
+		{
+			"source": "/concepts/security",
+			"destination": "/concepts/vaults"
+		},
+		{
+			"source": "/concepts/sessions-and-runs",
+			"destination": "/concepts/sessions"
+		},
+		{
+			"source": "/concepts/skills",
+			"destination": "/concepts/sessions"
+		},
+		{
+			"source": "/concepts/tenancy-and-governance",
+			"destination": "/self-hosting/architecture"
+		},
+		{
+			"source": "/concepts/work-environments",
+			"destination": "/concepts/environments"
+		},
+		{
+			"source": "/getting-started/cli-access",
+			"destination": "/reference/cli"
+		},
+		{
+			"source": "/getting-started/quickstart",
+			"destination": "/quickstart"
+		},
+		{
+			"source": "/getting-started/status",
+			"destination": "/self-hosting/deploy"
+		},
+		{
+			"source": "/guides/add-credit-and-cap-spend",
+			"destination": "/self-hosting/deploy"
+		},
+		{
+			"source": "/guides/author-an-agent-project",
+			"destination": "/guides/agents-as-code"
+		},
+		{
+			"source": "/guides/bring-a-custom-harness",
+			"destination": "/concepts/models-and-providers"
+		},
+		{
+			"source": "/guides/build-a-personal-assistant",
+			"destination": "/guides/add-an-agent-to-your-app"
+		},
+		{
+			"source": "/guides/call-an-agent-for-its-result",
+			"destination": "/guides/add-an-agent-to-your-app"
+		},
+		{
+			"source": "/guides/coming-from-claude-managed-agents",
+			"destination": "/quickstart"
+		},
+		{
+			"source": "/guides/connect-a-providers-account",
+			"destination": "/concepts/vaults"
+		},
+		{
+			"source": "/guides/connect-a-repository-and-skill-source",
+			"destination": "/guides/work-on-a-github-repo"
+		},
+		{
+			"source": "/guides/contribute-from-a-private-session",
+			"destination": "/concepts/memory-stores"
+		},
+		{
+			"source": "/guides/delete-your-data",
+			"destination": "/self-hosting/deploy"
+		},
+		{
+			"source": "/guides/draft-until-it-meets-a-rubric",
+			"destination": "/concepts/automations"
+		},
+		{
+			"source": "/guides/export-your-log",
+			"destination": "/reference/events"
+		},
+		{
+			"source": "/guides/export-your-workspace-data",
+			"destination": "/reference/http-api"
+		},
+		{
+			"source": "/guides/handle-an-approval",
+			"destination": "/concepts/tools"
+		},
+		{
+			"source": "/guides/invite-your-team",
+			"destination": "/dashboard"
+		},
+		{
+			"source": "/guides/memory-quickstart",
+			"destination": "/concepts/memory-stores"
+		},
+		{
+			"source": "/guides/review-dreaming-proposals",
+			"destination": "/concepts/memory-stores"
+		},
+		{
+			"source": "/guides/serve-tools-from-your-app",
+			"destination": "/guides/add-an-agent-to-your-app"
+		},
+		{
+			"source": "/guides/triage-worthwhile-issues",
+			"destination": "/concepts/automations"
+		},
+		{
+			"source": "/guides/trigger-agents-from-providers",
+			"destination": "/concepts/automations"
+		},
+		{
+			"source": "/guides/write-nightly-lessons",
+			"destination": "/concepts/automations"
+		},
+		{
+			"source": "/reference/access",
+			"destination": "/reference/http-api"
+		},
+		{
+			"source": "/reference/agent-placement-messages",
+			"destination": "/reference/http-api"
+		},
+		{
+			"source": "/reference/overview",
+			"destination": "/reference/http-api"
+		},
+		{
+			"source": "/reference/sessions",
+			"destination": "/concepts/sessions"
+		},
+		{
+			"source": "/reference/troubleshooting",
+			"destination": "/reference/errors"
+		},
+		{
+			"source": "/reference/versioning",
+			"destination": "/reference/http-api"
+		},
+		{
+			"source": "/local-development",
+			"destination": "https://github.com/checkfu/checkfu#development"
+		}
+	]
+}

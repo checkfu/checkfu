@@ -1,0 +1,60 @@
+---
+title: "Environments"
+description: "Set the network rules for the Linux machine where Sessions run."
+---
+
+An Environment controls the network rules for the Sessions that use it: which hosts their Linux machine can reach, and which MCP servers their agent can call. Many Sessions can share one Environment.
+
+<CodeGroup>
+
+```ts TypeScript
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const environment = await client.waitForPending(
+	await client.environments.create({
+		name: "locked-down",
+		config: {
+			type: "cloud",
+			networking: {
+				type: "limited",
+				allowed_hosts: ["github.com", "api.example.com"],
+				allow_package_managers: true,
+				allow_mcp_servers: true,
+			},
+		},
+	}),
+)
+```
+
+```sh CLI
+checkfu environments create --name default
+```
+
+</CodeGroup>
+
+If you leave out `config`, the Environment defaults to unrestricted networking.
+
+## Networking
+
+`unrestricted` lets the machine reach any public host. `limited` allows only `allowed_hosts`, plus common package registries when `allow_package_managers` is `true`, and every MCP server when `allow_mcp_servers` is `true` (otherwise only MCP servers whose host is in `allowed_hosts`). See [Create an environment](/api-reference/environments/create-an-environment) for the full host-matching rules and registry list.
+
+A blocked request fails with `403` inside the machine, and the error names the blocked host. Mounted GitHub repositories clone from `github.com`, so include `github.com` under `limited` networking.
+
+## The Linux machine
+
+Each Session gets its own Linux container. It boots on the first `bash` call, or during first-turn setup if the Session mounts a GitHub repository, and sleeps when idle. Across sleeps it preserves `/workspace` and `/mnt/session/outputs`; anything else, including globally installed packages, is lost. Keep setup steps in a script under `/workspace`.
+
+Preinstalled tools include `git`, `node`, `npm`, `python3` (no `pip`), `ripgrep`, `jq`, `curl`, `unzip`, and `zstd`. Only HTTP and HTTPS leave the container, so clone repositories over `https`.
+
+## Updates
+
+Pass the `version` you last read; the update fails with `409` if someone changed the Environment in the meantime. Environments are not pinned to a Session, so running Sessions pick up updated rules on their next turn.
+
+```ts
+await client.environments.update(environment.id, {
+	version: environment.version,
+	config: { type: "cloud", networking: { type: "unrestricted" } },
+})
+```

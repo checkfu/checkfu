@@ -1,0 +1,113 @@
+---
+title: "Artifacts"
+description: "Versioned sets of files you can mount in a Session, share by link, or publish as a site."
+---
+
+An Artifact is a named set of files, such as a web page or report. Every update creates a new immutable version.
+
+```ts
+import Checkfu from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+const artifact = await client.waitForPending(
+	await client.artifacts.create({
+		name: "Status page",
+		files: [
+			{ path: "index.html", content: '<link rel="stylesheet" href="style.css"><h1>All good</h1>' },
+			{ path: "style.css", content: "h1 { font-family: sans-serif; }" },
+		],
+	}),
+)
+```
+
+On create, supply each file inline with `content` or point to an uploaded [File](/concepts/files) with `file_id`.
+
+## Versions
+
+When adding a new version, pass the current `version` you expect to replace. You can carry forward unchanged files from the previous version by referencing their `sha256` instead of resending their contents:
+
+```ts
+const style = artifact.files.find((file) => file.path === "style.css")!
+await client.artifacts.versions.create(artifact.id, {
+	version: artifact.version,
+	files: [
+		{ path: "index.html", content: '<link rel="stylesheet" href="style.css"><h1>Degraded</h1>' },
+		{ path: "style.css", sha256: style.sha256 },
+	],
+})
+```
+
+## Use one in a Session
+
+Agents have a `save_artifact` tool. Saving again under the same name in the same Session adds a new version.
+
+To give an agent an existing Artifact, mount it when you create the Session. It appears read-only at `/mnt/artifacts/<name>` (`Status page` becomes `status-page`):
+
+```json
+{ "type": "artifact", "artifact_id": "art_...", "version": 2 }
+```
+
+## Share and publish
+
+A viewing link shows one pinned version until it expires. A publication creates a permanent public address that follows the latest version by default.
+
+```ts
+const link = await client.artifacts.versions.link(artifact.id, 2, { expires_in: 600 })
+const published = await client.artifacts.publish(
+	artifact.id,
+	{},
+	{ idempotencyKey: crypto.randomUUID() },
+)
+```
+
+Pages run in a sandboxed origin, so reference sibling files with relative paths. [Publish an Artifact](/guides/publish-an-artifact) walks through a full example.
+
+## Start from a template type
+
+A "type" is just another Artifact whose files act as a base layer so child Artifacts only need to provide content or data. The repository ships three starter types in [`packages/domain/src/Artifact/types`](https://github.com/checkfu/checkfu/tree/main/packages/domain/src/Artifact/types): `document`, `slides`, and `dashboard`. Upload a type once from its directory, then create Artifacts from it with `made_from`:
+
+```ts
+import Checkfu, { ArtifactId } from "@checkfu/sdk"
+
+const client = new Checkfu()
+
+await client.artifacts.create({
+	name: "Release notes",
+	made_from: { artifact_id: ArtifactId.make(documentType.id), version: documentType.version },
+	files: [{ path: "content.md", content: "# Release notes\n\n- Faster uploads" }],
+})
+```
+
+## Store data
+
+Each Artifact has a JSON document database shared across all of its versions:
+
+```ts
+await client.artifacts.data.put(artifact.id, "numbers", "revenue", {
+	data: { label: "Revenue", value: 1200, unit: "USD" },
+})
+```
+
+A published page can only access collections that `artifact.json` exposes to visitors, capped further by the viewing link or publication's `access` level:
+
+```json artifact.json
+{ "capabilities": { "database": { "collections": { "responses": { "visitors": "add" } } } } }
+```
+
+| `access`         | `visitors: read` | `visitors: add` | `visitors: write` |
+| :--------------- | :--------------- | :-------------- | :---------------- |
+| `view` (default) | nothing          | nothing         | nothing           |
+| `read`           | list, get        | nothing         | list, get         |
+| `write`          | list, get        | add             | everything        |
+
+In the page, load `_/data.js` and call `artifactData`:
+
+```html
+<script src="_/data.js"></script>
+<script>
+	artifactData.collection("responses").add({ choice: "yes" }, { key: crypto.randomUUID() })
+</script>
+```
+
+See [Limits](/reference/limits#artifacts) for file, version, and database caps, or [Create an artifact](/api-reference/artifacts/create-an-artifact) for all options.

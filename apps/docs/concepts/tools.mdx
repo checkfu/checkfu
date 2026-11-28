@@ -1,0 +1,81 @@
+---
+title: "Tools"
+description: "The built-in tools every agent has, MCP tools, and custom tools your application runs."
+---
+
+Every agent has built-in tools for its workspace, Linux machine, and Artifacts. You can also attach MCP servers and custom tools that your own application executes.
+
+## Built-in tools
+
+These tools are always available, except `tool_search`, which Checkfu adds automatically when the Agent has MCP servers with deferred tools.
+
+| Tool                                                    | What it does                                                                               |
+| :------------------------------------------------------ | :----------------------------------------------------------------------------------------- |
+| `read`, `ls`, `find`, `grep`, `write`, `edit`, `delete` | Work with workspace files and mounted resources.                                           |
+| `bash`                                                  | Runs a command on the Session's [Linux machine](/concepts/environments#the-linux-machine). |
+| `save_artifact`                                         | Saves a directory as an [Artifact](/concepts/artifacts) version.                           |
+| `artifact_data`                                         | Reads and writes collections of an Artifact saved in this Session.                         |
+| `codemode`                                              | Runs a JavaScript script that chains built-in and auto-allowed MCP tools.                  |
+| `tool_search`                                           | Looks up deferred MCP tools on demand (added when MCP tools are configured).               |
+
+`codemode` cannot call custom tools or MCP tools that require confirmation.
+
+## MCP tools
+
+The model sees each tool on an Agent's MCP server as `mcp__<server>__<tool>`. By default, every MCP call pauses for approval (`evaluated_permission: "ask"`) unless an `mcp_toolset` allows it:
+
+```json
+{
+	"mcp_servers": [{ "type": "url", "name": "docs", "url": "https://mcp.example.com/mcp" }],
+	"tools": [
+		{
+			"type": "mcp_toolset",
+			"mcp_server_name": "docs",
+			"default_config": { "permission_policy": { "type": "always_allow" } },
+			"configs": [{ "name": "delete_page", "permission_policy": { "type": "always_ask" } }]
+		}
+	]
+}
+```
+
+Store the server's bearer token in a [Vault](/concepts/vaults).
+
+## Custom tools
+
+Declare custom tools on the Agent; your application handles running them.
+
+```json
+{
+	"tools": [
+		{
+			"type": "custom",
+			"name": "lookup_order",
+			"description": "Look up an order by ID and return its status.",
+			"input_schema": {
+				"type": "object",
+				"properties": { "order_id": { "type": "string" } },
+				"required": ["order_id"]
+			}
+		}
+	]
+}
+```
+
+## Answer a paused turn
+
+When the agent calls a custom tool or an MCP tool that requires approval, the turn pauses with stop reason `requires_action`. Answer every waiting call in `stop_reason.event_ids` and the turn resumes:
+
+```ts
+await client.sessions.events.send(sessionId, {
+	events: [
+		{
+			type: "user.custom_tool_result",
+			custom_tool_use_id: customCallId,
+			content: [{ type: "text", text: "Order 1042 shipped." }],
+		},
+		{ type: "user.tool_confirmation", tool_use_id: mcpCallId, result: "allow" },
+	],
+})
+```
+
+See [Add an agent to your app](/guides/add-an-agent-to-your-app) for the full relay and tool-handling loop, and [Session events](/reference/events) or [Limits](/reference/limits#agents-and-environments) for exact fields and caps.

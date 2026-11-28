@@ -1,0 +1,81 @@
+---
+title: "Agents as code"
+description: "Keep Agents, Environments, and Automations in files and apply them with checkfu apply."
+---
+
+Keep Agents, Environments, and Automations as files, review them in git, and sync them with `checkfu apply`. The CLI must be [connected to your deployment](/reference/cli#connect-to-a-deployment).
+
+```md agents/support.md
+---
+name: Support
+model: claude-sonnet-5-5
+---
+
+Answer support questions and cite the source you used.
+```
+
+```yaml environments/cloud.yaml
+name: Cloud
+```
+
+```yaml automations/report.yaml
+# yaml-language-server: $schema=https://your-api.workers.dev/schemas/apply/automation.json
+name: Weekday report
+agent: ../agents/support.md
+environment_id: ../environments/cloud.yaml
+initial_events:
+  - type: user.message
+    content: [{ type: text, text: Write the daily support report. }]
+schedule: { type: cron, expression: "0 9 * * 1-5", timezone: America/New_York }
+```
+
+Preview the plan, then apply it:
+
+```sh
+checkfu apply . --dry-run
+checkfu apply . --yes
+```
+
+The first apply creates the three resources and writes `checkfu-lock.json`. Commit the lock file so later runs update those same resources instead of creating duplicates.
+
+## Files
+
+Each file describes one resource using the request body fields of `POST /v1/agents`, `POST /v1/environments`, or `POST /v1/automations`. Unknown fields fail validation.
+
+In Markdown files, YAML frontmatter holds the structured fields and the Markdown body fills one text field: `system` for an Agent, `description` for an Environment, or a single `user.message` in `initial_events` for an Automation.
+
+`checkfu apply` identifies each file's kind from a `type` field, its parent directory (`agents/`, `environments/`, or `automations/`), or its filename prefix (`agent-*`, `environment-*`, `automation-*`). Unclassified files such as `README.md` are skipped.
+
+## References
+
+An Automation file can reference local files instead of resource IDs. Writing `agent: ../agents/support.md` points at the version this apply creates or confirms, so editing the agent moves the Automation to the new version on the next apply. To pin a specific version, write `{ path: ../agents/support.md, version: 3 }`.
+
+## Validate and edit
+
+```sh
+checkfu agent info agents/support.md
+```
+
+`agent info` validates a single agent file offline and prints what `apply` would send. Editors with `yaml-language-server` can load the JSON Schema served by your deployment at `$CHECKFU_BASE_URL/schemas/apply/agent.json`, `environment.json`, or `automation.json`, as shown in the comment above.
+
+## Flags
+
+| Flag          | Effect                                                                                   |
+| :------------ | :--------------------------------------------------------------------------------------- |
+| `--dry-run`   | Print the plan without writing anything.                                                 |
+| `--yes`, `-y` | Skip the confirmation prompt. Required in non-interactive shells and CI.                 |
+| `--force`     | Overwrite remote edits, or recreate a resource that was archived or deleted.             |
+| `--prune`     | Archive resources whose files were removed. Refused while an Automation still uses them. |
+
+If someone edits a resource outside git (for example, in the Dashboard) after the last apply, `checkfu apply` refuses to overwrite it with `Remote configuration changed`. Copy the change into your file, or pass `--force` to replace it.
+
+Each lock file is tied to one `base_url`. To target a second deployment, pass a separate lock file with `--lock-file checkfu-lock.staging.json`.
+
+## Export from the Dashboard
+
+In the [Dashboard](/dashboard), open an Agent and click **Export as code**. The download contains `agents/<name>.md` and a `checkfu-lock.json` already linked to that Agent:
+
+```sh
+unzip support.zip -d support-bot && cd support-bot
+checkfu apply . --dry-run   # shows the agent as unchanged
+```

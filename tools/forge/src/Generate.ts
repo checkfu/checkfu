@@ -46,6 +46,10 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 			relativePath: "apps/api/public/openapi.json",
 			content: openApiJson,
 		},
+		{
+			relativePath: "apps/docs/openapi.json",
+			content: openApiJson,
+		},
 		...generateApplySchemas(),
 		...cliFiles.map((file) => ({
 			relativePath: `${generatedDirectories.cli}/${file.path}`,

@@ -1,0 +1,95 @@
+/* Checkfu docs — brand voice overrides (ink and paper).
+   Mintlify bundles any .css file in the repo. Cal Sans speaks — h1 and h2
+   only, one weight; minor headings (h3+) stay sans by design, the
+   display-major/sans-minor hierarchy. The sans operates (body, nav,
+   tables); mono is the machine. Cal Sans is the same face the marketing
+   page and the console set (/apps/www/STYLE.md Rev T), vendored here as a latin
+   subset because Mintlify serves this stylesheet statically and cannot
+   resolve a node_modules path.
+
+   Selectors are deliberately conservative (elements + Mintlify's stable
+   ids) so a theme update degrades harmlessly instead of breaking. */
+
+@font-face {
+	font-family: "Cal Sans";
+	src: url("/assets/fonts/cal-sans-latin-400.woff2") format("woff2");
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+h1,
+h2 {
+	/* Fall back to the operational sans, never to a serif: a failed webfont
+	   should read as quieter docs, not different ones. */
+	font-family: "Cal Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	/* Cal Sans has one drawn weight and no italic. Mintlify's theme sets its
+	   headings bold, so without font-synthesis the browser fakes it by smearing
+	   the outline — measured in Chromium, the 400 and 700 renderings of one
+	   string are not byte-identical. Both declarations are load-bearing here:
+	   this stylesheet does not own the theme's heading rules. */
+	font-weight: 400;
+	font-synthesis: none;
+	/* No negative tracking. Cal Sans is drawn tight with narrow word spaces to
+	   match; the serif's -0.008em welded words together at heading sizes. */
+	letter-spacing: normal;
+}
+
+/* Prose links, the TM way: ink with a quiet underline that darkens on
+   hover — never a colored word. */
+#content-area a:not([class]),
+article a:not([class]) {
+	text-decoration-color: color-mix(in srgb, currentColor 30%, transparent);
+	text-underline-offset: 3px;
+	transition: text-decoration-color 150ms ease-out;
+}
+#content-area a:not([class]):hover,
+article a:not([class]):hover {
+	text-decoration-color: currentColor;
+}
+
+/* Sidebar: 13px operating voice with specimen-label group headers —
+   small uppercase, letter-spaced, muted. The mint theme renders group
+   headers as .sidebar-group-header divs; match on the class fragment so
+   a markup change degrades to the theme default. */
+#sidebar,
+#sidebar-content {
+	font-size: 13px;
+}
+#sidebar [class*="group-header"] {
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: color-mix(in srgb, currentColor 60%, transparent);
+}
+
+/* Quotes carry the editorial voice. */
+blockquote {
+	font-style: normal;
+	border-left-width: 2px;
+}
+
+/* Reference tables are dense by nature; set them a step smaller than
+   prose, align cells to the top, and let long identifier cells breathe. */
+#content-area table,
+article table {
+	font-size: 0.875rem;
+	line-height: 1.5;
+}
+#content-area td,
+article td {
+	vertical-align: top;
+}
+#content-area th,
+article th {
+	font-weight: 600;
+}
+
+/* The lockup (brand/lockup.svg) is 132 units tall against 90-unit letters —
+   the mark deliberately overshoots the text. The mint theme's default h-7
+   (28px) renders the letters ~19px, oversized next to the nav text, so pin
+   a height that puts the letters at ~16px. */
+img.nav-logo {
+	height: 1.5rem !important;
+}

@@ -1,0 +1,109 @@
+---
+title: "HTTP API"
+description: "Rules shared by every Checkfu HTTP endpoint."
+---
+
+```sh
+curl --fail-with-body -X POST "$CHECKFU_BASE_URL/v1/agents" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: create-support-agent" \
+  -d '{"name": "Support", "model": "claude-sonnet-5-5"}'
+```
+
+The SDK, CLI, MCP server, and Dashboard all call this API. Each endpoint has a generated page under **HTTP API** in the sidebar, starting with [Create an agent](/api-reference/agents/create-an-agent).
+
+## Base URL
+
+| Where            | API URL                                                             |
+| :--------------- | :------------------------------------------------------------------ |
+| `checkfu deploy` | The URL printed after `Checkfu is live at`, or `CHECKFU_API_DOMAIN` |
+| `bun run dev`    | `http://localhost:1337`                                             |
+
+| No key needed                                            | Returns                                                    |
+| :------------------------------------------------------- | :--------------------------------------------------------- |
+| `GET /health`                                            | `{ "status": "ok" }`                                       |
+| `GET /openapi.json`                                      | The OpenAPI 3.1 document                                   |
+| `GET /schemas/apply/{agent,environment,automation}.json` | [Editor schemas](/guides/agents-as-code#validate-and-edit) |
+
+## Authentication
+
+```sh
+curl --fail-with-body "$CHECKFU_BASE_URL/v1/auth/verify" -H "Authorization: Bearer $CHECKFU_API_KEY"
+# {"type":"authentication_verified"}
+```
+
+Send `CHECKFU_API_KEY` as `Authorization: Bearer` or `x-api-key`. There is one key per deployment, with full access. A missing or wrong key returns `401`; a deployment with no key configured returns `503`.
+
+## Conventions
+
+- JSON endpoints require `Content-Type: application/json`, or the API returns `415`. `POST /v1/files` takes raw bytes.
+- Fields are `snake_case`. Timestamps are ISO 8601 UTC. IDs are opaque.
+- Most updates use `POST` to the resource URL (`PUT` is used for Artifact data documents). Optimistic concurrency uses `version` (Agents, Environments), `revision` (Automations), or `precondition.content_sha256` (Memories); a stale value returns `409`.
+- Body size limits are in [Limits](/reference/limits#request-bodies).
+
+## Pagination
+
+```sh
+curl --fail-with-body "$CHECKFU_BASE_URL/v1/sessions?limit=20&order=desc" -H "Authorization: Bearer $CHECKFU_API_KEY"
+# {"data": [...], "next_page": "..."}
+```
+
+Pass `next_page` back as `page` until it is `null`. A page can hold fewer items than `limit`.
+
+| Parameter          | Values                       | Default    |
+| :----------------- | :--------------------------- | :--------- |
+| `limit`            | 1 to 100                     | 50         |
+| `page`             | Previous `next_page`         | First page |
+| `order`            | `asc` or `desc`, by creation | `asc`      |
+| `include_archived` | `true` or `false`            | `false`    |
+
+Not every list accepts every parameter: `agents/{id}/versions` and `webhooks/{id}/deliveries` always return newest first, `memory_stores/{id}/memories` sorts by path, `artifacts/{id}/data/{collection}` returns oldest first, and `sessions/{id}/resources` is unpaginated.
+
+## Idempotency
+
+Send `Idempotency-Key` (1 to 128 characters, no leading or trailing whitespace) on create requests and event sends to make retries safe. Repeating the same key and body returns the original result; reusing a key with a different body returns `409` `idempotency_key_reused`.
+
+Endpoints that accept `Idempotency-Key`:
+
+- `POST` on `/v1/agents`, `/v1/environments`, `/v1/sessions`, `/v1/memory_stores`, `/v1/vaults`, `/v1/vaults/{id}/credentials`, `/v1/artifacts`, `/v1/files`, `/v1/webhooks`
+- `POST /v1/sessions/{session_id}/events` (events can also carry their own `id`)
+- `POST /v1/automations` (required)
+- `POST /v1/automations/{automation_id}/run`
+- `POST` and `DELETE` on `/v1/artifacts/{artifact_id}/publication`
+- `POST /v1/artifacts/{artifact_id}/data/{collection}`
+- `POST /v1/webhooks/{webhook_id}/rotate-secret`
+
+Receipts are retained indefinitely, with a few lifecycle exceptions: retrying after deleting an Artifact or Vault returns `404` (and `409` for a deleted File), retrying a Webhook create or secret rotation after a subsequent rotation returns `409`, and Artifact data collection idempotency keys are cleared if the document is deleted (or return its current contents if updated via `PUT`).
+
+## Pending receipts
+
+```json
+{ "id": "agent_...", "type": "agent", "pending": true }
+```
+
+A `202` with this body means the write succeeded, but the read view hasn't caught up yet. Poll the resource by `id` until it appears, or pass the result to the SDK's `waitForPending`. Receipts for nested resources include the parent field you need for polling: `version` (`artifact_version`), `vault_id` (`vault_credential`), and `memory_store_id` (`memory`). A pending `webhook` receipt already includes `signing_secret`, which is never returned again.
+
+Deleting a Vault or Credential can also return `202` (`"secrets": "erasing"` or `"custody": "erasing"`) while secret erasure finishes in the background.
+
+## Archive and delete
+
+An archived resource stays readable with `archived_at` set, is hidden from lists unless `include_archived=true`, and rejects edits with `409`. A deleted resource returns `404`.
+
+| Resource                        | Archive        | Delete |
+| :------------------------------ | :------------- | :----- |
+| Agent                           | Yes            | No     |
+| Environment                     | Yes            | Yes    |
+| Session                         | Yes, ends it   | No     |
+| Automation                      | Yes, stops it  | No     |
+| Memory store                    | Yes, read-only | Yes    |
+| Vault, Credential               | Yes            | Yes    |
+| Memory, File, Artifact, Webhook | No             | Yes    |
+
+To archive only if nothing changed, pass `version` (Agent, Environment) or `revision` (Automation) as a query parameter (for example, `POST /v1/agents/{agent_id}/archive?version=2`).
+
+## Request IDs
+
+Every response carries a `request-id` header, and error bodies repeat it as `request_id`. Include it when reporting a bug.
+
+Streaming is covered in [Session events](/reference/events), and status/error codes in [Errors](/reference/errors).

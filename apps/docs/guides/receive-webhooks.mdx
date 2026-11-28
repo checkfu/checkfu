@@ -1,0 +1,120 @@
+---
+title: "Receive webhooks"
+description: "A complete Node.js receiver that verifies signatures, skips duplicates, and answers fast."
+---
+
+This receiver verifies each request's signature, skips duplicate event IDs, answers before Checkfu's 10-second timeout, and then fetches the changed resource.
+
+## The receiver
+
+```sh
+mkdir checkfu-receiver && cd checkfu-receiver
+npm init -y && npm install @checkfu/sdk && npm install --save-dev tsx
+```
+
+```ts receiver.ts
+import { createHmac, timingSafeEqual } from "node:crypto"
+import { createServer, type IncomingHttpHeaders } from "node:http"
+import Checkfu from "@checkfu/sdk"
+
+const secret = process.env.CHECKFU_WEBHOOK_SECRET ?? ""
+if (!secret.startsWith("whsec_"))
+	throw new Error("Set CHECKFU_WEBHOOK_SECRET to the whsec_ signing secret.")
+const key = Buffer.from(secret.slice("whsec_".length), "base64")
+const client = new Checkfu()
+
+const header = (headers: IncomingHttpHeaders, name: string) => [headers[name]].flat()[0]
+
+// Returns the event ID if the signature is valid and fresh, otherwise null.
+const verify = (body: Buffer, headers: IncomingHttpHeaders): string | null => {
+	const id = header(headers, "webhook-id")
+	const timestamp = header(headers, "webhook-timestamp")?.trim()
+	const signatures = header(headers, "webhook-signature")
+	if (!id || !timestamp || !signatures || !/^\d+$/.test(timestamp)) return null
+	if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return null // replay window: 5 minutes
+
+	const expected = createHmac("sha256", key).update(`${id}.${timestamp}.`).update(body).digest()
+	const valid = signatures
+		.trim()
+		.split(/\s+/)
+		.filter((entry) => entry.startsWith("v1,"))
+		.map((entry) => Buffer.from(entry.slice(3), "base64"))
+		.some(
+			(candidate) => candidate.length === expected.length && timingSafeEqual(candidate, expected),
+		)
+	return valid ? id : null
+}
+
+// Handled event IDs. Use a database in production, and keep IDs for 14 days.
+const seen = new Set<string>()
+
+const handle = async (event: { id: string; data: { type: string; id: string } }) => {
+	if (event.data.type === "session.status_idled") {
+		const session = await client.sessions.retrieve(event.data.id)
+		console.log(`Session ${session.id} is ${session.status}`)
+	} else if (event.data.type === "automation_run.failed") {
+		const run = await client.automationRuns.retrieve(event.data.id)
+		console.log(`Run ${run.run} of ${run.automation_id} failed: ${run.error?.message}`)
+	} else {
+		console.log(`Received ${event.data.type}`)
+	}
+}
+
+createServer((request, response) => {
+	const chunks: Array<Buffer> = []
+	request.on("data", (chunk: Buffer) => chunks.push(chunk))
+	request.on("end", () => {
+		const body = Buffer.concat(chunks)
+		const eventId = verify(body, request.headers)
+		if (eventId === null) return void response.writeHead(401).end()
+		if (seen.has(eventId)) return void response.writeHead(204).end() // duplicate: acknowledge, do nothing
+
+		seen.add(eventId)
+		response.writeHead(204).end() // answer first, then work
+		handle(JSON.parse(body.toString("utf8"))).catch((error) => {
+			seen.delete(eventId) // let a redelivery try again
+			console.error(`Handling ${eventId} failed`, error)
+		})
+	})
+}).listen(3000, () => console.log("Listening on http://localhost:3000"))
+```
+
+```sh
+export CHECKFU_WEBHOOK_SECRET=whsec_... CHECKFU_BASE_URL=https://<api-worker>.workers.dev CHECKFU_API_KEY=<key>
+npx tsx receiver.ts
+```
+
+## How the signature works
+
+Checkfu computes HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<raw body>`, keyed with the base64-decoded bytes after `whsec_`. Always verify the exact raw bytes you received; parsing and re-serializing JSON changes them.
+
+You can use the SDK's `unwrapWebhookEvent` instead of writing `verify` by hand. It validates the signature and timestamp, then returns the parsed event or throws:
+
+```ts
+import { unwrapWebhookEvent } from "@checkfu/sdk"
+
+const event = await unwrapWebhookEvent(body, request.headers, {
+	secret: process.env.CHECKFU_WEBHOOK_SECRET!,
+})
+```
+
+## Rules for a reliable receiver
+
+- **Answer within 10 seconds** with any `2xx`, including for duplicates and event types you ignore.
+- **Never redirect.** A `3xx` disables the Webhook immediately.
+- **Expect each event more than once.** Retries and manual redeliveries reuse the same `webhook-id`.
+- **Do not rely on order.** Fetch the resource from the API to read its current state.
+- **Do not lose acknowledged work.** Once you return `2xx`, Checkfu will not retry. If the work cannot be lost, enqueue it durably before responding.
+
+## Test it
+
+Checkfu delivers only to public HTTPS URLs, and skips outbound delivery under `bun run dev`. Use a deployed stage and a tunnel such as `cloudflared tunnel --url http://localhost:3000`:
+
+```sh
+checkfu webhooks create --url "https://<your-tunnel-host>/" --event-types '["session.status_idled"]'
+# export the printed signing_secret as CHECKFU_WEBHOOK_SECRET and restart the receiver
+checkfu webhooks test --webhook-id "$WEBHOOK_ID"
+checkfu webhooks:deliveries list --webhook-id "$WEBHOOK_ID"
+```
+
+If every request fails verification, you are likely verifying parsed JSON instead of the raw body, using the wrong secret, or running with a server clock more than 5 minutes off. Intermittent failures usually mean your clock is drifting near the 5-minute replay window or a delivery was delayed in transit. See [Create a webhook](/api-reference/webhooks/create-a-webhook) for webhook options.

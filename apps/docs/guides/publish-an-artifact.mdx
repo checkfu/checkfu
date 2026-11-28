@@ -1,0 +1,114 @@
+---
+title: "Publish an Artifact"
+description: "Share an Artifact with a viewing link, publish it as a site, and take it down."
+---
+
+This script creates an [Artifact](/concepts/artifacts), adds a second version, creates a temporary viewing link, publishes it to a permanent URL, and unpublishes it.
+
+Export `CHECKFU_BASE_URL` and `CHECKFU_API_KEY`, run `npm install @checkfu/sdk`, then `npx tsx publish.ts`:
+
+```ts publish.ts
+import Checkfu, { PublicationAddress } from "@checkfu/sdk"
+
+const client = new Checkfu()
+const page = (text: string) =>
+	`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="style.css"><h1>Launch notes</h1><p>${text}</p>`
+
+// 1. Create the Artifact. This is version 1.
+const artifact = await client.waitForPending(
+	await client.artifacts.create(
+		{
+			name: "Launch notes",
+			files: [
+				{ path: "index.html", content: page("Uploads are faster.") },
+				{
+					path: "style.css",
+					content: "body { font-family: system-ui; max-width: 40rem; margin: 3rem auto }",
+				},
+			],
+		},
+		{ idempotencyKey: crypto.randomUUID() },
+	),
+)
+
+// 2. Add version 2. Keep style.css by its hash instead of sending it again.
+const style = artifact.files.find((file) => file.path === "style.css")!
+const v2 = await client.waitForPending(
+	await client.artifacts.versions.create(artifact.id, {
+		version: artifact.version,
+		files: [
+			{ path: "index.html", content: page("Uploads are faster, and dashboards are new.") },
+			{ path: "style.css", sha256: style.sha256 },
+		],
+	}),
+)
+
+// 3. Share version 2 for one hour.
+const link = await client.artifacts.versions.link(artifact.id, v2.version, { expires_in: 3600 })
+console.log("link:", link.url)
+
+// 4. Publish. The address serves the latest version.
+const published = await client.artifacts.publish(
+	artifact.id,
+	{},
+	{ idempotencyKey: crypto.randomUUID() },
+)
+console.log("published:", published.publication?.url)
+
+// 5. Unpublish that address.
+await client.artifacts.unpublish(artifact.id, {
+	if_current: PublicationAddress.make(published.publication!.address),
+})
+console.log("unpublished")
+```
+
+Comment out step 5 if you want to open the published URL before taking it down. The viewing link stays pinned to version 2 even after you add version 3, while the publication follows each new version.
+
+To pin a publication to a specific version, publish again with `{ version: 1 }` (the public address stays the same; see [Publish an artifact](/api-reference/artifacts/publish-an-artifact)). Publishing again after unpublishing assigns a new address.
+
+## Publish a live dashboard
+
+The starter `dashboard` type renders one card per document in the `numbers` collection and refreshes every 30 seconds. Upload the type from its directory in a checkout of [the repository](https://github.com/checkfu/checkfu), create a dashboard from it, and publish with `read` access so the page can query its data:
+
+```ts dashboard.ts
+import { readFile } from "node:fs/promises"
+import Checkfu, { ArtifactId } from "@checkfu/sdk"
+
+const client = new Checkfu()
+const dir = "checkfu/packages/domain/src/Artifact/types/dashboard"
+
+const type = await client.waitForPending(
+	await client.artifacts.create({
+		name: "dashboard",
+		files: await Promise.all(
+			["index.html", "artifact.json", "README.md"].map(async (path) => ({
+				path,
+				content: await readFile(`${dir}/${path}`, "utf8"),
+			})),
+		),
+	}),
+)
+
+const dashboard = await client.waitForPending(
+	await client.artifacts.create({
+		name: "Weekly numbers",
+		made_from: { artifact_id: ArtifactId.make(type.id), version: type.version },
+	}),
+)
+
+await client.artifacts.data.put(dashboard.id, "numbers", "title", { data: "Weekly numbers" })
+await client.artifacts.data.put(dashboard.id, "numbers", "revenue", {
+	data: { label: "Revenue", value: 1200, unit: "USD" },
+})
+
+const published = await client.artifacts.publish(
+	dashboard.id,
+	{ access: "read" },
+	{ idempotencyKey: crypto.randomUUID() },
+)
+console.log(published.publication?.url)
+```
+
+To update a number, `put` its document again under the same ID; the live page refreshes within 30 seconds.
+
+The CLI provides the same operations: `checkfu artifacts:versions link --artifact-id "$ARTIFACT_ID" --version 2`, `checkfu artifacts publish --artifact-id "$ARTIFACT_ID"`, and `checkfu artifacts unpublish --artifact-id "$ARTIFACT_ID" --if-current "$ADDRESS"`.
