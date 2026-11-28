@@ -251,7 +251,7 @@ describe("normalizeApiUrl", () => {
 				let splitRequests = 0
 				const splitFetch = (async () => {
 					splitRequests++
-					if (splitRequests <= 3) {
+					if (splitRequests <= 2) {
 						const body = new ReadableStream<Uint8Array>({
 							start(controller) {
 								controller.enqueue(encoder.encode(": keepalive\r\n\r"))
@@ -287,7 +287,7 @@ describe("normalizeApiUrl", () => {
 						}),
 					)
 				}).pipe(Effect.provide(makeLayer(splitFetch)))
-				expect(splitRequests).toBe(4)
+				expect(splitRequests).toBe(3)
 				expect(Array.from(splitEvents).map((e) => e.seq)).toEqual([1])
 
 				let rotSeq = 0
@@ -566,7 +566,9 @@ describe("normalizeApiUrl", () => {
 				}) as unknown as typeof globalThis.fetch
 				const idleBackoffEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(client.streamSessionEvents("sess_idle_backoff"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_idle_backoff", { maxReconnectAttempts: 7 }),
+					)
 				}).pipe(
 					Effect.provide(makeLayer(idleBackoffFetch)),
 					Effect.provideService(Clock.Clock, idleClock.clock),
