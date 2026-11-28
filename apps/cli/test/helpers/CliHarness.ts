@@ -1,3 +1,4 @@
+import { posix } from "node:path"
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { FileBytesKept } from "@checkfu/domain/File/FileBytes.external"
@@ -175,6 +176,8 @@ const defaultModelHandler: Required<ModelHandler> = {
 	toolEvents: () => [],
 	asks: () => [],
 }
+
+let temporaryDirectorySequence = 0
 
 export const makeTestServer = (handler?: ModelHandler) =>
 	Effect.gen(function* () {
@@ -376,6 +379,30 @@ export const makeTestServer = (handler?: ModelHandler) =>
 								delete files[from]
 							}
 						}),
+					makeTempDirectoryScoped: (options) =>
+						Effect.acquireRelease(
+							Effect.sync(() => {
+								const parent = options?.directory ?? "/tmp"
+								const prefix = options?.prefix ?? ""
+								let directory: string
+								do {
+									directory = posix.join(parent, prefix + String(++temporaryDirectorySequence))
+								} while (
+									Object.keys(files).some(
+										(file) => file === directory || file.startsWith(directory + "/"),
+									)
+								)
+								return directory
+							}),
+							(directory) =>
+								Effect.sync(() => {
+									for (const file of Object.keys(files)) {
+										if (file.startsWith(directory + "/")) {
+											delete files[file]
+										}
+									}
+								}),
+						),
 					makeDirectory: () => Effect.void,
 					chmod: (filePath, mode) => Effect.sync(() => options?.onChmod?.(filePath, mode)),
 					remove: (filePath) => {
