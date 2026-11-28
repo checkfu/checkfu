@@ -4,6 +4,7 @@ import type { JsonAutomation } from "@checkfu/sdk/client"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
+import { checkfu } from "../src/api.ts"
 import { AutomationView } from "../src/pages/automations.tsx"
 import { automationQuery } from "../src/queries.ts"
 import { button, click, mount, newQueryClient, settle, stubApi, submit, type } from "./dom.tsx"
@@ -165,12 +166,68 @@ const editor = async ({
 			sent.flatMap(({ method, path, body }) =>
 				method === "POST" && path === endpoint ? [body] : [],
 			),
+		archiveRequests: () => sent.filter(({ path }) => path.startsWith(`${endpoint}/archive`)),
 	}
 }
 
 afterEach(() => {
 	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
+})
+
+it("refuses invalid archive guards locally without sending any writes", async () => {
+	const sent = stubApi(() => ({ body: automation }))
+	for (const action of [
+		checkfu.agents.archive,
+		checkfu.environments.archive,
+		checkfu.automations.archive,
+	]) {
+		for (const version of [0, -1, 1.5, Number.NaN, 1_000_000_000_000_000]) {
+			await expect(action("resource_1", version)).rejects.toThrow("Reload before archiving.")
+		}
+	}
+	expect(sent).toEqual([])
+})
+
+it("refuses to archive an automation when the API omits its revision", async () => {
+	const page = await editor({ omitRevision: "opening", openEditor: false })
+	try {
+		await click(button(page.container, "Archive"))
+		expect(page.container.textContent).toContain("Reload before archiving.")
+		expect(page.archiveRequests()).toEqual([])
+	} finally {
+		page.unmount()
+	}
+})
+
+it("refuses to archive a changed automation until the operator sees its new revision", async () => {
+	const client = newQueryClient()
+	client.setQueryData(automationQuery(automation.id).queryKey, automation)
+	const archive = `${endpoint}/archive`
+	let current = { ...automation, name: "Review the new schedule", revision: 2 }
+	const sent = stubApi(({ method, path }) => {
+		if (method === "POST" && path.startsWith(archive)) {
+			if (path !== `${archive}?revision=2`) {
+				return conflict
+			}
+			current = { ...current, status: "archived", archived_at: automation.created_at }
+			return { body: current }
+		}
+		return { body: path === endpoint ? current : emptyPage }
+	})
+	const page = await mount(<AutomationUnderTest />, client)
+	try {
+		const archives = () => sent.filter(({ method }) => method === "POST").map(({ path }) => path)
+		await click(button(page.container, "Archive"))
+		await waitFor(() => expect(page.container.textContent).toContain("The automation changed."))
+		expect(page.container.textContent).toContain("Review the new schedule")
+		expect(archives()).toEqual([`${archive}?revision=1`])
+		await click(button(page.container, "Archive"))
+		await waitFor(() => expect(page.container.textContent).toContain("Archived"))
+		expect(archives()).toEqual([`${archive}?revision=1`, `${archive}?revision=2`])
+	} finally {
+		page.unmount()
+	}
 })
 
 it("reuses the manual run key after a lost reply and gives each later run its own key", async () => {

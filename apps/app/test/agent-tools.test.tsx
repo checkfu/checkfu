@@ -196,6 +196,19 @@ describe("agent revision navigation", () => {
 					return { body: { data: [], next_page: null } }
 				case `/v1/automations/${automation.id}`:
 					return { body: automation }
+				case `${agentApiPath}/archive`:
+					return {
+						status: 409,
+						body: {
+							error: {
+								type: "conflict_error",
+								message:
+									url.searchParams.get("version") === String(current.version)
+										? "An active automation uses this agent."
+										: "Agent changed.",
+							},
+						},
+					}
 				case agentApiPath:
 					if (method === "POST") {
 						const { version, ...changes } = body as {
@@ -246,6 +259,9 @@ describe("agent revision navigation", () => {
 			router,
 			queryClient,
 			current: () => current,
+			advanceAgent: (changes: Partial<JsonAgent>) => {
+				current = { ...current, ...changes, version: current.version + 1 }
+			},
 			updateAgent: async (changes: Partial<JsonAgent>) => {
 				current = { ...current, ...changes, version: current.version + 1 }
 				await act(async () => {
@@ -258,8 +274,31 @@ describe("agent revision navigation", () => {
 					.map(({ body }) => body),
 			agentRequests: () =>
 				sent.filter(({ path }) => path.startsWith(agentApiPath)).map(({ path }) => path),
+			archives: () =>
+				sent
+					.filter(
+						({ path, method }) => path.startsWith(`${agentApiPath}/archive`) && method === "POST",
+					)
+					.map(({ path }) => path),
 		}
 	}
+
+	it("refreshes the shown version after archive refusal and preserves dependency errors", async () => {
+		const view = await openRoute(agentPath)
+		await view.findByRole("button", { name: "Archive" }, routeRenderWait)
+		view.advanceAgent({ name: "New agent name" })
+		await click(button(view.container, "Archive"))
+		await view.findByText("Agent changed.", undefined, routeRenderWait)
+		await view.findByRole("heading", { name: "New agent name" }, routeRenderWait)
+		expect(view.archives()).toEqual([`${agentApiPath}/archive?version=2`])
+		await click(button(view.container, "Archive"))
+		await view.findByText("An active automation uses this agent.", undefined, routeRenderWait)
+		expect(view.archives()).toEqual([
+			`${agentApiPath}/archive?version=2`,
+			`${agentApiPath}/archive?version=3`,
+		])
+		expect(view.router.state.location.pathname).toBe(agentPath)
+	})
 
 	it.each([
 		{ path: "/sessions", name: `${agent.id} v1` },

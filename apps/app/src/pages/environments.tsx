@@ -369,12 +369,7 @@ export function EnvironmentView({
 	readonly environment: JsonEnvironment
 }): React.JSX.Element {
 	const [editing, setEditing] = useState(false)
-	const archive = useAction(
-		async () => {
-			await checkfu.environments.archive(environment.id)
-		},
-		{ invalidates },
-	)
+	const archive = useAction(checkfu.environments.archive, { invalidates })
 	return (
 		<>
 			<PageHeader
@@ -398,7 +393,7 @@ export function EnvironmentView({
 								variant="destructive"
 								size="sm"
 								disabled={archive.pending}
-								onClick={() => archive.run()}
+								onClick={() => archive.run(environment.id, environment.version)}
 							>
 								Archive
 							</Button>

@@ -449,3 +449,42 @@ it("displays archived environments without editing or archive controls", async (
 		page.unmount()
 	}
 })
+
+it("refreshes the environment after a stale archive and settles an explicit retry", async () => {
+	const client = newQueryClient()
+	client.setQueryData(environmentQuery(environment.id).queryKey, environment)
+	const archive = `${endpoint}/archive`
+	const updated = { ...environment, version: 2, name: "Updated reports" }
+	let accepted = false
+	let reads = 0
+	const sent = stubApi(({ path, method }) => {
+		if (method === "POST" && path.startsWith(archive)) {
+			if (path !== `${archive}?version=2`) {
+				return {
+					status: 409,
+					body: { error: { type: "conflict_error", message: "The environment changed." } },
+				}
+			}
+			accepted = true
+			return { status: 202, body: { id: environment.id, type: "environment", pending: true } }
+		}
+		return { body: accepted && ++reads > 1 ? { ...updated, archived_at: at } : updated }
+	})
+	const page = await mount(<EnvironmentUnderTest />, client)
+	try {
+		const archives = () => sent.filter(({ method }) => method === "POST").map(({ path }) => path)
+		await click(button(page.container, "Archive"))
+		await waitFor(() => expect(page.container.textContent).toContain("The environment changed."))
+		expect(page.container.textContent).toContain(updated.name)
+		expect(archives()).toEqual([`${archive}?version=1`])
+		await click(button(page.container, "Archive"))
+		await waitFor(() => expect(page.container.textContent).toContain("Archived"))
+		expect(archives()).toEqual([`${archive}?version=1`, `${archive}?version=2`])
+		expect(reads).toBeGreaterThanOrEqual(2)
+		expect(
+			[...page.container.querySelectorAll("button")].map((button) => button.textContent),
+		).not.toContain("Archive")
+	} finally {
+		page.unmount()
+	}
+})

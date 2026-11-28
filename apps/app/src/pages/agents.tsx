@@ -410,12 +410,7 @@ const exportSavedAgent = async (agent: JsonAgent): Promise<void> => {
 
 function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
 	const [edit, setEdit] = useState<Edit | null>(null)
-	const archive = useAction(
-		async () => {
-			await checkfu.agents.archive(agent.id)
-		},
-		{ invalidates: [["agents"]] },
-	)
+	const archive = useAction(checkfu.agents.archive, { invalidates: [["agents"]] })
 	const exportProject = useAction(exportSavedAgent)
 	const archived = agent.archived_at !== null
 	return (
@@ -448,7 +443,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 								variant="destructive"
 								size="sm"
 								disabled={archive.pending}
-								onClick={() => archive.run()}
+								onClick={() => archive.run(agent.id, agent.version)}
 							>
 								Archive
 							</Button>
