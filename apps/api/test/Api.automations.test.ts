@@ -24,6 +24,10 @@ import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
 import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomationSession.command"
+import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
+import { BoundedAgentId, BoundedEnvironmentId } from "@checkfu/domain/Session/AdmitSession.command"
+import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import * as Domain from "@alchemy.run/domain"
 import * as Option from "effect/Option"
@@ -418,8 +422,20 @@ describe("Automations API", () => {
 		run((apiFetch) =>
 			Effect.gen(function* () {
 				const { agentId, environmentId } = yield* prerequisites(apiFetch)
-				const store = yield* call(apiFetch, "POST", "/v1/memory_stores", { name: "Report history" })
+				const store = yield* call<{ id: string }>(apiFetch, "POST", "/v1/memory_stores", {
+					name: "Report history",
+				})
 				expect(store.status).toBe(201)
+				const rejected = yield* call<ErrorBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Daily report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the next report."),
+					schedule: weekdayMornings,
+					resources: [{ type: "memory_store", memory_store_id: store.body.id }],
+				})
+				expect(rejected.status).toBe(400)
+				expect((yield* call<ListBody>(apiFetch, "GET", "/v1/automations")).body.data).toEqual([])
 				const { body: automation } = yield* call<AutomationBody>(
 					apiFetch,
 					"POST",
@@ -481,6 +497,32 @@ describe("Automations API", () => {
 					agent: { id: agentId, version: 1 },
 					session_id: `sess_${id}_1`,
 					error: null,
+				})
+				const opening = yield* OpenAutomationSessionDecision
+				const sessionId = SessionId.make(`sess_${id}_1`)
+				const duplicate = yield* Effect.result(
+					opening.send(
+						new OpenAutomationSession({
+							session_id: sessionId,
+							automation_id: AutomationId.make(id),
+							agent_id: BoundedAgentId.make(agentId),
+							agent_version: 1,
+							environment_id: BoundedEnvironmentId.make(environmentId),
+							title: "Morning report",
+							text: "Write the morning report.",
+						}),
+						{ commandId: sessionId },
+					),
+				)
+				expect(duplicate).toMatchObject({
+					_tag: "Success",
+					success: {
+						events: [
+							{ _tag: "session.created" },
+							{ _tag: "user.message" },
+							{ _tag: "session.status_running" },
+						],
+					},
 				})
 				const one = yield* call<RunBody>(apiFetch, "GET", `/v1/automations/${id}/runs/1`)
 				expect([one.status, one.body]).toEqual([200, recorded])
