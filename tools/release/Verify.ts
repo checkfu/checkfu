@@ -4,7 +4,15 @@ import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import * as Schema from "effect/Schema"
-import { Evidence, RunnerReport, groups, journeys, matrix, surfaces } from "./Verification.ts"
+import {
+	Evidence,
+	RunnerReport,
+	groupNames,
+	groups,
+	journeys,
+	matrix,
+	surfaces,
+} from "./Verification.ts"
 import type { Group, Source } from "./Verification.ts"
 
 const root = resolve(import.meta.dirname, "../..")
@@ -29,7 +37,7 @@ const source = (): Source => {
 }
 
 const run = async (group: Group, directory: string, full: boolean) => {
-	const spec = groups[group]
+	const spec = groups(group)
 	const before = source()
 	const startedAt = new Date().toISOString()
 	const raw = join(directory, `${group}.vitest.json`)
@@ -91,12 +99,10 @@ if (action === "report" || action === "release") {
 	if (inputs.length !== 0 && !full) {
 		throw new Error("Use --full with project or machines to run the full Workerd suite.")
 	}
-	const selected = Object.keys(groups).filter(
-		(group): group is Group => group === action || action === "all",
-	)
+	const selected = groupNames.filter((group) => group === action || action === "all")
 	if (selected.length === 0) {
 		throw new Error(
-			`Usage: bun run verify [all|${Object.keys(groups).join("|")}|report|release] [evidence.json ...]`,
+			`Usage: bun run verify [all|${groupNames.join("|")}|report|release] [evidence.json ...]`,
 		)
 	}
 	for (const group of selected) {

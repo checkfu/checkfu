@@ -1,8 +1,13 @@
 import { expect, it } from "vitest"
-import { matrix } from "./Verification.ts"
-import type { Evidence, Source } from "./Verification.ts"
+import { groups, matrix } from "./Verification.ts"
+import type { Evidence, Group, Source } from "./Verification.ts"
 
 const source: Source = { commit: "candidate", fingerprint: "all-source-bytes", dirty: false }
+const command = (group: Group) => {
+	const { cwd, script } = groups(group)
+	return ["bun", "run", "--cwd", `/checkout/${cwd}`, script]
+}
+
 const execution = (
 	options: { file?: string; status?: string; success?: boolean; duplicate?: boolean } = {},
 ): Evidence => ({
@@ -13,7 +18,7 @@ const execution = (
 	finishedAt: "2026-11-27T00:00:01Z",
 	node: "v24",
 	platform: "linux/x64",
-	command: ["vitest"],
+	command: command("mcp"),
 	exitCode: 0,
 	runner: {
 		success: options.success ?? true,
@@ -43,6 +48,7 @@ it("requires each admission guard independently and preserves its proof scope", 
 	const evidence: Evidence = {
 		...execution(),
 		group: "domain",
+		command: command("domain"),
 		runner: {
 			success: true,
 			testResults: [
@@ -70,6 +76,41 @@ it("requires each admission guard independently and preserves its proof scope", 
 	expect(report.blockers.map(({ id }) => id)).toContain("memory-admission-guard")
 	expect(report.gaps.map(({ id }) => id)).toContain("mounted-admission-proof")
 	expect(report.cases.find(({ id }) => id === "mounted-admission-races")?.status).toBe("unverified")
+})
+
+it("only credits a domain claim when its tag is in its own proof file", () => {
+	const fileProof = "test/Files.verify.test.ts"
+	const mountProof = "test/MountedSession.verify.test.ts"
+	expect(groups("domain").files).toEqual([fileProof, mountProof])
+	for (const [id, expected, wrong] of [
+		["file-domain-proof", fileProof, mountProof],
+		["file-admission-guard", mountProof, fileProof],
+		["artifact-admission-guard", mountProof, fileProof],
+		["memory-admission-guard", mountProof, fileProof],
+	] as const) {
+		const run = (file: string) => {
+			const template = execution()
+			const assertion = template.runner!.testResults[0]!.assertionResults[0]!
+			const input: Evidence = {
+				...template,
+				group: "domain",
+				command: command("domain"),
+				runner: {
+					success: true,
+					testResults: [
+						{
+							name: ["", "checkout", "packages/domain", file].join("/").replaceAll("/", "\\"),
+							assertionResults: [{ ...assertion, tags: ["acceptance", id] }],
+						},
+					],
+				},
+			}
+			return matrix(source, [input]).cases.find((row) => row.id === id)?.status
+		}
+		expect(run(expected), id).toBe("passed")
+		expect(run(wrong), id).toBe("unverified")
+		expect(run(`test/duplicates/packages/domain/${expected}`), id).toBe("unverified")
+	}
 })
 
 it("requires one actual passing case from the registered file and the exact tested source", () => {
@@ -112,6 +153,7 @@ it("credits the project interfaces only for the actions each performs", () => {
 	const evidence: Evidence = {
 		...execution(),
 		group: "project",
+		command: command("project"),
 		runner: {
 			success: true,
 			testResults: [
