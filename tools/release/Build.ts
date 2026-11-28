@@ -324,30 +324,55 @@ const buildCandidates = async (directory: string, commit: string) => {
 	}
 }
 
-const qualify = async (directory: string) => {
+const requireCleanCheckout = () => {
 	if (git("status", "--porcelain") !== "") {
 		throw new Error("Qualify packages from a clean source commit.")
 	}
-	const commit = currentCommit()
+	return currentCommit()
+}
+
+const prepareCandidate = async (directory: string) => {
+	const commit = requireCleanCheckout()
 	await mkdir(directory, { recursive: true })
 	if ((await readdir(directory)).length !== 0) {
 		throw new Error("Choose an empty candidate directory.")
 	}
-	const { recordPath, integrity } = await buildCandidates(directory, commit)
+	const candidate = await buildCandidates(directory, commit)
+	if (requireCleanCheckout() !== commit) {
+		throw new Error("The checkout changed during package preparation.")
+	}
+	return candidate
+}
+
+const qualifyPrepared = async (directory: string, integrity: string) => {
+	const commit = requireCleanCheckout()
+	const recordPath = join(directory, CANDIDATE_RECORD)
+	await qualifiedPackages(recordPath, integrity)
 	execFileSync("bun", ["run", "--cwd", "tools/release", "test"], {
 		cwd: repoRoot,
 		env: { ...process.env, [CANDIDATE_ENV]: recordPath, [CANDIDATE_INTEGRITY_ENV]: integrity },
 		stdio: "inherit",
 		timeout: 6 * 60_000,
 	})
-	const [cli, sdk] = await qualifiedPackages(recordPath, integrity)
-	if (git("status", "--porcelain") !== "") {
+	const packages = await qualifiedPackages(recordPath, integrity)
+	if (requireCleanCheckout() !== commit) {
 		throw new Error("The checkout changed during package qualification.")
 	}
+	const [cli, sdk] = packages
 	const record: Candidates = { commit, packages: [cli.metadata, sdk.metadata] }
 	await writeFile(join(directory, QUALIFIED_RECORD), JSON.stringify(record, null, 2) + "\n", {
 		flag: "wx",
 	})
+	return packages
+}
+
+const printPackages = (
+	directory: string,
+	packages: Awaited<ReturnType<typeof qualifiedPackages>>,
+) => {
+	for (const { metadata } of packages) {
+		process.stdout.write(`${join(directory, metadata.filename)} ${metadata.integrity}\n`)
+	}
 }
 
 export const candidateRecordInput = () => {
@@ -363,17 +388,28 @@ export const candidateRecordInput = () => {
 }
 
 if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) {
-	const [command, destination] = process.argv.slice(2)
-	if (command === "--qualify" && destination !== undefined) {
+	const [command, destination, integrity, ...extra] = process.argv.slice(2)
+	if (extra.length > 0) {
+		throw new Error("Unexpected package build arguments.")
+	}
+	if (command === "--prepare" && destination !== undefined && integrity === undefined) {
+		const candidate = await prepareCandidate(resolve(destination))
+		process.stdout.write(`Candidate record integrity: ${candidate.integrity}\n`)
+	} else if (
+		command === "--qualify-prepared" &&
+		destination !== undefined &&
+		integrity !== undefined
+	) {
 		const directory = resolve(destination)
-		await qualify(directory)
+		printPackages(directory, await qualifyPrepared(directory, integrity))
+	} else if (command === "--qualify" && destination !== undefined && integrity === undefined) {
+		const directory = resolve(destination)
+		const candidate = await prepareCandidate(directory)
+		await qualifyPrepared(directory, candidate.integrity)
 		process.stdout.write(`Qualified packages recorded in ${join(directory, QUALIFIED_RECORD)}\n`)
 	} else if (command === "--verify" && destination !== undefined) {
 		const directory = resolve(destination)
-		const packages = await qualifiedPackages(join(directory, QUALIFIED_RECORD))
-		for (const { metadata } of packages) {
-			process.stdout.write(`${join(directory, metadata.filename)} ${metadata.integrity}\n`)
-		}
+		printPackages(directory, await qualifiedPackages(join(directory, QUALIFIED_RECORD), integrity))
 	} else if ((command === undefined || command === "--cli-only") && destination === undefined) {
 		await buildCliPackage()
 		if (command !== "--cli-only") {
@@ -381,6 +417,8 @@ if (process.argv[1] !== undefined && import.meta.filename === resolve(process.ar
 		}
 		process.stdout.write(`Release packages prepared in ${releaseRoot}\n`)
 	} else {
-		throw new Error("Use --qualify <directory>, --verify <directory>, or --cli-only.")
+		throw new Error(
+			"Use --prepare <directory>, --qualify-prepared <directory> <integrity>, --qualify <directory>, --verify <directory> [integrity], or --cli-only.",
+		)
 	}
 }
