@@ -212,12 +212,26 @@ export const artifactFileQuery = (id: string, version: number, path: string) =>
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 
+const transcriptCursor = (page: EventPage, seen: ReadonlyArray<unknown>) => {
+	const next = page.next_page
+	return typeof next === "string" && next.trim() !== "" && !seen.includes(next) ? next : undefined
+}
+
+export const transcriptCursorBlocked = (transcript: Transcript): boolean => {
+	const page = transcript.pages.at(-1)
+	return (
+		page !== undefined &&
+		page.next_page !== null &&
+		transcriptCursor(page, transcript.pageParams) === undefined
+	)
+}
+
 export const transcriptQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["transcripts", id],
 		queryFn: ({ pageParam, signal }) => checkfu.sessions.events(id, pageParam, signal),
 		initialPageParam: undefined as string | undefined,
-		getNextPageParam: (page) => page.next_page ?? undefined,
+		getNextPageParam: (page, _pages, _param, seen) => transcriptCursor(page, seen),
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 

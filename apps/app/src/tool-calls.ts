@@ -30,9 +30,13 @@ export interface LoadedHistory {
 
 export const loadUntilWaitingCallsSeen = async (
 	loadOlder: () => Promise<LoadedHistory>,
+	continues: () => boolean = () => true,
 ): Promise<null> => {
-	for (;;) {
+	while (continues()) {
 		const loaded = await loadOlder()
+		if (!continues()) {
+			return null
+		}
 		if (loaded.failure !== undefined) {
 			throw loaded.failure
 		}
@@ -40,6 +44,7 @@ export const loadUntilWaitingCallsSeen = async (
 			return null
 		}
 	}
+	return null
 }
 
 export const allowEvent = (id: string) => ({
