@@ -34,6 +34,7 @@ import {
 	mergeHeaderMaps,
 	parseRetryAfterMs,
 	readBoundedResponseText,
+	streamResponseBody,
 } from "./Transport.ts"
 import type { HeaderMap } from "./Transport.ts"
 
@@ -384,8 +385,10 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 							? mergeHeaderMaps(options?.headers, { "last-event-id": null })
 							: options?.headers
 				let lastResponse: HttpClientResponse.HttpClientResponse | undefined
+				const scope = yield* Effect.scope
 				const open = config.open({ reconnect, cursor: loopState.cursor }).pipe(
 					Effect.provideService(CurrentRequestTransportMeta, {
+						scope,
 						...(extraHeaders === undefined ? {} : { headers: extraHeaders }),
 						onResponse: (response) => {
 							lastResponse = response
@@ -494,10 +497,11 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 					}
 				}
 
+				const stream = streamResponseBody(response)
 				const body =
 					idleTimeoutMs === 0
-						? response.stream
-						: response.stream.pipe(
+						? stream
+						: stream.pipe(
 								Stream.timeoutOrElse({
 									duration: Duration.millis(idleTimeoutMs),
 									orElse: () =>

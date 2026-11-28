@@ -9,9 +9,13 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientError from "effect/http/HttpClientError"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import * as Fiber from "effect/Fiber"
+import * as Queue from "effect/Queue"
+import type * as Cause from "effect/Cause"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { CheckfuConfigError, isAPIError, isApiErrorEnvelope } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
@@ -29,6 +33,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 export type HeaderMap = Readonly<Record<string, string | null | undefined>>
 
 export interface PerRequestTransportMeta {
+	readonly scope?: Scope.Scope
 	readonly headers?: HeaderMap | undefined
 	readonly onResponse?: ((response: HttpClientResponse.HttpClientResponse) => void) | undefined
 }
@@ -47,12 +52,93 @@ export const cancelResponseBody = (
 	const webResponse = HttpClientResponse.toWeb(response)
 	if (Option.isSome(webResponse) && webResponse.value.body !== null) {
 		const body = webResponse.value.body
-		return Effect.tryPromise({
-			try: () => body.cancel(),
-			catch: () => undefined,
-		}).pipe(Effect.ignore)
+		return Effect.sync(() => {
+			void body.cancel().catch(() => undefined)
+		})
 	}
 	return Effect.void
+}
+
+const uncoupledBody = (body: ReadableStream<Uint8Array>) => {
+	const reader = body.getReader()
+	let active = true
+	const release = () => {
+		active = false
+		reader.releaseLock()
+	}
+	return new ReadableStream<Uint8Array>(
+		{
+			async pull(controller) {
+				try {
+					const next = await reader.read()
+					if (!active) {
+						return
+					}
+					if (next.done) {
+						release()
+						controller.close()
+					} else {
+						controller.enqueue(next.value)
+					}
+				} catch (error) {
+					if (active) {
+						release()
+						controller.error(error)
+					}
+				}
+			},
+			cancel(reason: unknown) {
+				if (active) {
+					void reader.cancel(reason).catch(() => undefined)
+					release()
+				}
+			},
+		},
+		{ highWaterMark: 0 },
+	)
+}
+
+const uncoupledStream = <A, E>(source: Stream.Stream<A, E>): Stream.Stream<A, E> =>
+	Stream.unwrap(
+		Effect.gen(function* () {
+			const chunks = yield* Queue.bounded<A, E | Cause.Done>(1)
+			const produce = Effect.scoped(
+				Effect.gen(function* () {
+					const pull = yield* Stream.toPull(source)
+					yield* pull.pipe(
+						Effect.flatMap((items) => Queue.offerAll(chunks, items)),
+						Effect.forever,
+						Effect.catchCause((cause) => Queue.failCause(chunks, cause)),
+					)
+				}),
+			)
+			// The terminal pull reaches the consumer before the provider's scope
+			// closes. Opaque provider finalizers cannot hold the SDK request scope.
+			yield* Effect.acquireRelease(Effect.forkDetach(produce), (producer) =>
+				Queue.shutdown(chunks).pipe(
+					Effect.andThen(Effect.forkDetach(Fiber.interrupt(producer))),
+					Effect.asVoid,
+				),
+			)
+			return Stream.fromQueue(chunks)
+		}),
+	)
+
+export const streamResponseBody = (
+	response: HttpClientResponse.HttpClientResponse,
+): Stream.Stream<Uint8Array, HttpClientError.HttpClientError> => {
+	const webResponse = HttpClientResponse.toWeb(response)
+	const body = Option.isSome(webResponse) ? webResponse.value.body : null
+	if (body === null) {
+		return uncoupledStream(response.stream)
+	}
+	return Stream.fromReadableStream({
+		evaluate: () => uncoupledBody(body),
+		onError: (cause) =>
+			new HttpClientError.HttpClientError({
+				reason: new HttpClientError.DecodeError({ request: response.request, response, cause }),
+			}),
+	})
 }
 
 export const readBoundedResponseText = (
@@ -64,7 +150,7 @@ export const readBoundedResponseText = (
 		const chunks: Array<Uint8Array> = []
 		let totalBytes = 0
 		let truncated = false
-		const readBody = response.stream.pipe(
+		const readBody = streamResponseBody(response).pipe(
 			Stream.takeUntil((chunk) => {
 				if (totalBytes + chunk.byteLength > maxBytes) {
 					const remaining = maxBytes - totalBytes
@@ -85,9 +171,6 @@ export const readBoundedResponseText = (
 		)
 		const outcome = yield* Effect.timeoutOption(readBody, Duration.millis(timeoutMs))
 		const timedOut = Option.isNone(outcome)
-		if (truncated || timedOut) {
-			yield* cancelResponseBody(response)
-		}
 		if (totalBytes === 0) {
 			return ""
 		}
@@ -350,11 +433,20 @@ export const makeAuthorizedHttpClient = (
 		((status: number) =>
 			`Unexpected HTTP ${status} redirect (redirects are not followed). Check baseUrl.`)
 
+	const scopedClient = HttpClient.withScope(rawHttpClient)
 	return rawHttpClient.pipe(
-		HttpClient.transformResponse((effect) =>
+		HttpClient.transform((effect, request) =>
 			Effect.gen(function* () {
 				const meta = yield* CurrentRequestTransportMeta
-				const response = yield* Effect.provideService(effect, FetchHttpClient.RequestInit, {
+				const execute =
+					meta?.scope === undefined
+						? effect
+						: Effect.provideService(
+								scopedClient.postprocess(Effect.succeed(request)),
+								Scope.Scope,
+								meta.scope,
+							)
+				const response = yield* Effect.provideService(execute, FetchHttpClient.RequestInit, {
 					...existingRequestInit,
 					redirect: "manual",
 				})
