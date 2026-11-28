@@ -12,7 +12,7 @@ import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { checkfu } from "../api.ts"
-import { editorOf } from "../memory-edit.ts"
+import { editorOf, rebaseOnto } from "../memory-edit.ts"
 import type { MemoryEdit } from "../memory-edit.ts"
 import { Pager } from "../pager.tsx"
 import {
@@ -274,7 +274,8 @@ function MemoryEditor({
 	const [edit, setEdit] = useState<MemoryEdit>()
 	const { text, base, overtaken, canSave } = editorOf(memory, edit)
 	const save = useAction(
-		async (text: string) => checkfu.memoryStores.updateMemory(memoryStore.id, base, text),
+		async (draft: MemoryEdit) =>
+			checkfu.memoryStores.updateMemory(memoryStore.id, draft.base, draft.text),
 		{
 			invalidates: [["memories", memoryStore.id]],
 			then: () => setEdit(undefined),
@@ -326,8 +327,8 @@ function MemoryEditor({
 				className="space-y-2"
 				onSubmit={(event) => {
 					event.preventDefault()
-					if (edit !== undefined) {
-						save.run(edit.text)
+					if (edit !== undefined && writable && canSave && !save.pending) {
+						save.run(edit)
 					}
 				}}
 			>
@@ -338,13 +339,34 @@ function MemoryEditor({
 					value={text}
 					onChange={(event) => setEdit({ base, text: event.target.value })}
 				/>
-				{overtaken ? (
+				{overtaken && edit !== undefined ? (
 					<Callout>
-						This memory changed while you were editing it (now v{memory.version}). Your text is kept
-						here and cannot be saved over the newer version.{" "}
-						<Button variant="outline" size="sm" onClick={() => setEdit(undefined)}>
-							Discard my edit and load the latest
-						</Button>
+						<p>
+							This memory was saved as v{memory.version} while you were editing v{base.version}.
+							{writable ? " Saving your text would replace the newer version." : null}
+						</p>
+						<div className="mt-2 flex flex-wrap gap-2">
+							{writable ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={save.pending}
+									onClick={() => setEdit(rebaseOnto(memory, edit))}
+								>
+									Keep my text and replace v{memory.version}
+								</Button>
+							) : null}
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								disabled={save.pending}
+								onClick={() => setEdit(undefined)}
+							>
+								Discard my edit and load the latest
+							</Button>
+						</div>
 					</Callout>
 				) : null}
 				{[save.error, remove.error].map((message) =>

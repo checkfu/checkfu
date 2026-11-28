@@ -1,6 +1,6 @@
 import type { JsonMemory } from "@checkfu/sdk/client"
 import { describe, expect, it } from "vitest"
-import { editorOf } from "../src/memory-edit.ts"
+import { editorOf, rebaseOnto } from "../src/memory-edit.ts"
 
 const memory = (version: number, content: string): JsonMemory => ({
 	id: "mem_1",
@@ -31,6 +31,24 @@ describe("memory editor", () => {
 		const editor = editorOf(memory(2, "Theirs."), edit)
 		expect(editor).toMatchObject({ text: "Mine.", overtaken: true, canSave: false })
 		expect(editor.base.content_sha256).toBe("sha-of-First.")
+	})
+
+	it("keeps the draft and uses only the version accepted by the editor as the save precondition", () => {
+		const latest = memory(2, "Theirs.")
+		const draft = rebaseOnto(latest, { base: memory(1, "First."), text: "Mine." })
+		const rebased = editorOf(latest, draft)
+		expect(rebased).toMatchObject({
+			text: "Mine.",
+			base: { version: 2, content_sha256: "sha-of-Theirs." },
+			overtaken: false,
+			canSave: true,
+		})
+		expect(editorOf(memory(3, "Newer."), draft)).toMatchObject({
+			text: "Mine.",
+			base: { version: 2 },
+			overtaken: true,
+			canSave: false,
+		})
 	})
 
 	it("has nothing to save when the text is back to what it started as", () => {
