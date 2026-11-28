@@ -104,6 +104,58 @@ export const MAX_MCP_BODY_BYTES = Math.max(
 	MAX_ARTIFACT_BODY_BYTES + MCP_ENVELOPE_BYTES,
 )
 
+const CREDENTIAL_CHECK_BYTES = 4096
+const CREDENTIAL_CHECK_CHUNKS = CREDENTIAL_CHECK_BYTES
+const CREDENTIAL_CHECK_TIMEOUT = "5 seconds"
+
+const abandon = (reader: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array>) => {
+	void reader.cancel().catch(() => undefined)
+}
+
+const readCredentialVerdict = async (response: Response, signal: AbortSignal): Promise<boolean> => {
+	const body = response.body
+	if (body === null) {
+		return false
+	}
+	const announced = response.headers.get("content-length")
+	if (
+		announced !== null &&
+		/^\d+$/u.test(announced) &&
+		Number(announced) > CREDENTIAL_CHECK_BYTES
+	) {
+		abandon(body)
+		return false
+	}
+	const reader = body.getReader()
+	const stop = () => abandon(reader)
+	const bytes = new Uint8Array(CREDENTIAL_CHECK_BYTES)
+	let size = 0
+	let chunks = 0
+	signal.addEventListener("abort", stop, { once: true })
+	try {
+		for (;;) {
+			signal.throwIfAborted()
+			const next = await reader.read()
+			signal.throwIfAborted()
+			if (next.done) {
+				return isVerified(
+					JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size))),
+				)
+			}
+			chunks += 1
+			if (chunks > CREDENTIAL_CHECK_CHUNKS || size + next.value.byteLength > bytes.length) {
+				stop()
+				return false
+			}
+			bytes.set(next.value, size)
+			size += next.value.byteLength
+		}
+	} finally {
+		signal.removeEventListener("abort", stop)
+		reader.releaseLock()
+	}
+}
+
 const admission = <E, R>(
 	app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<
@@ -124,19 +176,29 @@ const admission = <E, R>(
 			return yield* unauthorizedResponse
 		}
 		const verdict = yield* Effect.tryPromise({
-			try: async (): Promise<"accepted" | "rejected" | "unverified"> => {
+			try: async (signal): Promise<"accepted" | "rejected" | "unverified"> => {
 				const response = await api.fetch(`${API_ORIGIN}${CREDENTIAL_CHECK_PATH}`, {
 					headers: credentialHeaders(request.headers),
+					signal,
 				})
-				if (response.status === 200) {
-					const body: unknown = await response.json()
-					return isVerified(body) ? "accepted" : "unverified"
+				if (signal.aborted || response.status !== 200) {
+					if (response.body !== null) {
+						abandon(response.body)
+					}
+					signal.throwIfAborted()
+					return response.status === 401 ? "rejected" : "unverified"
 				}
-				await response.body?.cancel()
-				return response.status === 401 ? "rejected" : "unverified"
+				return (await readCredentialVerdict(response, signal)) ? "accepted" : "unverified"
 			},
 			catch: () => "unverified" as const,
-		}).pipe(Effect.orElseSucceed(() => "unverified" as const))
+		}).pipe(
+			Effect.timeoutOrElse({
+				duration: CREDENTIAL_CHECK_TIMEOUT,
+				orElse: () => Effect.succeed("unverified" as const),
+			}),
+			Effect.orElseSucceed(() => "unverified" as const),
+			Effect.interruptible,
+		)
 		if (verdict === "rejected") {
 			return yield* unauthorizedResponse
 		}

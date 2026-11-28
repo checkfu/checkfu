@@ -17,6 +17,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
@@ -1023,6 +1024,158 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 			}
 		}).pipe(Effect.scoped),
 	)
+
+	it.live(
+		"bounds credential verdict bodies and closes refused responses without tool dispatch",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* makeTestServer
+				const headers = { authorization: "Bearer " + TEST_API_KEY }
+				const operation = () =>
+					callToolRequest("environments_createEnvironment", { body: { name: "denied" } }, headers)
+				const verifying = '{"type":"authentication_verified"}'
+				const send = (request: Request, response: () => Response) =>
+					server.fetch(request, {
+						fetch: async (input, init) => {
+							const check = new Request(input, init)
+							expect(new URL(check.url).pathname).toBe(CREDENTIAL_CHECK_PATH)
+							expect(check.headers.get("authorization")).toBe(headers.authorization)
+							return response()
+						},
+					})
+				const exact = yield* send(
+					listToolsRequest("/mcp", headers),
+					() => new Response(verifying.padEnd(4096)),
+				)
+				expect(exact.status).toBe(200)
+
+				for (const scenario of ["declared", "streamed", "unauthorized", "empty"] as const) {
+					let pulls = 0
+					let cancelled = 0
+					const body = new ReadableStream<Uint8Array>(
+						{
+							pull: (controller) => {
+								pulls += 1
+								if (scenario === "empty") {
+									if (pulls <= 4100) {
+										controller.enqueue(new Uint8Array())
+									} else {
+										controller.enqueue(new TextEncoder().encode(verifying))
+										controller.close()
+									}
+									return
+								}
+								controller.enqueue(new Uint8Array(4097))
+							},
+							cancel: () => {
+								cancelled += 1
+								return new Promise<void>(() => {})
+							},
+						},
+						{ highWaterMark: 0 },
+					)
+					const response = yield* send(
+						operation(),
+						() =>
+							new Response(body, {
+								status: scenario === "unauthorized" ? 401 : 200,
+								...(scenario === "declared" ? { headers: { "content-length": "4097" } } : {}),
+							}),
+					)
+					expect(response.status).toBe(scenario === "unauthorized" ? 401 : 503)
+					expect(pulls).toBe({ streamed: 1, declared: 0, unauthorized: 0, empty: 4097 }[scenario])
+					expect(cancelled).toBe(1)
+					expect(body.locked).toBe(false)
+				}
+				expect(server.apiRequests).toHaveLength(0)
+			}).pipe(Effect.scoped),
+	)
+
+	it.live(
+		"times out a bound credential request or body and aborts the binding",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* makeTestServer
+				const verify = (phase: "headers" | "body") =>
+					Effect.gen(function* () {
+						let signal: AbortSignal | undefined
+						const paths: Array<string> = []
+						let cancelled = false
+						const body = new ReadableStream<Uint8Array>({
+							cancel: () => {
+								cancelled = true
+								return new Promise<void>(() => {})
+							},
+						})
+						const response = yield* server.fetch(
+							callToolRequest(
+								"environments_createEnvironment",
+								{ body: { name: "denied" } },
+								{
+									authorization: "Bearer " + TEST_API_KEY,
+								},
+							),
+							{
+								fetch: async (input, init) => {
+									const check = new Request(input, init)
+									signal = check.signal
+									paths.push(new URL(check.url).pathname)
+									return phase === "headers"
+										? await new Promise<Response>(() => {})
+										: new Response(body)
+								},
+							},
+						)
+						expect(response.status).toBe(503)
+						expect(signal?.aborted).toBe(true)
+						expect(cancelled).toBe(phase === "body")
+						expect(paths).toEqual([CREDENTIAL_CHECK_PATH])
+						expect(body.locked).toBe(false)
+					})
+				yield* Effect.all([verify("headers"), verify("body")], { concurrency: "unbounded" })
+				expect(server.apiRequests).toHaveLength(0)
+			}).pipe(Effect.scoped),
+		12_000,
+	)
+
+	it.live("aborts credential verification when the MCP caller disconnects", () => {
+		const caller = new AbortController()
+		return Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const bound = Promise.withResolvers<AbortSignal>()
+			const paths: Array<string> = []
+			const request = new Request(
+				callToolRequest(
+					"environments_createEnvironment",
+					{ body: { name: "denied" } },
+					{
+						authorization: "Bearer " + TEST_API_KEY,
+					},
+				),
+				{ signal: caller.signal },
+			)
+			const response = yield* Effect.forkChild(
+				server.fetch(request, {
+					fetch: async (input, init) => {
+						const check = new Request(input, init)
+						paths.push(new URL(check.url).pathname)
+						bound.resolve(check.signal)
+						return new Promise<Response>((_resolve, reject) => {
+							check.signal.addEventListener("abort", () => reject(check.signal.reason), {
+								once: true,
+							})
+						})
+					},
+				}),
+			)
+			const signal = yield* Effect.promise(() => bound.promise)
+			caller.abort()
+			const refused = yield* Fiber.join(response).pipe(Effect.timeout("1 second"))
+			expect(refused.status).toBe(499)
+			expect(signal.aborted).toBe(true)
+			expect(paths).toEqual([CREDENTIAL_CHECK_PATH])
+		}).pipe(Effect.scoped)
+	})
 
 	it.live("requires a credential on every route but the health check", () =>
 		Effect.gen(function* () {
