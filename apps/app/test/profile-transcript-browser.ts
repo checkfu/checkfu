@@ -7,6 +7,7 @@ import type { ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { extname, join, resolve } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
+import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import {
 	appendBatch,
 	historyRowCount,
@@ -457,12 +458,22 @@ const profile = async (
 			)
 			await press("Enter", 13)
 			await until(() => server.answers().length > 0, "the submitted tool result")
+			const answer = {
+				id: `evt_fixture_${finalReply.seq + 1}`,
+				seq: finalReply.seq + 1,
+				created_at: finalReply.created_at,
+				processed_at: finalReply.processed_at,
+				type: "user.custom_tool_result",
+				custom_tool_use_id: waitingCallId,
+				content: [{ type: "text", text: "Fixture answer" }],
+			} satisfies Extract<JsonSessionEvent, { type: "user.custom_tool_result" }>
+			write([answer])
 			await until(
 				() =>
 					evaluate<boolean>(
-						`transcriptProbe.waiting()[0].closest("form").querySelector("button[type=submit]").disabled === false`,
+						'transcriptProbe.list().textContent.includes("Your application answered")',
 					),
-				"the answer button to settle",
+				"the accepted answer to appear in the transcript",
 			)
 			await evaluate("transcriptProbe.frame().then(transcriptProbe.frame).then(() => true)")
 			assert.deepEqual(server.answers(), [
@@ -479,6 +490,108 @@ const profile = async (
 			process.stdout.write(
 				`${json({ size, correctness: true, previewReplaced: true, anchor, answer: waitingCallId })}\n`,
 			)
+		}
+	}
+}
+
+const livenessProbe = `
+(() => {
+	const NativeEventSource = globalThis.EventSource
+	const events = []
+	let current
+	globalThis.EventSource = class extends NativeEventSource {
+		constructor(...args) {
+			super(...args)
+			current = this
+			for (const type of ["open", "error"]) {
+				this.addEventListener(type, () => events.push({ type, state: this.readyState, at: performance.now() }))
+			}
+		}
+	}
+	globalThis.observeStreamLiveness = () => ({
+		state: current?.readyState,
+		events,
+		banner: document.body.textContent.includes("Live updates were interrupted."),
+	})
+})()
+`
+
+interface StreamObservation {
+	readonly state: number
+	readonly events: ReadonlyArray<{
+		readonly type: string
+		readonly state: number
+		readonly at: number
+	}>
+	readonly banner: boolean
+}
+
+const profileLiveness = async (
+	browser: Awaited<ReturnType<typeof devtools>>,
+	server: ReturnType<typeof fixtureServer>,
+	origin: string,
+) => {
+	const observe = () => browser.evaluate<StreamObservation>("globalThis.observeStreamLiveness()")
+	const observeMs = 6500
+	for (const kind of ["silent", "keepalive", "abrupt-close"] as const) {
+		const fixture = server.prepare(100)
+		await browser.send("Page.navigate", {
+			url: `${origin}/sessions/${transcriptSession.id}?liveness=${kind}`,
+		})
+		const stream = await until(() => server.connection(), "the liveness event stream")
+		await until(
+			async () => (await observe()).events[0]?.type === "open",
+			"the browser EventSource to open",
+		)
+		const event = reply(fixture.newest + 1)
+		streamEvents(stream, [event])
+		await until(
+			() =>
+				browser.evaluate<boolean>(
+					`transcriptProbe.list()?.lastElementChild?.textContent.includes(${json(rowLabel(event.seq))})`,
+				),
+			"the new sequence to render",
+		)
+		const start = performance.now()
+		let heartbeats = 0
+		const keepalive =
+			kind === "keepalive"
+				? setInterval(() => {
+						stream.write(": keepalive\n\n")
+						heartbeats += 1
+					}, 300)
+				: undefined
+		try {
+			if (kind === "abrupt-close") {
+				stream.socket?.destroy()
+				await until(() => server.opened() === 2, "automatic EventSource resume")
+				assert.equal(server.resumeId(), String(event.seq))
+				await until(
+					async () =>
+						(await observe()).events.some(({ type }) => type === "open") &&
+						(await observe()).events.some(({ type }) => type === "error") &&
+						(await observe()).state === 1,
+					"the reopened EventSource",
+				)
+			} else {
+				await delay(observeMs)
+				assert.equal(server.opened(), 1)
+				if (kind === "keepalive") {
+					assert.ok(heartbeats > 1)
+				}
+			}
+			const observation = await observe()
+			assert.equal(observation.state, 1)
+			assert.equal(observation.banner, false)
+			assert.deepEqual(
+				observation.events.map(({ type }) => type),
+				kind === "abrupt-close" ? ["open", "error", "open"] : ["open"],
+			)
+			process.stdout.write(
+				`${json({ kind, elapsedMs: Math.round(performance.now() - start), heartbeats, sequence: event.seq, resumeId: server.resumeId(), ...observation })}\n`,
+			)
+		} finally {
+			clearInterval(keepalive)
 		}
 	}
 }
@@ -530,7 +643,13 @@ try {
 		runImmediately: true,
 	})
 	assert.equal(await browser.evaluate("typeof globalThis.transcriptProbe"), "object")
-	await profile(browser, server, `http://127.0.0.1:${address.port}`)
+	const origin = `http://127.0.0.1:${address.port}`
+	if (process.argv.includes("--liveness")) {
+		await browser.send("Page.addScriptToEvaluateOnNewDocument", { source: livenessProbe })
+		await profileLiveness(browser, server, origin)
+	} else {
+		await profile(browser, server, origin)
+	}
 } finally {
 	browser?.close()
 	const exited = new Promise<void>((done) => {
