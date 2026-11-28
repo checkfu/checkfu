@@ -23,7 +23,7 @@ import * as HttpApiGroup from "effect/http-api/HttpApiGroup"
 import * as OpenApi from "effect/http-api/OpenApi"
 import * as Schema from "effect/Schema"
 import { generateCliFiles } from "../src/CliTransformer.ts"
-import { REPO_ROOT, runGenerate } from "../src/Generate.ts"
+import { REPO_ROOT, runGenerate, runGenerateCommand } from "../src/Generate.ts"
 import { exportDeterministicOpenApiJson } from "../src/OpenApiExport.ts"
 import { generateSdkFiles } from "../src/SdkTransformer.ts"
 import { buildSurfaceCatalog } from "../src/SurfaceCatalog.ts"
@@ -859,6 +859,41 @@ describe("Cloudflare Forge pipeline", () => {
 		}
 		const collisionForge = parse(JSON.stringify(collisionSpec))
 		expect(() => buildSurfaceCatalog(collisionForge)).toThrow(/Collision between subgroup/)
+	})
+
+	it("validates generator arguments before running either mode", () => {
+		const repoRoot = mkdtempSync(join(tmpdir(), "checkfu-forge-arguments-"))
+		try {
+			copyFileSync(join(REPO_ROOT, ".oxfmtrc.json"), join(repoRoot, ".oxfmtrc.json"))
+			symlinkSync(join(REPO_ROOT, "node_modules"), join(repoRoot, "node_modules"), "junction")
+			const calls: Array<boolean | undefined> = []
+			const generate: typeof runGenerate = (options) => {
+				calls.push(options?.check)
+				return runGenerate({ repoRoot, check: options?.check ?? false })
+			}
+			expect(runGenerateCommand([], generate)).toBe(0)
+			const stale = join(repoRoot, "apps/cli/src/generated/Stale.ts")
+			const sentinel = "these bytes belong to the fixture\n"
+			writeFileSync(stale, sentinel)
+			for (const args of [
+				["--chek"],
+				["output"],
+				["--check", "--unknown"],
+				["--check", "--check"],
+			]) {
+				expect(runGenerateCommand(args, generate)).toBe(1)
+				expect(readFileSync(stale, "utf8")).toBe(sentinel)
+			}
+			expect(calls).toEqual([false])
+			expect(runGenerateCommand(["--check"], generate)).toBe(1)
+			expect(readFileSync(stale, "utf8")).toBe(sentinel)
+			expect(runGenerateCommand([], generate)).toBe(0)
+			expect(existsSync(stale)).toBe(false)
+			expect(runGenerateCommand(["--check"], generate)).toBe(0)
+			expect(calls).toEqual([false, true, false, true])
+		} finally {
+			rmSync(repoRoot, { recursive: true, force: true })
+		}
 	})
 
 	it("checks and removes stale files only within generated directories", () => {

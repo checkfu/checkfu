@@ -207,12 +207,20 @@ export const runGenerate = (options?: {
 	return { ok: true, drifted: [] }
 }
 
+export const runGenerateCommand = (
+	args: ReadonlyArray<string>,
+	generate: typeof runGenerate = runGenerate,
+): number => {
+	const check = args.length === 1 && args[0] === "--check"
+	if (args.length !== 0 && !check) {
+		process.stderr.write("Usage: bun run generate [--check]\n")
+		return 1
+	}
+	return generate({ check }).ok ? 0 : 1
+}
+
 const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === import.meta.filename
 
 if (isMain) {
-	const check = process.argv.includes("--check")
-	const result = runGenerate({ check })
-	if (!result.ok) {
-		process.exit(1)
-	}
+	process.exitCode = runGenerateCommand(process.argv.slice(2))
 }
