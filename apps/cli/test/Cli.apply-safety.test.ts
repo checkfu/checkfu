@@ -267,6 +267,82 @@ it("accepts a project-root alias while preserving the physical project's lock an
 		),
 	))
 
+const lockHash = "0".repeat(64)
+const lockedReporter = { kind: "agent", id: "agent_reporter", hash: lockHash } as const
+
+it.each([
+	{
+		path: "./agents//reporter.yaml",
+		entries: { resources: { "./agents//reporter.yaml": lockedReporter } },
+	},
+	{
+		path: "./agents/reporter.yaml/",
+		entries: {
+			resources: {
+				[`./${reporter}`]: lockedReporter,
+				"./agents/reporter.yaml/": { ...lockedReporter, id: "agent_other" },
+			},
+		},
+	},
+	{
+		path: ".//agents/reporter.yaml",
+		entries: {
+			pending_creates: {
+				".//agents/reporter.yaml": { kind: "agent", key: "cli_original", hash: lockHash },
+			},
+		},
+	},
+	{
+		path: "./environments//cloud.yaml",
+		entries: {
+			pending_creates: {
+				[`./${report}`]: {
+					kind: "automation",
+					key: "cli_original",
+					hash: lockHash,
+					dependencies: {
+						agent: { id: "agent_reporter", version: 1, path: `./${reporter}` },
+						environment_id: { id: "env_cloud", path: "./environments//cloud.yaml" },
+					},
+				},
+			},
+		},
+	},
+] satisfies ReadonlyArray<{ path: string; entries: Partial<ProjectLockfile> }>)(
+	"refuses the noncanonical lock path $path before accessing the API",
+	({ path, entries }) =>
+		Effect.runPromise(
+			testProject((project) =>
+				Effect.gen(function* () {
+					const { apply, file, fs, write } = project
+					yield* standardProject(project)
+					const lockfile = "checkfu-lock.json"
+					const contents = formatProjectLockfile({
+						version: 1,
+						base_url: "http://localhost:1337",
+						resources: {},
+						...entries,
+					})
+					yield* write(lockfile, contents)
+					const requests: Array<string> = []
+					for (const flag of ["--dry-run", "--yes"]) {
+						const result = yield* apply(["."], [flag], {
+							interceptFetch: (next, request) => {
+								requests.push(request.method)
+								return next(request)
+							},
+						})
+						expect(result.exitCode).toBe(USAGE_EXIT_CODE)
+						expect(result.stderr).toContain("invalid lockfile")
+						expect(result.stderr).toContain(path)
+						expect(requests).toEqual([])
+						expect(yield* fs.readFileString(file(lockfile))).toBe(contents)
+					}
+				}),
+			),
+		),
+)
+
 it("rejects explicit inputs and references beneath a symlinked directory", () =>
 	Effect.runPromise(
 		testProject(({ fs, file, write, apply }) =>

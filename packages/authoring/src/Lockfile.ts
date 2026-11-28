@@ -5,8 +5,18 @@ import { resourceKinds } from "./Project.ts"
 export const projectLockfileName = "checkfu-lock.json"
 
 const fingerprint = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
+const validateResourceKey = (path: string) =>
+	path.startsWith("./") &&
+	path
+		.slice(2)
+		.split("/")
+		.every((part) => part !== "" && part !== "." && part !== ".." && !part.includes("\\"))
+		? true
+		: `Expected a canonical project-relative resource path, got ${JSON.stringify(path)}.`
 const resourceKey = Schema.String.check(
-	Schema.isPattern(/^\.\/(?!\.\.?(?:\/|$))(?!.*\/\.\.?(?:\/|$))[^\\]+$/u),
+	Schema.makeFilter(validateResourceKey, {
+		expected: "a canonical project-relative resource path",
+	}),
 )
 const resourceId = Schema.String.check(Schema.isPattern(/^(?:agent|env|auto)_[A-Za-z0-9_-]+$/u))
 
@@ -17,10 +27,14 @@ const LockEntry = Schema.Struct({
 })
 export type LockEntry = typeof LockEntry.Type
 
-const uniqueOwners = <Entry>(identityOf: (entry: Entry) => string) =>
+const resourceOwners = <Entry>(identityOf: (entry: Entry) => string) =>
 	Schema.makeFilter((resources: Readonly<Record<string, Entry>>) => {
 		const owners = new Map<string, string>()
 		for (const path of Object.keys(resources).sort()) {
+			const validKey = validateResourceKey(path)
+			if (validKey !== true) {
+				return validKey
+			}
 			const entry = resources[path]
 			if (entry === undefined) {
 				continue
@@ -35,8 +49,8 @@ const uniqueOwners = <Entry>(identityOf: (entry: Entry) => string) =>
 		return true
 	})
 
-const settledResources = Schema.Record(resourceKey, LockEntry).check(
-	uniqueOwners((entry: LockEntry) => `${entry.kind} ${entry.id}`),
+const settledResources = Schema.Record(Schema.String, LockEntry).check(
+	resourceOwners((entry: LockEntry) => `${entry.kind} ${entry.id}`),
 )
 
 const pendingIdentity = {
@@ -60,8 +74,8 @@ const PendingCreate = Schema.Union([
 ])
 export type PendingCreate = typeof PendingCreate.Type
 
-const pendingCreates = Schema.Record(resourceKey, PendingCreate).check(
-	uniqueOwners((entry: PendingCreate) => `${entry.kind} create request ${entry.key}`),
+const pendingCreates = Schema.Record(Schema.String, PendingCreate).check(
+	resourceOwners((entry: PendingCreate) => `${entry.kind} create request ${entry.key}`),
 )
 
 export const ProjectLockfile = Schema.fromJsonString(
