@@ -10,24 +10,24 @@ const RESULT_CHUNK_BYTES = 4096
 const MAX_INLINE_RESULT_BYTES = 16 * 1024
 const encoder = new TextEncoder()
 
-const decodeArguments = Schema.decodeUnknownOption(
-	Schema.Struct({
-		name: ArtifactName,
-		collection: Schema.String.check(Schema.isMinLength(1)),
-		operation: Schema.Literals(ARTIFACT_DATA_OPERATIONS),
-		id: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
-		data: Schema.optionalKey(Schema.Json),
-		key: Schema.optionalKey(
-			Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(CLIENT_EVENT_ID_MAX_LENGTH)),
+export const ArtifactDataToolArguments = Schema.Struct({
+	name: ArtifactName,
+	collection: Schema.String.check(Schema.isMinLength(1)),
+	operation: Schema.Literals(ARTIFACT_DATA_OPERATIONS),
+	id: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
+	data: Schema.optionalKey(Schema.Json),
+	key: Schema.optionalKey(
+		Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(CLIENT_EVENT_ID_MAX_LENGTH)),
+	),
+	page: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
+	limit: Schema.optionalKey(
+		Schema.NullOr(
+			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_ARTIFACT_DATA_LIMIT })),
 		),
-		page: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1)))),
-		limit: Schema.optionalKey(
-			Schema.NullOr(
-				Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_ARTIFACT_DATA_LIMIT })),
-			),
-		),
-	}),
-)
+	),
+})
+
+const decodeArguments = Schema.decodeUnknownOption(ArtifactDataToolArguments)
 
 const told = (text: string, isError: boolean): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],

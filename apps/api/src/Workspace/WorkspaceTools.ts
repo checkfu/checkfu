@@ -9,8 +9,9 @@ import {
 	SESSION_OUTPUTS_PATH,
 } from "./SessionOutputs.ts"
 import * as Schema from "effect/Schema"
+import { ArtifactToolArguments } from "./ArtifactTool.ts"
+import { ArtifactDataToolArguments } from "./ArtifactDataTool.ts"
 import {
-	ARTIFACT_DATA_OPERATIONS,
 	DEFAULT_ARTIFACT_DATA_LIMIT,
 	MAX_ARTIFACT_DATA_LIMIT,
 	MAX_TOOL_ARTIFACT_FILE_BYTES,
@@ -33,68 +34,47 @@ const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole 
 export const BASH_SECONDS = 120
 export const MAX_BASH_SECONDS = 600
 
+const BashToolArguments = Schema.Struct({
+	command: Schema.String.check(Schema.isMinLength(1)),
+	cwd: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
+	timeout: Schema.optionalKey(
+		Schema.Int.check(
+			Schema.isGreaterThanOrEqualTo(1),
+			Schema.isLessThanOrEqualTo(MAX_BASH_SECONDS),
+		),
+	),
+})
+
+export const decodeBashToolArguments = Schema.decodeUnknownOption(BashToolArguments)
+
+const toolParameters = (argumentsSchema: Schema.Constraint): WorkspaceTool["parameters"] => {
+	const { schema, definitions } = Schema.toJsonSchemaDocument(argumentsSchema, {
+		onExcessProperty: "error",
+		referencePolicy: () => undefined,
+	})
+	if (Object.keys(definitions).length !== 0 || schema.type !== "object") {
+		throw new Error("Workspace tool arguments must produce a self-contained object schema.")
+	}
+	return { ...schema, type: "object" }
+}
+
 export const BASH_TOOL: WorkspaceTool = {
 	name: "bash",
 	description: `Run a command with bash in the session's Linux machine, which starts the first time this is called. \`cwd\` is the directory to run in, /workspace when left out. Use /workspace for working files. Write deliverables to ${SESSION_OUTPUTS_PATH} to save them for the user after the turn completes. The machine and the file tools share both directories. The machine saves both when it sleeps after a period of inactivity. Running processes stop, and files and installations elsewhere on the machine are lost. Keep a setup script in /workspace. Access attached artifacts, uploaded files, memory stores and skills with the file tools, and copy files you need for Bash into /workspace first. git, node, npm, python3 (without pip), ripgrep, jq, curl, unzip and zstd are installed, and only HTTP and HTTPS leave the machine, to the hosts the session's environment allows: clone over https, not ssh. The credentials of the repositories mounted in this session are added to their requests for you; they are never inside the machine. stdout and stderr come back together, and only the end of a long output is returned: send it to a file and read that when you need all of it. \`timeout\` is in seconds, ${BASH_SECONDS} when left out and at most ${MAX_BASH_SECONDS}. A command still running then is stopped, so start a server in the background with its output sent to a file. Once the machine has started, list a very large directory with find in a command: the find tool walks at most 100,000 files and directories.`,
-	parameters: {
-		type: "object",
-		properties: {
-			command: { type: "string" },
-			cwd: { type: "string" },
-			timeout: { type: "integer", minimum: 1, maximum: MAX_BASH_SECONDS },
-		},
-		required: ["command"],
-		additionalProperties: false,
-	},
+	parameters: toolParameters(BashToolArguments),
 }
 
 export const ARTIFACT_TOOL: WorkspaceTool = {
 	name: "save_artifact",
 	description: `Save files from /workspace or /mnt/session/outputs as an artifact the user can open, share or publish after the session. Pass an absolute directory and a name. Reusing the name adds a version when the files or source change. Pages start at index.html. An optional artifact.json declares document collections, for example {"capabilities":{"database":{"collections":{"responses":{"visitors":"add"}}}}}. Visitor modes are none, read, add (submit only) and write. The page loads <script src="_/data.js"></script> and calls artifactData.collection("responses").add(value), .list(), .get(id), .put(id, value) or .delete(id) with the access granted when shared. Lists return data and next_page. Deletes and add-only submissions return receipts with the document ID. Other document reads and writes return the stored document. To start from an attached artifact, pass its mount path as made_from, such as /mnt/artifacts/document. Read its README.md for the content it expects. Leave inherited paths and artifact.json out of your directory. Use an existing empty directory if the active source supplies every file. Include source files in the limits of ${MAX_TOOL_ARTIFACT_FILES} regular files, ${MAX_TOOL_ARTIFACT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_TOOL_ARTIFACT_TOTAL_BYTES / MEBIBYTE} MiB total.`,
-	parameters: {
-		type: "object",
-		properties: {
-			name: { type: "string" },
-			directory: { type: "string" },
-			made_from: { type: "string" },
-		},
-		required: ["name", "directory"],
-		additionalProperties: false,
-	},
+	parameters: toolParameters(ArtifactToolArguments),
 }
 
 export const ARTIFACT_DATA_TOOL: WorkspaceTool = {
 	name: "artifact_data",
 	description: `Read or write the data of an artifact you saved in this session with save_artifact: the documents its page reaches through artifactData. Use it to fill a dashboard's numbers or to read what a form collected. \`name\` is the artifact's name and \`collection\` one of its collections. \`operation\` is list, get, add, put or delete: list returns documents oldest first, up to \`limit\` (${DEFAULT_ARTIFACT_DATA_LIMIT} when left out, at most ${MAX_ARTIFACT_DATA_LIMIT}), with a next_page to pass as \`page\`; get, put and delete take the document's \`id\`; add and put take \`data\`, any JSON value, and put stores it under an id you choose. Use the same \`key\` when repeating an add to avoid another document. Large responses give a workspace \`path\`. Use read on that path and pass next_byte_offset as byteOffset to retrieve subsequent JSON chunks. You may use any collection. A list can return fewer documents than requested. Continue until next_page is null.`,
-	parameters: {
-		type: "object",
-		properties: {
-			name: { type: "string" },
-			collection: { type: "string" },
-			operation: { type: "string", enum: [...ARTIFACT_DATA_OPERATIONS] },
-			id: { type: "string" },
-			data: {},
-			key: { type: "string" },
-			page: { type: "string" },
-			limit: { type: "integer", minimum: 1, maximum: MAX_ARTIFACT_DATA_LIMIT },
-		},
-		required: ["name", "collection", "operation"],
-		additionalProperties: false,
-	},
+	parameters: toolParameters(ArtifactDataToolArguments),
 }
-
-export const decodeBashToolArguments = Schema.decodeUnknownOption(
-	Schema.Struct({
-		command: Schema.String.check(Schema.isMinLength(1)),
-		cwd: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
-		timeout: Schema.optionalKey(
-			Schema.Int.check(
-				Schema.isGreaterThanOrEqualTo(1),
-				Schema.isLessThanOrEqualTo(MAX_BASH_SECONDS),
-			),
-		),
-	}),
-)
 
 export const MAX_INLINE_IMAGE_BYTES = 1024 * 1024
 

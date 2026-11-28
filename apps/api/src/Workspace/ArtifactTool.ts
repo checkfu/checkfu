@@ -25,13 +25,13 @@ const MEBIBYTE = 1024 * 1024
 
 const MAX_TOOL_ARTIFACT_ENTRIES = 8 * MAX_TOOL_ARTIFACT_FILES
 
-const decodeArguments = Schema.decodeUnknownOption(
-	Schema.Struct({
-		name: ArtifactName,
-		directory: Schema.String.check(Schema.isMinLength(1)),
-		made_from: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	}),
-)
+export const ArtifactToolArguments = Schema.Struct({
+	name: ArtifactName,
+	directory: Schema.String.check(Schema.isMinLength(1)),
+	made_from: Schema.optionalKey(Schema.NullOr(Schema.String)),
+})
+
+const decodeArguments = Schema.decodeUnknownOption(ArtifactToolArguments)
 
 const isArtifactPath = Schema.is(ArtifactPath)
 const isFileName = Schema.is(FileName)
