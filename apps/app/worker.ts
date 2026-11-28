@@ -73,17 +73,18 @@ const fromBase64url = (text: string): Uint8Array<ArrayBuffer> | undefined => {
 	}
 }
 
-const sessionPayload = (audience: string, expires: number) =>
-	utf8.encode(`checkfu-dashboard-session:${audience}:${expires}`)
+const sessionPayload = (audience: string, expires: number, binding: string) =>
+	utf8.encode(`checkfu-dashboard-session:${audience}:${expires}:${binding}`)
 
 const issueSession = async (apiKey: string, audience: string, now: number): Promise<string> => {
 	const expires = now + SESSION_SECONDS * 1000
+	const binding = base64url(crypto.getRandomValues(new Uint8Array(16)).buffer)
 	const mac = await crypto.subtle.sign(
 		"HMAC",
 		await sessionKey(apiKey),
-		sessionPayload(audience, expires),
+		sessionPayload(audience, expires, binding),
 	)
-	return `${expires}.${base64url(mac)}`
+	return `${expires}.${binding}.${base64url(mac)}`
 }
 
 const sessionFrom = (request: Request): string | undefined => {
@@ -96,24 +97,39 @@ const sessionFrom = (request: Request): string | undefined => {
 	return undefined
 }
 
-const signedIn = async (request: Request, env: Env, now: number): Promise<boolean> => {
+export const authenticateDashboardSession = async (
+	request: Request,
+	apiKey: string | undefined,
+	now: number,
+): Promise<{ readonly browserBinding: string } | undefined> => {
 	const token = sessionFrom(request)
-	if (token === undefined || env.CHECKFU_API_KEY === undefined || env.CHECKFU_API_KEY === "") {
-		return false
+	if (token === undefined || apiKey === undefined || apiKey === "") {
+		return undefined
 	}
-	const [expiresText, macText] = token.split(".", 2)
+	const [expiresText, binding, macText, excess] = token.split(".")
 	const expires = Number(expiresText)
 	const mac = macText === undefined ? undefined : fromBase64url(macText)
-	if (!Number.isSafeInteger(expires) || expires <= now || mac === undefined) {
-		return false
+	if (
+		!Number.isSafeInteger(expires) ||
+		expires <= now ||
+		binding === undefined ||
+		!/^[A-Za-z0-9_-]{22}$/u.test(binding) ||
+		mac === undefined ||
+		excess !== undefined
+	) {
+		return undefined
 	}
-	return crypto.subtle.verify(
+	const valid = await crypto.subtle.verify(
 		"HMAC",
-		await sessionKey(env.CHECKFU_API_KEY),
+		await sessionKey(apiKey),
 		mac,
-		sessionPayload(new URL(request.url).origin, expires),
+		sessionPayload(new URL(request.url).origin, expires, binding),
 	)
+	return valid ? { browserBinding: binding } : undefined
 }
+
+const signedIn = async (request: Request, env: Env, now: number): Promise<boolean> =>
+	(await authenticateDashboardSession(request, env.CHECKFU_API_KEY, now)) !== undefined
 
 const sameKey = async (submitted: string, apiKey: string): Promise<boolean> => {
 	const key = await sessionKey(apiKey)

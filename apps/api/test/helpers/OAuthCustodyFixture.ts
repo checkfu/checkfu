@@ -27,6 +27,7 @@ export const openOAuthCustodyFixture = (
 	sql: CustodySql,
 	provider: Provider,
 	beforeSend: () => Promise<void> = () => Promise.resolve(),
+	eraseAttempts?: (credential?: string) => void,
 ) => {
 	sql.exec(`CREATE TABLE IF NOT EXISTS oauth_grants (
 		credential_id TEXT PRIMARY KEY, target TEXT NOT NULL, generation INTEGER NOT NULL,
@@ -108,22 +109,43 @@ export const openOAuthCustodyFixture = (
 			return "ready"
 		})
 	}
+
+	const generation = (id: string): number | null =>
+		erased(id) ? null : (read(id)?.generation ?? 0)
+	const writeGrant = (id: string, target: string, access: string, token: string) => {
+		sql.exec(
+			"INSERT INTO oauth_grants VALUES (?, ?, 1, ?, ?, 0, 'ready') " +
+				"ON CONFLICT (credential_id) DO UPDATE SET target = excluded.target, " +
+				"access_token = excluded.access_token, refresh_token = excluded.refresh_token, " +
+				"generation = oauth_grants.generation + 1, dispatched = 0, status = 'ready'",
+			id,
+			target,
+			access,
+			token,
+		)
+	}
 	return {
+		generation,
 		authorize: (id: string, target: string, access: string, token: string) =>
 			sql.transaction(() => {
-				if (erased(id)) {
+				if (generation(id) === null) {
 					return false
 				}
-				sql.exec(
-					`INSERT INTO oauth_grants VALUES (?, ?, 1, ?, ?, 0, 'ready')
-					ON CONFLICT (credential_id) DO UPDATE SET target = excluded.target,
-					access_token = excluded.access_token, refresh_token = excluded.refresh_token,
-					generation = oauth_grants.generation + 1, dispatched = 0, status = 'ready'`,
-					id,
-					target,
-					access,
-					token,
-				)
+				writeGrant(id, target, access, token)
+				return true
+			}),
+		commitAuthorization: (
+			id: string,
+			expected: number,
+			grant: { readonly target: string; readonly access: string; readonly refresh: string },
+			complete: () => void,
+		) =>
+			sql.transaction(() => {
+				if (generation(id) !== expected) {
+					return false
+				}
+				writeGrant(id, grant.target, grant.access, grant.refresh)
+				complete()
 				return true
 			}),
 		refresh: (id: string) => {
@@ -144,11 +166,13 @@ export const openOAuthCustodyFixture = (
 			sql.transaction(() => {
 				sql.exec("INSERT OR IGNORE INTO oauth_tombstones VALUES (?)", id)
 				sql.exec(`${clearGrant} WHERE credential_id = ?`, "erased", id)
+				eraseAttempts?.(id)
 			}),
 		seal: () =>
 			sql.transaction(() => {
 				sql.exec("INSERT OR REPLACE INTO oauth_vault VALUES (1, 1)")
 				sql.exec(clearGrant, "erased")
+				eraseAttempts?.()
 			}),
 		overview: (id: string) => {
 			const grant = read(id)

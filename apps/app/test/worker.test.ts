@@ -54,11 +54,24 @@ describe("app worker", () => {
 		const response = await worker.fetch(signIn(KEY), env)
 		expect(response.status).toBe(204)
 		const header = response.headers.get("set-cookie") ?? ""
-		expect(header).toMatch(/^__Host-checkfu_session=\d+\.[\w-]+; Path=\/;/u)
+		expect(header).toMatch(/^__Host-checkfu_session=\d+\.[\w-]{22}\.[\w-]+; Path=\/;/u)
 		expect(header).not.toContain(KEY)
 		for (const flag of ["HttpOnly", "Secure", "SameSite=Strict"]) {
 			expect(header).toContain(flag)
 		}
+	})
+
+	it("binds independent browser sign-ins even when they occur in the same millisecond", async () => {
+		vi.useFakeTimers()
+		const { env } = makeEnv()
+		const first = await sessionCookie(env)
+		const second = await sessionCookie(env)
+		expect(first).not.toBe(second)
+		expect((await session(env, first)).status).toBe(204)
+		expect((await session(env, second)).status).toBe(204)
+		const [expiry, binding] = second.split(".")
+		const altered = expiry + "." + binding + "." + first.split(".").at(-1)
+		expect((await session(env, altered)).status).toBe(401)
 	})
 
 	it("refuses a wrong key without a cookie, and any sign-in without a configured key", async () => {
