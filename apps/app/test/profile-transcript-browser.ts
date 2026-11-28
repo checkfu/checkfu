@@ -1,10 +1,8 @@
 import assert from "node:assert/strict"
-import { spawn } from "node:child_process"
 import { createReadStream } from "node:fs"
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { createServer } from "node:http"
 import type { ServerResponse } from "node:http"
-import { tmpdir } from "node:os"
 import { extname, join, resolve } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
@@ -23,9 +21,11 @@ import {
 	waitingCallName,
 } from "./transcript-fixture.ts"
 
+import { until, withChrome } from "./helpers/Chrome.ts"
+import type { openDevtools } from "./helpers/Chrome.ts"
+
 const dist = resolve(import.meta.dirname, "../dist")
 const sessionPath = `/v1/sessions/${transcriptSession.id}`
-const chrome = process.env["CHROME_PATH"]
 const retryMs = 100
 const contentTypes = new Map([
 	[".css", "text/css"],
@@ -34,18 +34,6 @@ const contentTypes = new Map([
 	[".svg", "image/svg+xml"],
 	[".woff2", "font/woff2"],
 ])
-
-const until = async <A>(attempt: () => A | Promise<A>, label: string): Promise<NonNullable<A>> => {
-	const stop = performance.now() + 20_000
-	while (performance.now() < stop) {
-		const value = await attempt()
-		if (value !== null && value !== undefined && value !== false) {
-			return value
-		}
-		await delay(10)
-	}
-	throw new Error(`Timed out waiting for ${label}.`)
-}
 
 const streamEvents = (
 	current: ServerResponse,
@@ -163,73 +151,6 @@ const fixtureServer = () => {
 	}
 }
 
-interface ProtocolResult {
-	readonly result?: { readonly value?: unknown }
-	readonly exceptionDetails?: { readonly text: string }
-}
-
-interface ProtocolReply {
-	readonly id?: number
-	readonly result?: ProtocolResult
-	readonly error?: { readonly message: string }
-}
-
-const devtools = async (url: string) => {
-	const socket = new WebSocket(url)
-	await new Promise<void>((open, reject) => {
-		socket.addEventListener("open", () => open(), { once: true })
-		socket.addEventListener("error", () => reject(new Error("Could not open the browser")), {
-			once: true,
-		})
-	})
-	let nextId = 0
-	const replies = new Map<
-		number,
-		ReturnType<typeof Promise.withResolvers<ProtocolResult | undefined>>
-	>()
-	socket.addEventListener("message", (event) => {
-		const frame = JSON.parse(String(event.data)) as ProtocolReply
-		if (frame.id === undefined) {
-			return
-		}
-		const pending = replies.get(frame.id)
-		replies.delete(frame.id)
-		if (frame.error === undefined) {
-			pending?.resolve(frame.result)
-		} else {
-			pending?.reject(new Error(frame.error.message))
-		}
-	})
-	socket.addEventListener("close", () => {
-		for (const pending of replies.values()) {
-			pending.reject(new Error("Browser closed"))
-		}
-		replies.clear()
-	})
-	const send = (method: string, params: Record<string, string | number | boolean> = {}) => {
-		const id = ++nextId
-		const pending = Promise.withResolvers<ProtocolResult | undefined>()
-		replies.set(id, pending)
-		socket.send(JSON.stringify({ id, method, params }))
-		return pending.promise
-	}
-	return {
-		send,
-		evaluate: async <A>(expression: string): Promise<A> => {
-			const value = await send("Runtime.evaluate", {
-				expression,
-				awaitPromise: true,
-				returnByValue: true,
-			})
-			if (value?.result === undefined || value.exceptionDetails !== undefined) {
-				throw new Error(`Browser evaluation failed: ${JSON.stringify(value?.exceptionDetails)}`)
-			}
-			return value.result.value as A
-		},
-		close: () => socket.close(),
-	}
-}
-
 const probe = `
 (() => {
 	const commits = []
@@ -287,7 +208,7 @@ interface BrowserSample {
 const json = (value: unknown) => JSON.stringify(value)
 
 const profile = async (
-	browser: Awaited<ReturnType<typeof devtools>>,
+	browser: Awaited<ReturnType<typeof openDevtools>>,
 	server: ReturnType<typeof fixtureServer>,
 	origin: string,
 ) => {
@@ -542,7 +463,7 @@ interface StreamObservation {
 }
 
 const profileLiveness = async (
-	browser: Awaited<ReturnType<typeof devtools>>,
+	browser: Awaited<ReturnType<typeof openDevtools>>,
 	server: ReturnType<typeof fixtureServer>,
 	origin: string,
 ) => {
@@ -611,6 +532,7 @@ const profileLiveness = async (
 	}
 }
 
+const chrome = process.env["CHROME_PATH"]
 assert.ok(chrome, "Set CHROME_PATH to a Chrome or Chromium executable.")
 const server = fixtureServer()
 await new Promise<void>((done) => {
@@ -618,61 +540,23 @@ await new Promise<void>((done) => {
 })
 const address = server.http.address()
 assert.ok(address !== null && typeof address === "object")
-const directory = await mkdtemp(join(tmpdir(), "checkfu-transcript-chrome-"))
-const child = spawn(
-	chrome,
-	[
-		"--headless",
-		"--disable-background-timer-throttling",
-		"--disable-background-networking",
-		"--window-size=1280,900",
-		"--remote-debugging-port=0",
-		`--user-data-dir=${directory}`,
-		"about:blank",
-	],
-	{ stdio: "ignore" },
-)
-let browser: Awaited<ReturnType<typeof devtools>> | undefined
+const origin = "http://127.0.0.1:" + address.port
 try {
-	const port = await until(async () => {
-		const file = await readFile(join(directory, "DevToolsActivePort"), "utf8").catch(
-			() => undefined,
-		)
-		return file?.split("\n")[0]
-	}, "the browser debugger")
-	const debug = `http://127.0.0.1:${port}`
-	const targets = (await (await fetch(`${debug}/json/list`)).json()) as ReadonlyArray<{
-		readonly type: string
-		readonly webSocketDebuggerUrl: string
-	}>
-	const page = targets.find((entry) => entry.type === "page")
-	assert.ok(page)
-	browser = await devtools(page.webSocketDebuggerUrl)
-	const version = (await (await fetch(`${debug}/json/version`)).json()) as {
-		readonly Browser: string
-	}
-	process.stdout.write(`${json({ browser: version.Browser, viewport: "1280x900", retryMs })}\n`)
-	await browser.send("Page.enable")
-	await browser.send("Page.addScriptToEvaluateOnNewDocument", {
-		source: probe,
-		runImmediately: true,
+	await withChrome(chrome, async (browser, version) => {
+		process.stdout.write(json({ browser: version, viewport: "1280x900", retryMs }) + "\n")
+		await browser.send("Page.addScriptToEvaluateOnNewDocument", {
+			source: probe,
+			runImmediately: true,
+		})
+		assert.equal(await browser.evaluate("typeof globalThis.transcriptProbe"), "object")
+		if (process.argv.includes("--liveness")) {
+			await browser.send("Page.addScriptToEvaluateOnNewDocument", { source: livenessProbe })
+			await profileLiveness(browser, server, origin)
+		} else {
+			await profile(browser, server, origin)
+		}
 	})
-	assert.equal(await browser.evaluate("typeof globalThis.transcriptProbe"), "object")
-	const origin = `http://127.0.0.1:${address.port}`
-	if (process.argv.includes("--liveness")) {
-		await browser.send("Page.addScriptToEvaluateOnNewDocument", { source: livenessProbe })
-		await profileLiveness(browser, server, origin)
-	} else {
-		await profile(browser, server, origin)
-	}
 } finally {
-	browser?.close()
-	const exited = new Promise<void>((done) => {
-		child.once("exit", () => done())
-	})
-	child.kill("SIGTERM")
-	await Promise.race([exited, delay(2000, undefined, { ref: false })])
 	server.http.close()
 	server.http.closeAllConnections()
-	await rm(directory, { recursive: true, force: true })
 }

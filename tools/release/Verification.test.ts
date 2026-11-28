@@ -1,6 +1,7 @@
 import { expect, it } from "vitest"
-import { groups, matrix } from "./Verification.ts"
-import type { Evidence, Group, Source } from "./Verification.ts"
+import * as Schema from "effect/Schema"
+import { Evidence, groups, matrix } from "./Verification.ts"
+import type { Group, Source } from "./Verification.ts"
 
 const source: Source = { commit: "candidate", fingerprint: "all-source-bytes", dirty: false }
 const command = (group: Group) => {
@@ -145,6 +146,40 @@ it("keeps untouched surfaces, actual browser behavior and unsupported promises o
 	expect(report.cases.find((row) => row.id === "deployment-source")?.status).toBe("unverified")
 	expect(report.blockers.map((blocker) => blocker.id)).toContain("deployment-source")
 	expect(report.releaseQualified).toBe(false)
+})
+
+it("decodes a hosted browser report and credits only the passing case in its owning file", () => {
+	const template = execution().runner!.testResults[0]!.assertionResults[0]!
+	const report = (file: string, status: string): Evidence => ({
+		...execution(),
+		group: "browser",
+		command: command("browser"),
+		runner: {
+			success: true,
+			testResults: [
+				{
+					name: file,
+					assertionResults: [
+						{ ...template, status, tags: ["acceptance", "browser-agent-conflict"] },
+					],
+				},
+			],
+		},
+	})
+	const file = "/checkout/apps/app/test/browser-agent-journey.test.ts"
+	const decode = Schema.decodeSync(Schema.fromJsonString(Evidence))
+	for (const [sourceFile, status, expected] of [
+		[file, "passed", "passed"],
+		[file, "skipped", "unverified"],
+		["/checkout/apps/app/test/user-journey.test.tsx", "passed", "unverified"],
+	]) {
+		const evidence = decode(JSON.stringify(report(sourceFile!, status!)))
+		const result = matrix(source, [evidence])
+		expect(result.cases.find(({ id }) => id === "browser-agent-conflict")?.status).toBe(expected)
+		expect(result.blockers.some(({ id }) => id === "browser-agent-conflict")).toBe(
+			expected !== "passed",
+		)
+	}
 })
 
 it("credits the project interfaces only for the actions each performs", () => {
