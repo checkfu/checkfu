@@ -214,14 +214,21 @@ it(
 		const altered = join(scratch, "altered")
 		await mkdir(altered)
 		const alteredRecord = join(altered, "candidates.json")
-		const writeRecord = (packages = [cli.metadata, sdk.metadata]) =>
-			writeFile(alteredRecord, JSON.stringify({ commit, packages }))
+		const writeRecord = (packages = [cli.metadata, sdk.metadata], source = commit) =>
+			writeFile(alteredRecord, JSON.stringify({ commit: source, packages }))
 		await writeRecord()
 		const pinned = integrityOf(await readFile(alteredRecord))
 		await expect(qualifiedPackages(alteredRecord, pinned)).rejects.toMatchObject({ code: "ENOENT" })
 		await writeFile(join(altered, cli.metadata.filename), cli.bytes)
 		await writeFile(join(altered, sdk.metadata.filename), sdk.bytes)
 		await expect(qualifiedPackages(alteredRecord, pinned)).resolves.toHaveLength(2)
+		await writeRecord(undefined, "0000000000000000000000000000000000000000")
+		const foreignIntegrity = integrityOf(await readFile(alteredRecord))
+		await expect(qualifiedPackages(alteredRecord, foreignIntegrity)).rejects.toThrow(
+			"The candidate source commit differs from this checkout.",
+		)
+		await writeRecord()
+
 		const replacement = Uint8Array.from(cli.bytes)
 		replacement[4] = (replacement[4] ?? 0) ^ 1
 		await writeFile(join(altered, cli.metadata.filename), replacement)
