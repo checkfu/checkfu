@@ -5,11 +5,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 
+const BROWSER_START_MS = 60_000
+
 export const until = async <A>(
 	attempt: () => A | Promise<A>,
 	label: string,
+	within = 20_000,
 ): Promise<NonNullable<A>> => {
-	const stop = performance.now() + 20_000
+	const stop = performance.now() + within
 	while (performance.now() < stop) {
 		const value = await attempt()
 		if (value !== null && value !== undefined && value !== false) {
@@ -143,28 +146,49 @@ export const withChrome = async <A>(
 	})
 	let browser: Awaited<ReturnType<typeof openDevtools>> | undefined
 	try {
-		const port = await until(async () => {
-			if (failed !== undefined) {
-				throw failed
-			}
-			if (child.exitCode !== null) {
-				throw new Error("Chrome exited before opening its debugger.")
-			}
-			const file = await readFile(join(directory, "DevToolsActivePort"), "utf8").catch(
-				() => undefined,
-			)
-			return file?.split("\n")[0]
-		}, "the browser debugger")
+		const port = await until(
+			async () => {
+				if (failed !== undefined) {
+					throw failed
+				}
+				if (child.exitCode !== null) {
+					throw new Error("Chrome exited before opening its debugger.")
+				}
+				const file = await readFile(join(directory, "DevToolsActivePort"), "utf8").catch(
+					() => undefined,
+				)
+				return file?.split("\n")[0]
+			},
+			"the browser debugger",
+			BROWSER_START_MS,
+		)
 		const debug = "http://127.0.0.1:" + port
-		const inspect = (path: string) => fetch(debug + path, { signal: AbortSignal.timeout(5000) })
-		const targets = (await (await inspect("/json/list")).json()) as ReadonlyArray<{
-			readonly type: string
-			readonly webSocketDebuggerUrl: string
-		}>
+		const inspect = <A>(path: string, label: string, ready: (body: A) => boolean) =>
+			until(
+				async () => {
+					const response = await fetch(debug + path, { signal: AbortSignal.timeout(5000) }).catch(
+						() => undefined,
+					)
+					if (response?.ok !== true) {
+						return undefined
+					}
+					const body = (await response.json()) as A
+					return ready(body) ? body : undefined
+				},
+				label,
+				BROWSER_START_MS,
+			)
+		const targets = await inspect<
+			ReadonlyArray<{ readonly type: string; readonly webSocketDebuggerUrl: string }>
+		>("/json/list", "the browser's page", (list) => list.some((entry) => entry.type === "page"))
 		const page = targets.find((entry) => entry.type === "page")
 		assert.ok(page)
 		browser = await openDevtools(page.webSocketDebuggerUrl)
-		const version = (await (await inspect("/json/version")).json()) as { readonly Browser: string }
+		const version = await inspect<{ readonly Browser: string }>(
+			"/json/version",
+			"the browser's version",
+			(body) => typeof body.Browser === "string",
+		)
 		await browser.send("Page.enable")
 		return await run(browser, version.Browser)
 	} finally {
@@ -175,6 +199,6 @@ export const withChrome = async <A>(
 			child.kill("SIGKILL")
 			await Promise.race([exited, delay(2000, undefined, { ref: false })])
 		}
-		await rm(directory, { recursive: true, force: true })
+		await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 	}
 }
