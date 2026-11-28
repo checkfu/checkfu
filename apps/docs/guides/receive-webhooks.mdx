@@ -3,7 +3,7 @@ title: "Receive webhooks"
 description: "A complete Node.js receiver that verifies signatures, skips duplicates, and answers fast."
 ---
 
-This receiver verifies each request's signature, skips duplicate event IDs, answers before Checkfu's 10-second timeout, and then fetches the changed resource.
+This receiver verifies each request's signature, skips duplicate event IDs, answers before Checkfu's 10-second timeout, and finishes its bounded processing before acknowledging the event.
 
 ## The receiver
 
@@ -14,74 +14,132 @@ npm init -y && npm install @checkfu/sdk && npm install --save-dev tsx
 
 ```ts receiver.ts
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { createServer, type IncomingHttpHeaders } from "node:http"
-import Checkfu from "@checkfu/sdk"
+import type { IncomingHttpHeaders } from "node:http"
 
-const secret = process.env.CHECKFU_WEBHOOK_SECRET ?? ""
-if (!secret.startsWith("whsec_"))
-	throw new Error("Set CHECKFU_WEBHOOK_SECRET to the whsec_ signing secret.")
-const key = Buffer.from(secret.slice("whsec_".length), "base64")
-const client = new Checkfu()
+export type Notification = { data: { type: string; id: string } }
 
-const header = (headers: IncomingHttpHeaders, name: string) => [headers[name]].flat()[0]
-
-// Returns the event ID if the signature is valid and fresh, otherwise null.
-const verify = (body: Buffer, headers: IncomingHttpHeaders): string | null => {
-	const id = header(headers, "webhook-id")
-	const timestamp = header(headers, "webhook-timestamp")?.trim()
-	const signatures = header(headers, "webhook-signature")
-	if (!id || !timestamp || !signatures || !/^\d+$/.test(timestamp)) return null
-	if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return null // replay window: 5 minutes
-
-	const expected = createHmac("sha256", key).update(`${id}.${timestamp}.`).update(body).digest()
-	const valid = signatures
-		.trim()
-		.split(/\s+/)
-		.filter((entry) => entry.startsWith("v1,"))
-		.map((entry) => Buffer.from(entry.slice(3), "base64"))
-		.some(
-			(candidate) => candidate.length === expected.length && timingSafeEqual(candidate, expected),
-		)
-	return valid ? id : null
+export function decodeSigningKey(secret: string): Buffer {
+	const encoded = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : ""
+	const key = Buffer.from(encoded, "base64")
+	if (key.length !== 32 || key.toString("base64") !== encoded) {
+		throw new Error("Set CHECKFU_WEBHOOK_SECRET to the complete signing secret.")
+	}
+	return key
 }
 
-// Handled event IDs. Use a database in production, and keep IDs for 14 days.
-const seen = new Set<string>()
+export function createReceiver(
+	key: Buffer,
+	handle: (event: Notification, signal: AbortSignal) => Promise<void>,
+	{ now = Date.now, timeout = 7_000 } = {},
+) {
+	const completed = new Map<string, number>()
+	const pending = new Map<string, Promise<number>>()
+	const retention = 14 * 24 * 60 * 60 * 1000
+	const maxCompleted = 2_048
+	const header = (headers: IncomingHttpHeaders, name: string) => [headers[name]].flat()[0]
 
-const handle = async (event: { id: string; data: { type: string; id: string } }) => {
-	if (event.data.type === "session.status_idled") {
-		const session = await client.sessions.retrieve(event.data.id)
-		console.log(`Session ${session.id} is ${session.status}`)
-	} else if (event.data.type === "automation_run.failed") {
-		const run = await client.automationRuns.retrieve(event.data.id)
-		console.log(`Run ${run.run} of ${run.automation_id} failed: ${run.error?.message}`)
-	} else {
-		console.log(`Received ${event.data.type}`)
+	const verify = (body: Buffer, headers: IncomingHttpHeaders) => {
+		const id = header(headers, "webhook-id")
+		const timestamp = header(headers, "webhook-timestamp")?.trim()
+		const signatures = header(headers, "webhook-signature")
+		if (!id || !timestamp || !signatures || !/^\d+$/.test(timestamp)) return null
+		if (Math.abs(now() / 1000 - Number(timestamp)) > 300) return null
+
+		const expected = createHmac("sha256", key)
+			.update(id + "." + timestamp + ".")
+			.update(body)
+			.digest()
+		const valid = signatures
+			.trim()
+			.split(/\s+/)
+			.filter((entry) => entry.startsWith("v1,"))
+			.map((entry) => Buffer.from(entry.slice(3), "base64"))
+			.some(
+				(candidate) => candidate.length === expected.length && timingSafeEqual(candidate, expected),
+			)
+		return valid ? id : null
+	}
+
+	return async (body: Buffer, headers: IncomingHttpHeaders): Promise<number> => {
+		const id = verify(body, headers)
+		if (id === null) return 401
+		for (const [done, expires] of completed) {
+			if (expires > now()) break
+			completed.delete(done)
+		}
+		if (completed.has(id)) return 204
+		const existing = pending.get(id)
+		if (existing !== undefined) return existing
+
+		let event: Notification
+		try {
+			event = JSON.parse(body.toString("utf8"))
+			if (typeof event?.data?.type !== "string" || typeof event.data.id !== "string") return 400
+		} catch {
+			return 400
+		}
+
+		const signal = AbortSignal.timeout(timeout)
+		const deadline = new Promise<never>((_, reject) => {
+			signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+		})
+		const work = Promise.resolve().then(() => handle(event, signal))
+		const result = Promise.race([work, deadline])
+			.then(
+				() => {
+					completed.set(id, now() + retention)
+					for (const oldest of completed.keys()) {
+						if (completed.size <= maxCompleted) break
+						completed.delete(oldest)
+					}
+					return 204
+				},
+				() => {
+					console.error("Could not process webhook", id)
+					return 503
+				},
+			)
+			.finally(() => {
+				pending.delete(id)
+			})
+		pending.set(id, result)
+		return result
 	}
 }
+```
 
-createServer((request, response) => {
-	const chunks: Array<Buffer> = []
-	request.on("data", (chunk: Buffer) => chunks.push(chunk))
-	request.on("end", () => {
-		const body = Buffer.concat(chunks)
-		const eventId = verify(body, request.headers)
-		if (eventId === null) return void response.writeHead(401).end()
-		if (seen.has(eventId)) return void response.writeHead(204).end() // duplicate: acknowledge, do nothing
+```ts server.ts
+import { createServer } from "node:http"
+import { buffer } from "node:stream/consumers"
+import Checkfu from "@checkfu/sdk"
+import { createReceiver, decodeSigningKey } from "./receiver"
 
-		seen.add(eventId)
-		response.writeHead(204).end() // answer first, then work
-		handle(JSON.parse(body.toString("utf8"))).catch((error) => {
-			seen.delete(eventId) // let a redelivery try again
-			console.error(`Handling ${eventId} failed`, error)
-		})
-	})
+const key = decodeSigningKey(process.env.CHECKFU_WEBHOOK_SECRET ?? "")
+const client = new Checkfu()
+const receive = createReceiver(key, async (event, signal) => {
+	const options = { signal, timeout: 6_000, maxRetries: 0 }
+	if (event.data.type === "session.status_idled") {
+		const session = await client.sessions.retrieve(event.data.id, options)
+		console.log("Session", session.id, session.status)
+	} else if (event.data.type === "automation_run.failed") {
+		const run = await client.automationRuns.retrieve(event.data.id, options)
+		console.log("Automation run failed", run.id)
+	}
+})
+createServer(async (request, response) => {
+	try {
+		response.writeHead(await receive(await buffer(request), request.headers)).end()
+	} catch {
+		response.writeHead(503).end()
+	}
 }).listen(3000, () => console.log("Listening on http://localhost:3000"))
 ```
 
 ```sh
-export CHECKFU_WEBHOOK_SECRET=whsec_... CHECKFU_BASE_URL=https://<api-worker>.workers.dev CHECKFU_API_KEY=<key>
-npx tsx receiver.ts
+export CHECKFU_WEBHOOK_SECRET="whsec_..."
+export CHECKFU_BASE_URL="https://<api-worker>.workers.dev"
+export CHECKFU_API_KEY="<key>"
+npx tsx server.ts
 ```
 
 ## How the signature works
@@ -100,11 +158,11 @@ const event = await unwrapWebhookEvent(body, request.headers, {
 
 ## Rules for a reliable receiver
 
-- **Answer within 10 seconds** with any `2xx`, including for duplicates and event types you ignore.
+- **Answer within 10 seconds.** This example shares one processing result among concurrent deliveries. It returns `204` after success, for a completed duplicate, or for an ignored event. A failed or timed-out read returns `503` so delivery can retry.
 - **Never redirect.** A `3xx` disables the Webhook immediately.
 - **Expect each event more than once.** Retries and manual redeliveries reuse the same `webhook-id`.
 - **Do not rely on order.** Fetch the resource from the API to read its current state.
-- **Do not lose acknowledged work.** Once you return `2xx`, Checkfu will not retry. If the work cannot be lost, enqueue it durably before responding.
+- **Commit long-running work before acknowledging it.** Insert the verified event into a durable inbox keyed by its event ID, acknowledge once the insert commits, and retry work from the inbox. The example only makes idempotent reads. Its in-memory cache holds up to 2,048 completed IDs for 14 days and is empty after a restart.
 
 ## Test it
 
