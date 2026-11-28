@@ -70,7 +70,7 @@ const snapshotUploadBytes = (body: FileBytes) =>
 				: new CheckfuConfigError({ message: "Could not read the file upload body.", cause }),
 	})
 
-const concat = (chunks: Iterable<Uint8Array>): Uint8Array => {
+export const joinBinaryChunks = (chunks: Iterable<Uint8Array>): Uint8Array => {
 	const parts = [...chunks]
 	const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0))
 	let offset = 0
@@ -165,7 +165,9 @@ export class EffectFiles extends EffectFilesResource {
 								return [new Uint8Array(0), response] as const
 							}
 							if (response.status === 200 || response.status === 206) {
-								const bytes = concat(yield* Stream.runCollect(streamResponseBody(response)))
+								const bytes = joinBinaryChunks(
+									yield* Stream.runCollect(streamResponseBody(response)),
+								)
 								return [bytes, response] as const
 							}
 							yield* decodeFileContentResponse(response)

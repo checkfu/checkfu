@@ -1,3 +1,4 @@
+import { EffectArtifactsWithContent } from "./ArtifactContent.ts"
 import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -205,6 +206,7 @@ export const waitForPendingResource = (
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
 
 export class CheckfuSdkClient extends EffectResources {
+	override readonly artifacts: EffectArtifactsWithContent
 	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */
 	override readonly files: EffectFiles
 	readonly baseUrl: string
@@ -223,6 +225,7 @@ export class CheckfuSdkClient extends EffectResources {
 	) {
 		super(runtime)
 		this.files = new EffectFiles(runtime)
+		this.artifacts = new EffectArtifactsWithContent(runtime)
 		this[INTERNAL_EFFECT_RUNTIME] = runtime
 		this.baseUrl = runtime.baseUrl
 		this.raw = runtime.raw
