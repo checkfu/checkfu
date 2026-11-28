@@ -4,10 +4,10 @@ description: "Install @checkfu/sdk and use its Promise and Effect clients."
 ---
 
 ```sh
-npm install @checkfu/sdk
+npm install @checkfu/sdk@0.0.1
 ```
 
-The SDK requires Node.js 22.0.0 or later and also runs in Cloudflare Workers and browsers. It exports both a Promise client and an [Effect](https://effect.website) client.
+Set `CHECKFU_MODEL_ID` to a model configured on your deployment for the examples below. The SDK requires Node.js 22.0.0 or later and also runs in Cloudflare Workers and browsers. It exports both a Promise client and an [Effect](https://effect.website) client.
 
 <CodeGroup>
 
@@ -17,7 +17,7 @@ import Checkfu from "@checkfu/sdk"
 const client = new Checkfu()
 
 const agent = await client.waitForPending(
-	await client.agents.create({ name: "Assistant", model: "claude-sonnet-5-5" }),
+	await client.agents.create({ name: "Assistant", model: process.env.CHECKFU_MODEL_ID! }),
 )
 const environment = await client.waitForPending(
 	await client.environments.create({ name: "default" }),
@@ -34,6 +34,10 @@ await client.sessions.events.send(session.id, {
 
 for await (const event of await client.sessions.events.stream(session.id)) {
 	if (event.type === "agent.message") console.log(event.content.map((block) => block.text).join(""))
+	if (event.type === "session.status_idle" && event.stop_reason.type === "requires_action") {
+		console.log("Waiting for tool answers", event.stop_reason.event_ids, "resume after", event.seq)
+		break
+	}
 	if (event.type === "session.status_idle" || event.type === "session.status_terminated") break
 }
 ```
@@ -45,7 +49,7 @@ import * as Effect from "effect/Effect"
 const program = Effect.gen(function* () {
 	const client = yield* CheckfuClient
 	const agent = yield* client.waitForPending(
-		yield* client.agents.create({ name: "Assistant", model: "claude-sonnet-5-5" }),
+		yield* client.agents.create({ name: "Assistant", model: process.env.CHECKFU_MODEL_ID! }),
 	)
 	yield* Effect.log(agent.id)
 }).pipe(Effect.catchTag("NotFoundError", (error) => Effect.logError(error.message)))
@@ -102,7 +106,9 @@ await client.agents.archive(agentId, { version: 2 })
 | `automationRuns` |                                  |
 | `webhooks`       | `deliveries`                     |
 
-File upload, file download, and single-file raw Artifact download (`GET /v1/artifacts/{artifact_id}/versions/{version}/content`) transfer raw bytes and are omitted from the high-level resources. Use `fetch`, the [CLI](/reference/cli), or `client.raw` in the Effect client (`artifacts.versions.file` fetches one file as JSON text or base64).
+Checkout-built SDK packages expose File metadata and binary transfers on both clients. With the registry build of `@checkfu/sdk@0.0.1`, use the HTTP File endpoints on a deployment that serves them. See [Files](/concepts/files) for both examples.
+
+For a raw Artifact file, use the version-specific [HTTP download](/api-reference/artifacts/download-an-artifact-file). The high-level `artifacts.versions.file` method returns JSON with text or base64 content.
 
 ## Pending receipts
 

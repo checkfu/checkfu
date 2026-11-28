@@ -29,10 +29,10 @@ You need Node.js 22 or later, a Cloudflare account on Workers Paid with R2 enabl
 
   </Step>
   <Step title="Create an Agent and an Environment">
-    An [Agent](/concepts/agents) is the model and instructions. An [Environment](/concepts/environments) is where its Sessions run. Pick a model your key can call, such as `claude-sonnet-5-5` or `gpt-6.2-sol`.
+    An [Agent](/concepts/agents) is the model and instructions. An [Environment](/concepts/environments) is where its Sessions run. Set `CHECKFU_MODEL_ID` to a model your deployment can call.
 
     ```sh
-    AGENT_ID=$(checkfu agents create --name Assistant --model claude-sonnet-5-5 --transform id -r)
+    AGENT_ID=$(checkfu agents create --name Assistant --model "$CHECKFU_MODEL_ID" --transform id -r)
     ENVIRONMENT_ID=$(checkfu environments create --name default --transform id -r)
     ```
 
@@ -54,7 +54,7 @@ You need Node.js 22 or later, a Cloudflare account on Workers Paid with R2 enabl
     Install the SDK and export the saved URL and key:
 
     ```sh
-    npm install @checkfu/sdk
+    npm install @checkfu/sdk@0.0.1
     export CHECKFU_BASE_URL=$(jq -r .url ~/.config/checkfu/config.json)
     export CHECKFU_API_KEY=$(jq -r .api_key ~/.config/checkfu/config.json)
     ```
@@ -68,7 +68,7 @@ You need Node.js 22 or later, a Cloudflare account on Workers Paid with R2 enabl
     const client = new Checkfu()
 
     const agent = await client.waitForPending(
-      await client.agents.create({ name: "Assistant", model: "claude-sonnet-5-5" }),
+      await client.agents.create({ name: "Assistant", model: process.env.CHECKFU_MODEL_ID! }),
     )
     const environment = await client.waitForPending(
       await client.environments.create({ name: "default" }),
@@ -85,9 +85,15 @@ You need Node.js 22 or later, a Cloudflare account on Workers Paid with R2 enabl
       if (event.type === "agent.message") {
         console.log(event.content.map((block) => block.text).join(""))
       }
+      if (event.type === "session.status_idle" && event.stop_reason.type === "requires_action") {
+        console.log("Waiting for tool answers", event.stop_reason.event_ids, "resume after", event.seq)
+        break
+      }
       if (event.type === "session.status_idle" || event.type === "session.status_terminated") break
     }
     ```
+
+    If a turn requests tool answers, submit them from your application or the dashboard, then resume the stream after the reported sequence. See [Tools](/concepts/tools) and [Resume a stream](/guides/resume-a-stream).
 
     Writes can return HTTP `202` before the read view catches up; `waitForPending` returns settled resources immediately and polls [pending receipts](/reference/http-api#pending-receipts) until they are ready.
 

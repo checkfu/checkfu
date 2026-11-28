@@ -31,7 +31,7 @@ npm install -g checkfu@latest
 checkfu deploy
 ```
 
-Each CLI release deploys the server revision it was built with, so install a newer CLI to get a newer server. An update keeps the API key and data. If an update would delete or replace infrastructure, the CLI stops with `Update refused` and applies nothing.
+The registry CLI `checkfu@0.0.2` resolves the server from the latest commit on `main` when it deploys. A CLI packaged from this checkout pins the server commit from its build. Use a checkout-built package when you need to deploy and verify a specific commit. If an update would delete or replace infrastructure, the CLI stops with `Update refused` and applies nothing.
 
 ## Stages
 

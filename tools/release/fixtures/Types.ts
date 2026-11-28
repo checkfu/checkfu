@@ -76,6 +76,19 @@ const effectWaits = (sessionId: string) =>
 			}
 		}
 	})
+const transferFile = async (bytes: Uint8Array): Promise<Uint8Array> => {
+	const uploaded = await client.files.upload({ body: bytes, filename: "bytes.bin" })
+	return Effect.runPromise(
+		Effect.gen(function* () {
+			const sdk = yield* CheckfuClient
+			return yield* sdk.files.content(uploaded.id)
+		}).pipe(
+			Effect.provide(
+				CheckfuClient.layerFetch({ apiKey: "type-check", baseUrl: "https://example.com" }),
+			),
+		),
+	)
+}
 const vaultErased = async (vaultId: string): Promise<boolean> => {
 	const vault = await client.vaults.delete(vaultId)
 	return vault.secrets === "erased"
@@ -93,6 +106,7 @@ export {
 	effectWaits,
 	redeliveryForbidsKey,
 	responseType,
+	transferFile,
 	vaultErased,
 	credentialErased,
 }
