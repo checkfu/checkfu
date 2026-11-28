@@ -2431,7 +2431,9 @@ describe("Artifact bytes", () => {
 				expect(yield* json(yield* asJson("empty.txt"))).toMatchObject({ size: 0, content: "" })
 				const refused = yield* asJson("large.bin")
 				expect(refused.status).toBe(400)
-				expect((yield* json<ErrorBody>(refused)).error.message).toContain("/content?file=large.bin")
+				const message = (yield* json<ErrorBody>(refused)).error.message
+				expect(message).toContain("checkfu artifacts download")
+				expect(message).toContain("/content?file=large.bin")
 				const raw = yield* call(
 					"GET",
 					`/v1/artifacts/${artifact.id}/versions/1/content?file=large.bin`,

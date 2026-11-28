@@ -948,7 +948,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					if (file.size > MAX_INLINE_FILE_BYTES) {
 						return yield* reject(
 							400,
-							`File "${file.path}" is ${file.size} bytes, too large to return as JSON; download it from GET /v1/artifacts/${id}/versions/${params.version}/content?file=${encodeURIComponent(file.path)}.`,
+							`File "${file.path}" is ${file.size} bytes, too large to return as JSON; download it with checkfu artifacts download or from GET /v1/artifacts/${id}/versions/${params.version}/content?file=${encodeURIComponent(file.path)}.`,
 						)
 					}
 					const bytes =

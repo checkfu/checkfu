@@ -10,6 +10,7 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { agentCommand } from "./Commands/Agent.ts"
 import { applyCommand } from "./Commands/Apply.ts"
+import { artifactsDownloadCommand } from "./Commands/Artifacts.ts"
 import { deployCommand, destroyCommand } from "./Commands/Deploy.ts"
 import { filesCommands } from "./Commands/Files.ts"
 import { loginCommand, logoutCommand } from "./Commands/Login.ts"
@@ -30,6 +31,7 @@ export const CheckfuCli = RootCommand.pipe(
 		logoutCommand,
 		destroyCommand,
 		...buildGeneratedResourceCommands({
+			artifacts: [artifactsDownloadCommand],
 			files: filesCommands,
 			sessions: [sessionsConnectCommand],
 		}),
