@@ -22,7 +22,27 @@ const READDIR = `[ -d "$1" ] || { [ -e "$1" ] && exit ${WRONG_KIND}; exit ${MISS
 find -L "$1" -mindepth 1 -maxdepth "$2" \\( -xtype l -type d -prune -printf '%y\\0%s\\0%Ts\\0%m\\0%P\\0' \\) -o -printf '%y\\0%s\\0%Ts\\0%m\\0%P\\0' | head -z -n "$3" | head -c "$4"`
 const READ = `[ -f "$1" ] || { [ -e "$1" ] && exit ${WRONG_KIND}; exit ${MISSING}; }
 stat -L -c '%f %s %Y' -- "$1" >&2; tail -c "+$2" -- "$1" | head -c "$3" | base64 -w0`
-const PLACE_NEW = `ln -T -- "$1" "$2" 2>/dev/null; made=$?; rm -f -- "$1"; [ "$made" -eq 0 ] || exit ${EXISTS}`
+const STAGE_NEW = `mkdir -p -- "$1" || exit $?
+staged=
+trap '[ -z "$staged" ] || rmdir -- "$staged"' EXIT
+while :; do
+  staged=$(mktemp -d -- "$1/.checkfu-write-XXXXXXXXXX") || exit $?
+  if [ "$staged" != "$2" ]; then
+    printf '%s\\n' "$staged" || exit $?
+    staged=
+    exit 0
+  fi
+  rmdir -- "$staged" || exit $?
+done`
+const PLACE_NEW = `exec node -e '
+try {
+  require("node:fs").linkSync(process.argv[1], process.argv[2])
+} catch (error) {
+  if (error.code === "EEXIST") process.exit(${EXISTS})
+  console.error(error.message)
+  process.exitCode = 1
+}
+' -- "$1" "$2"`
 const RM = `[ -e "$1" ] || [ -L "$1" ] || exit ${MISSING}
 [ "$2" = recursive ] && exec rm -r -f -- "$1"
 rm -f -- "$1" 2>/dev/null && exit 0
@@ -199,18 +219,32 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 		},
 		writeFile: async (rel, body, options) => {
 			const content = await bytesOf(body)
+			const target = at(rel)
 			const write = (path: string) => inSandbox((sandbox) => sandbox.writeFile(path, content))
+			const writeWithMode = async (path: string) => {
+				await write(path)
+				if (options.mode !== undefined) {
+					await done('chmod "$2" -- "$1"', path, options.mode.toString(8))
+				}
+			}
 			if (options.exclusive === true) {
-				const staged = `${at(rel)}.${crypto.randomUUID()}.new`
-				await write(staged)
-				if ((await done(PLACE_NEW, staged, at(rel))) === EXISTS) {
-					throw failure("EEXIST", `File exists: ${at(rel)}`)
+				const parent = target.slice(0, target.lastIndexOf("/")) || "/"
+				const staged = await run(STAGE_NEW, parent, target)
+				if (staged.exitCode !== 0 || staged.stdout.length === 0) {
+					throw failure("EIO", staged.stderr.trim() || "Could not stage the new file.")
+				}
+				const directory = staged.stdout.trimEnd()
+				const payload = `${directory}/file`
+				try {
+					await writeWithMode(payload)
+					if ((await done(PLACE_NEW, payload, target)) === EXISTS) {
+						throw failure("EEXIST", `File exists: ${target}`)
+					}
+				} finally {
+					await done('rm -f -- "$1"; rmdir -- "$2"', payload, directory).catch(() => undefined)
 				}
 			} else {
-				await write(at(rel))
-			}
-			if (options.mode !== undefined) {
-				await done('chmod "$2" -- "$1"', at(rel), options.mode.toString(8))
+				await writeWithMode(target)
 			}
 		},
 		mkdir: async (rel, options) => {
