@@ -8,8 +8,8 @@ export interface CustodyRows {
 	readonly sealed: boolean
 }
 
-export const makeCustodyDatabase = () => {
-	const db = new DatabaseSync(":memory:")
+export const makeCustodyDatabase = (path = ":memory:") => {
+	const db = new DatabaseSync(path)
 	let failNext: string | undefined
 	let failNextCommit = false
 	const sql: CustodySql = {
@@ -49,6 +49,7 @@ export const makeCustodyDatabase = () => {
 			.map((row) => String(row["credential_id"]))
 	return {
 		sql,
+		close: () => db.close(),
 		failAt: (statementPrefix: string) => {
 			failNext = statementPrefix
 		},
