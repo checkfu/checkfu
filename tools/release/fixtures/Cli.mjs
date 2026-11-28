@@ -14,11 +14,10 @@ const raw = async (args, stdin = "") => {
 	// Keep the last attempted user action visible if the outer process deadline fires.
 	// Arguments and stdin can contain secrets; trace only the command name.
 	process.stderr.write(`[CLI journey] ${command}\n`)
-	const child = execute(
-		process.execPath,
-		["--no-experimental-strip-types", cli, "--format", "json", ...args],
-		{ timeout: 15_000, maxBuffer: 4 * 1024 * 1024 },
-	)
+	const child = execute(process.execPath, [cli, "--format", "json", ...args], {
+		timeout: 15_000,
+		maxBuffer: 4 * 1024 * 1024,
+	})
 	child.child.stdin.end(stdin)
 	return child
 }

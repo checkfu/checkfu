@@ -176,10 +176,16 @@ it(
 				Schema.Struct({
 					version: Schema.String,
 					dependencies: Schema.Record(Schema.String, Schema.String),
+					engines: Schema.Struct({ node: Schema.String }),
 				}),
 			),
 		)(await readFile(join(consumer, "node_modules", "@checkfu", "sdk", "package.json"), "utf8"))
 		expect(sdk.version).toBe(sdkVersion)
+		expect(sdk.engines.node).toBe(">=22.0.0")
+		const cliManifest = Schema.decodeSync(
+			Schema.fromJsonString(Schema.Struct({ engines: Schema.Struct({ node: Schema.String }) })),
+		)(await readFile(join(consumer, "node_modules", "checkfu", "package.json"), "utf8"))
+		expect(cliManifest.engines.node).toBe(">=22.0.0")
 		expect(
 			Object.values(sdk.dependencies).some((value) => /^(workspace|catalog|file):/.test(value)),
 		).toBe(false)
@@ -329,7 +335,7 @@ it(
 						'require("node:fs").writeFileSync("PRELOAD_RAN", "yes")',
 					)
 					const run = (args: ReadonlyArray<string>, extra = {}, stdin = "") => {
-						const child = execute(consumerNode, ["--no-experimental-strip-types", cli, ...args], {
+						const child = execute(consumerNode, [cli, ...args], {
 							cwd: hostile,
 							env: env({ CHECKFU_CONFIG_DIR: config, ...extra }),
 							timeout: 20_000,
@@ -398,27 +404,13 @@ it(
 					await run(["sessions", "archive", "--session-id", session.id])
 					const sdk = await execute(
 						consumerNode,
-						[
-							"--no-experimental-strip-types",
-							join(consumer, "Consumer.mjs"),
-							url,
-							TEST_API_KEY,
-							agent.id,
-							session.id,
-						],
+						[join(consumer, "Consumer.mjs"), url, TEST_API_KEY, agent.id, session.id],
 						{ cwd: consumer, env: env(), timeout: 30_000 },
 					)
 					expect(JSON.parse(sdk.stdout)).toMatchObject({ versions: [2, 1] })
 					const journey = await execute(
 						consumerNode,
-						[
-							"--no-experimental-strip-types",
-							join(consumer, "Cli.mjs"),
-							cli,
-							url,
-							TEST_API_KEY,
-							hostile,
-						],
+						[join(consumer, "Cli.mjs"), cli, url, TEST_API_KEY, hostile],
 						{
 							cwd: hostile,
 							env: env({ CHECKFU_CONFIG_DIR: config }),

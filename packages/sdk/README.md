@@ -4,7 +4,7 @@
 npm install @checkfu/sdk
 ```
 
-Requires Node.js 22 or later. The published package contains JavaScript and TypeScript declarations; it does not require Bun or a TypeScript runtime loader.
+Requires Node.js 22.0.0 or later. The published package contains JavaScript and TypeScript declarations; it does not require Bun or a TypeScript runtime loader.
 
 Effect-native TypeScript SDK for the Checkfu API, with a thin Promise / `AsyncIterable` client built on top of the same core.
 

@@ -1,6 +1,6 @@
 # checkfu
 
-The Checkfu command-line client. Requires Node.js 22 or later.
+The Checkfu command-line client. Requires Node.js 22.0.0 or later.
 
 ```sh
 npm install -g checkfu

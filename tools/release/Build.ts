@@ -70,7 +70,7 @@ const metadata = (name: string, version: string, directory: string) => ({
 	type: "module",
 	repository: { type: "git", url: "git+https://github.com/checkfu/checkfu.git", directory },
 	bugs: { url: "https://github.com/checkfu/checkfu/issues" },
-	engines: { node: ">=22" },
+	engines: { node: ">=22.0.0" },
 	publishConfig: { access: "public" },
 })
 

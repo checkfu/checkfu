@@ -13,7 +13,7 @@ Built on Cloudflare Workers, Durable Objects, [Pi Durable](https://github.com/ea
 
 ## Quickstart
 
-Requires Node.js 22+, a Cloudflare account (Workers Paid, R2 enabled), and a model provider API key.
+Requires Node.js 22.0.0 or later, a Cloudflare account (Workers Paid, R2 enabled), and a model provider API key.
 
 ```sh
 npm install -g checkfu
