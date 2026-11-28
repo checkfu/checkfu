@@ -14,11 +14,8 @@ import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
 import { LIST_PAGE_BYTES } from "../src/Http/Listing.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import {
-	HarnessLimits,
-	conversationName,
-	recordSettledToolEvents,
-} from "../src/Pi/PiDurableHarness.ts"
+import { conversationName, recordSettledToolEvents } from "../src/Pi/PiDurableHarness.ts"
+import { HarnessLimits } from "../src/HarnessCall.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import { blockAtGate } from "../src/Pi/PiRejection.ts"
 import {

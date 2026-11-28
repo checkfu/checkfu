@@ -43,7 +43,8 @@ import { WebhookListingQueryLive, vaultListingQueriesFrom } from "./Http/Listing
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { apiWorkerCustomProvidersProps } from "./Pi/PiCatalog.ts"
 import { CustomToolFaults } from "./Http/ToolSchemas.ts"
-import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
+import { PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
+import { harnessCall } from "./HarnessCall.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
 import { WebhookDelivererLive, WebhookDeliveryStoreDo } from "./Webhooks/WebhookDeliverer.do.ts"
@@ -53,8 +54,9 @@ import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
 import { SessionArtifactAccess } from "./SessionArtifactAccess.ts"
 import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 import { SkillReader } from "./Skills/SkillReader.ts"
+import { SessionWorkspaces } from "./Workspace/SessionWorkspaces.ts"
 
-const PiHarnessExecutorLive = Layer.effect(
+const PiTurnExecutorLive = Layer.effect(
 	PiTurnExecutor,
 	Effect.gen(function* () {
 		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
@@ -72,28 +74,6 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
-			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
-				harnessCall(
-					Effect.suspend(() =>
-						harness.prepareWorkspace(sessionId, token, repositories, allowedHosts),
-					),
-				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
-			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
-				harnessCall(
-					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
-				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
-			interruptWorkspace: (sessionId, token) =>
-				harnessCall(Effect.suspend(() => harness.interruptWorkspace(sessionId, token))).pipe(
-					Effect.withSpan("PiHarness.interruptWorkspace"),
-				),
-			listOutputs: (sessionId, turn) =>
-				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId, turn))).pipe(
-					Effect.withSpan("PiHarness.listOutputs"),
-				),
-			readOutputs: (sessionId, turn, files) =>
-				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, files))).pipe(
-					Effect.withSpan("PiHarness.readOutputs"),
-				),
 			pauseUsage: (conversation, operationId, pause) =>
 				harnessCall(
 					Effect.suspend(() => harness.pauseUsage(conversation, operationId, pause)),
@@ -102,9 +82,40 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(Effect.suspend(() => harness.answerCall(conversation, toolUseId, answer))).pipe(
 					Effect.withSpan("PiHarness.answerCall"),
 				),
+		}
+	}),
+)
+
+const SessionWorkspacesLive = Layer.effect(
+	SessionWorkspaces,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				harnessCall(
+					Effect.suspend(() =>
+						harness.prepareWorkspace(sessionId, token, repositories, allowedHosts),
+					),
+				).pipe(Effect.withSpan("SessionWorkspaces.prepareWorkspace")),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				harnessCall(
+					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
+				).pipe(Effect.withSpan("SessionWorkspaces.storeRepositoryToken")),
+			interruptWorkspace: (sessionId, token) =>
+				harnessCall(Effect.suspend(() => harness.interruptWorkspace(sessionId, token))).pipe(
+					Effect.withSpan("SessionWorkspaces.interruptWorkspace"),
+				),
+			listOutputs: (sessionId, turn) =>
+				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId, turn))).pipe(
+					Effect.withSpan("SessionWorkspaces.listOutputs"),
+				),
+			readOutputs: (sessionId, turn, files) =>
+				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, files))).pipe(
+					Effect.withSpan("SessionWorkspaces.readOutputs"),
+				),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
-					Effect.withSpan("PiHarness.discardWorkspace"),
+					Effect.withSpan("SessionWorkspaces.discardWorkspace"),
 				),
 		}
 	}),
@@ -214,7 +225,7 @@ const CheckfuLive = Checkfu.layer(
 	),
 	{ legacyData: false },
 ).pipe(
-	Layer.provide(PiHarnessExecutorLive),
+	Layer.provide([PiTurnExecutorLive, SessionWorkspacesLive]),
 	Layer.provide(PlacedDurableObjects),
 	Layer.provide(ArtifactStoreLive),
 	Layer.provide(ArtifactDatabaseLive),
@@ -247,7 +258,7 @@ const SkillReaderLive = Layer.effect(
 )
 
 const HarnessLive = PiDurableHarnessLive.pipe(
-	Layer.provide(PiHarnessExecutorLive),
+	Layer.provide([PiTurnExecutorLive, SessionWorkspacesLive]),
 	Layer.provide(CheckfuLive),
 )
 

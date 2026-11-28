@@ -17,11 +17,8 @@ import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.externa
 import { makeWebhooksTestSupport } from "../src/Webhooks/WebhookTestLayer.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
-import {
-	HarnessLimits,
-	PiDurableHarnessLive,
-	makePiTurnExecutorLayer,
-} from "../src/Pi/PiDurableHarness.ts"
+import { PiDurableHarnessLive, makePiTurnExecutorLayer } from "../src/Pi/PiDurableHarness.ts"
+import { HarnessLimits } from "../src/HarnessCall.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import { DEFAULT_REFUSAL_TEXT, PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
 import {

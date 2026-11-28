@@ -23,11 +23,11 @@ import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AgentVersionLookupTimeout,
-	HarnessLimits,
 	HarnessTurnTimeout,
 	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableHarness.ts"
+import { HarnessLimits } from "../src/HarnessCall.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
