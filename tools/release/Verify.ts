@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import * as Schema from "effect/Schema"
@@ -14,6 +14,7 @@ import {
 	surfaces,
 } from "./Verification.ts"
 import type { Group, Source } from "./Verification.ts"
+import { prepareEvidenceDirectory } from "./VerifyDirectory.ts"
 
 const root = resolve(import.meta.dirname, "../..")
 const git = (...args: Array<string>) =>
@@ -25,9 +26,16 @@ const source = (): Source => {
 		.filter(Boolean)
 		.sort()) {
 		hash.update(file).update("\0")
-		hash
-			.update(existsSync(join(root, file)) ? readFileSync(join(root, file)) : "<deleted>")
-			.update("\0")
+		const path = join(root, file)
+		const entry = lstatSync(path, { throwIfNoEntry: false })
+		const link = entry?.isSymbolicLink() === true
+		const kind = link ? "link" : entry === undefined ? "missing" : "file"
+		const bytes = link
+			? readlinkSync(path, { encoding: "buffer" })
+			: entry === undefined
+				? Buffer.alloc(0)
+				: readFileSync(path)
+		hash.update(kind).update("\0").update(String(bytes.length)).update("\0").update(bytes)
 	}
 	return {
 		commit: git("rev-parse", "HEAD"),
@@ -82,33 +90,48 @@ const run = async (group: Group, directory: string, full: boolean) => {
 }
 
 const [action = "all", ...inputs] = process.argv.slice(2)
-const current = source()
-const directory = resolve(
-	process.env["CHECKFU_VERIFICATION_DIR"] ??
-		join(root, ".checkfu", "verification", `${current.commit}-${Date.now()}-${process.pid}`),
+const importing = action === "report" || action === "release"
+const full =
+	inputs.length === 1 && inputs[0] === "--full" && (action === "project" || action === "machines")
+const selected = importing ? [] : groupNames.filter((group) => group === action || action === "all")
+if (!importing && inputs.length !== 0 && !full) {
+	throw new Error("Use --full with project or machines to run the full Workerd suite.")
+}
+if (!importing && selected.length === 0) {
+	throw new Error(
+		`Usage: bun run verify [all|${groupNames.join("|")}|report|release] [evidence.json ...]`,
+	)
+}
+const directory = prepareEvidenceDirectory(
+	root,
+	resolve(
+		process.env["CHECKFU_VERIFICATION_DIR"] ??
+			join(
+				root,
+				".checkfu",
+				"verification",
+				`${git("rev-parse", "HEAD")}-${Date.now()}-${process.pid}`,
+			),
+	),
+	[
+		"matrix.json",
+		"summary.md",
+		...selected.flatMap((group) => [`${group}.json`, `${group}.vitest.json`]),
+	],
+	process.env["GITHUB_STEP_SUMMARY"],
 )
 await mkdir(directory, { recursive: true })
 const evidence: Array<Evidence> = []
-if (action === "report" || action === "release") {
+if (importing) {
 	for (const file of inputs) {
 		evidence.push(Schema.decodeSync(Schema.fromJsonString(Evidence))(await readFile(file, "utf8")))
 	}
 } else {
-	const full =
-		inputs.length === 1 && inputs[0] === "--full" && (action === "project" || action === "machines")
-	if (inputs.length !== 0 && !full) {
-		throw new Error("Use --full with project or machines to run the full Workerd suite.")
-	}
-	const selected = groupNames.filter((group) => group === action || action === "all")
-	if (selected.length === 0) {
-		throw new Error(
-			`Usage: bun run verify [all|${groupNames.join("|")}|report|release] [evidence.json ...]`,
-		)
-	}
 	for (const group of selected) {
 		evidence.push(await run(group, directory, full))
 	}
 }
+
 const report = matrix(source(), evidence)
 await writeFile(join(directory, "matrix.json"), JSON.stringify(report, null, 2))
 const lines = [
