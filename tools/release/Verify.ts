@@ -28,7 +28,7 @@ const source = (): Source => {
 	}
 }
 
-const run = async (group: Group, directory: string) => {
+const run = async (group: Group, directory: string, full: boolean) => {
 	const spec = groups[group]
 	const before = source()
 	const startedAt = new Date().toISOString()
@@ -40,8 +40,7 @@ const run = async (group: Group, directory: string) => {
 		join(root, spec.cwd),
 		spec.script,
 		...spec.files,
-		"--tagsFilter",
-		"acceptance",
+		...(full ? [] : ["--tagsFilter", "acceptance"]),
 		"--reporter=default",
 		"--reporter=json",
 		`--outputFile.json=${raw}`,
@@ -78,7 +77,7 @@ const [action = "all", ...inputs] = process.argv.slice(2)
 const current = source()
 const directory = resolve(
 	process.env["CHECKFU_VERIFICATION_DIR"] ??
-		join(root, ".checkfu", "verification", `${current.commit}-${Date.now()}`),
+		join(root, ".checkfu", "verification", `${current.commit}-${Date.now()}-${process.pid}`),
 )
 await mkdir(directory, { recursive: true })
 const evidence: Array<Evidence> = []
@@ -87,6 +86,11 @@ if (action === "report" || action === "release") {
 		evidence.push(Schema.decodeSync(Schema.fromJsonString(Evidence))(await readFile(file, "utf8")))
 	}
 } else {
+	const full =
+		inputs.length === 1 && inputs[0] === "--full" && (action === "project" || action === "machines")
+	if (inputs.length !== 0 && !full) {
+		throw new Error("Use --full with project or machines to run the full Workerd suite.")
+	}
 	const selected = Object.keys(groups).filter(
 		(group): group is Group => group === action || action === "all",
 	)
@@ -96,7 +100,7 @@ if (action === "report" || action === "release") {
 		)
 	}
 	for (const group of selected) {
-		evidence.push(await run(group, directory))
+		evidence.push(await run(group, directory, full))
 	}
 }
 const report = matrix(source(), evidence)

@@ -158,19 +158,32 @@ jobs:
       matrix:
         leg:
           - name: pi-session
-            args: test/workerd/PiSession.workerd.ts
+            evidence: project
           - name: pi-session-machines
-            args: test/workerd/PiSessionMachines.workerd.ts
+            evidence: machines
           - name: rest
+            evidence: ""
             args: --exclude test/workerd/PiSession.workerd.ts --exclude test/workerd/PiSessionMachines.workerd.ts
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run test:workerd ${{ matrix.leg.args }}
+      - if: matrix.leg.evidence == ''
+        run: bun run test:workerd ${{ matrix.leg.args }}
         env:
           CHECKFU_LOG_DOCKER_READINESS: "1"
+      - if: matrix.leg.evidence != ''
+        run: bun run verify "${{ matrix.leg.evidence }}" --full
+        env:
+          CHECKFU_VERIFICATION_DIR: .checkfu/verification
+          CHECKFU_LOG_DOCKER_READINESS: "1"
+      - if: ${{ always() && matrix.leg.evidence != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verification-${{ matrix.leg.evidence }}
+          path: .checkfu/verification/
+          include-hidden-files: true
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
@@ -194,7 +207,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [clients, ui, mcp, project, machines, domain]
+        group: [clients, ui, mcp, domain]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -211,7 +224,7 @@ jobs:
           include-hidden-files: true
 
   verification:
-    needs: acceptance-evidence
+    needs: [acceptance-evidence, workerd-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -239,9 +252,10 @@ jobs:
           include-hidden-files: true
       - if: ${{ always() }}
         name: Require the evidence producers to pass
-        run: test "$RESULT" = success
+        run: test "$JOURNEYS_RESULT" = success && test "$WORKERD_RESULT" = success
         env:
-          RESULT: ${{ needs.acceptance-evidence.result }}
+          JOURNEYS_RESULT: ${{ needs.acceptance-evidence.result }}
+          WORKERD_RESULT: ${{ needs.workerd-tests.result }}
 
   # A deployable main includes its sandbox image. This is independent of npm CLI versions.
   cli-platforms:

@@ -108,3 +108,32 @@ it("credits the project interfaces only for the actions each performs", () => {
 		failedProducer.cases.filter(({ group }) => group === "project").map(({ status }) => status),
 	).toEqual(["unverified", "unverified"])
 })
+
+it("ignores untagged assertions in a full run but still requires the runner to succeed", () => {
+	const run = execution()
+	const file = run.runner!.testResults[0]!
+	const full: Evidence = {
+		...run,
+		runner: {
+			success: true,
+			testResults: [
+				{
+					...file,
+					assertionResults: [
+						...file.assertionResults,
+						{
+							...file.assertionResults[0]!,
+							title: "unrelated passing case",
+							fullName: "unrelated passing case",
+							tags: [],
+						},
+					],
+				},
+			],
+		},
+	}
+	expect(retry([full])).toMatchObject({ status: "passed", evidence: [expect.anything()] })
+	expect(
+		retry([{ ...full, runner: { ...full.runner!, success: false }, exitCode: 1 }])?.status,
+	).toBe("unverified")
+})
