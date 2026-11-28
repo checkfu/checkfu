@@ -278,9 +278,14 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				return yield* agents.send(new ArchiveAgent({ agent_id: id }))
 			}
 			const { withArchiveInventory } = yield* Effect.promise(() => import("./ArchiveInventory.ts"))
-			const receipt = yield* withArchiveInventory(list, automationViews, (inventory) =>
+			const receipt = yield* withArchiveInventory(list, automationViews, (inventory, scope) =>
 				guardedArchive.send(
-					new ArchiveAgentIfCurrent({ agent_id: id, expected_version: version, inventory }),
+					new ArchiveAgentIfCurrent({
+						agent_id: id,
+						expected_version: version,
+						inventory,
+						...scope,
+					}),
 				),
 			)
 			return commitForStream(receipt.commits, `Agent/${id}`)

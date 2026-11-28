@@ -18,6 +18,7 @@ import { AutomationArchivedError } from "@checkfu/domain/Automation/AutomationAr
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import { AutomationId, automationRunId } from "@checkfu/domain/Automation/Automation.id"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
+import { AutomationCapacityScope } from "./AutomationCapacityScope.ts"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
@@ -294,6 +295,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const { agent_id, agent_version } = yield* agentOf(payload.agent)
 					const environment_id = yield* environmentOf(payload.environment_id)
 					const command = {
+						// Keep the create receipt compatible when a deployment changes capacity assignment.
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
 						description: payload.description ?? null,
@@ -310,8 +312,12 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						body: command,
 					})
 					const id = AutomationId.make(identity.id)
+					const { capacityId } = yield* AutomationCapacityScope
 					const receipt = yield* admission
-						.send(new AdmitAutomation({ automation_id: id, ...command }), identity.options)
+						.send(
+							new AdmitAutomation({ automation_id: id, ...command, capacity_id: capacityId }),
+							identity.options,
+						)
 						.pipe(
 							Effect.catchTags({
 								AutomationAlreadyExists: () =>

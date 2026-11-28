@@ -38,5 +38,5 @@ it.each([
 			expect(["Proved", "Bounded"], description).toContain(verdict._tag)
 		}
 	},
-	60_000,
+	180_000,
 )

@@ -1,4 +1,7 @@
-import { MAX_LIVE_AUTOMATIONS } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
+import {
+	AutomationCapacity,
+	MAX_LIVE_AUTOMATIONS,
+} from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import {
 	ArchiveAgentIfCurrent,
@@ -19,6 +22,8 @@ import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
 import * as TestClock from "effect/testing/TestClock"
 import { makeApiHandler } from "../src/Http/Router.ts"
+import { AutomationCapacityScope } from "../src/Http/AutomationCapacityScope.ts"
+import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
 import { AutomationReadWaitTimeout } from "../src/Http/AutomationsHandlers.ts"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
@@ -161,6 +166,90 @@ const run = async <A>(
 		await closeAll()
 	}
 }
+
+it("keeps capacity assignment through an idempotent create, guarded archive, and slot release", () =>
+	run((apiFetch) =>
+		Effect.gen(function* () {
+			const { agentId, environmentId } = yield* prerequisites(apiFetch)
+			const create = (key: string, capacityId = AUTOMATION_CAPACITY as string) =>
+				call<AutomationBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					{
+						name: "Partitioned report",
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message("report"),
+						schedule: weekdayMornings,
+					},
+					{ "idempotency-key": key },
+				).pipe(Effect.provideService(AutomationCapacityScope, { capacityId }))
+			const original = yield* create("prepartition")
+			expect(original.status).toBe(201)
+			const resumed = yield* create("prepartition", "partition:one")
+			expect(resumed.status).toBe(201)
+			expect(resumed.body.id).toBe(original.body.id)
+
+			const first = yield* create("scoped-one", "partition:one")
+			const second = yield* create("scoped-two", "partition:two")
+			expect(first.status).toBe(201)
+			expect(second.status).toBe(201)
+			const capacity = yield* AutomationCapacity
+			expect((yield* capacity.get(AUTOMATION_CAPACITY)).reserved).toBe(1)
+			expect((yield* capacity.get("partition:one")).reserved).toBe(1)
+			expect((yield* capacity.get("partition:two")).reserved).toBe(1)
+			const archiveScope = {
+				capacityId: "partition:one",
+				includeDefaultCapacity: true,
+				archiveInventory: Effect.succeed([
+					AutomationId.make(original.body.id),
+					AutomationId.make(first.body.id),
+				]),
+			} as const
+			for (const path of [
+				`/v1/agents/${agentId}/archive`,
+				`/v1/environments/${environmentId}/archive`,
+			]) {
+				const blocked = yield* call(apiFetch, "POST", `${path}?version=1`).pipe(
+					Effect.provideService(AutomationCapacityScope, archiveScope),
+				)
+				expect(blocked.status).toBe(409)
+			}
+			const unavailableId = AutomationId.make("auto_ffffffffffffffffffffffffffffffff")
+			const incomplete = yield* call(
+				apiFetch,
+				"POST",
+				`/v1/agents/${agentId}/archive?version=1`,
+			).pipe(
+				Effect.provideService(AutomationCapacityScope, {
+					...archiveScope,
+					archiveInventory: Effect.succeed([unavailableId]),
+				}),
+			)
+			expect(incomplete.status).toBe(503)
+			expect(JSON.stringify(incomplete.body)).toContain("The automation inventory is changing.")
+			expect(JSON.stringify(incomplete.body)).not.toContain(unavailableId)
+			for (const automation of [original, first]) {
+				for (let retry = 0; retry < 2; retry++) {
+					const archive = yield* call(
+						apiFetch,
+						"POST",
+						`/v1/automations/${automation.body.id}/archive?revision=1`,
+					)
+					expect(archive.status).toBe(200)
+				}
+			}
+			yield* Effect.gen(function* () {
+				const legacy = yield* capacity.get(AUTOMATION_CAPACITY)
+				const one = yield* capacity.get("partition:one")
+				if (legacy.reserved + one.reserved !== 0) {
+					return yield* Effect.fail("slot release still queued")
+				}
+			}).pipe(Effect.retry({ times: 50, schedule: Schedule.spaced("20 millis") }), Effect.orDie)
+			expect((yield* capacity.get("partition:two")).reserved).toBe(1)
+		}),
+	))
 
 interface ListBody {
 	readonly data: ReadonlyArray<AutomationBody>

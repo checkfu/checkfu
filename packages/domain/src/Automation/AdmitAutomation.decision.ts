@@ -17,6 +17,7 @@ import {
 	AutomationSlotReserved,
 	MAX_LIVE_AUTOMATIONS,
 } from "./AutomationCapacity.aggregate.ts"
+import { AUTOMATION_CAPACITY } from "./AutomationCapacity.id.ts"
 import { AutomationAlreadyExists, AutomationCreated } from "./CreateAutomation.command.ts"
 import { isUsableSchedule } from "./Schedule.ts"
 
@@ -64,6 +65,7 @@ export class AdmitAutomationDecision extends Domain.Decision(AdmitAutomation, {
 		return [
 			automation.record(
 				new AutomationCreated({
+					...(cmd.capacity_id === AUTOMATION_CAPACITY ? {} : { capacity_id: cmd.capacity_id }),
 					name: cmd.name,
 					description: cmd.description,
 					agent_id: agent.id,

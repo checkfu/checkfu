@@ -154,6 +154,7 @@ const STANDING = {
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
+	"Session.FencingClosesAnUninitializedSessionBeforeItCanAdmit": "proved",
 	"Session.TurnNeverDecreases": "proved",
 	"Session.TurnAdvancesByAtMostOne": "proved",
 	"Session.ModelRequestsStartedNeverDecreasesWithinTurn": "proved",

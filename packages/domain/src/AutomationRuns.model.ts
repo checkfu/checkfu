@@ -5,6 +5,7 @@ import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
 import { Automation } from "./Automation/Automation.aggregate.ts"
 import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
+import { capacityOf } from "./Automation/AutomationCapacity.id.ts"
 import { AutomationRunView } from "./Automation/AutomationRunView.view.ts"
 import { AutomationView } from "./Automation/AutomationView.view.ts"
 import {
@@ -49,11 +50,17 @@ export class AutomationRuns extends Domain.Model("AutomationRuns", {
 		ReservedSlotsCoverLiveAutomations: (m) => {
 			const live = m.Automation.filter((a) =>
 				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
-			).length
+			)
 			return [
-				[m.AutomationCapacity.length === 0, live === 0].every((ok) => ok),
-				m.AutomationCapacity.some((c) => c.state.reserved >= live),
-			].some((ok) => ok)
+				live.every((automation) =>
+					m.AutomationCapacity.some((capacity) => capacity.id === capacityOf(automation.state)),
+				),
+				m.AutomationCapacity.every(
+					(capacity) =>
+						capacity.state.reserved >=
+						live.filter((automation) => capacity.id === capacityOf(automation.state)).length,
+				),
+			].every((ok) => ok)
 		},
 	},
 	eventually: {
@@ -68,11 +75,17 @@ export class AutomationRuns extends Domain.Model("AutomationRuns", {
 		ReservedSlotsEqualLiveAutomations: (m) => {
 			const live = m.Automation.filter((a) =>
 				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
-			).length
+			)
 			return [
-				[m.AutomationCapacity.length === 0, live === 0].every((ok) => ok),
-				m.AutomationCapacity.some((c) => c.state.reserved === live),
-			].some((ok) => ok)
+				live.every((automation) =>
+					m.AutomationCapacity.some((capacity) => capacity.id === capacityOf(automation.state)),
+				),
+				m.AutomationCapacity.every(
+					(capacity) =>
+						capacity.state.reserved ===
+						live.filter((automation) => capacity.id === capacityOf(automation.state)).length,
+				),
+			].every((ok) => ok)
 		},
 	},
 	sometimes: {

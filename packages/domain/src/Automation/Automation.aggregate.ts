@@ -3,6 +3,7 @@ import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { ArchiveAutomation, AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { AutomationId, sessionIdOfNextRun } from "./Automation.id.ts"
+import { AutomationCapacityId } from "./AutomationCapacity.id.ts"
 import { AutomationArchivedError } from "./AutomationArchived.rejection.ts"
 import { AutomationNotFound } from "./AutomationNotFound.rejection.ts"
 import { NonNegativeInt, PAUSED_MANUALLY } from "./AutomationTypes.ts"
@@ -27,6 +28,7 @@ import { AutomationUnpaused, ResumeAutomation } from "./ResumeAutomation.command
 import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
+	capacity_id: Schema.optionalKey(AutomationCapacityId),
 	status: Schema.Literals(["", "active", "paused", "archived"]),
 	runs: NonNegativeInt,
 	reported: NonNegativeInt,
@@ -247,7 +249,11 @@ export class Automation extends Domain.Aggregate("Automation", {
 			if (state.status === "archived") {
 				return []
 			}
-			return [new AutomationArchived()]
+			return [
+				new AutomationArchived(
+					state.capacity_id === undefined ? {} : { capacity_id: state.capacity_id },
+				),
+			]
 		},
 		RunAutomation: (state, _cmd, ctx) => {
 			if (state.status === "") {
@@ -312,6 +318,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 						...state,
 						status: "active" as const,
 						revision: 1,
+						...(e.capacity_id === undefined ? {} : { capacity_id: e.capacity_id }),
 						agent_id: e.agent_id,
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,

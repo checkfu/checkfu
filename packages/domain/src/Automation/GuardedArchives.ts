@@ -17,7 +17,7 @@ import { AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { AutomationId } from "./Automation.id.ts"
 import { AutomationCapacity, MAX_LIVE_AUTOMATIONS } from "./AutomationCapacity.aggregate.ts"
-import { AUTOMATION_CAPACITY } from "./AutomationCapacity.id.ts"
+import { AUTOMATION_CAPACITY, AutomationCapacityId, capacityOf } from "./AutomationCapacity.id.ts"
 import { AutomationNotFound } from "./AutomationNotFound.rejection.ts"
 import { AutomationRevisionConflict } from "./UpdateAutomation.command.ts"
 
@@ -45,11 +45,24 @@ export class AutomationDependencyInUse extends Domain.Rejection(
 ) {}
 
 const archiveInventory = Schema.Array(AutomationReference).check(
-	Schema.isMaxLength(MAX_LIVE_AUTOMATIONS),
+	Schema.isMaxLength(2 * MAX_LIVE_AUTOMATIONS),
 )
+const inventoryScope = {
+	capacity_id: Schema.optionalKey(AutomationCapacityId),
+	include_default_capacity: Schema.optionalKey(Schema.Literal(true)),
+}
+const inventoryCapacityKeys = (command: {
+	readonly capacity_id?: AutomationCapacityId
+	readonly include_default_capacity?: true
+}) => {
+	const capacity = capacityOf(command)
+	return command.include_default_capacity === true && capacity !== AUTOMATION_CAPACITY
+		? [capacity, AUTOMATION_CAPACITY]
+		: [capacity]
+}
 
 const referenceConflict = (
-	capacity: Read<typeof AutomationCapacity>,
+	capacities: ReadonlyArray<Read<typeof AutomationCapacity>>,
 	automations: ReadonlyArray<Read<typeof Automation>>,
 	inventory: ReadonlyArray<AutomationReference>,
 	field: "agent_id" | "environment_id",
@@ -61,25 +74,39 @@ const referenceConflict = (
 	// Admission reserves a slot atomically. Slot release can lag, so reserved is an upper
 	// bound. Equality proves the listing covers every live automation at this transaction.
 	if (
-		live.length !== capacity.state.reserved ||
+		capacities.some(
+			(capacity) =>
+				live.filter(({ state }) => capacityOf(state) === capacity.id).length !==
+				capacity.state.reserved,
+		) ||
 		inventory.some(({ id }) => inventory.filter((entry) => entry.id === id).length !== 1) ||
 		live.some(
 			({ id, state }) =>
-				!inventory.some((entry) => entry.id === id && entry.revision === state.revision),
+				!capacities.some((capacity) => capacity.id === capacityOf(state)) ||
+				!inventory.some(
+					(entry) =>
+						entry.id === id &&
+						entry.revision === state.revision &&
+						entry.agent_id === state.agent_id &&
+						entry.environment_id === state.environment_id,
+				),
 		)
 	) {
 		return new AutomationInventoryChanged()
 	}
-	const conflict = inventory.find(
-		(entry) => entry[field] === id && live.some((automation) => automation.id === entry.id),
-	)
+	const conflict = live.find(({ state }) => state[field] === id)
 	return conflict === undefined
 		? undefined
 		: new AutomationDependencyInUse({ automation_id: conflict.id })
 }
 
 export class ArchiveAgentIfCurrent extends Domain.Command("ArchiveAgentIfCurrent", {
-	input: { agent_id: AgentId, expected_version: PositiveInt, inventory: archiveInventory },
+	input: {
+		agent_id: AgentId,
+		expected_version: PositiveInt,
+		inventory: archiveInventory,
+		...inventoryScope,
+	},
 	events: [AgentArchived],
 	rejects: [
 		AgentNotFound,
@@ -90,13 +117,13 @@ export class ArchiveAgentIfCurrent extends Domain.Command("ArchiveAgentIfCurrent
 }) {}
 
 export class ArchiveAgentIfCurrentDecision extends Domain.Decision(ArchiveAgentIfCurrent, {
-	reads: { agent: Agent, capacity: AutomationCapacity, automations: Automation },
+	reads: { agent: Agent, capacities: AutomationCapacity, automations: Automation },
 	keyOf: (cmd) => ({
 		agent: cmd.agent_id,
-		capacity: AUTOMATION_CAPACITY,
+		capacities: inventoryCapacityKeys(cmd),
 		automations: cmd.inventory.map(({ id }) => id),
 	}),
-	decide: ({ agent, capacity, automations }, cmd) => {
+	decide: ({ agent, capacities, automations }, cmd) => {
 		if (agent.state.status === "") {
 			return new AgentNotFound({ agent_id: agent.id })
 		}
@@ -111,7 +138,7 @@ export class ArchiveAgentIfCurrentDecision extends Domain.Decision(ArchiveAgentI
 			})
 		}
 		return (
-			referenceConflict(capacity, automations, cmd.inventory, "agent_id", agent.id) ?? [
+			referenceConflict(capacities, automations, cmd.inventory, "agent_id", agent.id) ?? [
 				agent.record(new AgentArchived()),
 			]
 		)
@@ -134,6 +161,7 @@ export class ArchiveEnvironmentIfCurrent extends Domain.Command("ArchiveEnvironm
 		environment_id: EnvironmentId,
 		expected_version: PositiveInt,
 		inventory: archiveInventory,
+		...inventoryScope,
 	},
 	events: [EnvironmentArchived],
 	rejects: [
@@ -147,13 +175,13 @@ export class ArchiveEnvironmentIfCurrent extends Domain.Command("ArchiveEnvironm
 export class ArchiveEnvironmentIfCurrentDecision extends Domain.Decision(
 	ArchiveEnvironmentIfCurrent,
 	{
-		reads: { environment: Environment, capacity: AutomationCapacity, automations: Automation },
+		reads: { environment: Environment, capacities: AutomationCapacity, automations: Automation },
 		keyOf: (cmd) => ({
 			environment: cmd.environment_id,
-			capacity: AUTOMATION_CAPACITY,
+			capacities: inventoryCapacityKeys(cmd),
 			automations: cmd.inventory.map(({ id }) => id),
 		}),
-		decide: ({ environment, capacity, automations }, cmd) => {
+		decide: ({ environment, capacities, automations }, cmd) => {
 			if (environment.state.status === "" || environment.state.status === "deleted") {
 				return new EnvironmentNotFound({ environment_id: environment.id })
 			}
@@ -169,7 +197,7 @@ export class ArchiveEnvironmentIfCurrentDecision extends Domain.Decision(
 			}
 			return (
 				referenceConflict(
-					capacity,
+					capacities,
 					automations,
 					cmd.inventory,
 					"environment_id",
@@ -216,7 +244,15 @@ export class ArchiveAutomationIfCurrentDecision extends Domain.Decision(
 					current_revision: automation.state.revision,
 				})
 			}
-			return [automation.record(new AutomationArchived())]
+			return [
+				automation.record(
+					new AutomationArchived(
+						automation.state.capacity_id === undefined
+							? {}
+							: { capacity_id: automation.state.capacity_id },
+					),
+				),
+			]
 		},
 		transitions: {
 			AnArchiveHappensAtTheExpectedRevision: ({ before, after, command }) =>

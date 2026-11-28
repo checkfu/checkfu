@@ -95,6 +95,7 @@ const STANDING = {
 	"Session.AnInterruptedTurnStaysInterrupted": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
+	"Session.FencingClosesAnUninitializedSessionBeforeItCanAdmit": "proved",
 	"Session.IdleSessionStartsTheNextTurn": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
 	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",

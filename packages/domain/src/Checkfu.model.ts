@@ -15,6 +15,7 @@ import {
 	ArchiveEnvironmentIfCurrentDecision,
 } from "./Automation/GuardedArchives.ts"
 import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
+import { capacityOf } from "./Automation/AutomationCapacity.id.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
 import { UpdateAutomationDecision } from "./Automation/UpdateAutomation.decision.ts"
 import { OpenAutomationSessionDecision } from "./Automation/OpenAutomationSession.decision.ts"
@@ -394,10 +395,17 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ReservedSlotsEqualLiveAutomations: (m) => {
 			const live = m.Automation.filter((a) =>
 				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
-			).length
-			return m.AutomationCapacity.length === 0
-				? live === 0
-				: m.AutomationCapacity.every((c) => c.state.reserved === live)
+			)
+			return [
+				live.every((automation) =>
+					m.AutomationCapacity.some((capacity) => capacity.id === capacityOf(automation.state)),
+				),
+				m.AutomationCapacity.every(
+					(capacity) =>
+						capacity.state.reserved ===
+						live.filter((automation) => capacity.id === capacityOf(automation.state)).length,
+				),
+			].every((ok) => ok)
 		},
 		EveryArtifactVersionIsWithinItsArtifactsHead: (m) =>
 			m.ArtifactVersionView.every((v) =>

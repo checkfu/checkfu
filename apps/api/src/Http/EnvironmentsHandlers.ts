@@ -69,12 +69,13 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 				return yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
 			}
 			const { withArchiveInventory } = yield* Effect.promise(() => import("./ArchiveInventory.ts"))
-			const receipt = yield* withArchiveInventory(list, automationViews, (inventory) =>
+			const receipt = yield* withArchiveInventory(list, automationViews, (inventory, scope) =>
 				guardedArchive.send(
 					new ArchiveEnvironmentIfCurrent({
 						environment_id: id,
 						expected_version: version,
 						inventory,
+						...scope,
 					}),
 				),
 			)
