@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect"
 import { describe, expect, it } from "vitest"
 import type { ExecResult, Sandbox } from "../src/Sandbox/Sandboxes.ts"
 import type { Archive, SavedDisk } from "../src/Workspace/SavedDisk.ts"
+import { makeSandboxMount } from "../src/Workspace/SandboxMount.ts"
 import { makeWorkspaceMachine } from "../src/Workspace/WorkspaceMachine.ts"
 import type { StoredFiles } from "../src/Workspace/WorkspaceMachine.ts"
 
@@ -274,6 +275,39 @@ describe("workspace machine", () => {
 		await content(machine)
 		expect([state.opened.length, settled(), machine.engaged()]).toEqual([1, 1, true])
 	})
+
+	it.each(["read", "exclusive write"] as const)(
+		"leaves the replacement notice for a live caller after a canceled %s",
+		async (kind) => {
+			const { machine, state, content, kill, again } = makeMachine()
+			await content(machine)
+			kill()
+			const replacement = again()
+			const opening = deferred()
+			state.opening = opening.held
+			const mount = makeSandboxMount("/workspace", replacement.inMachine)
+			const controller = new AbortController()
+			const options = { signal: controller.signal }
+			const pending =
+				kind === "read"
+					? mount.readFile("target", options)
+					: mount.writeFile!("target", new Blob(["fixture"]).stream(), {
+							...options,
+							exclusive: true,
+						})
+			const cancelled = new Error("Cancelled while opening the workspace")
+			const result = expect(pending).rejects.toBe(cancelled)
+			try {
+				await expect.poll(() => replacement.busy()).toBe(true)
+				controller.abort(cancelled)
+			} finally {
+				opening.release()
+			}
+			await result
+			await expect(content(replacement)).rejects.toThrow("before the first command")
+			await expect(content(replacement)).resolves.toBe(SEEDED)
+		},
+	)
 
 	it("cancels the archive when a staging write fails and can restore it on retry", async () => {
 		const chunk = new Uint8Array(256 * 1024)
