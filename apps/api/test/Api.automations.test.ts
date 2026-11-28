@@ -1402,6 +1402,51 @@ describe("Automations API", () => {
 			}),
 		))
 
+	it("reports the committed revision for both no-op and advancing edits with delayed projections", () =>
+		run(() =>
+			Effect.gen(function* () {
+				const views = yield* AutomationView
+				let delayRead = false
+				let reads = 0
+				const lagging = {
+					...views,
+					get: (...args: Parameters<typeof views.get>) => {
+						if (delayRead && ++reads === 2) {
+							return Effect.succeedNone
+						}
+						return views.get(...args)
+					},
+				}
+				const { fetch } = yield* makeApiHandler.pipe(Effect.provideService(AutomationView, lagging))
+				const { agentId, environmentId } = yield* prerequisites(fetch)
+				const { body: created } = yield* call<AutomationBody>(fetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Report."),
+					schedule: weekdayMornings,
+				})
+				const path = "/v1/automations/" + created.id
+				for (const [name, revision] of [
+					["Morning report", 1],
+					["Afternoon report", 2],
+				] as const) {
+					reads = 0
+					delayRead = true
+					const result = yield* call(fetch, "POST", path, { name, revision: 1 })
+					delayRead = false
+					expect(result).toEqual({
+						status: 202,
+						body: { id: created.id, type: "automation", pending: true, revision },
+					})
+					expect((yield* call(fetch, "GET", path)).body).toMatchObject({ name, revision })
+				}
+				expect((yield* call(fetch, "POST", path, { revision: 1, name: "Stale edit" })).status).toBe(
+					409,
+				)
+			}),
+		))
+
 	it("changes the cron expression and the timezone separately, keeping both of two concurrent edits", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {

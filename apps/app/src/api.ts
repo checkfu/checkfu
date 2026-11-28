@@ -96,14 +96,6 @@ const settled = async <T>(
 	throw new AcceptedReceipt(result.id, check, cause)
 }
 
-const versionOf = (value: unknown): number =>
-	typeof value === "object" &&
-	value !== null &&
-	"version" in value &&
-	typeof value.version === "number"
-		? value.version
-		: 0
-
 const requireAutomationRevision = (revision: number): number => {
 	if (!Number.isSafeInteger(revision) || revision < 1) {
 		throw new Error(
@@ -316,12 +308,10 @@ export const checkfu = {
 		retrieve: retrieveAgent,
 		create: async (body: CreateAgentBody, idempotencyKey: string) =>
 			settled(retrieveAgent, await request("agents.create", { body, idempotencyKey })),
-		update: async (agent_id: string, body: UpdateAgentBody & { readonly version: number }) =>
-			settled(
-				retrieveAgent,
-				await request("agents.update", { path: { agent_id }, body }),
-				(saved) => versionOf(saved) > body.version,
-			),
+		update: async (agent_id: string, body: UpdateAgentBody & { readonly version: number }) => {
+			const result = await request("agents.update", { path: { agent_id }, body })
+			return settled(retrieveAgent, result, (saved) => saved.version >= result.version)
+		},
 		archive: async (agent_id: string, version: number) =>
 			settled(
 				retrieveAgent,
@@ -365,10 +355,11 @@ export const checkfu = {
 			body: UpdateAutomationBody & { readonly revision: number },
 		) => {
 			requireAutomationRevision(body.revision)
+			const result = await request("automations.update", { path: { automation_id }, body })
 			return settled(
 				retrieveAutomation,
-				await request("automations.update", { path: { automation_id }, body }),
-				(saved) => showsChanges(saved, body),
+				result,
+				(saved) => saved.revision >= result.revision && showsChanges(saved, body),
 			)
 		},
 		pause: async (automation_id: string) =>

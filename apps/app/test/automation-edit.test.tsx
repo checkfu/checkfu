@@ -118,7 +118,10 @@ const editor = async ({
 			writeAccepted = true
 			if (pending) {
 				previous = before
-				return { status: 202, body: { id: current.id, type: "automation", pending: true } }
+				return {
+					status: 202,
+					body: { id: current.id, type: "automation", pending: true, revision: current.revision },
+				}
 			}
 			return { body: current }
 		}

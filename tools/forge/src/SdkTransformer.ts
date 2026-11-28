@@ -531,7 +531,11 @@ const generateResourcesFile = (
 			}
 
 			const emitInvoke = (): void => {
-				if (!op.supportsPending) {
+				if (
+					!op.supportsPending ||
+					op.operationId === "agents.update" ||
+					op.operationId === "automations.update"
+				) {
 					emitRawInvoke()
 					return
 				}
