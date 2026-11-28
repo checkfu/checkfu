@@ -8,6 +8,7 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import type * as Redacted from "effect/Redacted"
 import { isPendingResource, makeCheckfuHttpApiClientWith } from "./Api.ts"
+import { EffectFiles } from "./FileTransfer.ts"
 import type {
 	Agent,
 	Artifact,
@@ -204,6 +205,8 @@ export const waitForPendingResource = (
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
 
 export class CheckfuSdkClient extends EffectResources {
+	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */
+	declare readonly files: EffectFiles
 	readonly baseUrl: string
 	readonly raw: CheckfuHttpApiClient
 	readonly generateIdempotencyKey: Effect.Effect<string>
@@ -219,6 +222,7 @@ export class CheckfuSdkClient extends EffectResources {
 		) => Effect.Effect<CheckfuClientService, CheckfuConfigError>,
 	) {
 		super(runtime)
+		;(this as { files: EffectFiles }).files = new EffectFiles(runtime)
 		this[INTERNAL_EFFECT_RUNTIME] = runtime
 		this.baseUrl = runtime.baseUrl
 		this.raw = runtime.raw

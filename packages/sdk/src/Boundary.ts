@@ -19,11 +19,13 @@ export type IsoDateTimes<T> = T extends DateTime.Utc
 				: T
 		: T extends string | number | boolean | null | undefined | symbol | bigint
 			? T
-			: T extends ReadonlyArray<infer U>
-				? ReadonlyArray<IsoDateTimes<U>>
-				: T extends object
-					? { readonly [K in keyof T]: IsoDateTimes<T[K]> }
-					: T
+			: T extends Uint8Array
+				? Uint8Array
+				: T extends ReadonlyArray<infer U>
+					? ReadonlyArray<IsoDateTimes<U>>
+					: T extends object
+						? { readonly [K in keyof T]: IsoDateTimes<T[K]> }
+						: T
 
 export type ApiGroupName = keyof (typeof CheckfuApi)["groups"]
 export type ApiEndpointName<G extends ApiGroupName> =
@@ -64,6 +66,10 @@ export type RawSseMethod = (request: {
 }) => Effect.Effect<HttpClientResponse.HttpClientResponse, ApiSseError>
 
 export const asIsoDateTimes = <T>(json: Schema.Json): IsoDateTimes<T> => json as IsoDateTimes<T>
+
+/** Bytes are already wire-shaped: `IsoDateTimes<Uint8Array>` is `Uint8Array`. */
+export const bytesAsIsoDateTimes = <T>(bytes: ArrayBufferView): IsoDateTimes<T> =>
+	bytes as IsoDateTimes<T>
 
 export const parseJsonAs = <T>(text: string): T => JSON.parse(text) as T
 

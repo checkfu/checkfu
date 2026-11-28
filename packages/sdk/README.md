@@ -144,6 +144,22 @@ const { data, status, request_id, requestId } = await client.agents
 
 Pass `agent: agent.id` when creating a session to pin the latest agent version. To pin a specific version, pass `agent: { type: "agent", id: agent.id, version: agent.version }`.
 
+## Files
+
+Upload bytes and download them again. These are hand-written next to the generated `list`, `retrieve`
+and `delete`, with the same retries, idempotency and errors (Forge doesn't generate raw byte bodies).
+
+```ts
+const file = await client.files.upload(
+	{ body: await readFile("report.pdf"), filename: "report.pdf", content_type: "application/pdf" },
+	{ idempotencyKey: "upload-report-2026-11-28" }, // makes retries safe
+)
+const bytes: Uint8Array = await client.files.content(file.id)
+```
+
+`body` can be a `Uint8Array`, `ArrayBuffer` or `Blob`. Attach a file to a session with
+`resources: [{ type: "file", file_id: file.id }]`, or use it in an artifact version.
+
 ## Pausing and resuming a turn
 
 Both examples return control when the stream reports an idle or terminated session. A `requires_action` stop leaves the turn paused, with `stop_reason.event_ids` identifying the tool calls that need answers. Read each tool call and send a `user.tool_confirmation` for an `agent.mcp_tool_use` or a `user.custom_tool_result` for an `agent.custom_tool_use`. Then call `sessions.events.stream(session.id, { after: pauseSequence })` with the paused event's `seq` to continue reading that turn.

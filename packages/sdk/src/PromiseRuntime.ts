@@ -11,7 +11,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { asIsoDateTimes } from "./Boundary.ts"
+import { asIsoDateTimes, bytesAsIsoDateTimes } from "./Boundary.ts"
 import {
 	APIConnectionError,
 	APIUserAbortError,
@@ -116,6 +116,11 @@ const normalizeDatesToJson = (value: unknown): Schema.Json => {
 }
 
 export const toIsoJson = <T>(value: T): IsoDateTimes<T> => {
+	// Byte results (files.content) pass through untouched: walking a typed array's indices
+	// would turn the bytes into a plain object.
+	if (ArrayBuffer.isView(value)) {
+		return bytesAsIsoDateTimes<T>(value)
+	}
 	const converted = asIsoDateTimes<T>(normalizeDatesToJson(value))
 	const readiness = getPendingReadiness(value)
 	if (readiness !== undefined) {
