@@ -46,6 +46,7 @@ export const follow = ({
 	preview,
 	mayRetry,
 	connection,
+	recovered,
 }: {
 	readonly open: (after: number) => Source
 	readonly cursor: () => number
@@ -53,13 +54,16 @@ export const follow = ({
 	readonly receive: (event: JsonSessionEvent) => void
 	readonly mayRetry: () => Promise<boolean>
 	readonly connection: (state: Connection) => void
+	readonly recovered?: () => void
 }): (() => void) => {
 	let source: Source | undefined
 	let stopped = false
 	let attempt = 0
+	let interruptedSinceOpen = false
 	let retry: ReturnType<typeof setTimeout> | undefined
 	let quiet: ReturnType<typeof setTimeout> | undefined
 	const interrupted = () => {
+		interruptedSinceOpen = true
 		if (quiet === undefined) {
 			quiet = setTimeout(() => connection("reconnecting"), QUIET_MS)
 		}
@@ -110,6 +114,10 @@ export const follow = ({
 			clearTimeout(quiet)
 			quiet = undefined
 			connection("live")
+			if (interruptedSinceOpen) {
+				interruptedSinceOpen = false
+				recovered?.()
+			}
 		})
 		current.addEventListener("error", () => {
 			if (current.readyState === CLOSED) {

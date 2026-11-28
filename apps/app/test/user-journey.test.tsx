@@ -344,6 +344,7 @@ const sessionJourney = async (apiFetch: typeof globalThis.fetch) => {
 		await click(button(page.container, "Start session"))
 		await waitFor(() => {
 			expect(page.container.querySelector("h1")?.textContent).toBe("Shared report")
+			expect(page.container.textContent).toContain("No files saved yet.")
 		})
 		const session = (await otherUser.sessions.list()).data[0]
 		if (session === undefined) {

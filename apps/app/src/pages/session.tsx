@@ -15,6 +15,7 @@ import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { SessionBindings } from "./session-bindings.tsx"
+import { SessionFiles } from "./session-files.tsx"
 import { sendFailure } from "./tool-call.tsx"
 import type { SendAnswer } from "./tool-call.tsx"
 import { Transcript } from "./transcript.tsx"
@@ -30,7 +31,16 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, preview, calls, reconnecting, earlier, findingCalls } = useSessionEvents({
+	const {
+		events,
+		preview,
+		calls,
+		reconnecting,
+		earlier,
+		findingCalls,
+		outputTurn,
+		outputRecovery,
+	} = useSessionEvents({
 		session,
 		onSnapshotChange: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
@@ -148,6 +158,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 				</div>
 			)}
 			{session.resources.length === 0 ? null : <SessionResources session={session} open={open} />}
+			<SessionFiles sessionId={session.id} turn={outputTurn} recovery={outputRecovery} />
 			<Transcript
 				events={events}
 				preview={preview}

@@ -44,6 +44,7 @@ const harness = (mayRetry: () => Promise<boolean>) => {
 	const sources: Array<{ readonly after: number; readonly source: FakeSource }> = []
 	const received: Array<number> = []
 	const states: Array<Connection> = []
+	const recovered = vi.fn()
 	let newest = 7
 	const stop = follow({
 		open: (after) => {
@@ -58,9 +59,10 @@ const harness = (mayRetry: () => Promise<boolean>) => {
 		},
 		mayRetry,
 		connection: (state) => states.push(state),
+		recovered,
 	})
 	const latest = () => sources.at(-1)?.source ?? new FakeSource()
-	return { sources, received, states, stop, latest }
+	return { sources, received, states, stop, latest, recovered }
 }
 
 beforeEach(() => {
@@ -90,6 +92,18 @@ describe("following a session's events", () => {
 		stream.latest().failed()
 		await vi.advanceTimersByTimeAsync(1000)
 		expect(stream.sources).toHaveLength(4)
+	})
+
+	it("announces recovery from a short interruption without showing a reconnect warning", async () => {
+		const stream = harness(() => Promise.resolve(true))
+		stream.latest().failed()
+		await vi.advanceTimersByTimeAsync(1000)
+		stream.latest().opened()
+		expect(stream.states).toEqual(["live"])
+		expect(stream.recovered).toHaveBeenCalledTimes(1)
+		stream.latest().opened()
+		expect(stream.recovered).toHaveBeenCalledTimes(1)
+		stream.stop()
 	})
 
 	it("keeps retrying when the session check itself fails", async () => {

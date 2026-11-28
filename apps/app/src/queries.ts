@@ -179,6 +179,13 @@ export const sessionQuery = (id: string) =>
 		queryFn: ({ signal }) => checkfu.sessions.retrieve(id, signal),
 	})
 
+export const sessionOutputsQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["session-outputs", id],
+		queryFn: ({ signal }) => checkfu.sessions.outputs(id, signal),
+		retry: false,
+	})
+
 export const artifactsPage = (token?: string) =>
 	queryOptions({
 		queryKey: ["artifacts", "page", token ?? null],

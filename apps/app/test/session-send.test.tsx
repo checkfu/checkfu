@@ -83,10 +83,28 @@ class QuietEventSource {
 	close(): void {}
 }
 
-const open = async (events: ReadonlyArray<unknown>, firstPostFailure?: number) => {
+const open = async (
+	events: ReadonlyArray<unknown>,
+	firstPostFailure?: number,
+	files: ReadonlyArray<unknown> = [],
+) => {
 	vi.stubGlobal("EventSource", QuietEventSource)
 	let status = firstPostFailure
 	const sent = stubApi(({ method, path }) => {
+		if (path.endsWith("/outputs")) {
+			return {
+				body: {
+					type: "session_outputs",
+					session_id: "sesn_1",
+					status: "none",
+					turn: 0,
+					reason: null,
+					recorded_at: null,
+					files,
+					skipped: [],
+				},
+			}
+		}
 		if (method === "POST") {
 			const failure = status
 			status = undefined
@@ -149,6 +167,17 @@ const pressSubmitShortcut = async (field: HTMLTextAreaElement, key: "ctrlKey" | 
 afterEach(() => {
 	vi.unstubAllGlobals()
 	document.body.innerHTML = ""
+})
+
+it("keeps the session transcript usable when the server returns a malformed file", async () => {
+	const page = await open(settled, undefined, [null])
+	try {
+		expect(page.container.textContent).toContain("Hello.")
+		expect(page.container.textContent).toContain("Could not load saved files.")
+		expect(button(page.container, "Retry files")).toBeDefined()
+	} finally {
+		page.unmount()
+	}
 })
 
 describe("sending a message from a session's page", () => {
