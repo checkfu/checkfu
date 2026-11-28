@@ -222,6 +222,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				"memoryStores_listMemoryStores",
 				"memoryStores_updateMemory",
 				"memoryStores_updateMemoryStore",
+				"models_listModels",
 				"sessions_archiveSession",
 				"sessions_createSession",
 				"sessions_getOutputs",
@@ -322,6 +323,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				memoryStores_listMemoryStores: "read-only, additive, repeatable",
 				memoryStores_updateMemory: "writes, destructive, not repeatable",
 				memoryStores_updateMemoryStore: "writes, destructive, not repeatable",
+				models_listModels: "read-only, additive, repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
 				sessions_getOutputs: "read-only, additive, repeatable",
@@ -615,6 +617,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 						},
 					},
 					memoryStores_updateMemoryStore: { ...store, body: { name: "Team notes" } },
+					models_listModels: { query: { search: "model", limit: 1 } },
 					sessions_archiveSession: session,
 					sessions_createSession: {
 						body: {

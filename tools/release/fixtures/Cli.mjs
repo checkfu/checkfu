@@ -50,6 +50,16 @@ const listed = async (args, id) => {
 	assert.fail(`${args.join(" ")} never listed ${id}`)
 }
 
+const modelPage = await run(["models", "list", "--limit", "1"])
+assert.equal(modelPage.data.length, 1)
+assert.equal(modelPage.data[0].type, "model")
+assert.ok(modelPage.data[0].id.length > 0)
+assert.equal(typeof modelPage.next_page, "string")
+assert.deepEqual(modelPage, await get("models?limit=1"))
+const nextModelPage = await run(["models", "list", "--limit", "1", "--page", modelPage.next_page])
+assert.equal(nextModelPage.data.length, 1)
+assert.notEqual(nextModelPage.data[0].id, modelPage.data[0].id)
+
 // Resource versions and a stale write: inspect the backend independently of CLI output.
 const agent = await run([
 	"agents",

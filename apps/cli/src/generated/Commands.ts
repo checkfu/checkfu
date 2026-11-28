@@ -3091,6 +3091,64 @@ const memoryStoresMemoriesUpdateCommand = CommandMake(
 	),
 )
 
+const modelsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "models list",
+	apiGroup: "models",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "search",
+			flagName: "search",
+			wireName: "search",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const modelsListCommand = CommandMake(
+	"list",
+	{
+		page: FlagString("page").pipe(
+			FlagWithDescription(
+				"Page token returned by a previous list request with the same model search.",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("INT"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		search: FlagString("search").pipe(FlagWithDescription("Query parameter search"), FlagOptional),
+	},
+	(flags) => invokeGeneratedOperation(modelsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results.",
+	),
+)
+
 const sessionsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "sessions archive",
 	apiGroup: "sessions",
@@ -4848,6 +4906,7 @@ export const buildGeneratedResourceCommands = <
 	const FilesExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const MemoryStoresExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const MemoryStoresMemoriesExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const ModelsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsOutputsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -4869,6 +4928,7 @@ export const buildGeneratedResourceCommands = <
 	readonly files?: FilesExtras
 	readonly "memory-stores"?: MemoryStoresExtras
 	readonly "memory-stores:memories"?: MemoryStoresMemoriesExtras
+	readonly models?: ModelsExtras
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
 	readonly "sessions:outputs"?: SessionsOutputsExtras
@@ -5003,6 +5063,10 @@ export const buildGeneratedResourceCommands = <
 				memoryStoresMemoriesUpdateCommand,
 				...(extras?.["memory-stores:memories"] ?? ([] as const)),
 			]),
+		),
+		CommandMake("models").pipe(
+			CommandWithDescription("Manage models"),
+			CommandWithSubcommands([modelsListCommand, ...(extras?.["models"] ?? ([] as const))]),
 		),
 		CommandMake("sessions").pipe(
 			CommandWithDescription("Manage sessions"),

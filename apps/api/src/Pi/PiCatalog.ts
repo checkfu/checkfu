@@ -3,6 +3,7 @@ import {
 	BUILTIN_PROVIDERS,
 	CUSTOM_PROVIDERS_ENV,
 	CUSTOM_PROVIDER_CATALOG_ENV,
+	DEFAULT_PROVIDER_MODELS,
 	allProviders,
 	assertCloudflareWorkerEnvByteLimit,
 	checkProviderCredentials,
@@ -212,4 +213,17 @@ export const checkCatalogProviderCredentials = (
 		}
 	}
 	return checkProviderCredentials(provider, config)
+}
+
+export const suggestedCatalogModelIds = (customProviders: ReadonlyArray<ProviderSpec>) => {
+	const ids = new Set(DEFAULT_PROVIDER_MODELS.map(({ specifier }) => specifier))
+	for (const provider of customProviders) {
+		if (provider.defaultModel !== undefined) {
+			ids.add(provider.defaultModel)
+		}
+		for (const modelId of Object.keys(provider.models ?? {})) {
+			ids.add(`${provider.id}/${modelId}`)
+		}
+	}
+	return [...ids].filter((id) => resolveCatalogModel(id, customProviders) !== null).sort()
 }

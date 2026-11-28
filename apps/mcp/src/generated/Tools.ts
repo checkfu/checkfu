@@ -3277,6 +3277,48 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "models_listModels",
+		title: "List suggested models",
+		description:
+			"List model IDs that can be selected when creating or updating an agent. Filter by ID and follow the next page token for more results.",
+		method: "GET",
+		path: "/v1/models",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						page: {
+							type: "string",
+							maxLength: 2182,
+							pattern: "^[A-Za-z0-9_-]+$",
+							description:
+								"Page token returned by a previous list request with the same model search.",
+						},
+						limit: {
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						search: {
+							type: "string",
+							maxLength: 256,
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "sessions_archiveSession",
 		title: "Archive a session",
 		description: "Archive a session",
