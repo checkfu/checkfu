@@ -283,6 +283,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version-file: package.json
+      - run: bun install --frozen-lockfile
       - name: Identify the sandbox build context
         id: image
         run: echo "tag=$(bun apps/cli/scripts/Image.ts)" >> "$GITHUB_OUTPUT"
@@ -294,8 +295,12 @@ jobs:
       - name: Publish the sandbox only when its build context changes
         env:
           IMAGE: ghcr.io/checkfu/sandbox:${{ steps.image.outputs.tag }}
+          SANDBOX_TAG: ${{ steps.image.outputs.tag }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          if ! docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+          available="$(bun --no-env-file apps/cli/scripts/SandboxPublication.ts "$SANDBOX_TAG")"
+          if [[ "$available" == missing ]]; then
             docker build --platform linux/amd64 \
               --label org.opencontainers.image.source=https://github.com/checkfu/checkfu \
               --tag "$IMAGE" apps/api/src/Sandbox/image
