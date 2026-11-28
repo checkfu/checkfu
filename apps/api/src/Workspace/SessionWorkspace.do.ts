@@ -186,7 +186,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 				)
 				const artifacts: SessionArtifacts = {
 					mounts: () => call(api.artifactMounts(sessionId)),
-					files: (mountPath) => call(api.artifactFiles(sessionId, mountPath)),
+					files: (mountPath, path) => call(api.artifactFiles(sessionId, mountPath, path)),
 					read: (mountPath, path, offset, length) =>
 						call(api.artifactRead(sessionId, mountPath, path, offset, length)),
 				}

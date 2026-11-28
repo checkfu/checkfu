@@ -174,9 +174,9 @@ export const mountReadFixture = (size: number, manifestFiles: number, backing?: 
 					counts.mountLists++
 					return run(access.artifactMounts(session.id))
 				},
-				files: (root) => {
+				files: (root, subtree) => {
 					counts.fileLists++
-					return run(access.artifactFiles(session.id, root))
+					return run(access.artifactFiles(session.id, root, subtree))
 				},
 				read: (root, path, offset, length) => {
 					requested.push([offset, length])

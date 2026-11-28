@@ -600,8 +600,8 @@ export const makePiDurableTestLayer = (
 	) => built().run(Effect.orDie(effect(built().access)))
 	const sessionArtifacts = (sessionId: string): SessionArtifacts => ({
 		mounts: () => built().run(Effect.orDie(built().artifacts.artifactMounts(sessionId))),
-		files: (mountPath) =>
-			built().run(Effect.orDie(built().artifacts.artifactFiles(sessionId, mountPath))),
+		files: (mountPath, path) =>
+			built().run(Effect.orDie(built().artifacts.artifactFiles(sessionId, mountPath, path))),
 		read: (mountPath, path, offset, length) =>
 			built().run(
 				Effect.orDie(built().artifacts.artifactRead(sessionId, mountPath, path, offset, length)),

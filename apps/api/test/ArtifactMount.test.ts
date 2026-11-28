@@ -1,7 +1,7 @@
 import { MAX_ARTIFACT_FILE_BYTES, MAX_ARTIFACT_FILES } from "@checkfu/sdk/Limits"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { makeArtifactMount } from "../src/Workspace/ArtifactMount.ts"
+import { makeArtifactMount, makeFilesMount } from "../src/Workspace/ArtifactMount.ts"
 import type { SessionArtifacts } from "../src/Workspace/SessionArtifacts.ts"
 import { makeAssistantReply, makePiDurableTestLayer } from "./helpers/ApiHarness.ts"
 import {
@@ -25,6 +25,34 @@ const withMountFixtures = async <A, E>(
 }
 
 describe("artifact mount", () => {
+	it("scopes a known upload's stat and read to its own path", async () => {
+		const root = "/mnt/session/uploads"
+		const queries: Array<readonly [string, string | null]> = []
+		const content = new TextEncoder().encode("available")
+		const mount = makeFilesMount(
+			root,
+			{
+				mounts: async () => [root],
+				files: async (path, subtree) => {
+					queries.push([path, subtree])
+					if (subtree !== "nested/ready.txt") {
+						throw new Error("An unrelated upload could not be checked.")
+					}
+					return [{ path: subtree, size: content.byteLength }]
+				},
+				read: async (_mount, _path, offset, length) => content.slice(offset, offset + length),
+			},
+			100,
+		)
+		await expect(mount.stat("nested/ready.txt")).resolves.toMatchObject({ size: content.length })
+		const file = await mount.readFile("nested/ready.txt")
+		expect(await new Response(file?.body).text()).toBe("available")
+		expect(queries).toEqual([
+			[root, "nested/ready.txt"],
+			[root, "nested/ready.txt"],
+		])
+	})
+
 	it("asks the store only for the range a read pages through", async () => {
 		const content = new TextEncoder().encode("x".repeat(1000))
 		const asked: Array<readonly [number, number]> = []

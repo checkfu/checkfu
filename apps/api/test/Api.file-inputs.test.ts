@@ -1,3 +1,4 @@
+import { File } from "@checkfu/domain/File/File.aggregate"
 import { MAX_SESSION_FILES } from "@checkfu/domain/Session/SessionResource"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
@@ -5,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import { makeApiHandler } from "../src/Http/Router.ts"
+import { SessionArtifactAccess } from "../src/SessionArtifactAccess.ts"
 import {
 	AUTH_HEADERS,
 	TEST_RUNTIME,
@@ -54,7 +56,7 @@ const withSessions = async (
 			readonly createSession: (resources: ReadonlyArray<unknown>) => Effect.Effect<Response>
 			readonly upload: (filename: string, content: string) => Effect.Effect<{ id: string }>
 		},
-	) => Effect.Effect<void>,
+	) => Effect.Effect<void, never, Effect.Services<typeof SessionArtifactAccess>>,
 ) => {
 	const systems: Array<string> = []
 	let look: () => Promise<void> = () => Promise.resolve()
@@ -267,7 +269,39 @@ describe("Files in a session", () => {
 			}),
 		))
 
-	it("stops serving a file once it is deleted, without failing the session's turns", () =>
+	it("reads only the selected File owner for a targeted upload lookup", () =>
+		withSessions((_apiFetch, { createSession, upload }) =>
+			Effect.gen(function* () {
+				const selected = yield* upload("selected.txt", "one")
+				const unrelated = yield* upload("other.txt", "two")
+				const session = yield* json<SessionBody>(
+					yield* createSession([
+						{ type: "file", file_id: selected.id },
+						{ type: "file", file_id: unrelated.id },
+					]),
+				)
+				const owners = yield* File
+				const checked: Array<string> = []
+				const access = yield* SessionArtifactAccess.pipe(
+					Effect.provideService(File, {
+						...owners,
+						get: (target) => {
+							const id = typeof target === "string" ? target : target.id
+							checked.push(id)
+							return id === unrelated.id
+								? Effect.die(new Error("Unrelated File unavailable"))
+								: owners.get(target)
+						},
+					}),
+				)
+				expect(
+					yield* access.artifactFiles(session.id, UPLOADS, "selected.txt").pipe(Effect.orDie),
+				).toEqual([{ path: "selected.txt", size: 3 }])
+				expect(checked).toEqual([selected.id])
+			}),
+		))
+
+	it("omits deleted uploads from listings and reads without failing the session's turns", () =>
 		withSessions((apiFetch, { uploadedFiles, onTurn, createSession, upload }) =>
 			Effect.gen(function* () {
 				const file = yield* upload("a.txt", "a")
@@ -278,25 +312,30 @@ describe("Files in a session", () => {
 						{ type: "file", file_id: empty.id },
 					]),
 				)
-				const seen: Array<ReadonlyArray<string | null>> = []
+				const seen: Array<{
+					readonly listed: ReadonlyArray<string>
+					readonly readable: ReadonlyArray<string | null>
+				}> = []
 				onTurn(async () => {
 					const files = uploadedFiles(session.id)
-					seen.push(
-						await Promise.all([
+					seen.push({
+						listed: await files.list(),
+						readable: await Promise.all([
 							files.read(`${UPLOADS}/a.txt`).catch(() => "unavailable"),
 							files.read(`${UPLOADS}/a.txt`, { offset: 1, length: 4 }),
 							files.read(`${UPLOADS}/empty.txt`),
 						]),
-					)
+					})
 				})
 				yield* sendAndSettle(apiFetch, session.id, ["Read them."], 1)
-				for (const deleted of [file, empty]) {
-					expect((yield* request(apiFetch, "DELETE", `/v1/files/${deleted.id}`)).status).toBe(200)
-				}
+				expect((yield* request(apiFetch, "DELETE", `/v1/files/${file.id}`)).status).toBe(200)
 				yield* sendAndSettle(apiFetch, session.id, ["Read them again."], 2)
+				expect((yield* request(apiFetch, "DELETE", `/v1/files/${empty.id}`)).status).toBe(200)
+				yield* sendAndSettle(apiFetch, session.id, ["Check the last upload."], 3)
 				expect(seen).toEqual([
-					["a", "", ""],
-					["unavailable", null, null],
+					{ listed: [`${UPLOADS}/a.txt`, `${UPLOADS}/empty.txt`], readable: ["a", "", ""] },
+					{ listed: [`${UPLOADS}/empty.txt`], readable: [null, null, ""] },
+					{ listed: [], readable: [null, null, null] },
 				])
 			}),
 		))

@@ -14,7 +14,7 @@ const Path = Schema.String
 export const SessionArtifactCalls = {
 	artifactMounts: { args: Schema.Tuple([Session]), result: Schema.Array(MountPath) },
 	artifactFiles: {
-		args: Schema.Tuple([Session, MountPath]),
+		args: Schema.Tuple([Session, MountPath, Schema.NullOr(Path)]),
 		result: Schema.Array(ArtifactFileInfo),
 	},
 	artifactRead: {
@@ -25,7 +25,10 @@ export const SessionArtifactCalls = {
 
 export interface SessionArtifacts {
 	readonly mounts: () => Promise<ReadonlyArray<string>>
-	readonly files: (mountPath: string) => Promise<ReadonlyArray<ArtifactFileInfo>>
+	readonly files: (
+		mountPath: string,
+		path: string | null,
+	) => Promise<ReadonlyArray<ArtifactFileInfo>>
 	readonly read: (
 		mountPath: string,
 		path: string,

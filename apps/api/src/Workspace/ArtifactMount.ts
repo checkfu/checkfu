@@ -49,7 +49,8 @@ export const makeArtifactMount = (
 		(await artifacts.mounts())
 			.filter((path) => path.startsWith(`${root}/`))
 			.map((path) => path.slice(root.length + 1))
-	const files = (name: string) => artifacts.files(`${root}/${name}`)
+	const files = (name: string, path = "") =>
+		artifacts.files(`${root}/${name}`, path === "" ? null : path)
 	const locate = async (rel: string) => {
 		const [name = "", ...rest] = rel.split("/")
 		return (await mounted()).includes(name) ? { name, path: rest.join("/") } : undefined
@@ -70,7 +71,7 @@ export const makeArtifactMount = (
 			if (at.path === "") {
 				return DIR
 			}
-			const listing = await files(at.name)
+			const listing = await files(at.name, at.path)
 			const file = listing.find((entry) => entry.path === at.path)
 			if (file !== undefined) {
 				return fileStat(file.size)
@@ -105,7 +106,7 @@ export const makeArtifactMount = (
 			if (at === undefined) {
 				return null
 			}
-			const listing = await files(at.name)
+			const listing = await files(at.name, at.path)
 			if (listing.some((file) => file.path === at.path)) {
 				throw failure("ENOTDIR", `Not a directory: ${rel}`)
 			}
@@ -120,7 +121,7 @@ export const makeArtifactMount = (
 			if (at === undefined || at.path === "") {
 				return null
 			}
-			const file = (await files(at.name)).find((entry) => entry.path === at.path)
+			const file = (await files(at.name, at.path)).find((entry) => entry.path === at.path)
 			if (file === undefined) {
 				return null
 			}

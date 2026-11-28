@@ -4,8 +4,8 @@
 	"reviewed": {},
 	"baselines": [
 		{
-			"label": "harness-reply-usage",
-			"cut_at": "2026-11-28T00:23:41.776Z",
+			"label": "artifact-mount-subtree",
+			"cut_at": "2026-11-28T00:31:56.157Z",
 			"schemas": {
 				"state:Checkfu.Agent": "00f54801d7b688fb58570995145751835ab2bdd67ff31e88d778b352a33bd3f4",
 				"event:Checkfu.Agent/agent.archived": "cdea0918cbddf8abefeb71df342497a7949967876a422ec07c7496c06c8963a9",
@@ -352,7 +352,7 @@
 				"api-call:Api.memoryRemove/result": "fbd94455026cad7ed194c8ac70161ad361cd12dca4799a9ee7e8f3fd3bd403bb",
 				"api-call:Api.artifactMounts/args": "b004d702513d177168fe50e40e987659d68efb65c89735f7cf7edf7abcdcc380",
 				"api-call:Api.artifactMounts/result": "b96b0bcc28ef0a8a6cfa6a875fd9c24942800b41399061f5eb8a6a378a203a91",
-				"api-call:Api.artifactFiles/args": "68cb1b9a420f61a17e35c5345e393b98c89597a9fd6159b4977b9842903e850c",
+				"api-call:Api.artifactFiles/args": "b8c11ea3ee8b040e75d15a4d9bcb1f425b90ebd9c987b9ed12cd5082dc7ad1de",
 				"api-call:Api.artifactFiles/result": "b8d570353fd5a7163ea22d9446f83f2d8a67da7363fbaab629060624b5ccbe49",
 				"api-call:Api.artifactRead/args": "96e05fa19519d18635f01d7bf70f88a873166919aea8aec1dbfe52d5b1c8b046",
 				"api-call:Api.artifactRead/result": "f214bbedb0a7063b9d2f4ee91e509ebea6cdfd1453854f0170c721de7681ec3c",
@@ -19313,35 +19313,43 @@
 				"api-call:Api.artifactFiles/args": [
 					[
 						":O}v F2",
-						"toString"
+						"toString",
+						"-1"
 					],
 					[
 						"D\"dUl6",
-						"prototype"
+						"prototype",
+						null
 					],
 					[
 						"=\\9",
-						"3T8NA#I@,P"
+						"3T8NA#I@,P",
+						"-1"
 					],
 					[
 						"",
-						""
+						"",
+						"\udc00"
 					],
 					[
 						"/oiU-0,p@M",
-						"😀"
+						"😀",
+						null
 					],
 					[
 						"",
-						"0"
+						"0",
+						"|_^ FFM-5{"
 					],
 					[
 						"",
-						"prototype"
+						"prototype",
+						null
 					],
 					[
 						";Wa",
-						"0"
+						"0",
+						"qO^djSv,Dw"
 					]
 				],
 				"api-call:Api.artifactFiles/result": [

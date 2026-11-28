@@ -375,8 +375,8 @@ export default ApiWorker.make(
 			memoryRemove: (sessionId, name, path, expected) =>
 				fromHarness(Effect.orDie(memory.memoryRemove(sessionId, name, path, expected))),
 			artifactMounts: (sessionId) => fromHarness(Effect.orDie(artifacts.artifactMounts(sessionId))),
-			artifactFiles: (sessionId, mountPath) =>
-				fromHarness(Effect.orDie(artifacts.artifactFiles(sessionId, mountPath))),
+			artifactFiles: (sessionId, mountPath, path) =>
+				fromHarness(Effect.orDie(artifacts.artifactFiles(sessionId, mountPath, path))),
 			artifactRead: (sessionId, mountPath, path, offset, length) =>
 				fromHarness(
 					Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),

@@ -17,6 +17,9 @@ type Pinned = Pick<ArtifactMount, "artifact_id" | "manifest" | "mount_path">
 
 const uploadPath = (file: FileMount) => file.mount_path.slice(FILE_MOUNT_ROOT.length + 1)
 
+const inSubtree = (entry: string, path: string | null) =>
+	path === null || entry === path || entry.startsWith(`${path}/`)
+
 export const SessionArtifactAccess = Effect.gen(function* () {
 	const pinned = yield* PinnedArtifact
 	const files = yield* File
@@ -56,10 +59,19 @@ export const SessionArtifactAccess = Effect.gen(function* () {
 				)
 				return filesOf(resources).length === 0 ? mounts : [...mounts, FILE_MOUNT_ROOT]
 			}),
-		artifactFiles: (sessionId: string, mountPath: string) =>
+		artifactFiles: (sessionId: string, mountPath: string, path: string | null) =>
 			Effect.gen(function* () {
 				if (mountPath === FILE_MOUNT_ROOT) {
-					return (yield* uploadsOf(sessionId)).map((file): ArtifactFileInfo => ({
+					const uploads = (yield* uploadsOf(sessionId)).filter((file) =>
+						inSubtree(uploadPath(file), path),
+					)
+					const ready = yield* Effect.filter(
+						uploads,
+						(file) =>
+							Effect.map(files.get(FileId.make(file.file_id)), ({ status }) => status === "ready"),
+						{ concurrency: 8 },
+					)
+					return ready.map((file): ArtifactFileInfo => ({
 						path: uploadPath(file),
 						size: file.size,
 					}))
@@ -67,7 +79,9 @@ export const SessionArtifactAccess = Effect.gen(function* () {
 				const pin = (yield* pinnedBy(sessionId)).get(mountPath)
 				return pin === undefined
 					? []
-					: (yield* filesOfPin(pin)).map(({ path, size }): ArtifactFileInfo => ({ path, size }))
+					: (yield* filesOfPin(pin))
+							.filter((file) => inSubtree(file.path, path))
+							.map(({ path, size }): ArtifactFileInfo => ({ path, size }))
 			}),
 		artifactRead: (
 			sessionId: string,
