@@ -502,14 +502,15 @@ export const PiDurableHarnessLive = boundedHarness(
 					const token = { turn: args.turn }
 					const repositories = repositoriesOf(args.resources)
 					const artifacts = artifactsOf(args.resources)
+					const { config: environmentConfig } = yield* environments.get(
+						EnvironmentId.make(args.environment_id),
+					)
 					const prepared = yield* withRetry(
 						executor.prepareWorkspace(
 							args.session_id,
 							token,
 							repositories,
-							allowedHostsOf(
-								(yield* environments.get(EnvironmentId.make(args.environment_id))).config,
-							),
+							allowedHostsOf(environmentConfig),
 						),
 					).pipe(
 						Effect.tapError((error) =>
@@ -570,9 +571,7 @@ export const PiDurableHarnessLive = boundedHarness(
 												),
 											)).mcp_server_credentials,
 									),
-									networking:
-										(yield* environments.get(EnvironmentId.make(args.environment_id))).config
-											?.networking ?? null,
+									networking: environmentConfig?.networking ?? null,
 								}
 
 					const tools = version.tools.length === 0 ? undefined : encodeAgentTools(version.tools)

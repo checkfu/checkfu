@@ -305,6 +305,7 @@ export const makePiDurableTestLayer = (
 		executionEnv,
 		vaults,
 		harnessSessions = (sessions) => sessions,
+		beforePrepare,
 		mcpTools,
 		webhookSender,
 		webhookAutoDrain,
@@ -316,6 +317,7 @@ export const makePiDurableTestLayer = (
 		readonly executionEnv?: ExecutionEnv
 		readonly vaults?: typeof VaultsTestLive
 		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
+		readonly beforePrepare?: (turn: number) => Effect.Effect<void>
 		readonly mcpTools?: ReadonlyArray<TestMcpTool>
 		readonly webhookSender?: WebhookHttpSender
 		readonly webhookAutoDrain?: boolean
@@ -752,6 +754,7 @@ export const makePiDurableTestLayer = (
 			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
 				Effect.gen(function* (): Effect.fn.Return<WorkspacePreparation> {
 					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
+					yield* beforePrepare?.(token.turn) ?? Effect.void
 					if (refusedWorkspaces.has(sessionId)) {
 						return { ok: false, interrupted: true }
 					}

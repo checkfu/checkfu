@@ -79,6 +79,8 @@ import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Deferred from "effect/Deferred"
+import * as Fiber from "effect/Fiber"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -120,6 +122,7 @@ import {
 	TEST_API_KEY,
 	TestRuntimeContext,
 } from "./helpers/ApiHarness.ts"
+
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { makeArtifactDatabaseMemory } from "../src/ArtifactData/ArtifactDatabaseMemory.ts"
 import { makeFileStoreMemory } from "../src/Files/FileStoreMemory.ts"
@@ -139,6 +142,75 @@ class SessionAdmissionStorage extends Domain.Model("SessionAdmissionStorage", {
 }) {}
 
 describe("Agent and environment lifecycle, versioning, and projection consistency", () => {
+	it("uses one network policy for workspace preparation and MCP until the next turn", async () => {
+		const preparing = Deferred.makeUnsafe<void>()
+		const release = Deferred.makeUnsafe<void>()
+		const { layer, closeAll, preparedWorkspaces, requests } = makePiDurableTestLayer(
+			async (model) => makeAssistantReply(model, null, "ok", 1, 1),
+			{
+				beforePrepare: (turn) =>
+					turn === 1
+						? Deferred.succeed(preparing, undefined).pipe(Effect.andThen(Deferred.await(release)))
+						: Effect.void,
+			},
+		)
+		const network = (allowed_hosts: ReadonlyArray<string>, allow_mcp_servers: boolean) => ({
+			type: "limited",
+			allow_mcp_servers,
+			allow_package_managers: false,
+			allowed_hosts,
+		})
+		const initial = network(["docs.mcp.example"], true)
+		const updated = network(["new.example"], false)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch } = yield* makeApiHandler
+					const post = (path: string, body: Schema.JsonObject) =>
+						sendRequest(fetch, { method: "POST", path, body, headers: AUTH_HEADERS })
+					const create = (path: string, body: Schema.JsonObject) =>
+						Effect.gen(function* () {
+							const response = yield* post(path, body)
+							expect(response.status).toBe(201)
+							return yield* Effect.promise(
+								() => response.json() as Promise<{ readonly id: string }>,
+							)
+						})
+					const agent = yield* create("/v1/agents", {
+						name: "Researcher",
+						model: "gpt-4o-mini",
+						mcp_servers: [{ type: "url", name: "docs", url: "https://docs.mcp.example/mcp" }],
+					})
+					const env = yield* create("/v1/environments", {
+						name: "Workspace",
+						config: { type: "cloud", networking: initial },
+					})
+					const session = yield* create("/v1/sessions", { agent: agent.id, environment_id: env.id })
+					const first = yield* sendAndSettle(fetch, session.id, ["First."], 1).pipe(
+						Effect.forkChild,
+					)
+					yield* Deferred.await(preparing)
+					const changed = yield* post(`/v1/environments/${env.id}`, {
+						version: 1,
+						config: { type: "cloud", networking: updated },
+					})
+					expect(changed.status).toBe(200)
+					yield* Deferred.succeed(release, undefined)
+					yield* Fiber.join(first)
+					yield* sendAndSettle(fetch, session.id, ["Second."], 2)
+					expect(preparedWorkspaces.map(({ allowedHosts }) => allowedHosts)).toEqual([
+						initial.allowed_hosts,
+						updated.allowed_hosts,
+					])
+					expect(requests.map(({ mcp }) => mcp?.networking)).toEqual([initial, updated])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await Effect.runPromise(Deferred.succeed(release, undefined))
+			await closeAll()
+		}
+	})
+
 	it("resolves arbitrary stored AgentVersionIds (not synthetic agentId:vN) and rejects missing/archived resources", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) =>
 			makeAssistantReply(model, null, `CustomVersion: ${extractLastUserText(context)}`, 4, 2),
