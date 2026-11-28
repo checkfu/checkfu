@@ -269,7 +269,13 @@ export const makeMemoryMount = (memory: SessionMemory, walkLimit = Infinity): Pa
 				throw failure("EBUSY", `An attached memory store cannot be renamed: ${from}`)
 			}
 			if (source.mount.name === target.mount.name && source.path === target.path) {
-				await writable(from, true)
+				const current = await writable(from, true)
+				if (
+					(await memory.stat(current.mount.name, current.path)) === null &&
+					below(await memory.list(current.mount.name), current.path).length === 0
+				) {
+					throw failure("ENOENT", `No such file or directory: ${from}`)
+				}
 				return
 			}
 			const file = await read(source)

@@ -273,14 +273,33 @@ describe("memory mount", () => {
 		expect([...files]).toEqual([["/rules.md", "Be kind."]])
 	})
 
-	it("leaves a memory renamed onto itself, and refuses to move a directory into itself", async () => {
+	it("makes a same-path rename a no-op only when the source exists", async () => {
+		const files = new Map([
+			["/note.md", "Note"],
+			["/directory/note.md", "Nested"],
+		])
+		const calls: Array<string> = []
+		const mount = mountOver(files, { calls })
+		for (const path of ["notes/note.md", "notes/directory"]) {
+			expect(await code(mount.rename?.(path, path, {}))).toBe("ok")
+		}
+		for (const path of ["notes/missing.md", "notes/dir"]) {
+			expect(await code(mount.rename?.(path, path, {}))).toBe("ENOENT")
+		}
+		expect([...files]).toEqual([
+			["/note.md", "Note"],
+			["/directory/note.md", "Nested"],
+		])
+		expect(calls).toEqual([])
+	})
+
+	it("refuses to move a directory into itself", async () => {
 		const files = new Map([
 			["/a.md", "A."],
 			["/dir/x.md", "X."],
 			["/dir/y.md", "Y."],
 		])
 		const mount = mountOver(files)
-		expect(await code(mount.rename?.("notes/a.md", "notes/a.md", {}))).toBe("ok")
 		expect(await code(mount.rename?.("notes/dir", "notes/dir/sub", {}))).toBe("EINVAL")
 		expect(Object.fromEntries(files)).toEqual({
 			"/a.md": "A.",
