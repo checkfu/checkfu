@@ -137,6 +137,10 @@
 			"WebhookEndpoint.OnlyResumeOrReactivationActivates": {
 				"kind": "transition",
 				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.status !== \"active\",\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\tcommand._tag === \"CreateWebhookEndpoint\",\n\t\t\t\tcommand._tag === \"ResumeWebhookEndpoint\",\n\t\t\t\tcommand._tag === \"UpdateWebhookEndpoint\" && command.reactivate,\n\t\t\t].some((ok) => ok)"
+			},
+			"WebhookEndpoint.UpdateReactivationRecordsTheStatusChange": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"webhook.updated\" ||\n\t\t\t\t\tevent.reactivated === (before.status !== \"active\" && after.status === \"active\"),\n\t\t\t)"
 			}
 		}
 	}

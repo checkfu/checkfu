@@ -315,6 +315,12 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 					after.consecutive_failures === before.consecutive_failures,
 				].every((ok) => ok),
 			].some((ok) => ok),
+		UpdateReactivationRecordsTheStatusChange: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "webhook.updated" ||
+					event.reactivated === (before.status !== "active" && after.status === "active"),
+			),
 		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) => {
 			if (command._tag !== "UpdateWebhookEndpoint") {
 				return true
@@ -427,7 +433,7 @@ export class WebhookEndpoint extends Domain.Aggregate("WebhookEndpoint", {
 					url,
 					description,
 					event_types,
-					reactivated: cmd.reactivate,
+					reactivated: cmd.reactivate && state.status !== "active",
 				}),
 			]
 		},

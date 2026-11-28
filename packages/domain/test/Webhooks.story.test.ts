@@ -540,7 +540,7 @@ describe("Webhooks model stories", () => {
 						url: null,
 						description: "Renamed sink",
 						event_types: null,
-						reactivate: false,
+						reactivate: true,
 					}),
 				),
 				Story.then(

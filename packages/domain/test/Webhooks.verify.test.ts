@@ -42,6 +42,7 @@ const STANDING = {
 	"WebhookEndpoint.OnlyResumeOrReactivationActivates": "proved",
 	"WebhookEndpoint.StaleSecretExpiryLeavesPreviousSecretUntouched": "proved",
 	"WebhookEndpoint.ClaimingKeyChangesNoState": "proved",
+	"WebhookEndpoint.UpdateReactivationRecordsTheStatusChange": "proved",
 	"WebhookEndpoint.UpdateKeepsWhatItDoesNotName": "proved",
 	"WebhookEndpoint.UnchangedUpdateKeepsDeliveryHealth": "proved",
 	"WebhookEndpoint.PredatingSuccessLeavesFailureWindowUntouched": "proved",
