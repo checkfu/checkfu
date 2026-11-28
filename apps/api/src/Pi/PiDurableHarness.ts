@@ -2,8 +2,12 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
+import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { File } from "@checkfu/domain/File/File.aggregate"
+import { FileId } from "@checkfu/domain/File/File.id"
 import { bindMcpServers, encodeAgentTools } from "@checkfu/domain/Mcp/McpServers"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type {
@@ -36,6 +40,7 @@ import type {
 	ArtifactMount,
 	FileMount,
 	MemoryStoreResource,
+	SessionResource,
 	SkillMount,
 } from "@checkfu/domain/Session/SessionResource"
 import * as Context from "effect/Context"
@@ -257,11 +262,55 @@ export const allowedHostsOf = (config: EnvironmentConfig | null): ReadonlyArray<
 				]
 			: null
 
+const readableAttachments = Effect.fn(function* (resources: ReadonlyArray<SessionResource>) {
+	const artifacts = artifactsOf(resources)
+	const skills = skillsOf(resources)
+	const files = filesOf(resources)
+	const artifactOwners = yield* Artifact
+	const fileOwners = yield* File
+	const lookups = new Map<string, Effect.Effect<boolean>>()
+	for (const { artifact_id } of [...artifacts, ...skills]) {
+		lookups.set(
+			artifact_id,
+			Effect.map(
+				artifactOwners.get(ArtifactId.make(artifact_id)),
+				({ status }) => status === "active",
+			),
+		)
+	}
+	for (const { file_id } of files) {
+		lookups.set(
+			file_id,
+			Effect.map(fileOwners.get(FileId.make(file_id)), ({ status }) => status === "ready"),
+		)
+	}
+	const available = new Set(
+		yield* Effect.forEach(
+			lookups,
+			([id, lookup]) =>
+				lookup.pipe(
+					Effect.map((readable) => (readable ? id : null)),
+					Effect.catchDefect((cause) =>
+						Effect.as(Effect.logWarning("Could not read a session attachment", id, cause), null),
+					),
+				),
+			{ concurrency: 8 },
+		),
+	)
+	return {
+		artifacts: artifacts.filter(({ artifact_id }) => available.has(artifact_id)),
+		skills: skills.filter(({ artifact_id }) => available.has(artifact_id)),
+		files: files.filter(({ file_id }) => available.has(file_id)),
+	}
+})
+
 export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const environments = yield* Environment
 		const memoryStores = yield* MemoryStore
+		const artifactOwners = yield* Artifact
+		const fileOwners = yield* File
 		const executor = yield* PiTurnExecutor
 		const workspaces = yield* SessionWorkspaces
 		const customProviders = yield* configuredApiCustomProviders
@@ -439,7 +488,6 @@ export const PiDurableHarnessLive = boundedHarness(
 
 					const token = { turn: args.turn }
 					const repositories = repositoriesOf(args.resources)
-					const artifacts = artifactsOf(args.resources)
 					const { config: environmentConfig } = yield* environments.get(
 						EnvironmentId.make(args.environment_id),
 					)
@@ -468,20 +516,29 @@ export const PiDurableHarnessLive = boundedHarness(
 							terminal: false,
 						})
 					}
-					const skills = skillsOf(args.resources)
 					const attachedStores = memoryStoresOf(args.resources)
-					const stores = yield* readableMemoryStores(attachedStores).pipe(
-						Effect.provideService(MemoryStore, memoryStores),
+					const [stores, { artifacts, skills, files }] = yield* Effect.all(
+						[
+							readableMemoryStores(attachedStores).pipe(
+								Effect.provideService(MemoryStore, memoryStores),
+							),
+							readableAttachments(args.resources).pipe(
+								Effect.provideService(Artifact, artifactOwners),
+								Effect.provideService(File, fileOwners),
+							),
+						],
+						{ concurrency: 2 },
 					)
-					const system = describeMounts(
-						version.system,
+					const mounts = describeMounts(
+						null,
 						repositories,
 						stores,
 						artifacts,
 						skills,
-						filesOf(args.resources),
+						files,
 						stores.length < attachedStores.length,
 					)
+					const systemContext = [mounts, args.system_context].filter(Boolean).join("\n\n")
 
 					const mcp =
 						version.mcp_servers.length === 0 ||
@@ -519,8 +576,8 @@ export const PiDurableHarnessLive = boundedHarness(
 						turn: args.turn,
 						provider: resolved.provider,
 						modelId: resolved.modelId,
-						system,
-						...(args.system_context === undefined ? {} : { systemContext: args.system_context }),
+						system: version.system,
+						systemContext,
 						...(args.unattended === true ? { unattended: true as const } : {}),
 						text: userText,
 						...(mcp === undefined ? {} : { mcp }),

@@ -150,11 +150,9 @@ describe("Skills in a session", () => {
 					"/mnt/skills/pdf-forms/scripts/fill.py",
 				])
 				expect(read).toBe(PDF_SKILL)
+				expect(systems[0]).toContain("Be brief.")
 				expect(systems[0]).toContain(
-					[
-						"Be brief.",
-						"Skills in your workspace. Each is a directory of instructions for one kind of task. When a task matches a skill's description, read its SKILL.md before you start:\n- /mnt/skills/pdf-forms/SKILL.md: pdf-forms. Fill in PDF forms. Use when the user has a PDF form.",
-					].join("\n\n"),
+					"Skills in your workspace. Each is a directory of instructions for one kind of task. When a task matches a skill's description, read its SKILL.md before you start:\n- /mnt/skills/pdf-forms/SKILL.md: pdf-forms. Fill in PDF forms. Use when the user has a PDF form.",
 				)
 
 				yield* request(apiFetch, "POST", `/v1/artifacts/${artifact.id}/versions`, {
@@ -168,6 +166,16 @@ describe("Skills in a session", () => {
 					yield* createSession([{ type: "skill", artifact_id: artifact.id }]),
 				)
 				expect(next.resources[0]).toMatchObject({ version: 2, description: "Changed." })
+
+				expect((yield* request(apiFetch, "DELETE", `/v1/artifacts/${artifact.id}`)).status).toBe(
+					200,
+				)
+				yield* sendAndSettle(apiFetch, session.id, ["Continue without the skill."], 3)
+				expect(systems[2]).toContain("Be brief.")
+				expect(systems[2]).not.toContain("/mnt/skills/pdf-forms")
+				expect(systems[2]).not.toContain("Fill in PDF forms")
+				expect(seen).toEqual([])
+				expect(read).toBeNull()
 			}),
 		))
 
