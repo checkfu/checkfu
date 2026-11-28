@@ -2997,11 +2997,11 @@ describe("turn engine", () => {
 								return result
 							}),
 						),
-					enterWorkspace: (turn) => {
+					enterWorkspace: (turn, operationId) => {
 						if (admission !== undefined) {
 							admission.enterAt = performance.now()
 						}
-						return backend.enterWorkspace(turn)
+						return backend.enterWorkspace(turn, operationId)
 					},
 					submit: (text, operationId) => {
 						if (admission !== undefined) {

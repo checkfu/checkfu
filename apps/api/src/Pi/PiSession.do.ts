@@ -46,7 +46,7 @@ import type { SessionMcp } from "./PiMcpSession.ts"
 import { previewModelRequests } from "./PiEventPreviews.ts"
 import type { PreviewPacket } from "./PiEventPreviews.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
-import { MCP_TURN_KEY } from "./PiTurn.ts"
+import { MCP_TURN_KEY, turnOperationId } from "./PiTurn.ts"
 import type { PiActionAnswer, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import { turnCallLog } from "./PiTurnCalls.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
@@ -73,6 +73,12 @@ class PiSessionHost {
 }
 
 const ADMITTED_TURN = "workspace-turn"
+const ADMITTED_EXECUTION = "workspace-execution"
+
+interface AdmittedExecution {
+	readonly turn: number
+	readonly operationId: string
+}
 const AGENT_TOOLS = "agent-tools"
 const UNATTENDED = "unattended"
 
@@ -81,7 +87,7 @@ export const makePiHarnessBackend = (
 	fence: SqliteTurnFence,
 	apiKeys: ProviderApiKeysInput,
 	reset: () => void,
-	enterWorkspace: (turn: number) => Promise<boolean>,
+	enterWorkspace: PiDurableBackend["enterWorkspace"],
 	options?: {
 		readonly aiBinding?: CloudflareAiBindingLike | null
 		readonly customProviders?: ReadonlyArray<ProviderSpec>
@@ -226,7 +232,17 @@ export const PiSessionLive = PiSession.make(
 				const workspaceStub = placedStub(workspaces, where)
 				const workspace = () => workspaceStub(sessionId)
 				const workspaceDeclarations = yield* Effect.promise(() => workspaceToolDeclarations())
-				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
+				const admittedExecution = () => rawCtx.storage.kv.get<AdmittedExecution>(ADMITTED_EXECUTION)
+				const legacyAdmittedTurn = () => rawCtx.storage.kv.get<number>(ADMITTED_TURN)
+				const admittedTurn = (): number => admittedExecution()?.turn ?? legacyAdmittedTurn() ?? 0
+				const currentOperationId = (): string | null => {
+					const execution = admittedExecution()
+					if (execution !== undefined) {
+						return execution.operationId
+					}
+					const previousTurn = legacyAdmittedTurn()
+					return previousTurn === undefined ? null : turnOperationId(previousTurn)
+				}
 				const previews = yield* PubSub.sliding<PreviewPacket>(128)
 				const writeScriptOutput = (path: string, content: string | Uint8Array) =>
 					runPromise(workspace().writeScriptOutput(path, content, { turn: admittedTurn() }))
@@ -328,7 +344,7 @@ export const PiSessionLive = PiSession.make(
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
 						const models = previewModelRequests(
-							sessionProviders.createModels(),
+							sessionProviders.createModels({ currentOperationId }),
 							sessionId,
 							admittedTurn,
 							(packet) => {
@@ -361,9 +377,10 @@ export const PiSessionLive = PiSession.make(
 					() => {
 						rawCtx.abort("A turn did not stop when aborted")
 					},
-					async (turn) => {
+					async (turn, operationId) => {
 						const entered = await runPromise(workspace().enter({ turn }))
 						if (entered) {
+							rawCtx.storage.kv.put<AdmittedExecution>(ADMITTED_EXECUTION, { turn, operationId })
 							rawCtx.storage.kv.put(ADMITTED_TURN, turn)
 						}
 						return entered

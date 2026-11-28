@@ -48,7 +48,7 @@ export interface PiDurableBackend {
 	readonly hasApiKey: (provider: string) => boolean
 	readonly missingCredentialsMessage?: (provider: string) => string
 	readonly isCancelled: (operationId: string) => boolean
-	readonly enterWorkspace: (turn: number) => Promise<boolean>
+	readonly enterWorkspace: (turn: number, operationId: string) => Promise<boolean>
 	readonly pi: () => Promise<Harness>
 	readonly ensureRoot: (agent: AgentChange) => Promise<void>
 	readonly submit: (text: string, operationId: string) => Promise<void>
@@ -569,7 +569,7 @@ const admitPiTurnUnderWay = (
 						await settleTurnUsage(pi, operationId)
 						return false
 					}
-					if (!(await backend.enterWorkspace(request.turn))) {
+					if (!(await backend.enterWorkspace(request.turn, request.operationId))) {
 						await settleTurnUsage(pi, operationId)
 						return false
 					}

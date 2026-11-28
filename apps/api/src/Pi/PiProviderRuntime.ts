@@ -18,8 +18,13 @@ export interface PiProviderSessionContext {
 	readonly sessionId: string
 }
 
+/** Operation admitted by the native runtime, available even when the Pi harness reopens. */
+export interface PiProviderOperationContext {
+	readonly currentOperationId: () => string | null
+}
+
 export interface PiSessionProviders {
-	readonly createModels: () => MutableModels
+	readonly createModels: (operation?: PiProviderOperationContext) => MutableModels
 	readonly checkCredentials: (provider: string) => ProviderCredentialCheck
 }
 
