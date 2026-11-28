@@ -3033,17 +3033,44 @@ const Files = HttpApiGroup.make("files")
 	.add(
 		HttpApiEndpoint.get("content", "/v1/files/:file_id/content", {
 			params: fileParams,
-			success: HttpApiSchema.StreamUint8Array(),
+			success: [
+				HttpApiSchema.StreamUint8Array().annotate({ description: "Complete file" }),
+				Schema.Uint8Array.pipe(
+					HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" }),
+					HttpApiSchema.status(206),
+				).annotate({ description: "Requested byte range" }),
+				HttpApiSchema.Empty(304).annotate({
+					description: "The file matches the supplied validator",
+				}),
+			],
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Download a file")
 			.annotate(
 				OpenApi.Description,
-				"Download a file's bytes with its content type. A single HTTP byte range returns 206. A range outside the file returns 416. A matching If-None-Match returns 304.",
+				"Download a file's bytes with its content type. A single HTTP byte range returns 206. A range outside the file returns 416. A matching If-None-Match returns 304. If-Range falls back to the complete file when the validator does not match.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-skip": true,
 				"x-checkfu-endpoint": { group: "files", endpoint: "content" },
+			})
+			.annotate(OpenApi.Transform, (operation) => {
+				const responses: unknown = operation.responses
+				return {
+					...operation,
+					responses: {
+						...(typeof responses === "object" ? responses : {}),
+						416: {
+							description: "The requested range does not overlap the file.",
+							headers: {
+								"Content-Range": {
+									description: "The complete file size in the form bytes */size.",
+									schema: { type: "string" },
+								},
+							},
+						},
+					},
+				}
 			}),
 	)
 	.add(

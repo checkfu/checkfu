@@ -1,4 +1,6 @@
+import { decodeFileContentResponse } from "@checkfu/sdk/FileTransfer"
 import { FileId, FileName, MAX_FILE_BYTES } from "@checkfu/sdk/Schemas"
+import { cancelResponseBody, streamResponseBody } from "@checkfu/sdk/Transport"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
@@ -113,7 +115,23 @@ const downloadCommand = Command.make(
 			const size = yield* downloadTo(
 				target,
 				file,
-				client.api.files.content({ params: { file_id } }),
+				Effect.gen(function* () {
+					const response = yield* client.api.files.content({
+						params: { file_id },
+						responseMode: "response-only",
+					})
+					if (response.status === 200) {
+						return streamResponseBody(response)
+					}
+					if (response.status === 206 || response.status === 304) {
+						yield* cancelResponseBody(response)
+						return yield* usageError(
+							`The server returned HTTP ${response.status} for a full download.`,
+						)
+					}
+					yield* decodeFileContentResponse(response)
+					return yield* usageError("Unexpected file download response.")
+				}),
 			)
 			yield* renderOutput({ id: file.id, path: target, size })
 		}).pipe(Effect.scoped),

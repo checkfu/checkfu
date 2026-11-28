@@ -36008,6 +36008,20 @@
 							}
 						}
 					},
+					"206": {
+						"description": "Requested byte range",
+						"content": {
+							"application/octet-stream": {
+								"schema": {
+									"type": "string",
+									"format": "binary"
+								}
+							}
+						}
+					},
+					"304": {
+						"description": "The file matches the supplied validator"
+					},
 					"400": {
 						"description": "Error",
 						"content": {
@@ -36200,6 +36214,17 @@
 							}
 						}
 					},
+					"416": {
+						"description": "The requested range does not overlap the file.",
+						"headers": {
+							"Content-Range": {
+								"description": "The complete file size in the form bytes */size.",
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
 					"429": {
 						"description": "Error",
 						"content": {
@@ -36345,7 +36370,7 @@
 						}
 					}
 				},
-				"description": "Download a file's bytes with its content type. A single HTTP byte range returns 206. A range outside the file returns 416. A matching If-None-Match returns 304.",
+				"description": "Download a file's bytes with its content type. A single HTTP byte range returns 206. A range outside the file returns 416. A matching If-None-Match returns 304. If-Range falls back to the complete file when the validator does not match.",
 				"summary": "Download a file",
 				"x-forge-skip": true,
 				"x-checkfu-endpoint": {

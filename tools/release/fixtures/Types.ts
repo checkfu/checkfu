@@ -23,6 +23,14 @@ const redeliveryForbidsKey: [
 ] extends [undefined, undefined]
 	? true
 	: false = true
+type PromiseFileOptions = NonNullable<Parameters<typeof client.files.content>[1]>
+type EffectFileOptions = NonNullable<Parameters<EffectClient["files"]["content"]>[1]>
+const fileContentForbidsKey: [
+	PromiseFileOptions["idempotencyKey"],
+	EffectFileOptions["idempotencyKey"],
+] extends [undefined, undefined]
+	? true
+	: false = true
 const responseType = () =>
 	client.webhooks.deliveries
 		.redeliver("whe_test", "wdel_old", {
@@ -92,6 +100,7 @@ export {
 	promiseWaits,
 	effectWaits,
 	redeliveryForbidsKey,
+	fileContentForbidsKey,
 	responseType,
 	vaultErased,
 	credentialErased,
