@@ -15,18 +15,20 @@ import { SandboxError, Sandboxes, TIMED_OUT, machineIdle } from "./Sandboxes.ts"
 import { WRITE_FILE } from "./WriteFile.ts"
 import type { ExecOptions, Sandbox } from "./Sandboxes.ts"
 
+export const sandboxMachineProps = Effect.gen(function* () {
+	const managed = yield* Config.Boolean("CHECKFU_MANAGED_DEPLOYMENT").pipe(
+		Config.withDefault(false),
+	)
+	if (managed) {
+		const image = yield* Config.NonEmptyString("CHECKFU_SANDBOX_IMAGE")
+		return { schedulingPolicy: "durable_object" as const, image }
+	}
+	return { schedulingPolicy: "durable_object" as const, context: `${import.meta.dirname}/image` }
+})
+
 export class SandboxMachine extends Cloudflare.Container<SandboxMachine>()(
 	"SandboxMachine",
-	Effect.gen(function* () {
-		const managed = yield* Config.String("CHECKFU_MANAGED_DEPLOYMENT").pipe(Config.withDefault("0"))
-		if (managed === "1") {
-			const image = yield* Config.option(Config.String("CHECKFU_SANDBOX_IMAGE"))
-			if (Option.isSome(image)) {
-				return { schedulingPolicy: "durable_object" as const, image: image.value }
-			}
-		}
-		return { schedulingPolicy: "durable_object" as const, context: `${import.meta.dirname}/image` }
-	}),
+	sandboxMachineProps,
 ) {}
 
 const MACHINE = "machine"

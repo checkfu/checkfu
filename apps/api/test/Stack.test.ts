@@ -36,6 +36,7 @@ import {
 	publishDomain,
 } from "../src/CustomDomain.ts"
 import { JURISDICTION_ENV } from "../src/Placement.ts"
+import { sandboxMachineProps } from "../src/Sandbox/CloudflareSandboxes.do.ts"
 
 const RemovalPolicyName = Schema.Literals(["retain", "destroy", "protect"])
 
@@ -123,6 +124,30 @@ describe("Alchemy stack and worker entry", () => {
 				}).pipe(Effect.provide(devStateLayer))
 				expect(devStateStore.id).toBe("local")
 			}),
+	)
+
+	it.effect("requires an image for a managed sandbox and builds locally in source mode", () =>
+		Effect.gen(function* () {
+			const props = (env: Record<string, string>) =>
+				sandboxMachineProps.pipe(
+					Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })),
+				)
+			expect(yield* props({})).toEqual({
+				schedulingPolicy: "durable_object",
+				context: expect.stringMatching(/\/image$/),
+			})
+			const managed = { CHECKFU_MANAGED_DEPLOYMENT: "1" }
+			expect(String(yield* Effect.flip(props(managed)))).toContain("CHECKFU_SANDBOX_IMAGE")
+			expect(
+				String(yield* Effect.flip(props({ ...managed, CHECKFU_SANDBOX_IMAGE: "" }))),
+			).toContain("CHECKFU_SANDBOX_IMAGE")
+			expect(
+				yield* props({ ...managed, CHECKFU_SANDBOX_IMAGE: "registry.example/sandbox:revision" }),
+			).toEqual({
+				schedulingPolicy: "durable_object",
+				image: "registry.example/sandbox:revision",
+			})
+		}),
 	)
 
 	it.effect("keeps artifact bytes in the R2 jurisdiction the objects are placed in", () =>

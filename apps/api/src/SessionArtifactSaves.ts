@@ -24,10 +24,13 @@ import {
 	ArtifactPath,
 	FileName,
 } from "@checkfu/sdk/Schemas"
+import * as Data from "effect/Data"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Mime from "effect/http/Mime"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { DocumentCalls, DocumentRefused, isDocumentRefused } from "./ArtifactData/DocumentCalls.ts"
@@ -35,7 +38,6 @@ import { outputFileId } from "./Files/OutputsSaverLive.ts"
 import { SessionResources } from "./SessionResources.ts"
 import { makeStoreFile } from "./Files/StoreFile.ts"
 import {
-	RESERVATION_LOST,
 	artifactReads,
 	artifactWrites,
 	resolveFiles,
@@ -57,12 +59,13 @@ import type {
 } from "./Workspace/SessionArtifactTool.ts"
 
 const DEFAULT_CONTENT_TYPE = "application/octet-stream"
-const RETRY = "retry" as const
 const MAX_ATTEMPTS = 4
 const FILE_COPIES = [0, 1, 2, 3] as const
 const RETRY_PAUSE = "20 millis"
 
-const retry = () => Effect.succeed(RETRY)
+class SaveRetry extends Data.TaggedError("SaveRetry") {}
+
+const retry = () => Effect.fail(new SaveRetry())
 
 const utf8Encoder = new TextEncoder()
 const isArtifactPath = Schema.is(ArtifactPath)
@@ -294,7 +297,7 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 							const id = yield* outputFileId(digest, sessionId, path, hash)
 							const ended = yield* stopped(sessionId, turn)
 							if (ended !== undefined) {
-								return ended
+								return Option.some(ended)
 							}
 							const confirmTurn = stopped(sessionId, turn).pipe(
 								Effect.flatMap((ended) =>
@@ -318,19 +321,21 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 								{ beforeCommit: confirmTurn, contentAddressed: true },
 							).pipe(Effect.catchTag("ArtifactSaveStopped", ({ ended }) => Effect.succeed(ended)))
 							if ("ok" in outcome) {
-								return outcome
+								return Option.some(outcome)
 							}
 							if (outcome._tag === "Taken") {
-								return RETRY
+								return Option.none()
 							}
-							return outcome._tag === "Stored"
-								? { ok: true as const, file_id: id }
-								: refused(`Saving ${path} took too long; try again.`)
+							return Option.some(
+								outcome._tag === "Stored"
+									? { ok: true as const, file_id: id }
+									: refused(`Saving ${path} took too long; try again.`),
+							)
 						})
 					for (const copy of FILE_COPIES) {
 						const outcome = yield* save(copy === 0 ? sha256 : `${sha256}:turn:${turn}:${copy}`)
-						if (outcome !== RETRY) {
-							return outcome
+						if (Option.isSome(outcome)) {
+							return outcome.value
 						}
 					}
 					return refused(`${path} keeps being deleted after it is saved.`)
@@ -479,23 +484,20 @@ export const SessionArtifactSaves = Effect.gen(function* () {
 							ArtifactAlreadyExists: retry,
 							ArtifactNotFound: retry,
 							ArtifactReservationLapsed: retry,
+							ArtifactReservationStale: retry,
 							ArtifactVersionConflict: retry,
 						}),
-						Effect.catchIf(
-							(error) => isApiErrorEnvelope(error) && error.error.message === RESERVATION_LOST,
-							retry,
+					)
+					return yield* attempt.pipe(
+						Effect.retry({
+							while: Predicate.isTagged("SaveRetry"),
+							times: MAX_ATTEMPTS - 1,
+							schedule: Schedule.spaced(RETRY_PAUSE),
+						}),
+						Effect.catchTag("SaveRetry", () =>
+							Effect.succeed(refused("Saving the artifact did not finish. Try again.")),
 						),
 					)
-					for (let left = MAX_ATTEMPTS; left > 0; left -= 1) {
-						const outcome = yield* attempt
-						if (outcome !== RETRY) {
-							return outcome
-						}
-						if (left > 1) {
-							yield* Effect.sleep(RETRY_PAUSE)
-						}
-					}
-					return refused("Saving the artifact did not finish. Try again.")
 				}),
 			),
 	}

@@ -185,9 +185,7 @@ const versionResource = (id: ArtifactId, found: LocatedVersion, manifest: Artifa
 	created_at: found.created_at,
 })
 
-export const RESERVATION_LOST = "The create took too long; retry the request."
-
-const interrupted = reject(503, RESERVATION_LOST)
+const interrupted = reject(503, "The create took too long; retry the request.")
 
 export const artifactReads = Effect.gen(function* () {
 	const artifacts = yield* Artifact
@@ -403,7 +401,6 @@ export const artifactWrites = Effect.gen(function* () {
 						const copied = yield* stored(store.putBlob(id, sha256, body, size, reservation)).pipe(
 							Effect.catchTags({
 								ArtifactPurged: () => reject(404, `Artifact ${id} not found.`),
-								ArtifactReservationStale: () => interrupted,
 							}),
 						)
 						if (copied === "mismatch") {
@@ -422,7 +419,6 @@ export const artifactWrites = Effect.gen(function* () {
 		stored(store.stage(id, built, reservation)).pipe(
 			Effect.catchTags({
 				ArtifactPurged: () => reject(404, `Artifact ${id} not found.`),
-				ArtifactReservationStale: () => interrupted,
 			}),
 		)
 
@@ -703,7 +699,10 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					return yield* Effect.flatMap(artifacts.get(id), (state) =>
 						createdArtifact(id, state, built),
 					).pipe(orPending(id, "artifact"))
-				}).pipe(handled),
+				}).pipe(
+					Effect.catchTag("ArtifactReservationStale", () => interrupted),
+					handled,
+				),
 			)
 			.handle("list", ({ query }) =>
 				list("artifact", query, (id) =>
@@ -877,7 +876,10 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						return { ...result, version }
 					}
 					return versionResource(id, result.found, result.manifest)
-				}).pipe(handled),
+				}).pipe(
+					Effect.catchTag("ArtifactReservationStale", () => interrupted),
+					handled,
+				),
 			)
 			.handle("getVersion", ({ params }) =>
 				Effect.gen(function* () {

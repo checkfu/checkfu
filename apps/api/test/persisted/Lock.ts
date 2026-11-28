@@ -373,10 +373,10 @@ export const makePersistedLock = <Kind extends string>(config: PersistedLockConf
 		}
 		if (
 			allowManagedDeploymentEnv &&
-			(yield* Config.String("CHECKFU_MANAGED_DEPLOYMENT").pipe(
-				Config.withDefault("0"),
-				Effect.orElseSucceed(() => "0"),
-			)) === "1"
+			(yield* Config.Boolean("CHECKFU_MANAGED_DEPLOYMENT").pipe(
+				Config.withDefault(false),
+				Effect.orElseSucceed(() => false),
+			))
 		) {
 			const fs = yield* FileSystem.FileSystem
 			const path = yield* Path.Path
