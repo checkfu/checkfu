@@ -8,6 +8,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { truncateError } from "./WebhookDeliveryEngine.ts"
 import type { WebhookHttpResult, WebhookHttpSender } from "./WebhookDeliveryEngine.ts"
 import {
@@ -29,10 +30,17 @@ export {
 } from "./WebhookEgressConfig.ts"
 export type { WebhookEgressConfig } from "./WebhookEgressConfig.ts"
 
+// The proxy sends one small report with a bounded diagnostic.
+export const MAX_EGRESS_REPORT_BYTES = 16 * 1024
+const malformedReport = {
+	kind: "egress_error",
+	message: "Webhook egress proxy returned a malformed response.",
+} as const satisfies WebhookHttpResult
+
 const EgressEnvelopeSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("response"),
-		status: Schema.Int,
+		status: Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 599 })),
 	}),
 	Schema.Struct({
 		kind: Schema.Literal("timeout"),
@@ -58,6 +66,77 @@ const cancelResponseBody = (response: HttpClientResponse.HttpClientResponse): Ef
 			}
 		}),
 	)
+
+const abandonProxyResponse = (
+	response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<void> =>
+	Effect.sync(() => {
+		const web = HttpClientResponse.toWeb(response)
+		if (Option.isSome(web) && web.value.body !== null) {
+			void web.value.body.cancel().catch(() => undefined)
+		}
+	})
+
+const proxyReport = (
+	response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<WebhookHttpResult> =>
+	Effect.gen(function* () {
+		const declared = response.headers["content-length"]
+		if (
+			declared !== undefined &&
+			/^\d+$/u.test(declared) &&
+			Number(declared) > MAX_EGRESS_REPORT_BYTES
+		) {
+			yield* abandonProxyResponse(response)
+			return malformedReport
+		}
+		const web = HttpClientResponse.toWeb(response)
+		const body = Option.isSome(web) ? web.value.body : null
+		const bytes = new Uint8Array(MAX_EGRESS_REPORT_BYTES)
+		let size = 0
+		const append = (chunk: Uint8Array) => {
+			if (size + chunk.byteLength > bytes.length) {
+				return Effect.fail(malformedReport)
+			}
+			bytes.set(chunk, size)
+			size += chunk.byteLength
+			return Effect.void
+		}
+		if (body === null) {
+			yield* Stream.runForEach(response.stream, append)
+		} else {
+			yield* Effect.scoped(
+				Effect.gen(function* () {
+					const reader = yield* Effect.acquireRelease(
+						Effect.sync(() => body.getReader()),
+						(reader) =>
+							Effect.sync(() => {
+								void reader.cancel().catch(() => undefined)
+								reader.releaseLock()
+							}),
+					)
+					while (true) {
+						const part = yield* Effect.tryPromise({
+							try: () => reader.read(),
+							catch: () => malformedReport,
+						})
+						if (part.done) {
+							return
+						}
+						yield* append(part.value)
+					}
+				}),
+			)
+		}
+		const text = yield* Effect.try({
+			try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, size)),
+			catch: () => malformedReport,
+		})
+		const parsed = yield* decodeEgressEnvelope(text)
+		return parsed.kind === "invalid_destination" || parsed.kind === "network_error"
+			? { kind: parsed.kind, message: truncateError(parsed.message) }
+			: parsed
+	}).pipe(Effect.orElseSucceed(() => malformedReport))
 
 const sendDirectPublicFetch = (
 	client: HttpClient.HttpClient,
@@ -122,27 +201,13 @@ const sendViaPublicEgress = (
 			Effect.flatMap((response) =>
 				Effect.gen(function* () {
 					if (response.status !== 200) {
-						yield* cancelResponseBody(response)
+						yield* abandonProxyResponse(response)
 						return {
 							kind: "egress_error" as const,
 							message: truncateError(`Webhook egress proxy returned HTTP ${response.status}.`),
 						}
 					}
-					const text = yield* response.text
-					const parsed = yield* decodeEgressEnvelope(text).pipe(
-						Effect.orElseSucceed((): WebhookHttpResult => ({
-							kind: "egress_error",
-							message: "Webhook egress proxy returned a malformed response.",
-						})),
-					)
-					if (
-						parsed.kind === "invalid_destination" ||
-						parsed.kind === "network_error" ||
-						parsed.kind === "egress_error"
-					) {
-						return { kind: parsed.kind, message: truncateError(parsed.message) }
-					}
-					return parsed
+					return yield* proxyReport(response)
 				}),
 			),
 			Effect.catch((error) =>
