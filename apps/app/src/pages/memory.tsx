@@ -6,12 +6,12 @@ import { Input, Textarea } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonMemory, JsonMemoryStore } from "@checkfu/sdk/client"
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useRef, useState } from "react"
 import type * as React from "react"
-import { checkfu } from "../api.ts"
+import { checkfu, errorMessage, isSignedOut } from "../api.ts"
 import { Confirm } from "../confirm.tsx"
 import { editorOf, rebaseOnto } from "../memory-edit.ts"
 import type { MemoryEdit } from "../memory-edit.ts"
@@ -142,7 +142,9 @@ export function NewMemoryStorePage(): React.JSX.Element {
 export function MemoryStorePage(): React.JSX.Element {
 	const { memoryStoreId } = store.useParams()
 	const memoryStore = present(useSuspenseQuery(memoryStoreQuery(memoryStoreId)))
-	const memories = useSuspenseQuery(memoriesQuery(memoryStoreId)).data.data
+	const memories = useSuspenseInfiniteQuery(memoriesQuery(memoryStoreId))
+	const cursor = memories.data.pages.at(-1)?.next_page
+	const repeated = !memories.hasNextPage && typeof cursor === "string" && cursor !== ""
 	const archive = useAction(
 		async () => {
 			await checkfu.memoryStores.archive(memoryStore.id)
@@ -176,7 +178,7 @@ export function MemoryStorePage(): React.JSX.Element {
 				<Callout>An archived store is read-only, here and in every session that mounts it.</Callout>
 			)}
 			<DataTable
-				rows={memories}
+				rows={memories.data.pages.flatMap((page) => page.data)}
 				rowKey={(memory) => memory.id}
 				empty="No memories yet. An agent writes them under /mnt/memory, or add one below."
 				columns={[
@@ -207,6 +209,22 @@ export function MemoryStorePage(): React.JSX.Element {
 					},
 				]}
 			/>
+			{memories.hasNextPage ? (
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={memories.isFetching}
+					onClick={() => void memories.fetchNextPage({ cancelRefetch: false })}
+				>
+					{memories.isFetchingNextPage ? "Loading…" : "Load more"}
+				</Button>
+			) : null}
+			{repeated ? (
+				<Callout tone="error">Listing stopped because the next page repeated.</Callout>
+			) : null}
+			{memories.isFetchNextPageError && !isSignedOut(memories.error) ? (
+				<Callout tone="error">{errorMessage(memories.error)}</Callout>
+			) : null}
 			{active ? <NewMemory memoryStore={memoryStore} /> : null}
 		</>
 	)

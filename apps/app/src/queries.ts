@@ -89,9 +89,14 @@ export const artifactChoices = infiniteQueryOptions({
 })
 
 export const memoriesQuery = (storeId: string) =>
-	queryOptions({
-		queryKey: ["memories", storeId, "all"],
-		queryFn: ({ signal }) => checkfu.memoryStores.memories(storeId, signal),
+	infiniteQueryOptions({
+		queryKey: ["memories", storeId, "pages"],
+		queryFn: ({ pageParam, signal }) => checkfu.memoryStores.memories(storeId, pageParam, signal),
+		initialPageParam: undefined as string | undefined,
+		getNextPageParam: ({ next_page }, _pages, _current, seen) =>
+			typeof next_page === "string" && next_page !== "" && !seen.includes(next_page)
+				? next_page
+				: undefined,
 	})
 
 export const memoryQuery = (storeId: string, id: string) =>
