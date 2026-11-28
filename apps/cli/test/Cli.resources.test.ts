@@ -739,15 +739,15 @@ describe("CLI help, errors, and resource commands", () => {
 					}
 					process.on("warning", onWarning)
 					try {
-						const warnedYaml = yield* cli.run(["agents", "create"], {
+						const rejectedYaml = yield* cli.run(["agents", "create"], {
 							stdin: "name: !custom_tag Safe\u001b]52;c;evil\u0007Name\nmodel: gpt-6.2-sol\n",
 						})
-						expect(warnedYaml.exitCode).toBe(0)
+						expect(rejectedYaml.exitCode).toBe(USAGE_EXIT_CODE)
 						expect(leakedWarnings).toEqual([])
-						expect(warnedYaml.stderr).toContain("Warning (stdin):")
-						expect(warnedYaml.stderr).toContain("Unresolved tag")
-						expect(warnedYaml.stderr).not.toContain("\u001b")
-						expect(warnedYaml.stderr).not.toContain("\u0007")
+						expect(rejectedYaml.stderr).toContain("Invalid JSON or YAML for stdin")
+						expect(rejectedYaml.stderr).toContain("TAG_RESOLVE_FAILED")
+						expect(rejectedYaml.stderr).not.toContain("\u001b")
+						expect(rejectedYaml.stderr).not.toContain("\u0007")
 					} finally {
 						process.off("warning", onWarning)
 					}

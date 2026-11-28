@@ -21,6 +21,7 @@
 		"@effect/platform-bun": "catalog:",
 		"alchemy": "catalog:",
 		"effect": "catalog:",
+		"jsonc-parser": "3.3.1",
 		"modern-tar": "catalog:",
 		"yaml": "catalog:"
 	},
