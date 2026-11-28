@@ -614,7 +614,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_addDocument",
 		title: "Add a document",
 		description:
-			"Add a document to a collection under a new id. A collection holds up to 10000 documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Retries compare JSON values with object member order ignored and array order preserved. Reusing the key with a different JSON value answers 409.",
+			"Add a document to a collection under a new id. A collection holds up to 10000 documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Retries compare JSON values with object member order ignored and array order preserved. Reusing the key with a different JSON value answers 409. The raw JSON request body may be at most 163840 bytes. The stored data value may be at most 65536 bytes when encoded as JSON, with arrays and objects nested at most 32 levels deep.",
 		method: "POST",
 		path: "/v1/artifacts/{artifact_id}/data/{collection}",
 		readOnly: false,
@@ -1536,7 +1536,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "artifacts_putDocument",
 		title: "Put a document",
-		description: "Store a document under an id you choose, replacing the document already there",
+		description:
+			"Store a document under an id you choose, replacing the document already there. The raw JSON request body may be at most 163840 bytes. The stored data value may be at most 65536 bytes when encoded as JSON, with arrays and objects nested at most 32 levels deep.",
 		method: "PUT",
 		path: "/v1/artifacts/{artifact_id}/data/{collection}/{document_id}",
 		readOnly: false,

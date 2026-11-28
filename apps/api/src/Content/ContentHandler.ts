@@ -1,10 +1,11 @@
+import { MAX_ARTIFACT_DOCUMENT_BODY_BYTES } from "@checkfu/sdk/Limits"
 import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
 import type * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-import * as Exit from "effect/Exit"
+import * as Result from "effect/Result"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
 import type {
 	ArtifactVersionNotReady,
@@ -56,7 +57,6 @@ const PREFLIGHT_HEADERS = {
 
 const RESERVED_PREFIX = "_/"
 const DATA_SEGMENT = "data"
-const MAX_DATA_BODY_BYTES = 128 * 1024
 const RETRY_AFTER_SECONDS = "60"
 const COLLECTION_METHODS = "GET, POST, OPTIONS"
 const DOCUMENT_METHODS = "GET, PUT, DELETE, OPTIONS"
@@ -178,7 +178,7 @@ export interface ContentRequest {
 	readonly method: string
 	readonly url: string
 	readonly headers: HttpServerRequest.HttpServerRequest["headers"]
-	readonly text: Effect.Effect<string | null>
+	readonly text: Effect.Effect<string, "too_large" | "invalid">
 }
 
 export type ContentAccessTarget =
@@ -197,15 +197,16 @@ export const contentRequestOf = (request: HttpServerRequest.HttpServerRequest): 
 	method: request.method,
 	url: request.originalUrl,
 	headers: request.headers,
-	text: Effect.map(
-		Effect.exit(
-			Effect.provideService(
-				request.text,
-				HttpIncomingMessage.MaxBodySize,
-				ByteSize.bytes(MAX_DATA_BODY_BYTES),
-			),
+	text: request.text.pipe(
+		Effect.provideService(
+			HttpIncomingMessage.MaxBodySize,
+			ByteSize.bytes(MAX_ARTIFACT_DOCUMENT_BODY_BYTES),
 		),
-		(read) => (Exit.isSuccess(read) ? read.value : null),
+		Effect.mapError((error) =>
+			error.reason._tag === "RequestParseError" && error.reason.reason === "BodyTooLarge"
+				? ("too_large" as const)
+				: ("invalid" as const),
+		),
 	),
 })
 
@@ -341,15 +342,19 @@ export const serveContent = (options: {
 					return denied
 				}
 			}
-			const body = operation === "add" || operation === "put" ? yield* request.text : ""
-			if (body === null) {
-				return plain(413, `Send at most ${MAX_DATA_BODY_BYTES} bytes.`)
+			const body = yield* Effect.result(
+				operation === "add" || operation === "put" ? request.text : Effect.succeed(""),
+			)
+			if (Result.isFailure(body)) {
+				return body.failure === "too_large"
+					? plain(413, `Send at most ${MAX_ARTIFACT_DOCUMENT_BODY_BYTES} bytes.`)
+					: plain(400, "Could not read the request body.")
 			}
 			const reply = yield* artifactData(found.address, {
 				operation,
 				collection: route.collection,
 				id: route.id,
-				body,
+				body: body.success,
 				page: url.searchParams.get("page") ?? "",
 				limit: url.searchParams.get("limit") ?? "",
 				idempotency_key: request.headers["idempotency-key"] ?? "",

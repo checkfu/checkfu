@@ -147,6 +147,7 @@ import {
 	MAX_ARTIFACT_DOCUMENT_PAGE_SIZE,
 	MAX_ARTIFACT_DOCUMENT_PAGE_BYTES,
 	MAX_ARTIFACT_DOCUMENT_BYTES,
+	MAX_ARTIFACT_DOCUMENT_BODY_BYTES,
 	MAX_SESSION_BODY_BYTES,
 	MAX_SESSION_EVENTS_PER_BATCH,
 	MAX_SESSION_INITIAL_MESSAGES_BYTES,
@@ -415,6 +416,11 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 
 export class ArtifactBodyLimit extends HttpApiMiddleware.Service<ArtifactBodyLimit>()(
 	"@checkfu/api/ArtifactBodyLimit",
+	{ error: ERRORS[413] },
+) {}
+
+export class ArtifactDocumentBodyLimit extends HttpApiMiddleware.Service<ArtifactDocumentBodyLimit>()(
+	"@checkfu/api/ArtifactDocumentBodyLimit",
 	{ error: ERRORS[413] },
 ) {}
 
@@ -1419,6 +1425,8 @@ export const ArtifactDocumentBody = Schema.Struct({
 	}),
 })
 export type ArtifactDocumentBody = typeof ArtifactDocumentBody.Type
+
+const artifactDocumentLimits = `The raw JSON request body may be at most ${MAX_ARTIFACT_DOCUMENT_BODY_BYTES} bytes. The stored data value may be at most ${MAX_ARTIFACT_DOCUMENT_BYTES} bytes when encoded as JSON, with arrays and objects nested at most ${MAX_ARTIFACT_DOCUMENT_DEPTH} levels deep.`
 
 export const ArtifactDocumentDeleted = Schema.Struct({
 	id: Schema.String,
@@ -3402,14 +3410,15 @@ const ArtifactData = HttpApiGroup.make("artifact_data")
 			.annotate(OpenApi.Summary, "Add a document")
 			.annotate(
 				OpenApi.Description,
-				`Add a document to a collection under a new id. A collection holds up to ${MAX_ARTIFACT_COLLECTION_DOCUMENTS} documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Retries compare JSON values with object member order ignored and array order preserved. Reusing the key with a different JSON value answers 409.`,
+				`Add a document to a collection under a new id. A collection holds up to ${MAX_ARTIFACT_COLLECTION_DOCUMENTS} documents. While the added document exists, a matching retry with the same Idempotency-Key returns the same document ID and its current contents. Retries compare JSON values with object member order ignored and array order preserved. Reusing the key with a different JSON value answers 409. ${artifactDocumentLimits}`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts.data",
 				"x-forge-method-name": "add",
 				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "addDocument" },
 				"x-checkfu-mcp": { name: "artifacts_addDocument", destructive: false },
-			}),
+			})
+			.middleware(ArtifactDocumentBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("getDocument", "/v1/artifacts/:artifact_id/data/:collection/:document_id", {
@@ -3436,14 +3445,15 @@ const ArtifactData = HttpApiGroup.make("artifact_data")
 			.annotate(OpenApi.Summary, "Put a document")
 			.annotate(
 				OpenApi.Description,
-				"Store a document under an id you choose, replacing the document already there",
+				`Store a document under an id you choose, replacing the document already there. ${artifactDocumentLimits}`,
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "artifacts.data",
 				"x-forge-method-name": "put",
 				"x-checkfu-endpoint": { group: "artifact_data", endpoint: "putDocument" },
 				"x-checkfu-mcp": { name: "artifacts_putDocument" },
-			}),
+			})
+			.middleware(ArtifactDocumentBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.delete(

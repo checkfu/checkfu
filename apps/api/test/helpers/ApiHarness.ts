@@ -1017,7 +1017,7 @@ export const sendRequest = (
 		readonly method: string
 		readonly path: string
 		readonly body?: unknown
-		readonly rawBody?: string
+		readonly rawBody?: string | ReadableStream<Uint8Array>
 		readonly headers?: Record<string, string>
 	},
 ) =>
@@ -1030,7 +1030,7 @@ export const sendRequest = (
 				...(body === undefined ? {} : { "content-type": "application/json" }),
 				...input.headers,
 			},
-			...(body === undefined ? {} : { body }),
+			...(body === undefined ? {} : { body, duplex: "half" }),
 		}
 		const webRequest = new Request(`http://localhost${input.path}`, init)
 		const response = yield* fetchEffect.pipe(

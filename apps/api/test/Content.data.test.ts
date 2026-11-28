@@ -1,3 +1,4 @@
+import { MAX_ARTIFACT_DOCUMENT_BODY_BYTES } from "@checkfu/sdk/Limits"
 import { DATA_OPERATIONS, accessAt, permits } from "@checkfu/domain/Artifact/ArtifactAccess"
 import type { DataOperation } from "@checkfu/domain/Artifact/ArtifactAccess"
 import { runInNewContext } from "node:vm"
@@ -41,7 +42,7 @@ const MacLive = Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCrypt
 interface Sent {
 	readonly method?: string
 	readonly body?: unknown
-	readonly raw?: string
+	readonly raw?: string | ReadableStream<Uint8Array>
 	readonly headers?: Record<string, string>
 }
 
@@ -110,6 +111,11 @@ const withPages = <A>(
 			body?: unknown,
 			headers?: Record<string, string>,
 		) => Effect.Effect<Response>
+		readonly rawApi: (
+			method: string,
+			path: string,
+			body: string | ReadableStream<Uint8Array>,
+		) => Effect.Effect<Response>
 		readonly page: (url: string, sent?: Sent) => Effect.Effect<Response>
 		readonly onDomain: (url: string, sent?: Sent) => Effect.Effect<Response>
 		readonly artifact: (collections: Record<string, string>) => Effect.Effect<string>
@@ -149,7 +155,7 @@ const withPages = <A>(
 								...(body === undefined ? {} : { "content-type": "application/json" }),
 								...sent.headers,
 							},
-							...(body === undefined ? {} : { body }),
+							...(body === undefined ? {} : { body, duplex: "half" }),
 						}),
 					),
 				)
@@ -168,6 +174,8 @@ const withPages = <A>(
 				})
 			return yield* run({
 				api,
+				rawApi: (method, path, rawBody) =>
+					sendRequest(apiFetch, { method, path, rawBody, headers: AUTH_HEADERS }),
 				throttle: yield* DataThrottle,
 				page: (url, sent) => Effect.map(serve(request(url, sent)), HttpServerResponse.toWeb),
 				onDomain: (url, sent) =>
@@ -387,6 +395,63 @@ describe("A page reaching its artifact's data", () => {
 			}),
 		))
 
+	it("shares wire limits across owner and hosted writes while preserving the stored byte limit", () =>
+		withPages(({ artifact, link, page, rawApi, api }) =>
+			Effect.gen(function* () {
+				const id = yield* artifact(COLLECTIONS)
+				const root = yield* link(id, "write")
+				const hosted = root + "_/data/board"
+				const owner = "/v1/artifacts/" + id + "/data/board"
+				const raw = (data: string) => '{"data":"' + data + '"}'
+				const payload = "é".repeat(24_000)
+				const escaped = raw(String.raw`\u00e9`.repeat(24_000))
+				const utf8 = raw(payload)
+				const shortRead = () =>
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode('{"data":'))
+						},
+						pull(controller) {
+							controller.error(new Error("fixture interrupted request"))
+						},
+					})
+				for (const [name, write] of [
+					[
+						"owner",
+						(method: "POST" | "PUT", tail: string, body: string | ReadableStream<Uint8Array>) =>
+							rawApi(method, owner + tail, body),
+					],
+					[
+						"hosted",
+						(method: "POST" | "PUT", tail: string, body: string | ReadableStream<Uint8Array>) =>
+							page(hosted + tail, { method, raw: body }),
+					],
+				] as const) {
+					const doc = "/" + name
+					for (const body of [escaped, utf8]) {
+						const added = yield* write("POST", "", body)
+						expect(added.status).toBe(201)
+						expect((yield* json<DocumentBody>(added)).data).toBe(payload)
+					}
+					for (const size of [
+						MAX_ARTIFACT_DOCUMENT_BODY_BYTES - 1,
+						MAX_ARTIFACT_DOCUMENT_BODY_BYTES,
+					]) {
+						const accepted = yield* write("PUT", doc, escaped.padEnd(size))
+						expect(accepted.status).toBe(200)
+					}
+					expect(
+						(yield* write("PUT", doc, escaped.padEnd(MAX_ARTIFACT_DOCUMENT_BODY_BYTES + 1))).status,
+					).toBe(413)
+					expect((yield* write("PUT", doc, "{")).status).toBe(400)
+					expect((yield* write("PUT", doc, shortRead())).status).toBe(400)
+					expect((yield* write("PUT", doc, raw("x".repeat(65_536)))).status).toBe(400)
+					const preserved = yield* api("GET", owner + doc)
+					expect((yield* json<DocumentBody>(preserved)).data).toBe(payload)
+				}
+			}),
+		))
+
 	it("refuses what it cannot read or hold, and answers preflight without granting anything", () =>
 		withPages(({ page, artifact, link }) =>
 			Effect.gen(function* () {
@@ -403,9 +468,12 @@ describe("A page reaching its artifact's data", () => {
 				expect(yield* status(board, { method: "POST", body: { data: "x".repeat(65_536) } })).toBe(
 					400,
 				)
-				expect(yield* status(board, { method: "POST", body: { data: "x".repeat(140_000) } })).toBe(
-					413,
-				)
+				expect(
+					yield* status(board, {
+						method: "POST",
+						body: { data: "x".repeat(MAX_ARTIFACT_DOCUMENT_BODY_BYTES) },
+					}),
+				).toBe(413)
 				expect(yield* status(`${board}?limit=0`)).toBe(400)
 				expect(yield* status(`${board}?limit=101`)).toBe(400)
 				expect(yield* status(`${board}?page=abc`)).toBe(400)
