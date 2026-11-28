@@ -46,6 +46,7 @@ const withSessions = async (
 		apiFetch: ApiFetch,
 		world: Pick<
 			World,
+			| "artifactFiles"
 			| "workspaceFiles"
 			| "saveOutputs"
 			| "saveSessionArtifact"
@@ -56,6 +57,9 @@ const withSessions = async (
 			| "fileStore"
 		> & {
 			readonly createSession: Effect.Effect<{ readonly id: string }>
+			readonly createSessionResponse: (
+				resources: ReadonlyArray<AttachedArtifact>,
+			) => Effect.Effect<Response>
 			readonly createSessionWith: (
 				resources: ReadonlyArray<AttachedArtifact>,
 			) => Effect.Effect<{ readonly id: string }>
@@ -94,15 +98,15 @@ const withSessions = async (
 				const environment = yield* json<{ id: string }>(
 					yield* request(apiFetch, "POST", "/v1/environments", { name: "Env" }),
 				)
+				const createSessionResponse = (resources: ReadonlyArray<AttachedArtifact>) =>
+					request(apiFetch, "POST", "/v1/sessions", {
+						agent: agent.id,
+						environment_id: environment.id,
+						...(resources.length === 0 ? {} : { resources }),
+					})
 				const started = (resources: ReadonlyArray<AttachedArtifact>) =>
 					Effect.gen(function* () {
-						const session = yield* json<{ id: string }>(
-							yield* request(apiFetch, "POST", "/v1/sessions", {
-								agent: agent.id,
-								environment_id: environment.id,
-								...(resources.length === 0 ? {} : { resources }),
-							}),
-						)
+						const session = yield* json<{ id: string }>(yield* createSessionResponse(resources))
 						const posted = yield* request(apiFetch, "POST", `/v1/sessions/${session.id}/events`, {
 							events: [
 								{ type: "user.message", content: [{ type: "text", text: "Save these files." }] },
@@ -113,6 +117,7 @@ const withSessions = async (
 					})
 				yield* run(apiFetch, {
 					...world,
+					createSessionResponse,
 					createSession: started([]),
 					createSessionWith: started,
 					save: (sessionId, name, directory, madeFrom) =>
@@ -213,6 +218,52 @@ it("keeps identical artifact and output files independent across turns", () =>
 	))
 
 describe("An artifact the agent saves", () => {
+	it("mounts two artifacts with the same name at distinct chosen directories", () =>
+		withSessions((apiFetch, { artifactFiles, createSessionResponse, createSessionWith }) =>
+			Effect.gen(function* () {
+				const create = (content: string) =>
+					Effect.flatMap(
+						request(apiFetch, "POST", "/v1/artifacts", {
+							name: "Daily report",
+							files: [{ path: "index.html", content }],
+						}),
+						json<{ readonly id: string }>,
+					)
+				const today = yield* create("Today")
+				const yesterday = yield* create("Yesterday")
+				const attachment = (artifact_id: string) => ({ type: "artifact" as const, artifact_id })
+				const session = yield* createSessionWith([
+					{ ...attachment(today.id), mount_path: "today" },
+					{ ...attachment(yesterday.id), mount_path: "yesterday" },
+				])
+				const files = artifactFiles(session.id)
+				expect(yield* Effect.promise(() => files.read("/mnt/artifacts/today/index.html"))).toBe(
+					"Today",
+				)
+				expect(yield* Effect.promise(() => files.read("/mnt/artifacts/yesterday/index.html"))).toBe(
+					"Yesterday",
+				)
+
+				const collision = yield* createSessionResponse([
+					attachment(today.id),
+					attachment(yesterday.id),
+				])
+				expect(collision.status).toBe(400)
+				expect(yield* Effect.promise(() => collision.text())).toContain(
+					"Expected mount paths that are neither equal nor inside one another",
+				)
+				const longest = "🙂".repeat(504)
+				expect(
+					(yield* createSessionResponse([{ ...attachment(today.id), mount_path: longest }])).status,
+				).toBe(201)
+				for (const mount_path of ["..", "/absolute", "nested/path", "../escape", `${longest}🙂`]) {
+					expect(
+						(yield* createSessionResponse([{ ...attachment(today.id), mount_path }])).status,
+					).toBe(400)
+				}
+			}),
+		))
+
 	it("resolves each File once, checks every path, and keeps the storage-time guard", () =>
 		withSessions((apiFetch, { createSession, sessionArtifactSaves, runInWorld }) =>
 			Effect.gen(function* () {

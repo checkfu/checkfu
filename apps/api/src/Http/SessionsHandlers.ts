@@ -46,6 +46,7 @@ import {
 } from "@checkfu/domain/Session/SessionTypes"
 import {
 	SessionResources,
+	ARTIFACT_MOUNT_ROOT,
 	artifactMountPath,
 	fileMountPath,
 	FileMountPath,
@@ -731,7 +732,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				version,
 				manifest,
 				name: artifact.name,
-				mount_path: artifactMountPath(artifact.name, wanted.artifact_id),
 			}
 		})
 
@@ -782,12 +782,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				}
 			}
 			if (resource.type === "artifact") {
+				const pinned = yield* artifactVersion({
+					...resource,
+					artifact_id: ArtifactId.make(resource.artifact_id),
+				})
 				return {
+					...pinned,
 					type: resource.type,
-					...(yield* artifactVersion({
-						...resource,
-						artifact_id: ArtifactId.make(resource.artifact_id),
-					})),
+					mount_path:
+						resource.mount_path === undefined
+							? artifactMountPath(pinned.name, pinned.artifact_id)
+							: `${ARTIFACT_MOUNT_ROOT}/${resource.mount_path}`,
 				}
 			}
 			if (resource.type === "file") {

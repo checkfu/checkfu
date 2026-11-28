@@ -34,6 +34,7 @@ import {
 	ArtifactVersionFilesInput,
 	ArtifactId,
 	ArtifactMount,
+	ARTIFACT_MOUNT_ROOT,
 	SkillMount,
 	FileMount,
 	FILE_MOUNT_ROOT,
@@ -766,6 +767,16 @@ export const ArtifactMountParams = Schema.Struct({
 	artifact_id: ResourceId.annotate({ description: "Artifact whose files to mount, read-only" }),
 	version: Schema.optionalKey(
 		PositiveInt.annotate({ description: "Version to mount (default: the current version)" }),
+	),
+	mount_path: Schema.optionalKey(
+		ArtifactPath.check(
+			Schema.isMaxCodePoints(
+				Math.floor((MAX_MOUNT_PATH_LENGTH - ARTIFACT_MOUNT_ROOT.length - 1) / 2),
+			),
+			Schema.isPattern(/^[^/]+$/u),
+		).annotate({
+			description: `Directory name under ${ARTIFACT_MOUNT_ROOT}. Defaults to a name derived from the artifact's name.`,
+		}),
 	),
 })
 

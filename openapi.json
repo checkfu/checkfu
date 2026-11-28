@@ -9552,6 +9552,18 @@
 															"minimum": 1,
 															"maximum": 9007199254740991,
 															"description": "Version to mount (default: the current version)"
+														},
+														"mount_path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 504,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"allOf": [
+																{
+																	"pattern": "^[^/]+$",
+																	"description": "Directory name under /mnt/artifacts. Defaults to a name derived from the artifact's name."
+																}
+															]
 														}
 													},
 													"required": ["type", "artifact_id"],
