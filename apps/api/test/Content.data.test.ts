@@ -468,6 +468,7 @@ describe("A page reaching its artifact's data", () => {
 				expect((yield* page(`${root}sub/_/data.js`)).status).toBe(404)
 
 				const sent: Array<string> = []
+				let responseOverride: Response | undefined
 				const loaded: LoadedPage = {}
 				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
 				runInNewContext(source, {
@@ -478,6 +479,9 @@ describe("A page reaching its artifact's data", () => {
 						init: { method: string; body?: string; headers: Record<string, string> },
 					) => {
 						sent.push(`${init.method} ${String(input).slice(root.length)}`)
+						if (responseOverride !== undefined) {
+							return Promise.resolve(responseOverride)
+						}
 						return runPromise(
 							page(String(input), {
 								method: init.method,
@@ -545,6 +549,41 @@ describe("A page reaching its artifact's data", () => {
 						(document) => document.data,
 					),
 				).toEqual([{ text: "hi" }])
+				expect(yield* calling(() => data.collection("shown").list())).toEqual({
+					data: [],
+					next_page: null,
+				})
+				expect(yield* calling(() => data.collection("inbox").add(null))).toEqual({
+					id: expect.any(String),
+					type: "artifact_document_added",
+				})
+				yield* calling(() => board.put("nullable", null))
+				expect(yield* calling(() => board.get("nullable"))).toMatchObject({ data: null })
+
+				const interrupted = new ReadableStream({
+					start: (controller) => controller.error(new Error("PRIVATE_RESPONSE_MARKER")),
+				})
+				for (const response of [
+					new Response('{"id":"PRIVATE_RESPONSE_MARKER"', { status: 201 }),
+					new Response(interrupted, { status: 201 }),
+					new Response(null, { status: 200 }),
+					Response.json(null, { status: 201 }),
+					Response.json({ type: "artifact_document_added" }, { status: 201 }),
+				]) {
+					responseOverride = response
+					const count = sent.length
+					const refusal = yield* calling(() => board.add(null).then(() => null, refusalOf))
+					expect(refusal).toBe(
+						`${response.status}: The Artifact data response could not be read. The change may already have been saved.`,
+					)
+					expect(sent.slice(count)).toEqual(["POST _/data/board"])
+				}
+				responseOverride = new Response("not JSON", { status: 503 })
+				const count = sent.length
+				expect(yield* calling(() => board.list().then(() => null, refusalOf))).toBe(
+					"503: Request failed with status 503",
+				)
+				expect(sent.slice(count)).toEqual(["GET _/data/board?"])
 			}),
 		))
 
