@@ -14,6 +14,10 @@ concurrency:
 
 env:
   TURBO_CACHE_DIR: .turbo/cache
+  # On a pull request, a turbo task runs only when the pull request changes one of its inputs:
+  # nothing else can change its result, and main's own run checks every merged state in full.
+  TURBO_AFFECTED: ${{ github.event_name == 'pull_request' && '--affected' || '' }}
+  TURBO_SCM_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
   TURBO_TELEMETRY_DISABLED: 1
 
 # The jobs run `check`, `test`, `test:bun`, `test:workerd` and the release baseline guard:
@@ -64,10 +68,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          filter: blob:none
       - uses: ./.github/actions/setup
         with:
           turbo-cache: test-${{ matrix.leg.name }}
-      - run: bun x turbo run test --continue --concurrency=1 ${{ matrix.leg.filter }}
+      - run: bun x turbo run test $TURBO_AFFECTED --continue --concurrency=1 ${{ matrix.leg.filter }}
       - if: ${{ !cancelled() && matrix.leg.name == 'api' }}
         run: bun run test:bun
       - if: ${{ !cancelled() }}
@@ -107,10 +113,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          filter: blob:none
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain-${{ matrix.shard.name }}
-      - run: bun x turbo run test --filter=@checkfu/domain -- ${{ matrix.shard.args }}
+      - run: bun x turbo run test $TURBO_AFFECTED --filter=@checkfu/domain -- ${{ matrix.shard.args }}
         env:
           CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}
@@ -136,10 +144,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          filter: blob:none
       - uses: ./.github/actions/setup
         with:
           turbo-cache: domain-checkfu
-      - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts test/Checkfu.story.test.ts test/EnsureTurnStarted.test.ts
+      - run: bun x turbo run test $TURBO_AFFECTED --filter=@checkfu/domain -- test/Checkfu.verify.test.ts test/Checkfu.story.test.ts test/EnsureTurnStarted.test.ts
         env:
           CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}
