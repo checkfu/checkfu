@@ -37,6 +37,41 @@ const execution = (
 const retry = (runs: ReadonlyArray<Evidence>) =>
 	matrix(source, runs).cases.find((row) => row.id === "mcp-uncertain-create")
 
+it("requires each admission guard independently and preserves its proof scope", () => {
+	const template = execution().runner?.testResults[0]?.assertionResults[0]
+	expect(template).toBeDefined()
+	const evidence: Evidence = {
+		...execution(),
+		group: "domain",
+		runner: {
+			success: true,
+			testResults: [
+				{
+					name: "/checkout/packages/domain/test/MountedSession.verify.test.ts",
+					assertionResults: ["file-admission-guard", "artifact-admission-guard"].map((id) => ({
+						...template!,
+						tags: ["acceptance", id],
+					})),
+				},
+			],
+		},
+	}
+	const report = matrix(source, [evidence])
+	expect(report.cases.find(({ id }) => id === "file-admission-guard")).toMatchObject({
+		status: "passed",
+		surfaces: [],
+		boundary: expect.stringContaining("bounded to two items"),
+	})
+	expect(report.cases.find(({ id }) => id === "artifact-admission-guard")).toMatchObject({
+		status: "passed",
+		surfaces: [],
+	})
+	expect(report.cases.find(({ id }) => id === "memory-admission-guard")?.status).toBe("unverified")
+	expect(report.blockers.map(({ id }) => id)).toContain("memory-admission-guard")
+	expect(report.gaps.map(({ id }) => id)).toContain("mounted-admission-proof")
+	expect(report.cases.find(({ id }) => id === "mounted-admission-races")?.status).toBe("unverified")
+})
+
 it("requires one actual passing case from the registered file and the exact tested source", () => {
 	expect(retry([execution()])?.status).toBe("passed")
 	expect(retry([])?.status).toBe("unverified")
