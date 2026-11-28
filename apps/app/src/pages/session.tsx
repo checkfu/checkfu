@@ -7,6 +7,7 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link } from "@tanstack/react-router"
 import { useState } from "react"
 import type * as React from "react"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { checkfu } from "../api.ts"
 import { present, sessionQuery } from "../queries.ts"
 import { describeResource } from "../session-resources.ts"
@@ -123,7 +124,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 						<Button
 							variant="destructive"
 							size="sm"
-							disabled={archive.pending}
+							disabled={archive.blocked}
 							onClick={() => archive.run()}
 						>
 							Archive
@@ -143,6 +144,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					</Callout>
 				),
 			)}
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
 			<SessionBindings session={session} />
 			{earlier === null ? null : (
 				<div className="space-y-2">

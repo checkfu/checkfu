@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
 import { useRef } from "react"
-import { ApiError, errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
+import { isAcceptedReceipt, ApiError, errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
 
 export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 	action: (...args: Args) => Promise<Result>,
@@ -18,19 +18,24 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 	} = {},
 ) {
 	const queryClient = useQueryClient()
+	const invalidate = () =>
+		Promise.all([
+			...(invalidates ?? []).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+			...(refreshes ?? []).map((queryKey) =>
+				queryClient.invalidateQueries({ queryKey, refetchType: "all" }),
+			),
+		])
 	const mutation = useMutation({
 		...(mutationKey === undefined ? {} : { mutationKey }),
 		mutationFn: (args: Args) => action(...args),
-		onSettled: () =>
-			Promise.all([
-				...(invalidates ?? []).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-				...(refreshes ?? []).map((queryKey) =>
-					queryClient.invalidateQueries({ queryKey, refetchType: "all" }),
-				),
-			]),
+		onSettled: (_data, error) => (isAcceptedReceipt(error) ? undefined : invalidate()),
 	})
+	const receipt = isAcceptedReceipt(mutation.error) ? mutation.error : undefined
 	return {
 		run: (...args: Args): void => {
+			if (mutation.isPending || receipt !== undefined) {
+				return
+			}
 			if (then === undefined) {
 				mutation.mutate(args)
 			} else {
@@ -38,9 +43,15 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 			}
 		},
 		pending: mutation.isPending,
+		receipt,
+		blocked: mutation.isPending || receipt !== undefined,
+		confirmReceipt: async () => {
+			await invalidate()
+			mutation.reset()
+		},
 		errorCode: mutation.error instanceof ApiError ? mutation.error.code : undefined,
 		error:
-			mutation.error === null || isSignedOut(mutation.error)
+			mutation.error === null || receipt !== undefined || isSignedOut(mutation.error)
 				? undefined
 				: errorMessage(mutation.error),
 	}

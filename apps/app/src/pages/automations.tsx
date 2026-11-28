@@ -37,6 +37,7 @@ import {
 } from "../queries.ts"
 import { selection } from "../selection.ts"
 import { Status } from "../status.tsx"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
 const list = getRouteApi("/_app/automations/")
@@ -312,12 +313,16 @@ export function NewAutomationPage(): React.JSX.Element {
 	return (
 		<>
 			<PageHeader title="New automation" breadcrumb={<Link to="/automations">Automations</Link>} />
+			<ActionReceipt
+				receipt={create.receipt}
+				href={(id) => `/automations/${encodeURIComponent(id)}`}
+			/>
 			<AutomationForm
 				draft={draft}
 				onChange={setDraft}
 				submitLabel="Create automation"
-				pending={create.pending}
-				error={create.error}
+				pending={create.blocked}
+				error={create.receipt === undefined ? create.error : undefined}
 				onSubmit={(submitted) => create.run(submitted)}
 			/>
 		</>
@@ -384,13 +389,20 @@ function AutomationEditor({
 					)}
 				</Callout>
 			)}
+			<ActionReceipt
+				receipt={save.receipt}
+				onVisible={async () => {
+					await save.confirmReceipt()
+					onClose()
+				}}
+			/>
 			<AutomationForm
 				saved={{ agentId: edit.base.agent.id, environmentId: edit.base.environment_id }}
 				draft={edit.draft}
 				onChange={(draft) => setEdit({ ...edit, draft })}
 				submitLabel={edit.review === undefined ? "Save" : "Save my edits"}
-				pending={save.pending}
-				error={save.error}
+				pending={save.blocked}
+				error={save.receipt === undefined ? save.error : undefined}
 				onSubmit={(submitted) => save.run(edit.base, submitted)}
 				onCancel={onClose}
 			/>
@@ -437,10 +449,18 @@ export function AutomationView({
 		{ invalidates },
 	)
 	const busy =
-		runNow.pending || pause.pending || unpause.pending || archive.pending || repin.pending
-	const error = runNow.error ?? pause.error ?? unpause.error ?? archive.error
+		runNow.pending || pause.blocked || unpause.blocked || archive.blocked || repin.blocked
+	const error =
+		runNow.error ??
+		[pause, unpause, archive].find(
+			(action) => action.receipt === undefined && action.error !== undefined,
+		)?.error
 	return (
 		<>
+			<ActionReceipt receipt={pause.receipt} onVisible={pause.confirmReceipt} />
+			<ActionReceipt receipt={unpause.receipt} onVisible={unpause.confirmReceipt} />
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
+			<ActionReceipt receipt={repin.receipt} onVisible={repin.confirmReceipt} />
 			<PageHeader
 				title={automation.name}
 				id={automation.id}
@@ -469,7 +489,7 @@ export function AutomationView({
 							<Button
 								variant="outline"
 								size="sm"
-								disabled={repin.pending}
+								disabled={busy}
 								onClick={() => setEditBase(automation)}
 							>
 								Edit

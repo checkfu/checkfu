@@ -748,6 +748,85 @@ describe("vault pages", () => {
 		expect(consoleErrors).not.toHaveBeenCalled()
 	})
 
+	it.each(["create", "rotate"] as const)(
+		"checks an accepted credential %s with a GET and keeps its draft locked until visible",
+		async (kind) => {
+			const endpoint = "/v1/vaults/vlt_1/credentials"
+			const target = endpoint + "/vcrd_1"
+			const fresh = { ...credential, updated_at: "2026-11-24T01:00:00.000Z" }
+			let visible = false
+			const sent = stubApi(({ method, path }) => {
+				if (method === "POST") {
+					return {
+						status: 202,
+						body: {
+							id: credential.id,
+							type: "vault_credential",
+							vault_id: vault.id,
+							pending: true,
+						},
+					}
+				}
+				if (path === target) {
+					return visible
+						? { body: fresh }
+						: {
+								status: 401,
+								body: { error: { type: "authentication_error", message: "Sign in again." } },
+							}
+				}
+				return { body: pageOf(visible ? [fresh] : kind === "rotate" ? [credential] : []) }
+			})
+			const page = await mount(
+				<VaultView vault={vault} />,
+				withCredentials(kind === "rotate" ? [credential] : []),
+			)
+			try {
+				if (kind === "rotate") {
+					await click(button(page.container, "Replace token"))
+				} else {
+					await type(
+						page.container.querySelector('input[type="url"]'),
+						credential.auth.mcp_server_url,
+					)
+				}
+				const field = page.container.querySelector<HTMLInputElement>(
+					kind === "rotate" ? 'td input[type="password"]' : 'input[type="password"]',
+				)
+				const form = field?.closest("form")
+				await type(field, TOKEN)
+				await submit(form)
+				await waitFor(() => expect(page.container.textContent).toContain("Change accepted for"))
+				expect(page.container.textContent).toContain("Sign in again before checking this change.")
+				expect(field?.closest("fieldset")?.disabled).toBe(true)
+				expect(field?.value).toBe("")
+				expect(page.container.querySelector('a[href="/sign-in"]')?.getAttribute("target")).toBe(
+					"_blank",
+				)
+				if (kind === "rotate") {
+					const row = field?.closest("tr") ?? page.container
+					expect(button(row, "Archive").disabled).toBe(false)
+					expect(button(row, "Delete").disabled).toBe(false)
+				}
+				await submit(form)
+				expect(sent.filter(({ method }) => method === "POST")).toHaveLength(1)
+				visible = true
+				await click(button(page.container, "Check change"))
+				await waitFor(() => expect(page.container.textContent).not.toContain("Change accepted for"))
+				expect(sent.filter(({ method, path }) => method === "GET" && path === target)).toHaveLength(
+					2,
+				)
+				expect(sent.filter(({ method }) => method === "POST").map(({ path }) => path)).toEqual([
+					kind === "rotate" ? target : endpoint,
+				])
+				expect(page.container.innerHTML).not.toContain(TOKEN)
+				expect(field?.isConnected === true ? field.value : "").toBe("")
+			} finally {
+				page.unmount()
+			}
+		},
+	)
+
 	it("shows the error of the action tried last, not an earlier one", async () => {
 		stubApi((request) =>
 			request.method === "POST"

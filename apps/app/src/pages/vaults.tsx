@@ -18,7 +18,7 @@ import { PlusIcon } from "lucide-react"
 import { useRef, useState } from "react"
 import { Confirm } from "../confirm.tsx"
 import type * as React from "react"
-import { ApiError, checkfu, errorMessage } from "../api.ts"
+import { ApiError, checkfu, errorMessage, isAcceptedReceipt } from "../api.ts"
 import { Pager } from "../pager.tsx"
 import {
 	ERASING_POLL_MS,
@@ -29,6 +29,7 @@ import {
 	vaultsPage,
 } from "../queries.ts"
 import { LifecycleStatus, Status } from "../status.tsx"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { canonicalServerUrl } from "../mcp-url.ts"
 
@@ -111,6 +112,7 @@ export function NewVaultPage(): React.JSX.Element {
 	)
 	return (
 		<>
+			<ActionReceipt receipt={create.receipt} href={(id) => `/vaults/${encodeURIComponent(id)}`} />
 			<PageHeader title="New vault" breadcrumb={<Link to="/vaults">Vaults</Link>} />
 			<form
 				className="max-w-2xl"
@@ -119,12 +121,14 @@ export function NewVaultPage(): React.JSX.Element {
 					create.run()
 				}}
 			>
-				<fieldset disabled={create.pending} className="min-w-0 space-y-4">
+				<fieldset disabled={create.blocked} className="min-w-0 space-y-4">
 					<Field label="Name" description="For example the person or team whose accounts it holds.">
 						<Input required value={name} onChange={(event) => setName(event.target.value)} />
 					</Field>
-					{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-					<Button type="submit" disabled={create.pending || name.trim() === ""}>
+					{create.receipt !== undefined || create.error === undefined ? null : (
+						<Callout tone="error">{create.error}</Callout>
+					)}
+					<Button type="submit" disabled={create.blocked || name.trim() === ""}>
 						Create vault
 					</Button>
 				</fieldset>
@@ -208,7 +212,7 @@ export function VaultView({ vault: given }: { readonly vault: JsonVault }): Reac
 		},
 	})
 	const archived = vault.archived_at !== null
-	const busy = archive.pending || remove.pending
+	const busy = archive.blocked || remove.pending
 	if (deletedErasing) {
 		return (
 			<>
@@ -229,6 +233,7 @@ export function VaultView({ vault: given }: { readonly vault: JsonVault }): Reac
 	}
 	return (
 		<>
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
 			<PageHeader
 				title={vault.display_name}
 				id={vault.id}
@@ -411,6 +416,7 @@ function SecretInput({
 }
 
 function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX.Element {
+	const client = useQueryClient()
 	const [name, setName] = useState("")
 	const [url, setUrl] = useState("")
 	const { ref: tokenRef, ...secret } = useSecretField()
@@ -432,10 +438,11 @@ function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX
 						display_name: described.display_name,
 					},
 					createKey.keyFor({ vaultId, ...described, token: secret.edits }),
+					secret.clear,
 				)
 				.catch((error: unknown) => {
 					const earlierUnsure = unsure.current.has(pair)
-					if (isAmbiguous(error)) {
+					if (isAmbiguous(error) && !isAcceptedReceipt(error)) {
 						unsure.current.add(pair)
 					}
 					throw isUrlTaken(error) && earlierUnsure
@@ -463,7 +470,18 @@ function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX
 				create.run()
 			}}
 		>
-			<fieldset disabled={create.pending} className="min-w-0 space-y-4">
+			<ActionReceipt
+				receipt={create.receipt}
+				onVisible={async () => {
+					secret.clear()
+					setName("")
+					setUrl("")
+					createKey.settle()
+					await client.invalidateQueries({ queryKey: credentialPages(vaultId).queryKey })
+					await create.confirmReceipt()
+				}}
+			/>
+			<fieldset disabled={create.blocked} className="min-w-0 space-y-4">
 				<h3 className="text-sm font-medium">Add a credential</h3>
 				<Field label="Name">
 					<Input value={name} onChange={(event) => setName(event.target.value)} />
@@ -482,8 +500,10 @@ function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX
 					/>
 				</Field>
 				<SecretInput label="Token" ref={tokenRef} onInput={secret.onInput} />
-				{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-				<Button type="submit" disabled={create.pending || url.trim() === "" || !secret.filled}>
+				{create.error === undefined || create.receipt !== undefined ? null : (
+					<Callout tone="error">{create.error}</Callout>
+				)}
+				<Button type="submit" disabled={create.blocked || url.trim() === "" || !secret.filled}>
 					Save credential
 				</Button>
 			</fieldset>
@@ -514,6 +534,7 @@ function CredentialActions({
 				credential.id,
 				{ auth: { type: "static_bearer", token: secret.read() } },
 				credential,
+				secret.clear,
 			),
 		{
 			invalidates: [["vaults"]],
@@ -540,7 +561,8 @@ function CredentialActions({
 		{ invalidates: [["vaults"]] },
 	)
 	const busy = rotate.pending || archive.pending || remove.pending
-	const error = last === undefined ? undefined : { rotate, archive, remove }[last].error
+	const action = last === undefined ? undefined : { rotate, archive, remove }[last]
+	const error = action?.receipt === undefined ? action?.error : undefined
 	const active = credential.archived_at === null && !vaultEnded
 	const replacing = rotating && active
 	return (
@@ -551,7 +573,7 @@ function CredentialActions({
 						<Button
 							variant="ghost"
 							size="sm"
-							disabled={busy}
+							disabled={busy || rotate.blocked}
 							onClick={() => {
 								secret.clear()
 								setRotating(!replacing)
@@ -562,7 +584,7 @@ function CredentialActions({
 						<Button
 							variant="outline"
 							size="sm"
-							disabled={busy}
+							disabled={busy || archive.blocked}
 							onClick={() => {
 								setLast("archive")
 								archive.run()
@@ -605,7 +627,10 @@ function CredentialActions({
 						rotate.run()
 					}}
 				>
-					<fieldset disabled={rotate.pending} className="min-w-0 space-y-2">
+					<fieldset
+						disabled={busy || rotate.blocked || archive.blocked}
+						className="min-w-0 space-y-2"
+					>
 						<SecretInput label="New token" ref={tokenRef} onInput={secret.onInput} />
 						<Button type="submit" size="sm" disabled={busy || !secret.filled}>
 							Save new token
@@ -613,6 +638,15 @@ function CredentialActions({
 					</fieldset>
 				</form>
 			) : null}
+			<ActionReceipt
+				receipt={rotate.receipt}
+				onVisible={async () => {
+					secret.clear()
+					setRotating(false)
+					await rotate.confirmReceipt()
+				}}
+			/>
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
 			{error === undefined ? null : <Callout tone="error">{error}</Callout>}
 		</div>
 	)
