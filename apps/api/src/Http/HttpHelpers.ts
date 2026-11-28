@@ -4,7 +4,12 @@ import {
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
 import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
-import { MAX_EVENTS_BODY_BYTES, MAX_FILE_BYTES, MAX_SESSION_BODY_BYTES } from "@checkfu/sdk/Limits"
+import {
+	MAX_ARTIFACT_DOCUMENT_BODY_BYTES,
+	MAX_EVENTS_BODY_BYTES,
+	MAX_FILE_BYTES,
+	MAX_SESSION_BODY_BYTES,
+} from "@checkfu/sdk/Limits"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
 	MAX_MCP_SERVERS_TEXT_LENGTH,
@@ -33,6 +38,7 @@ import {
 	AgentBodyLimit,
 	FileBodyLimit,
 	ArtifactBodyLimit,
+	ArtifactDocumentBodyLimit,
 	Authentication,
 	ERROR_CODES,
 	EventBatchBodyLimit,
@@ -462,6 +468,16 @@ export const ArtifactBodyLimitLive = Layer.succeed(ArtifactBodyLimit, (httpEffec
 		),
 		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_BODY_BYTES)),
 	),
+)
+
+export const ArtifactDocumentBodyLimitLive = Layer.succeed(
+	ArtifactDocumentBodyLimit,
+	(httpEffect) =>
+		Effect.provideService(
+			httpEffect,
+			HttpIncomingMessage.MaxBodySize,
+			ByteSize.bytes(MAX_ARTIFACT_DOCUMENT_BODY_BYTES),
+		),
 )
 
 export const FileBodyLimitLive = Layer.succeed(FileBodyLimit, (httpEffect) =>
