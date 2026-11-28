@@ -5,7 +5,9 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Redacted from "effect/Redacted"
@@ -3572,6 +3574,215 @@ describe("@checkfu/sdk", () => {
 			Effect.flatMap(CheckfuClient, (client) =>
 				Stream.runCollect(client.sessions.events.stream("sess_wait", {}, options)),
 			).pipe(Effect.provide(makeEffectLayer(fetch)))
+
+		it.each([
+			{
+				label: "wrong content type",
+				status: 200,
+				maxReconnectAttempts: 0,
+				failure: "APIConnectionError",
+			},
+			{ label: "transient response", status: 503, maxReconnectAttempts: 1, failure: undefined },
+			{
+				label: "bounded error response",
+				status: 400,
+				maxReconnectAttempts: 0,
+				failure: "BadRequestError",
+			},
+			{
+				label: "idle live stream",
+				status: 200,
+				maxReconnectAttempts: 0,
+				failure: "APIConnectionTimeoutError",
+			},
+		])(
+			"settles $label before body cancellation finishes",
+			async ({ label, status, maxReconnectAttempts, failure }) => {
+				const cleanup = Promise.withResolvers<void>()
+				void cleanup.promise.catch(() => undefined)
+				let cancelled = 0
+				let calls = 0
+				const stream = new ReadableStream<Uint8Array>(
+					{
+						start: (controller) => {
+							if (status === 400) {
+								controller.enqueue(new Uint8Array(16 * 1024 + 1).fill(120))
+							}
+						},
+						cancel: () => {
+							cancelled += 1
+							return cleanup.promise
+						},
+					},
+					{ highWaterMark: 0 },
+				)
+				const fetch: typeof globalThis.fetch = async () => {
+					calls += 1
+					return calls === 1
+						? new Response(stream, {
+								status,
+								headers: {
+									"content-type":
+										label === "idle live stream" ? "text/event-stream" : "application/json",
+									"retry-after": "0",
+								},
+							})
+						: new Response(null, { status: 204 })
+				}
+				const outcome = Effect.runPromise(
+					Effect.result(
+						collectEvents(fetch, {
+							maxReconnectAttempts,
+							baseReconnectDelayMs: 1,
+							idleTimeoutMs: 15,
+							errorBodyTimeoutMs: 15,
+						}),
+					),
+				)
+				let deadline: ReturnType<typeof setTimeout> | undefined
+				try {
+					const result = await Promise.race([
+						outcome,
+						new Promise<never>((_resolve, reject) => {
+							deadline = setTimeout(
+								() => reject(new Error("The event stream waited for body cancellation.")),
+								1000,
+							)
+						}),
+					])
+					if (failure === undefined) {
+						expect(result).toMatchObject({ _tag: "Success", success: [] })
+						expect(calls).toBe(2)
+					} else {
+						expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: failure } })
+						expect(calls).toBe(1)
+					}
+					expect(cancelled).toBe(1)
+					expect(stream.locked).toBe(false)
+				} finally {
+					clearTimeout(deadline)
+					cleanup.reject(new Error("Provider cleanup rejected."))
+					await outcome
+				}
+			},
+		)
+
+		it("settles the timeout before a custom client's stream finalizer releases", async () => {
+			const cancellation = Promise.withResolvers<void>()
+			const cleanup = Promise.withResolvers<void>()
+			const body = new ReadableStream<Uint8Array>({
+				cancel: () => {
+					cancellation.resolve()
+					return cleanup.promise
+				},
+			})
+			let requestSignal: AbortSignal | undefined
+			const raw = HttpClient.make((request, _url, signal) => {
+				requestSignal = signal
+				const web = HttpClientResponse.fromWeb(request, eventStreamResponse(body))
+				const custom = {
+					...web,
+					request,
+					status: web.status,
+					headers: web.headers,
+					stream: web.stream,
+				} as HttpClientResponse.HttpClientResponse
+				return Effect.succeed(custom)
+			})
+			const client = makeAuthorizedHttpClient(raw, Redacted.make("ck_test_key"), {})
+			const opening = Effect.result(
+				Stream.runDrain(
+					streamApiSse({
+						open: () => client.execute(HttpClientRequest.get("https://api.example.test/stream")),
+						decodeEvent: Effect.succeed,
+						options: { idleTimeoutMs: 15, maxReconnectAttempts: 0 },
+					}),
+				),
+			)
+			const result = Effect.runPromise(opening)
+			let timer: ReturnType<typeof setTimeout> | undefined
+			try {
+				const outer = new Promise<never>((_resolve, reject) => {
+					timer = setTimeout(() => reject(new Error("Waited for custom stream cleanup.")), 1000)
+				})
+				expect(await Promise.race([result, outer])).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "APIConnectionTimeoutError" },
+				})
+				await Promise.race([cancellation.promise, outer])
+				expect(requestSignal?.aborted).toBe(true)
+				expect(body.locked).toBe(true)
+			} finally {
+				clearTimeout(timer)
+				cleanup.resolve()
+				await result
+			}
+			await expect.poll(() => body.locked).toBe(false)
+		})
+
+		it.each([false, true])(
+			"observes a custom stream terminal result (read error = %s) before provider scope cleanup",
+			async (failedRead) => {
+				const blocked = Promise.withResolvers<void>()
+				let entered = false
+				let signalSeen: AbortSignal | undefined
+				const raw = HttpClient.make((request, _url, signal) => {
+					signalSeen = signal
+					const web = HttpClientResponse.fromWeb(request, eventStreamResponse(""))
+					const error = new HttpClientError.HttpClientError({
+						reason: new HttpClientError.DecodeError({
+							request,
+							response: web,
+							cause: "provider read failed",
+						}),
+					})
+					const stream = Stream.unwrap(
+						Effect.addFinalizer(() =>
+							Effect.promise(() => {
+								entered = true
+								return blocked.promise
+							}),
+						).pipe(Effect.as(failedRead ? Stream.fail(error) : Stream.empty)),
+					)
+					return Effect.succeed({
+						...web,
+						request,
+						status: web.status,
+						headers: web.headers,
+						stream,
+					})
+				})
+				const client = makeAuthorizedHttpClient(raw, Redacted.make("ck_test_key"), {})
+				const result = Effect.runPromise(
+					Effect.result(
+						Stream.runDrain(
+							streamApiSse({
+								open: () =>
+									client.execute(HttpClientRequest.get("https://api.example.test/stream")),
+								decodeEvent: Effect.succeed,
+								options: { idleTimeoutMs: 0, maxReconnectAttempts: 0 },
+							}),
+						),
+					),
+				)
+				let timer: ReturnType<typeof setTimeout> | undefined
+				try {
+					const outer = new Promise<never>((_resolve, reject) => {
+						timer = setTimeout(() => reject(new Error("Waited for terminal stream cleanup.")), 1000)
+					})
+					expect(await Promise.race([result, outer])).toMatchObject({
+						_tag: "Failure",
+						failure: { _tag: "APIConnectionError" },
+					})
+					await expect.poll(() => entered).toBe(true)
+					expect(signalSeen?.aborted).toBe(true)
+				} finally {
+					clearTimeout(timer)
+					blocked.resolve()
+					await result
+				}
+			},
+		)
 
 		it.live("charges a clean EOF without progress against the reconnect budget", () =>
 			Effect.gen(function* () {
