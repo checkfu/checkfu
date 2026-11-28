@@ -6,7 +6,7 @@ export const Route = createFileRoute("/_app/memory-stores/$memoryStoreId/")({
 	loader: ({ context, params }) =>
 		Promise.all([
 			context.queryClient.ensureQueryData(memoryStoreQuery(params.memoryStoreId)),
-			context.queryClient.ensureQueryData(memoriesQuery(params.memoryStoreId)),
+			context.queryClient.ensureInfiniteQueryData(memoriesQuery(params.memoryStoreId)),
 		]),
 	component: MemoryStorePage,
 })
