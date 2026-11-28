@@ -25,10 +25,14 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ matrix.node }}
-      - run: bun install --frozen-lockfile
-      - run: |
+      - name: Record the consumer Node executable
+        run: |
           node --version
-          export CHECKFU_TEST_NODE="$(command -v node)"
-          bun run release:build --qualify "$RUNNER_TEMP/checkfu-npm"
+          echo "CHECKFU_TEST_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+      - run: bun install --frozen-lockfile
+      - run: bun run release:build --qualify "$RUNNER_TEMP/checkfu-npm"
       - run: bun run release:build --verify "$RUNNER_TEMP/checkfu-npm"
       - run: git diff --exit-code

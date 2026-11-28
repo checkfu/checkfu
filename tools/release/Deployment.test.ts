@@ -39,7 +39,7 @@ it.skipIf(process.platform === "win32")(
 			const home = join(directory, "home")
 			await mkdir(path)
 			await mkdir(home)
-			await symlink(process.execPath, join(path, "node"))
+			await symlink(process.env["CHECKFU_TEST_NODE"] ?? process.execPath, join(path, "node"))
 			// Dependency install and all subsequent commands see no system Bun, Git, Docker or npm.
 			const env = managedEnvironment({
 				PATH: path,
@@ -72,12 +72,16 @@ it.skipIf(process.platform === "win32")(
 				JSON.parse(await readFile(join(repoRoot, "checkfu.deployment.json"), "utf8")).runtime
 					.version,
 			)
-			await execute("bun", ["--no-env-file", "run", "--cwd", "apps/app", "build"], {
-				cwd: installed.root,
-				env: installed.environment,
-				timeout: 60_000,
-				maxBuffer: 4 * 1024 * 1024,
-			})
+			await execute(
+				installed.runtime,
+				["--no-env-file", "run", "--bun", "--cwd", "apps/app", "build"],
+				{
+					cwd: installed.root,
+					env: installed.environment,
+					timeout: 60_000,
+					maxBuffer: 4 * 1024 * 1024,
+				},
+			)
 			const check = () =>
 				execute(installed.runtime, ["--no-env-file", "apps/api/test/persisted/main.ts", "check"], {
 					cwd: installed.root,
