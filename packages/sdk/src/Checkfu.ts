@@ -1,3 +1,4 @@
+import { secret } from "./Secret.ts"
 import { Files } from "./FileTransfer.ts"
 import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import * as Duration from "effect/Duration"
@@ -247,6 +248,8 @@ export class Checkfu extends PromiseResources {
 	static readonly PaginationCursorCycleError = PaginationCursorCycleError
 	static readonly CheckfuConfigError = CheckfuConfigError
 	static readonly isPendingResource = isPendingResource
+	/** Wrap a secret request field (vault credential token, repository token). See `secret`. */
+	static readonly secret = secret
 
 	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */
 	declare readonly files: Files

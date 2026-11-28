@@ -38,6 +38,8 @@ export {
 	SessionsResource,
 } from "./generated/Resources.ts"
 export { EffectFiles, Files } from "./FileTransfer.ts"
+export { secret } from "./Secret.ts"
+export type { Secret } from "./Secret.ts"
 export type { FileBytes, UploadFileParams } from "./FileTransfer.ts"
 export {
 	emptySessionFold,
