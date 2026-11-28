@@ -17,6 +17,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import {
@@ -28,6 +29,7 @@ import {
 	WebhookDeliveryStoreError,
 } from "../src/Webhooks/WebhookDeliveryStore.ts"
 import {
+	MAX_EGRESS_REPORT_BYTES,
 	WEBHOOK_EGRESS_URL_ENV,
 	WEBHOOK_LOCAL_RUNTIME_ENV,
 	WEBHOOK_LOCAL_RUNTIME_VALUE,
@@ -121,6 +123,67 @@ describe("Webhook egress", () => {
 				)
 			}),
 	)
+
+	it("bounds and validates an egress report before treating it as a receiver response", async () => {
+		const send = (report: Response) =>
+			Effect.runPromise(
+				makeConfiguredWebhookHttpSender(
+					HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, report))),
+					{ egressUrl: "https://relay.example.com/egress", egressToken: null, localRuntime: true },
+				).send({ url: "https://hooks.example.com/hook", headers: {}, body: "{}", timeoutMs: 50 }),
+			)
+		for (const status of [200, 299, 400, 599]) {
+			const json = JSON.stringify({ kind: "response", status })
+			const exact = json.padEnd(MAX_EGRESS_REPORT_BYTES, " ")
+			expect(await send(new Response(exact))).toEqual({ kind: "response", status })
+		}
+		for (const bad of [
+			JSON.stringify({ kind: "response", status: 199 }),
+			JSON.stringify({ kind: "response", status: 600 }),
+			JSON.stringify({ kind: "response", status: 201.5 }),
+			JSON.stringify({ kind: "response", status: "204" }),
+			"{",
+			new Uint8Array([0xff]),
+			'{"kind":"timeout"}'.padEnd(MAX_EGRESS_REPORT_BYTES + 1, " "),
+		]) {
+			expect(await send(new Response(bad))).toMatchObject({ kind: "egress_error" })
+		}
+
+		const encoder = new TextEncoder()
+		const bytes = encoder.encode('{"kind":"network_error","message":"é"}')
+		const split = bytes.indexOf(0xc3) + 1
+		const chunks = new ReadableStream<Uint8Array>({
+			start: (controller) => {
+				controller.enqueue(bytes.subarray(0, split))
+				controller.enqueue(bytes.subarray(split))
+				controller.close()
+			},
+		})
+		expect(await send(new Response(chunks))).toEqual({ kind: "network_error", message: "é" })
+
+		for (const declared of [false, true]) {
+			let pulls = 0
+			let cancelled = 0
+			const body = new ReadableStream<Uint8Array>(
+				{
+					pull: (controller) => {
+						pulls += 1
+						controller.enqueue(new Uint8Array(MAX_EGRESS_REPORT_BYTES + 1))
+					},
+					cancel: () => {
+						cancelled += 1
+						return new Promise<void>(() => {})
+					},
+				},
+				{ highWaterMark: 0 },
+			)
+			const headers = declared ? { "content-length": String(MAX_EGRESS_REPORT_BYTES + 1) } : {}
+			expect(await send(new Response(body, { headers }))).toMatchObject({ kind: "egress_error" })
+			expect(pulls).toBe(declared ? 0 : 1)
+			expect(cancelled).toBe(1)
+			expect(body.locked).toBe(false)
+		}
+	})
 
 	it("fails closed without local egress and keeps the relay request and failure contract", async () => {
 		const target = "https://hooks.example.com/hook"
