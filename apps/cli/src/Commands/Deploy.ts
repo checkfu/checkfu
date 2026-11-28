@@ -201,10 +201,11 @@ export const setDotEnvValue = (
 		),
 	)
 
-const STAGE_NAME = /^[a-z0-9]+[-_a-z0-9]*$/i
+const StageName = Schema.String.check(Schema.isPattern(/^[a-z0-9]+[-_a-z0-9]*$/i))
+const isStageName = Schema.is(StageName)
 
 const stageFlag = Flag.String("stage").pipe(
-	Flag.withSchema(Schema.String.check(Schema.isPattern(STAGE_NAME))),
+	Flag.withSchema(StageName),
 	Flag.withMetavar("NAME"),
 	Flag.withDescription(
 		`Deployment stage. deploy remembers the last selected stage, or uses "${DEFAULT_STAGE}" the first time; destroy requires an explicit stage`,
@@ -220,7 +221,7 @@ const yesFlag = Flag.Boolean("yes").pipe(
 
 const DeploymentRecord = Schema.fromJsonString(
 	Schema.Struct({
-		stage: Schema.String.check(Schema.isPattern(STAGE_NAME)),
+		stage: StageName,
 		profile: Schema.String,
 		account_id: Schema.String,
 		url: Schema.optional(Schema.String),
@@ -230,25 +231,51 @@ const DeploymentRecord = Schema.fromJsonString(
 )
 type DeploymentRecord = typeof DeploymentRecord.Type
 
-const deploymentRecordPath = (checkout: Checkout) =>
+const stageRecordName = (stage: string): string =>
+	`stage-${stage.replaceAll(/[A-Z]/g, (letter) => `~${letter.toLowerCase()}`)}.json`
+
+const deploymentRecordPath = (checkout: Checkout, stage: string) =>
 	Effect.map(Path.Path, (path) =>
-		path.join(checkout.dataRoot ?? checkout.root, ".checkfu", "deployment.json"),
+		checkout.dataRoot === undefined
+			? path.join(checkout.root, ".checkfu", "deployments", stageRecordName(stage))
+			: path.join(checkout.dataRoot, ".checkfu", "deployment.json"),
 	)
 
-const readDeploymentRecord = (checkout: Checkout) =>
+const selectedStagePath = (checkout: Checkout) =>
+	Effect.map(Path.Path, (path) => path.join(checkout.root, ".checkfu", "stage"))
+
+const readDeploymentRecord = (checkout: Checkout, stage: string) =>
 	Effect.gen(function* () {
-		const file = yield* deploymentRecordPath(checkout)
+		const file = yield* deploymentRecordPath(checkout, stage)
 		const contents = yield* readIfPresent(file)
 		if (Option.isNone(contents)) {
 			return Option.none()
 		}
-		return yield* Schema.decodeEffect(DeploymentRecord)(contents.value).pipe(
-			Effect.mapBoth({
-				onSuccess: Option.some,
-				onFailure: () =>
-					configError(`${file} is not valid. Fix or delete it, then pass --stage explicitly.`),
-			}),
+		const record = yield* Schema.decodeEffect(DeploymentRecord)(contents.value).pipe(
+			Effect.mapError(() => configError(`${file} is not a valid deployment record.`)),
 		)
+		if (record.stage !== stage) {
+			return yield* configError(`${file} records "${record.stage}", but "${stage}" was requested.`)
+		}
+		return Option.some(record)
+	})
+
+const lastSelectedStage = (checkout: Checkout) =>
+	Effect.gen(function* () {
+		if (checkout.dataRoot !== undefined) {
+			return Option.fromUndefinedOr(checkout.stage)
+		}
+		const contents = yield* readIfPresent(yield* selectedStagePath(checkout))
+		const stage = Option.match(contents, { onNone: () => "", onSome: (value) => value.trim() })
+		if (!isStageName(stage)) {
+			return Option.none()
+		}
+		const file = yield* deploymentRecordPath(checkout, stage)
+		const fs = yield* FileSystem.FileSystem
+		const exists = yield* fs
+			.exists(file)
+			.pipe(Effect.mapError((error) => configError(`Could not look for ${file}: ${error.message}`)))
+		return exists ? Option.some(stage) : Option.none()
 	})
 
 const requireCheckout = (request: CheckoutRequest) =>
@@ -778,7 +805,7 @@ const requireRecordedAccount = (
 const writeDeploymentRecord = (checkout: Checkout, record: DeploymentRecord) =>
 	Effect.gen(function* () {
 		const contents = yield* Schema.encodeEffect(DeploymentRecord)(record).pipe(Effect.orDie)
-		yield* writePrivate(yield* deploymentRecordPath(checkout), `${contents}\n`)
+		yield* writePrivate(yield* deploymentRecordPath(checkout, record.stage), `${contents}\n`)
 		if (checkout.recordStage !== undefined) {
 			yield* checkout.recordStage(record.stage)
 		}
@@ -838,13 +865,9 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			...Option.match(input.stage, { onNone: () => ({}), onSome: (stage) => ({ stage }) }),
 		})
 		const envFile = path.join(checkout.dataRoot ?? checkout.root, ".env")
-		const record = yield* readDeploymentRecord(checkout)
-		const stage = Option.getOrElse(input.stage, () =>
-			Option.match(record, {
-				onNone: () => checkout.stage ?? DEFAULT_STAGE,
-				onSome: (known) => known.stage,
-			}),
-		)
+		const selected = Option.isSome(input.stage) ? input.stage : yield* lastSelectedStage(checkout)
+		const stage = Option.getOrElse(selected, () => checkout.stage ?? DEFAULT_STAGE)
+		const record = yield* readDeploymentRecord(checkout, stage)
 
 		const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
 
@@ -864,6 +887,9 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			...(target.image === undefined ? {} : { image: target.image }),
 		}
 		yield* writeDeploymentRecord(checkout, attempt)
+		if (checkout.dataRoot === undefined) {
+			yield* writePrivate(yield* selectedStagePath(checkout), `${stage}\n`)
+		}
 		if (checkout.managed) {
 			yield* writeStderrLine("Preparing the agent sandbox in your Cloudflare account…")
 			const image = yield* ask(target, ImageAnswer, ["image"])
@@ -951,17 +977,18 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 			operation: "destroy",
 			...Option.match(input.stage, { onNone: () => ({}), onSome: (stage) => ({ stage }) }),
 		})
-		const record = Option.getOrUndefined(yield* readDeploymentRecord(checkout))
-
 		if (Option.isNone(input.stage)) {
+			const last = yield* lastSelectedStage(checkout)
 			return yield* usageError(
-				`Name the stage to delete: \`${COMMAND} destroy --stage <name>\`.${record === undefined ? "" : ` This CLI last deployed "${record.stage}".`}`,
+				`Name the stage to delete: \`${COMMAND} destroy --stage <name>\`.${Option.isNone(last) ? "" : ` This CLI last deployed "${last.value}".`}`,
 			)
 		}
 		const stage = input.stage.value
-		if (record?.stage !== stage) {
+		const record = Option.getOrUndefined(yield* readDeploymentRecord(checkout, stage))
+		if (record === undefined) {
+			const last = yield* lastSelectedStage(checkout)
 			return yield* usageError(
-				`This CLI has no record of deploying "${stage}"${record === undefined ? "" : ` (it last deployed "${record.stage}")`}. Nothing was deleted. Use the configuration directory that originally deployed this stage.`,
+				`This CLI has no record of deploying "${stage}"${Option.isNone(last) ? "" : ` (it last deployed "${last.value}")`}. Nothing was deleted. Use the configuration directory that originally deployed this stage.`,
 			)
 		}
 		const stdio = yield* Stdio.Stdio
@@ -988,7 +1015,7 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 			return yield* new CliFailure({ message: "Destroy did not finish.", exitCode })
 		}
 		yield* writeStderrLine(`Removed the "${stage}" deployment and all of its data.`)
-		yield* removeIfPresent(yield* deploymentRecordPath(checkout))
+		yield* removeIfPresent(yield* deploymentRecordPath(checkout, stage))
 		const saved = yield* readSavedConnection
 		if (Option.isSome(saved) && saved.value.url === record.url) {
 			yield* removeSavedConnection

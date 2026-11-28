@@ -11,7 +11,8 @@ import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 const DEPLOYED_URL = "https://checkfu.example.workers.dev"
 const CONFIG_FILE = "/config/config.json"
 const ENV_FILE = "/checkout/.env"
-const RECORD_FILE = "/checkout/.checkfu/deployment.json"
+const STAGE_FILE = "/checkout/.checkfu/stage"
+const recordFile = (stage: string) => `/checkout/.checkfu/deployments/stage-${stage}.json`
 const ACCOUNT = "0123456789abcdef0123456789abcdef"
 const OTHER_ACCOUNT = "fedcba9876543210fedcba9876543210"
 const record = (
@@ -214,7 +215,7 @@ describe("checkfu deploy", () => {
 			expect(files[ENV_FILE]).toBe(
 				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=sk-ant-from-env\n`,
 			)
-			expect(files[RECORD_FILE]).toBe(record("live"))
+			expect(files[recordFile("live")]).toBe(record("live"))
 			expect(JSON.parse(files[CONFIG_FILE] ?? "")).toEqual({
 				url: DEPLOYED_URL,
 				api_key: TEST_API_KEY,
@@ -390,7 +391,7 @@ describe("checkfu deploy", () => {
 				["deploy", "--stage", "live", ...work],
 				askOutput("live", "work"),
 			])
-			expect(files[RECORD_FILE]).toBe(record("live", "work"))
+			expect(files[recordFile("live")]).toBe(record("live", "work"))
 
 			const cancelled: Array<ReadonlyArray<string>> = []
 			const stopped = yield* cli.run(["deploy"], {
@@ -463,14 +464,14 @@ describe("checkfu deploy", () => {
 
 			const first = yield* cli.run(["deploy", "--stage", "staging"], declined)
 			expect(first.exitCode).toBe(3)
-			expect(files[RECORD_FILE]).toBe(record("staging", "default", ACCOUNT, null))
+			expect(files[recordFile("staging")]).toBe(record("staging", "default", ACCOUNT, null))
 			expect(files[CONFIG_FILE]).toBeUndefined()
 
 			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy([]) })
-			expect(files[RECORD_FILE]).toBe(record("staging"))
+			expect(files[recordFile("staging")]).toBe(record("staging"))
 
 			yield* cli.run(["deploy", "--stage", "staging"], declined)
-			expect(files[RECORD_FILE]).toBe(record("staging"))
+			expect(files[recordFile("staging")]).toBe(record("staging"))
 
 			const next: Array<ReadonlyArray<string>> = []
 			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy(next) })
@@ -482,7 +483,7 @@ describe("checkfu deploy", () => {
 				spawn: fakeAlchemy([]),
 			})
 			expect(cleanup.exitCode).toBe(0)
-			expect(files[RECORD_FILE]).toBeUndefined()
+			expect(files[recordFile("staging")]).toBeUndefined()
 		}),
 	)
 
@@ -492,7 +493,8 @@ describe("checkfu deploy", () => {
 			const saved = JSON.stringify({ url: DEPLOYED_URL, api_key: TEST_API_KEY })
 			const files = virtualFiles({
 				...checkout,
-				[RECORD_FILE]: record("live"),
+				[STAGE_FILE]: "live\n",
+				[recordFile("live")]: record("live"),
 				[CONFIG_FILE]: saved,
 			})
 			const elsewhere = { account: OTHER_ACCOUNT, url: "https://checkfu.other.workers.dev" }
@@ -511,7 +513,7 @@ describe("checkfu deploy", () => {
 				expect(result.errorMessage).toContain(`act on account ${OTHER_ACCOUNT}`)
 				expect(result.errorMessage).toContain("Nothing was changed")
 				expect(calls).toEqual([["query", "account", "default", ""]])
-				expect(files[RECORD_FILE]).toBe(record("live"))
+				expect(files[recordFile("live")]).toBe(record("live"))
 				expect(files[CONFIG_FILE]).toBe(saved)
 				expect(files[ENV_FILE]).toBeUndefined()
 			}
@@ -522,7 +524,9 @@ describe("checkfu deploy", () => {
 				spawn: fakeAlchemy([], elsewhere),
 			})
 			expect(other.errorMessage).toBeUndefined()
-			expect(files[RECORD_FILE]).toBe(record("staging", "default", OTHER_ACCOUNT, elsewhere.url))
+			expect(files[recordFile("staging")]).toBe(
+				record("staging", "default", OTHER_ACCOUNT, elsewhere.url),
+			)
 		}),
 	)
 
@@ -568,7 +572,7 @@ describe("checkfu deploy", () => {
 				})
 				expect(result.exitCode).toBe(1)
 				expect(result.errorMessage).toContain(message)
-				expect(files[RECORD_FILE]).toBe(record("live", "default", ACCOUNT, null))
+				expect(files[recordFile("live")]).toBe(record("live", "default", ACCOUNT, null))
 				expect(files[CONFIG_FILE]).toBeUndefined()
 			}
 		}),
@@ -580,7 +584,8 @@ describe("checkfu deploy", () => {
 			const saved = JSON.stringify({ url: DEPLOYED_URL, api_key: TEST_API_KEY })
 			const files = virtualFiles({
 				...checkout,
-				[RECORD_FILE]: record("live"),
+				[STAGE_FILE]: "live\n",
+				[recordFile("live")]: record("live"),
 				[CONFIG_FILE]: saved,
 			})
 			yield* cli.run(["deploy", "--yes"], {
@@ -588,7 +593,7 @@ describe("checkfu deploy", () => {
 				files,
 				spawn: fakeAlchemy([], { output: "error" }),
 			})
-			expect(files[RECORD_FILE]).toBe(record("live"))
+			expect(files[recordFile("live")]).toBe(record("live"))
 
 			const destroyed = yield* cli.run(["destroy", "--yes", "--stage", "live"], {
 				env: deployEnv,
@@ -656,7 +661,7 @@ describe("checkfu deploy", () => {
 			})
 			expect(result.exitCode).toBe(1)
 			expect(result.errorMessage).toContain("did not accept its API key within")
-			expect(files[RECORD_FILE]).toBe(record("live"))
+			expect(files[recordFile("live")]).toBe(record("live"))
 			expect(files[CONFIG_FILE]).toBeUndefined()
 		}),
 	)
@@ -1451,7 +1456,11 @@ describe("checkfu deploy", () => {
 
 describe("checkfu destroy", () => {
 	const savedLive = JSON.stringify({ url: DEPLOYED_URL, api_key: TEST_API_KEY })
-	const liveCheckout = { "/checkout/alchemy.run.ts": "", [RECORD_FILE]: record("live") }
+	const liveCheckout = {
+		"/checkout/alchemy.run.ts": "",
+		[STAGE_FILE]: "live\n",
+		[recordFile("live")]: record("live"),
+	}
 	const env = { CHECKFU_CONFIG_DIR: "/config" }
 	const PROFILE = ["--profile", "default"]
 
@@ -1472,7 +1481,7 @@ describe("checkfu destroy", () => {
 				expect(result.errorMessage).toContain("--yes")
 				expect(calls).toEqual([])
 				expect(files[CONFIG_FILE]).toBe(savedLive)
-				expect(files[RECORD_FILE]).toBe(record("live"))
+				expect(files[recordFile("live")]).toBe(record("live"))
 			}),
 	)
 
@@ -1492,7 +1501,7 @@ describe("checkfu destroy", () => {
 				["destroy", "--stage", "live", "--yes", ...PROFILE],
 			])
 			expect(files[CONFIG_FILE]).toBeUndefined()
-			expect(files[RECORD_FILE]).toBeUndefined()
+			expect(files[recordFile("live")]).toBeUndefined()
 		}),
 	)
 
@@ -1522,36 +1531,104 @@ describe("checkfu destroy", () => {
 		}),
 	)
 
-	it.live("follows the last successful deploy even when that deploy's URL was never read", () =>
+	it.live("keeps each stage destroyable after selecting another stage", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const files = virtualFiles({ ...liveCheckout, [CONFIG_FILE]: savedLive })
-			yield* cli.run(["deploy", "--yes", "--stage", "staging"], {
-				env: deployEnv,
-				files,
-				spawn: fakeAlchemy([], { output: "error" }),
+			const files = virtualFiles(liveCheckout)
+			const options = { env: deployEnv, files }
+			const stagingUrl = "https://staging.example.workers.dev"
+			const staging = yield* cli.run(["deploy", "--yes", "--stage", "staging"], {
+				...options,
+				spawn: fakeAlchemy([], { url: stagingUrl }),
 			})
-			expect(files[RECORD_FILE]).toBe(record("staging", "default", ACCOUNT, null))
+			expect(staging.exitCode).toBe(0)
+			expect(files[recordFile("live")]).toBe(record("live"))
+			expect(files[recordFile("staging")]).toBe(record("staging", "default", ACCOUNT, stagingUrl))
+			expect(files[STAGE_FILE]).toBe("staging\n")
 
-			const old: Array<ReadonlyArray<string>> = []
-			const refused = yield* cli.run(["destroy", "--yes", "--stage", "live"], {
-				env: deployEnv,
-				files,
-				spawn: fakeAlchemy(old),
+			const before = { ...files }
+			const invalid = yield* cli.run(["deploy", "--yes", "--stage", "../other"], {
+				...options,
+				spawn: fakeAlchemy([]),
 			})
-			expect(refused.errorMessage).toContain('it last deployed "staging"')
-			expect(old).toEqual([])
+			expect(invalid.exitCode).toBe(1)
+			expect(files).toEqual(before)
 
 			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["destroy", "--yes", "--stage", "staging"], {
-				env: deployEnv,
-				files,
+			const destroyed = yield* cli.run(["destroy", "--yes", "--stage", "live"], {
+				...options,
 				spawn: fakeAlchemy(calls),
 			})
-			expect(result.errorMessage).toBeUndefined()
-			expect(calls.at(-1)).toEqual(["destroy", "--stage", "staging", "--yes", ...SHARED])
-			expect(files[RECORD_FILE]).toBeUndefined()
-			expect(files[CONFIG_FILE]).toBe(savedLive)
+			expect(destroyed.exitCode).toBe(0)
+			expect(calls.at(-1)).toEqual(["destroy", "--stage", "live", "--yes", ...SHARED])
+			expect(files[recordFile("live")]).toBeUndefined()
+			expect(files[recordFile("staging")]).toBe(before[recordFile("staging")])
+			expect(files[CONFIG_FILE]).toBe(before[CONFIG_FILE])
+
+			const defaultCalls: Array<ReadonlyArray<string>> = []
+			const redeployed = yield* cli.run(["deploy", "--yes"], {
+				...options,
+				spawn: fakeAlchemy(defaultCalls, { url: stagingUrl }),
+			})
+			expect(redeployed.exitCode).toBe(0)
+			expect(defaultCalls[1]).toEqual(["deploy", "--stage", "staging", "--yes", ...SHARED])
+
+			const last = yield* cli.run(["destroy", "--yes", "--stage", "staging"], {
+				...options,
+				spawn: fakeAlchemy([]),
+			})
+			expect(last.exitCode).toBe(0)
+			expect(files[recordFile("staging")]).toBeUndefined()
+			defaultCalls.length = 0
+			yield* cli.run(["deploy", "--yes"], { ...options, spawn: fakeAlchemy(defaultCalls) })
+			expect(defaultCalls[1]).toEqual(["deploy", "--stage", "live", "--yes", ...SHARED])
+		}),
+	)
+
+	it.live("keeps stages that differ only by case in distinct checkout records", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
+			for (const stage of ["QA", "qa"]) {
+				const deploy = yield* cli.run(["deploy", "--yes", "--stage", stage], {
+					env: deployEnv,
+					files,
+					spawn: fakeAlchemy([], { url: `https://${stage === "QA" ? "upper" : "lower"}.example` }),
+				})
+				expect(deploy.exitCode).toBe(0)
+			}
+			const upper = recordFile("~q~a")
+			const lower = recordFile("qa")
+			expect(upper.toLowerCase()).not.toBe(lower.toLowerCase())
+			expect(files[upper]).toBe(record("QA", "default", ACCOUNT, "https://upper.example"))
+			expect(files[lower]).toBe(record("qa", "default", ACCOUNT, "https://lower.example"))
+
+			const cleared = yield* cli.run(["destroy", "--yes", "--stage", "QA"], {
+				env: deployEnv,
+				files,
+				spawn: fakeAlchemy([]),
+			})
+			expect(cleared.exitCode).toBe(0)
+			expect(files[upper]).toBeUndefined()
+			expect(files[lower]).toBe(record("qa", "default", ACCOUNT, "https://lower.example"))
+		}),
+	)
+
+	it.live("refuses a record that does not own the stage named by its file", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles({ ...liveCheckout, [recordFile("staging")]: record("live") })
+			for (const operation of ["deploy", "destroy"]) {
+				const calls: Array<ReadonlyArray<string>> = []
+				const result = yield* cli.run([operation, "--yes", "--stage", "staging"], {
+					env: deployEnv,
+					files,
+					spawn: fakeAlchemy(calls),
+				})
+				expect(result.errorMessage).toContain('records "live", but "staging" was requested')
+				expect(calls).toEqual([])
+				expect(files[recordFile("staging")]).toBe(record("live"))
+			}
 		}),
 	)
 
@@ -1564,7 +1641,7 @@ describe("checkfu destroy", () => {
 				files,
 				spawn: fakeAlchemy([]),
 			})
-			expect(files[RECORD_FILE]).toBe(record("staging", "work"))
+			expect(files[recordFile("staging")]).toBe(record("staging", "work"))
 
 			yield* cli.run(["--base-url", "https://another.example", "login"], { env: deployEnv, files })
 			yield* cli.run(["logout"], { env: deployEnv, files })
@@ -1604,7 +1681,7 @@ describe("checkfu destroy", () => {
 				expect(result.exitCode).toBe(1)
 				expect(result.errorMessage).toContain(message)
 				expect(calls.map((call) => call[0])).toEqual(["query"])
-				expect(files[RECORD_FILE]).toBe(record("live"))
+				expect(files[recordFile("live")]).toBe(record("live"))
 				expect(files[CONFIG_FILE]).toBe(savedLive)
 			}
 		}),
