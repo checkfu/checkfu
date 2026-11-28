@@ -49,35 +49,51 @@ const pause = () =>
 		setTimeout(resolve, 250)
 	})
 
+export class AcceptedReceipt extends Error {
+	readonly _tag = "AcceptedReceipt"
+	readonly id: string
+	readonly check: () => Promise<boolean>
+
+	constructor(id: string, check: () => Promise<boolean>, cause?: unknown) {
+		super(`Change accepted for ${id}. It is not visible yet.`, { cause })
+		this.id = id
+		this.check = check
+	}
+}
+
+export const isAcceptedReceipt = (error: unknown): error is AcceptedReceipt =>
+	typeof error === "object" && error !== null && "_tag" in error && error._tag === "AcceptedReceipt"
+
 const settled = async <T>(
 	retrieve: (id: string) => Promise<T>,
 	result: NoInfer<T> | Pending,
 	done: (resource: T) => boolean = () => true,
+	onAccepted?: () => void,
 ): Promise<T> => {
+	onAccepted?.()
 	if (!isPending(result)) {
 		return result
 	}
-	for (let attempt = 0; ; attempt++) {
+	const check = () => retrieve(result.id).then(done)
+	let cause: unknown
+	for (let attempt = 0; attempt <= 40; attempt++) {
 		try {
 			const resource = await retrieve(result.id)
+			cause = undefined
 			if (done(resource)) {
 				return resource
 			}
-			if (attempt >= 40) {
-				throw new Error("The change was accepted but is not visible yet. Reload in a moment.")
-			}
-			await pause()
 		} catch (error) {
-			if (
-				attempt >= 40 ||
-				!(error instanceof CheckfuFetchError) ||
-				![404, 503].includes(error.status)
-			) {
-				throw error
+			cause = error
+			if (!(error instanceof CheckfuFetchError) || ![404, 503].includes(error.status)) {
+				break
 			}
+		}
+		if (attempt < 40) {
 			await pause()
 		}
 	}
+	throw new AcceptedReceipt(result.id, check, cause)
 }
 
 const versionOf = (value: unknown): number =>
@@ -194,25 +210,32 @@ const vaults = {
 			vault_id: string,
 			body: BodyOf<"vaults.credentials.create">,
 			idempotencyKey: string,
+			onAccepted?: () => void,
 		) =>
 			settled(
 				credentialOf(vault_id),
 				await request("vaults.credentials.create", { path: { vault_id }, body, idempotencyKey }),
 				isStored,
+				onAccepted,
 			),
 		update: async (
 			vault_id: string,
 			credential_id: string,
 			body: BodyOf<"vaults.credentials.update">,
 			since: { readonly updated_at: string },
-		) =>
-			settled(
+			onAccepted?: () => void,
+		) => {
+			const requiresStoredToken = typeof body === "object" && body !== null && "auth" in body
+			const updatedAt = Date.parse(since.updated_at)
+			return settled(
 				credentialOf(vault_id),
 				await request("vaults.credentials.update", { path: { vault_id, credential_id }, body }),
 				(credential) =>
-					Date.parse(credential.updated_at) > Date.parse(since.updated_at) &&
-					!(typeof body === "object" && body !== null && "auth" in body && !isStored(credential)),
-			),
+					Date.parse(credential.updated_at) > updatedAt &&
+					(!requiresStoredToken || isStored(credential)),
+				onAccepted,
+			)
+		},
 		archive: async (vault_id: string, credential_id: string) =>
 			settled(
 				credentialOf(vault_id),

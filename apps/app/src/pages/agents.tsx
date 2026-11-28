@@ -17,6 +17,7 @@ import { Pager } from "../pager.tsx"
 import { checkfu, deploymentApiUrl } from "../api.ts"
 import { agentQuery, agentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import {
 	bodyOf,
@@ -185,7 +186,8 @@ function AgentForm<Saved>({
 				}
 			}}
 		>
-			<fieldset disabled={action.pending} className="min-w-0 space-y-4">
+			<ActionReceipt receipt={action.receipt} href={(id) => `/agents/${encodeURIComponent(id)}`} />
+			<fieldset disabled={action.blocked} className="min-w-0 space-y-4">
 				<AgentModeControl
 					formLabel="Form"
 					disabled={load.pending}
@@ -239,13 +241,15 @@ function AgentForm<Saved>({
 						/>
 					</div>
 				)}
-				{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
+				{action.receipt !== undefined || action.error === undefined ? null : (
+					<Callout tone="error">{action.error}</Callout>
+				)}
 				{editNotice}
 				<div className="flex gap-2">
 					<Button
 						type="submit"
 						disabled={
-							action.pending ||
+							action.blocked ||
 							editNotice !== undefined ||
 							invalidSource ||
 							invalidForm ||
@@ -415,6 +419,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 	const archived = agent.archived_at !== null
 	return (
 		<>
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
 			<PageHeader
 				title={agent.name}
 				id={agent.id}
@@ -442,7 +447,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 							<Button
 								variant="destructive"
 								size="sm"
-								disabled={archive.pending}
+								disabled={archive.blocked}
 								onClick={() => archive.run(agent.id, agent.version)}
 							>
 								Archive
@@ -451,7 +456,9 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 					)
 				}
 			/>
-			{archive.error === undefined ? null : <Callout tone="error">{archive.error}</Callout>}
+			{archive.receipt !== undefined || archive.error === undefined ? null : (
+				<Callout tone="error">{archive.error}</Callout>
+			)}
 			{exportProject.error === undefined ? null : (
 				<Callout tone="error">{exportProject.error}</Callout>
 			)}

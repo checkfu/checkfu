@@ -18,6 +18,7 @@ import { Pager } from "../pager.tsx"
 import { ApiError, checkfu } from "../api.ts"
 import { environmentQuery, environmentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
 const list = getRouteApi("/_app/environments/")
@@ -334,6 +335,10 @@ export function NewEnvironmentPage(): React.JSX.Element {
 	)
 	return (
 		<>
+			<ActionReceipt
+				receipt={create.receipt}
+				href={(id) => `/environments/${encodeURIComponent(id)}`}
+			/>
 			<PageHeader
 				title="New environment"
 				breadcrumb={<Link to="/environments">Environments</Link>}
@@ -345,10 +350,12 @@ export function NewEnvironmentPage(): React.JSX.Element {
 					create.run()
 				}}
 			>
-				<fieldset disabled={create.pending} className="min-w-0 space-y-4">
+				<fieldset disabled={create.blocked} className="min-w-0 space-y-4">
 					<EnvironmentFields draft={draft} onChange={setDraft} />
-					{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-					<Button type="submit" disabled={create.pending}>
+					{create.receipt !== undefined || create.error === undefined ? null : (
+						<Callout tone="error">{create.error}</Callout>
+					)}
+					<Button type="submit" disabled={create.blocked}>
 						Create environment
 					</Button>
 				</fieldset>
@@ -372,6 +379,7 @@ export function EnvironmentView({
 	const archive = useAction(checkfu.environments.archive, { invalidates })
 	return (
 		<>
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
 			<PageHeader
 				title={environment.name}
 				id={environment.id}
@@ -384,7 +392,7 @@ export function EnvironmentView({
 							<Button
 								variant="outline"
 								size="sm"
-								disabled={archive.pending}
+								disabled={archive.blocked}
 								onClick={() => setEditing(true)}
 							>
 								Edit
@@ -392,7 +400,7 @@ export function EnvironmentView({
 							<Button
 								variant="destructive"
 								size="sm"
-								disabled={archive.pending}
+								disabled={archive.blocked}
 								onClick={() => archive.run(environment.id, environment.version)}
 							>
 								Archive
@@ -401,7 +409,9 @@ export function EnvironmentView({
 					) : undefined
 				}
 			/>
-			{archive.error === undefined ? null : <Callout tone="error">{archive.error}</Callout>}
+			{archive.receipt !== undefined || archive.error === undefined ? null : (
+				<Callout tone="error">{archive.error}</Callout>
+			)}
 			{editing ? (
 				<EnvironmentEditor current={environment} onClose={() => setEditing(false)} />
 			) : (
@@ -587,7 +597,7 @@ function EnvironmentEditor({
 		!sameHosts(draftHosts, baseHosts) &&
 		!sameHosts(savedHosts, baseHosts) &&
 		!sameHosts(draftHosts, savedHosts)
-	const canSave = !archived && !review && changed && changes.name !== "" && !save.pending
+	const canSave = !archived && !review && changed && changes.name !== "" && !save.blocked
 	return (
 		<form
 			className="max-w-2xl space-y-4"
@@ -598,13 +608,14 @@ function EnvironmentEditor({
 				}
 			}}
 		>
+			<ActionReceipt receipt={save.receipt} onVisible={save.confirmReceipt} />
 			{archived ? <Callout>This environment was archived while you were editing.</Callout> : null}
 			{review ? (
 				<EnvironmentReview
 					current={current}
 					hasNewVersion={updated}
 					conflictingHosts={conflictingHosts}
-					saving={save.pending}
+					saving={save.blocked}
 					onReview={(keepDraftHosts) => {
 						const rebased = rebaseDraft(draft, baseDraft, currentDraft)
 						setDraft(
@@ -619,7 +630,7 @@ function EnvironmentEditor({
 					}}
 				/>
 			) : null}
-			<fieldset disabled={archived || save.pending} className="min-w-0 space-y-4">
+			<fieldset disabled={archived || save.blocked} className="min-w-0 space-y-4">
 				<EnvironmentFields draft={draft} onChange={setDraft} />
 			</fieldset>
 			<p className="text-control text-muted-foreground">
@@ -632,7 +643,7 @@ function EnvironmentEditor({
 				<Button type="submit" disabled={!canSave}>
 					Save changes
 				</Button>
-				<Button type="button" variant="outline" disabled={save.pending} onClick={onClose}>
+				<Button type="button" variant="outline" disabled={save.blocked} onClick={onClose}>
 					Cancel
 				</Button>
 			</div>

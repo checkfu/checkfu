@@ -24,6 +24,7 @@ import {
 	present,
 } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
 const list = getRouteApi("/_app/memory-stores/")
@@ -114,6 +115,10 @@ export function NewMemoryStorePage(): React.JSX.Element {
 	)
 	return (
 		<>
+			<ActionReceipt
+				receipt={create.receipt}
+				href={(id) => `/memory-stores/${encodeURIComponent(id)}`}
+			/>
 			<PageHeader title="New memory store" breadcrumb={<Link to="/memory-stores">Memory</Link>} />
 			<form
 				className="max-w-2xl"
@@ -122,15 +127,17 @@ export function NewMemoryStorePage(): React.JSX.Element {
 					create.run()
 				}}
 			>
-				<fieldset disabled={create.pending} className="min-w-0 space-y-4">
+				<fieldset disabled={create.blocked} className="min-w-0 space-y-4">
 					<Field label="Name" description="The agent sees this name.">
 						<Input required value={name} onChange={(event) => setName(event.target.value)} />
 					</Field>
 					<Field label="Description" description="What the store holds. The agent sees this too.">
 						<Input value={description} onChange={(event) => setDescription(event.target.value)} />
 					</Field>
-					{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-					<Button type="submit" disabled={create.pending}>
+					{create.receipt !== undefined || create.error === undefined ? null : (
+						<Callout tone="error">{create.error}</Callout>
+					)}
+					<Button type="submit" disabled={create.blocked}>
 						Create store
 					</Button>
 				</fieldset>
@@ -165,7 +172,7 @@ export function MemoryStorePage(): React.JSX.Element {
 						<Button
 							variant="destructive"
 							size="sm"
-							disabled={archive.pending}
+							disabled={archive.blocked}
 							onClick={() => archive.run()}
 						>
 							Archive
@@ -173,6 +180,7 @@ export function MemoryStorePage(): React.JSX.Element {
 					) : undefined
 				}
 			/>
+			<ActionReceipt receipt={archive.receipt} onVisible={archive.confirmReceipt} />
 			{archive.error === undefined ? null : <Callout tone="error">{archive.error}</Callout>}
 			{active ? null : (
 				<Callout>An archived store is read-only, here and in every session that mounts it.</Callout>
@@ -254,7 +262,15 @@ function NewMemory({ memoryStore }: { readonly memoryStore: JsonMemoryStore }): 
 			}}
 		>
 			<h2 className="text-sm font-medium">Add a memory</h2>
-			<fieldset disabled={add.pending} className="min-w-0 space-y-4">
+			<ActionReceipt
+				receipt={add.receipt}
+				onVisible={async () => {
+					setPath("")
+					setContent("")
+					await add.confirmReceipt()
+				}}
+			/>
+			<fieldset disabled={add.blocked} className="min-w-0 space-y-4">
 				<Field label="Path" description="Inside the store, such as /notes/style.md.">
 					<Input
 						required
@@ -267,7 +283,7 @@ function NewMemory({ memoryStore }: { readonly memoryStore: JsonMemoryStore }): 
 					<Textarea value={content} onChange={(event) => setContent(event.target.value)} />
 				</Field>
 				{add.error === undefined ? null : <Callout tone="error">{add.error}</Callout>}
-				<Button type="submit" variant="outline" disabled={add.pending || path.trim() === ""}>
+				<Button type="submit" variant="outline" disabled={add.blocked || path.trim() === ""}>
 					Add memory
 				</Button>
 			</fieldset>
@@ -369,6 +385,13 @@ function MemoryEditor({
 					{deleting.version}.
 				</Confirm>
 			) : null}
+			<ActionReceipt
+				receipt={save.receipt}
+				onVisible={async () => {
+					await save.confirmReceipt()
+					setEdit(undefined)
+				}}
+			/>
 			<DescriptionList>
 				<Description label="Size">{sizeOf(memory.content_size_bytes)}</Description>
 				<Description label="Version">v{memory.version}</Description>
@@ -378,7 +401,7 @@ function MemoryEditor({
 				className="space-y-2"
 				onSubmit={(event) => {
 					event.preventDefault()
-					if (edit !== undefined && writable && canSave && !save.pending) {
+					if (edit !== undefined && writable && canSave && !save.blocked) {
 						save.run(edit)
 					}
 				}}
@@ -386,7 +409,7 @@ function MemoryEditor({
 				<Textarea
 					aria-label="Content"
 					className="font-mono"
-					readOnly={!writable || save.pending}
+					readOnly={!writable || save.blocked}
 					value={text}
 					onChange={(event) => setEdit({ base, text: event.target.value })}
 				/>
@@ -402,7 +425,7 @@ function MemoryEditor({
 									type="button"
 									variant="outline"
 									size="sm"
-									disabled={save.pending}
+									disabled={save.blocked}
 									onClick={() => setEdit(rebaseOnto(memory, edit))}
 								>
 									Keep my text and replace v{memory.version}
@@ -412,7 +435,7 @@ function MemoryEditor({
 								type="button"
 								variant="outline"
 								size="sm"
-								disabled={save.pending}
+								disabled={save.blocked}
 								onClick={() => setEdit(undefined)}
 							>
 								Discard my edit and load the latest
@@ -429,7 +452,7 @@ function MemoryEditor({
 				)}
 				{writable ? (
 					<div className="flex justify-end">
-						<Button type="submit" disabled={save.pending || !canSave}>
+						<Button type="submit" disabled={save.blocked || !canSave}>
 							Save
 						</Button>
 					</div>

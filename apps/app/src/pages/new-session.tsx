@@ -31,6 +31,7 @@ import {
 	resourceIdentity,
 } from "../session-resources.ts"
 import type { ResourceDraft, ResourceType } from "../session-resources.ts"
+import { ActionReceipt } from "../action-receipt.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import {
 	bindingsOf,
@@ -213,9 +214,14 @@ export function NewSessionPage(): React.JSX.Element {
 			},
 		},
 	)
-	const startError = placeError(start.error, start.errorCode, servers)
+	const startError = placeError(
+		start.receipt === undefined ? start.error : undefined,
+		start.errorCode,
+		servers,
+	)
 	return (
 		<>
+			<ActionReceipt receipt={start.receipt} href={(id) => `/sessions/${encodeURIComponent(id)}`} />
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />
 			{(agents.length === 0 && agentOptions.more === null) ||
 			(environments.length === 0 && environmentOptions.more === null) ? (
@@ -238,7 +244,7 @@ export function NewSessionPage(): React.JSX.Element {
 						start.run()
 					}}
 				>
-					<fieldset disabled={start.pending} className="min-w-0 space-y-4">
+					<fieldset disabled={start.blocked} className="min-w-0 space-y-4">
 						<OptionPicker
 							label="Agent"
 							noun="agents"
@@ -288,7 +294,7 @@ export function NewSessionPage(): React.JSX.Element {
 						{choices.checking ? (
 							<p className="text-control text-muted-foreground">Checking your choices…</p>
 						) : null}
-						<Button type="submit" disabled={start.pending || !canStart}>
+						<Button type="submit" disabled={start.blocked || !canStart}>
 							Start session
 						</Button>
 					</fieldset>
