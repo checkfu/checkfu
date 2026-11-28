@@ -2,32 +2,32 @@ import * as Schema from "effect/Schema"
 
 export const surfaces = ["api", "mcp", "sdk", "yaml", "ui", "cli"] as const
 type Surface = (typeof surfaces)[number]
-export const groups = {
-	clients: { cwd: "tools/release", script: "test", files: ["Package.test.ts"] },
-	ui: { cwd: "apps/app", script: "test", files: ["test/user-journey.test.tsx"] },
-	mcp: { cwd: "apps/mcp", script: "test", files: ["test/Mcp.interoperability.test.ts"] },
-	api: { cwd: "apps/api", script: "test", files: ["test/Api.mounted-admission.test.ts"] },
-	project: {
-		cwd: "apps/api",
-		script: "test:workerd",
-		files: ["test/workerd/PiSession.workerd.ts"],
-	},
-	machines: {
-		cwd: "apps/api",
-		script: "test:workerd",
-		files: ["test/workerd/PiSessionMachines.workerd.ts"],
-	},
-	domain: {
-		cwd: "packages/domain",
-		script: "test",
-		files: ["test/Files.verify.test.ts", "test/MountedSession.verify.test.ts"],
-	},
+const groupRunners = {
+	clients: { cwd: "tools/release", script: "test" },
+	ui: { cwd: "apps/app", script: "test" },
+	mcp: { cwd: "apps/mcp", script: "test" },
+	api: { cwd: "apps/api", script: "test" },
+	project: { cwd: "apps/api", script: "test:workerd" },
+	machines: { cwd: "apps/api", script: "test:workerd" },
+	domain: { cwd: "packages/domain", script: "test" },
 } as const
-export type Group = keyof typeof groups
+export type Group = keyof typeof groupRunners
+
+const suite = {
+	clients: "tools/release/Package.test.ts",
+	ui: "apps/app/test/user-journey.test.tsx",
+	mcp: "apps/mcp/test/Mcp.interoperability.test.ts",
+	api: "apps/api/test/Api.mounted-admission.test.ts",
+	project: "apps/api/test/workerd/PiSession.workerd.ts",
+	machines: "apps/api/test/workerd/PiSessionMachines.workerd.ts",
+	files: "packages/domain/test/Files.verify.test.ts",
+	mounts: "packages/domain/test/MountedSession.verify.test.ts",
+} as const
 
 interface Journey {
 	readonly id: string
 	readonly group: Group
+	readonly file: (typeof suite)[keyof typeof suite]
 	readonly promise: string
 	readonly surfaces: ReadonlyArray<Surface>
 	readonly boundary: string
@@ -41,6 +41,7 @@ export const journeys: ReadonlyArray<Journey> = [
 		id: "installed-entrypoints",
 		notApplicable: "Only the CLI and SDK distribute npm consumer entry points",
 		group: "clients",
+		file: suite.clients,
 		promise:
 			"Install candidate packages outside the checkout and use strict TypeScript and JavaScript",
 		surfaces: ["cli", "sdk"],
@@ -50,6 +51,7 @@ export const journeys: ReadonlyArray<Journey> = [
 		id: "package-integrity",
 		notApplicable: "Only the CLI and SDK are distributed as npm tarballs",
 		group: "clients",
+		file: suite.clients,
 		promise: "Reject changed tarballs and ambiguous package identities",
 		surfaces: ["cli", "sdk"],
 		boundary: "exact candidate record and SHA-512 package bytes",
@@ -57,6 +59,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "installed-journeys",
 		group: "clients",
+		file: suite.clients,
 		promise:
 			"Use installed clients for login, CRUD, retries, stale edits, version history and event streams",
 		surfaces: ["cli", "sdk"],
@@ -66,6 +69,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "deployment-source",
 		group: "clients",
+		file: suite.clients,
 		promise: "Deploy the server revision built with the installed CLI",
 		surfaces: ["cli"],
 		boundary: "installed candidate CLI; deployment source URL compared with the qualified commit",
@@ -74,6 +78,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "ui-session-admission",
 		group: "ui",
+		file: suite.ui,
 		promise: "Correct a refused session without losing the form or admitting partial state",
 		surfaces: ["ui"],
 		boundary:
@@ -82,6 +87,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "ui-agent-conflict",
 		group: "ui",
+		file: suite.ui,
 		promise: "Rebase a stale agent edit while preserving tools and historic versions",
 		surfaces: ["ui"],
 		boundary: "happy-dom; independent competing SDK editor and HTTP/domain",
@@ -89,6 +95,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "ui-memory-conflict",
 		group: "ui",
+		file: suite.ui,
 		promise: "Keep a conflicting memory draft until the newer version is loaded",
 		surfaces: ["ui"],
 		boundary: "happy-dom; independent competing SDK editor and HTTP/domain",
@@ -96,6 +103,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "mcp-uncertain-create",
 		group: "mcp",
+		file: suite.mcp,
 		promise: "Recover a lost committed create reply without a duplicate or changed intent",
 		surfaces: ["mcp"],
 		boundary: "independent official MCP clients; protocol negotiation and production HTTP/domain",
@@ -103,6 +111,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "authored-project-cli",
 		group: "project",
+		file: suite.project,
 		promise:
 			"Preview, apply, run and prune an authored project while preserving pinned history, output bytes and competing edits",
 		surfaces: ["yaml", "cli"],
@@ -112,6 +121,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "authored-project-mcp",
 		group: "project",
+		file: suite.project,
 		promise:
 			"Read automation pins, edit an agent and enforce the revision when CLI and MCP compete",
 		surfaces: ["mcp"],
@@ -121,6 +131,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "file-mount",
 		group: "machines",
+		file: suite.machines,
 		promise: "Read uploaded files in an agent and retain their bytes after a refused write",
 		surfaces: ["api"],
 		boundary: "authenticated HTTP; real Workers/storage/sandbox and model protocol fixture",
@@ -128,8 +139,9 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "mounted-admission-races",
 		group: "api",
+		file: suite.api,
 		promise:
-			"Refuse mounts changed, archived or deleted after selection before creating any session",
+			"Refuse stale mount identities and inactive resources at admission commit while allowing a valid older pin",
 		surfaces: ["api"],
 		boundary:
 			"authenticated production HTTP/domain; lifecycle changes injected at admission commit in idle, start and queue modes; in-memory stores, not Worker/storage atomicity",
@@ -137,6 +149,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "artifact-mount",
 		group: "machines",
+		file: suite.machines,
 		promise: "Read a pinned artifact as files and refuse writes",
 		surfaces: ["api"],
 		boundary: "authenticated HTTP; real Workers/storage/sandbox and model protocol fixture",
@@ -144,6 +157,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "skill-mount",
 		group: "machines",
+		file: suite.machines,
 		promise: "Tell the agent about a mounted skill and read it with file tools",
 		surfaces: ["api"],
 		boundary: "authenticated HTTP; real Workers/storage/sandbox and model protocol fixture",
@@ -151,6 +165,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "output-bytes",
 		group: "machines",
+		file: suite.machines,
 		promise: "Download exactly the bytes the agent wrote to its outputs directory",
 		surfaces: ["api"],
 		boundary: "authenticated HTTP; real Workers/storage/sandbox and model protocol fixture",
@@ -158,6 +173,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "agent-mcp-tools",
 		group: "machines",
+		file: suite.machines,
 		promise:
 			"Discover and call external MCP tools from scripts and directly without exposing credentials",
 		surfaces: ["api"],
@@ -167,6 +183,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "mcp-revocation",
 		group: "machines",
+		file: suite.machines,
 		promise: "Stop sending a credential once its credential or vault is revoked",
 		surfaces: ["api"],
 		boundary: "real Workers/sandbox; independent upstream request/token counts",
@@ -174,6 +191,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "file-domain-proof",
 		group: "domain",
+		file: suite.files,
 		promise:
 			"Prove file content immutability and output transition invariants with real-handler replay agreement",
 		surfaces: [],
@@ -183,6 +201,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "file-admission-guard",
 		group: "domain",
+		file: suite.mounts,
 		promise: "Check mounted file admission against production keys and original content",
 		surfaces: [],
 		boundary:
@@ -191,6 +210,7 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "artifact-admission-guard",
 		group: "domain",
+		file: suite.mounts,
 		promise: "Prove an admitted artifact or skill is active at its pinned version",
 		surfaces: [],
 		boundary:
@@ -199,12 +219,31 @@ export const journeys: ReadonlyArray<Journey> = [
 	{
 		id: "memory-admission-guard",
 		group: "domain",
+		file: suite.mounts,
 		promise: "Prove an admitted memory store is active",
 		surfaces: [],
 		boundary:
 			"Alchemy/Z3; shared production mount guard with one memory-store participant; full multi-participant admission is separate",
 	},
 ]
+
+export const groups = (group: Group) => {
+	const { cwd, script } = groupRunners[group]
+	const files = new Set(
+		journeys.flatMap((journey) => (journey.group === group ? [journey.file] : [])),
+	)
+	return {
+		cwd,
+		script,
+		files: [...files].map((file) => {
+			if (!file.startsWith(`${cwd}/`)) {
+				throw new Error(`Verification file ${file} is outside the runner directory ${cwd}`)
+			}
+			return file.slice(cwd.length + 1)
+		}),
+	}
+}
+export const groupNames = [...new Set(journeys.map(({ group }) => group))]
 
 export const verificationTags = [
 	{ name: "acceptance" },
@@ -279,6 +318,24 @@ export const sameSource = (left: Source, right: Source) =>
 	left.fingerprint === right.fingerprint &&
 	left.dirty === right.dirty
 
+const normalizedPath = (file: string) => file.replaceAll("\\", "/")
+
+const expectedFile = (journey: Journey, run: Evidence | undefined): string | undefined => {
+	const command = run?.command
+	const cwd = normalizedPath(command?.[3] ?? "")
+	const runner = groupRunners[journey.group]
+	if (
+		command?.[0] !== "bun" ||
+		command[1] !== "run" ||
+		command[2] !== "--cwd" ||
+		command[4] !== runner.script ||
+		!cwd.endsWith(`/${runner.cwd}`)
+	) {
+		return undefined
+	}
+	return `${cwd}/${journey.file.slice(runner.cwd.length + 1)}`
+}
+
 export const matrix = (source: Source, evidence: ReadonlyArray<Evidence>) => {
 	const cases = journeys.map((journey) => {
 		const runs = evidence.filter((run) => run.group === journey.group)
@@ -296,14 +353,11 @@ export const matrix = (source: Source, evidence: ReadonlyArray<Evidence>) => {
 				) ?? [])
 			: []
 		const assertion = assertions[0]
-		const expectedFiles = groups[journey.group].files.map(
-			(file) => `${groups[journey.group].cwd}/${file}`,
-		)
 		const registered =
 			assertions.length === 1 &&
 			assertion !== undefined &&
 			assertion.tags.includes("acceptance") &&
-			expectedFiles.some((file) => assertion.file.replaceAll("\\", "/").endsWith(`/${file}`))
+			normalizedPath(assertion.file) === expectedFile(journey, run)
 		const status = !registered
 			? "unverified"
 			: assertion.status === "failed"
