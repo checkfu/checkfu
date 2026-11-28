@@ -221,12 +221,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [clients, ui, mcp, api, domain]
+        group: [clients, ui, browser, mcp, api, domain]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      - if: matrix.group == 'browser'
+        name: Build dashboard and locate Chrome
+        run: |
+          chrome=$(command -v google-chrome)
+          "$chrome" --version
+          echo "CHROME_PATH=$chrome" >> "$GITHUB_ENV"
+          bun run --cwd apps/app build
       - run: bun run verify ${{ matrix.group }}
         env:
           CHECKFU_VERIFICATION_DIR: .checkfu/verification
@@ -254,7 +261,7 @@ jobs:
       - name: Derive the feature matrix from executed cases
         shell: bash
         run: |
-          mapfile -t reports < <(find .checkfu/results -type f -regextype posix-extended -regex '.*/(clients|ui|mcp|api|project|machines|domain)\.json' | sort)
+          mapfile -t reports < <(find .checkfu/results -type f -regextype posix-extended -regex '.*/(clients|ui|browser|mcp|api|project|machines|domain)\.json' | sort)
           bun run verify report "${reports[@]}"
         env:
           CHECKFU_VERIFICATION_DIR: .checkfu/verification

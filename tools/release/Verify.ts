@@ -56,7 +56,11 @@ const run = async (group: Group, directory: string, full: boolean) => {
 	const child = spawn("bun", args, {
 		cwd: root,
 		stdio: "inherit",
-		env: { ...process.env, CHECKFU_PROVE: "1" },
+		env: {
+			...process.env,
+			CHECKFU_PROVE: "1",
+			...(group === "browser" ? { CHECKFU_REQUIRE_BROWSER: "1" } : {}),
+		},
 	})
 	const exitCode = await new Promise<number>((done, reject) => {
 		child.once("error", reject)

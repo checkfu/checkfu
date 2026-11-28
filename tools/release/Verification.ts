@@ -5,6 +5,7 @@ type Surface = (typeof surfaces)[number]
 const groupRunners = {
 	clients: { cwd: "tools/release", script: "test" },
 	ui: { cwd: "apps/app", script: "test" },
+	browser: { cwd: "apps/app", script: "test" },
 	mcp: { cwd: "apps/mcp", script: "test" },
 	api: { cwd: "apps/api", script: "test" },
 	project: { cwd: "apps/api", script: "test:workerd" },
@@ -16,6 +17,7 @@ export type Group = keyof typeof groupRunners
 const suite = {
 	clients: "tools/release/Package.test.ts",
 	ui: "apps/app/test/user-journey.test.tsx",
+	browser: "apps/app/test/browser-agent-journey.test.ts",
 	mcp: "apps/mcp/test/Mcp.interoperability.test.ts",
 	api: "apps/api/test/Api.mounted-admission.test.ts",
 	project: "apps/api/test/workerd/PiSession.workerd.ts",
@@ -83,6 +85,16 @@ export const journeys: ReadonlyArray<Journey> = [
 		surfaces: ["ui"],
 		boundary:
 			"happy-dom; production router/forms, signed-cookie Worker and HTTP/domain; not a browser",
+	},
+	{
+		id: "browser-agent-conflict",
+		notApplicable: "Only the dashboard signs in and navigates through browser history",
+		group: "browser",
+		file: suite.browser,
+		promise: "Sign in, resolve an agent edit conflict and revisit the saved version in Chrome",
+		surfaces: ["ui"],
+		boundary:
+			"Chrome, production dashboard build, real Worker handler and API domain, loopback origin",
 	},
 	{
 		id: "ui-agent-conflict",
@@ -264,10 +276,10 @@ export const gaps = [
 		source: "packages/sdk/src/Api.ts",
 	},
 	{
-		id: "browser-journeys",
+		id: "other-browser-journeys",
 		status: "unverified",
 		reason:
-			"DOM journeys do not verify rendering, browser navigation or browser-specific behavior.",
+			"Browser evidence covers a signed-in agent edit and navigation. Session admission, memory editing and other dashboard paths have DOM evidence only.",
 		source: "apps/app/test/user-journey.test.tsx",
 	},
 	{
@@ -300,7 +312,7 @@ export const Source = Schema.Struct({
 })
 export type Source = typeof Source.Type
 export const Evidence = Schema.Struct({
-	group: Schema.Literals(["clients", "ui", "mcp", "api", "project", "machines", "domain"]),
+	group: Schema.Literals(groupNames),
 	source: Source,
 	finishedSource: Source,
 	startedAt: Schema.String,
