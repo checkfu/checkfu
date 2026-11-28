@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { SessionPage } from "../../../pages/sessions.tsx"
+import { SessionPage } from "../../../pages/session.tsx"
 import { sessionQuery, transcriptQuery } from "../../../queries.ts"
 
 export const Route = createFileRoute("/_app/sessions/$sessionId")({

@@ -102,11 +102,14 @@ describe("first view", () => {
 		const routeChunks = [...own, ...layouts]
 		const cold = closure([...entry, ...routeChunks])
 		const specific = [...cold].filter((key) => !entry.has(key))
-		expect({
-			route,
-			coldJs: brotli(jsOf(cold)) <= COLD_ENTRY_JS,
-			routeJs: brotli(jsOf(specific)) <= ROUTE_JS,
-			css: brotli(cssOf(cold)) <= FIRST_VIEW_CSS,
-		}).toEqual({ route, coldJs: true, routeJs: true, css: true })
+		expect
+			.soft(brotli(jsOf(cold)), `${route} cold JavaScript (Brotli bytes)`)
+			.toBeLessThanOrEqual(COLD_ENTRY_JS)
+		expect
+			.soft(brotli(jsOf(specific)), `${route} route JavaScript (Brotli bytes)`)
+			.toBeLessThanOrEqual(ROUTE_JS)
+		expect
+			.soft(brotli(cssOf(cold)), `${route} cold CSS (Brotli bytes)`)
+			.toBeLessThanOrEqual(FIRST_VIEW_CSS)
 	})
 })

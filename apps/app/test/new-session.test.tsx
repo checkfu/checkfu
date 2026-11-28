@@ -9,7 +9,7 @@ import type {
 import { MAX_SESSION_VAULTS } from "@checkfu/sdk/Limits"
 import { act, Suspense } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { NewSessionPage } from "../src/pages/sessions.tsx"
+import { NewSessionPage } from "../src/pages/new-session.tsx"
 import { button, click, mount, settle, stubApi, submit } from "./dom.tsx"
 
 const AT = "2026-11-24T00:00:00.000Z"

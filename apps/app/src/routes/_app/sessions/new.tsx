@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { NewSessionPage } from "../../../pages/sessions.tsx"
+import { NewSessionPage } from "../../../pages/new-session.tsx"
 import { agentChoices, environmentChoices } from "../../../queries.ts"
 
 export const Route = createFileRoute("/_app/sessions/new")({
