@@ -2,6 +2,7 @@ import { MAX_ARTIFACT_PATH_LENGTH } from "@checkfu/sdk/Limits"
 import * as Base64 from "effect/encoding/Base64"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import { callSignal } from "./CallSignal.ts"
 import { OutputEntry } from "./SessionOutputs.ts"
 import type { OutputFiles } from "./SessionOutputs.ts"
 import type { PassthroughDirent, PassthroughMount, PassthroughStat } from "@cloudflare/computer"
@@ -74,8 +75,48 @@ const LISTING_BYTES = 16 * 1024 * 1024
 
 const byteLength = (text: string): number => new TextEncoder().encode(text).byteLength
 
-const bytesOf = async (body: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
-	new Uint8Array(await new Response(body).arrayBuffer())
+const bytesOf = async (
+	body: ReadableStream<Uint8Array>,
+	signal: AbortSignal | undefined,
+): Promise<Uint8Array> => {
+	if (signal === undefined) {
+		return new Uint8Array(await new Response(body).arrayBuffer())
+	}
+	const reader = body.getReader()
+	let cancel: (() => void) | undefined
+	try {
+		const input = new ReadableStream<Uint8Array>({
+			start(controller) {
+				cancel = () => {
+					controller.error(signal.reason)
+					void reader.cancel(signal.reason).catch(() => undefined)
+				}
+				if (signal.aborted) {
+					cancel()
+				} else {
+					signal.addEventListener("abort", cancel, { once: true })
+				}
+			},
+			async pull(controller) {
+				const chunk = await reader.read()
+				if (signal.aborted) {
+					return
+				}
+				if (chunk.done) {
+					controller.close()
+				} else {
+					controller.enqueue(chunk.value)
+				}
+			},
+		})
+		return new Uint8Array(await new Response(input).arrayBuffer())
+	} finally {
+		if (cancel !== undefined) {
+			signal.removeEventListener("abort", cancel)
+		}
+		reader.releaseLock()
+	}
+}
 
 const fromBase64 = (text: string): Uint8Array<ArrayBuffer> => {
 	const decoded = Base64.decode(text)
@@ -88,16 +129,45 @@ const fromBase64 = (text: string): Uint8Array<ArrayBuffer> => {
 const atRoot = (rel: string, script: string): string =>
 	rel === "" ? `mkdir -p -- "$1" 2>/dev/null; ${script}` : script
 
+export interface SandboxCallOptions {
+	readonly internal?: true
+	readonly retainOutcome?: true
+}
+
 export type InSandbox = <A>(
 	call: (sandbox: Sandbox) => Effect.Effect<A, SandboxError>,
+	signal?: AbortSignal,
+	access?: SandboxCallOptions,
 ) => Promise<A>
+
+const command = (script: string, args: ReadonlyArray<string>) => (sandbox: Sandbox) =>
+	sandbox.exec(["sh", "-c", script, "sh", ...args])
 
 export const makeSandboxMount = (root: string, inSandbox: InSandbox): PassthroughMount => {
 	const at = (rel: string): string => (rel === "" ? root : `${root}/${rel}`)
-	const run = (script: string, ...args: ReadonlyArray<string>) =>
-		inSandbox((sandbox) => sandbox.exec(["sh", "-c", script, "sh", ...args]))
-	const done = async (script: string, ...args: ReadonlyArray<string>): Promise<number> => {
-		const { exitCode, stderr } = await run(script, ...args)
+	const dispatch = <A>(
+		call: (sandbox: Sandbox) => Effect.Effect<A, SandboxError>,
+		signal: AbortSignal | undefined,
+		access?: SandboxCallOptions,
+	): Promise<A> => {
+		signal?.throwIfAborted()
+		return inSandbox(
+			(sandbox) => {
+				signal?.throwIfAborted()
+				return call(sandbox)
+			},
+			signal,
+			access,
+		)
+	}
+
+	const done = async (
+		script: string,
+		args: ReadonlyArray<string>,
+		signal: AbortSignal | undefined,
+		access?: SandboxCallOptions,
+	): Promise<number> => {
+		const { exitCode, stderr } = await dispatch(command(script, args), signal, access)
 		if (exitCode !== 0 && exitCode !== MISSING && exitCode !== WRONG_KIND && exitCode !== EXISTS) {
 			throw failure("EIO", stderr.trim() || `exit code ${exitCode}`)
 		}
@@ -105,12 +175,15 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 	}
 	const absent = (rel: string): Error => failure("ENOENT", `No such file or directory: ${at(rel)}`)
 
-	const chunk = async (rel: string, offset: number, length: number) => {
-		const { exitCode, stdout, stderr } = await run(
-			READ,
-			at(rel),
-			String(offset + 1),
-			String(length),
+	const chunk = async (
+		rel: string,
+		offset: number,
+		length: number,
+		signal: AbortSignal | undefined,
+	) => {
+		const { exitCode, stdout, stderr } = await dispatch(
+			command(READ, [at(rel), String(offset + 1), String(length)]),
+			signal,
 		)
 		if (exitCode === MISSING) {
 			return null
@@ -129,8 +202,11 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 		kind: "checkfu-sandbox",
 		strategy: "passthrough",
 		mode: "read-write",
-		stat: async (rel) => {
-			const { exitCode, stdout, stderr } = await run(atRoot(rel, STAT), at(rel))
+		stat: async (rel, options) => {
+			const { exitCode, stdout, stderr } = await dispatch(
+				command(atRoot(rel, STAT), [at(rel)]),
+				callSignal(options?.signal),
+			)
 			if (exitCode === MISSING) {
 				return null
 			}
@@ -141,12 +217,14 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 		},
 		readdir: async (rel, options) => {
 			const limit = Math.min(options?.limit ?? LISTING_ENTRIES, LISTING_ENTRIES)
-			const { exitCode, stdout, stderr } = await run(
-				atRoot(rel, READDIR),
-				at(rel),
-				options?.recursive === true ? "1000000" : "1",
-				String((limit + 1) * 5),
-				String(LISTING_BYTES),
+			const { exitCode, stdout, stderr } = await dispatch(
+				command(atRoot(rel, READDIR), [
+					at(rel),
+					options?.recursive === true ? "1000000" : "1",
+					String((limit + 1) * 5),
+					String(LISTING_BYTES),
+				]),
+				callSignal(options?.signal),
 			)
 			if (exitCode === MISSING) {
 				return null
@@ -181,11 +259,13 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 			return entries
 		},
 		readFile: async (rel, options) => {
+			const signal = callSignal(options?.signal)
 			const offset = options?.range?.offset ?? 0
 			const first = await chunk(
 				rel,
 				offset,
 				Math.min(options?.range?.length ?? READ_CHUNK_BYTES, READ_CHUNK_BYTES),
+				signal,
 			)
 			if (first === null) {
 				return null
@@ -200,12 +280,14 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 				offset,
 				body: new ReadableStream<Uint8Array>({
 					pull: async (controller) => {
+						signal?.throwIfAborted()
 						if (next >= end) {
 							controller.close()
 							return
 						}
 						const length = Math.min(READ_CHUNK_BYTES, end - next)
-						const read = next === offset ? first : await chunk(rel, next, length)
+						const read = next === offset ? first : await chunk(rel, next, length, signal)
+						signal?.throwIfAborted()
 						const bytes = read?.bytes.subarray(0, length)
 						if (bytes === undefined || bytes.byteLength === 0) {
 							controller.close()
@@ -218,40 +300,52 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 			}
 		},
 		writeFile: async (rel, body, options) => {
-			const content = await bytesOf(body)
+			const signal = callSignal(options.signal)
+			const content = await bytesOf(body, signal)
 			const target = at(rel)
-			const write = (path: string) => inSandbox((sandbox) => sandbox.writeFile(path, content))
-			const writeWithMode = async (path: string) => {
-				await write(path)
+			const writeWithMode = async (path: string, access?: SandboxCallOptions) => {
+				await dispatch((sandbox) => sandbox.writeFile(path, content), signal, access)
 				if (options.mode !== undefined) {
-					await done('chmod "$2" -- "$1"', path, options.mode.toString(8))
+					await done('chmod "$2" -- "$1"', [path, options.mode.toString(8)], signal, access)
 				}
 			}
 			if (options.exclusive === true) {
 				const parent = target.slice(0, target.lastIndexOf("/")) || "/"
-				const staged = await run(STAGE_NEW, parent, target)
+				// Wait for reservation to return its owned path even if cancellation races its dispatch.
+				const stagedAccess = { retainOutcome: true } as const
+				const staged = await dispatch(command(STAGE_NEW, [parent, target]), signal, stagedAccess)
 				if (staged.exitCode !== 0 || staged.stdout.length === 0) {
 					throw failure("EIO", staged.stderr.trim() || "Could not stage the new file.")
 				}
 				const directory = staged.stdout.trimEnd()
 				const payload = `${directory}/file`
 				try {
-					await writeWithMode(payload)
-					if ((await done(PLACE_NEW, payload, target)) === EXISTS) {
+					await writeWithMode(payload, stagedAccess)
+					if ((await done(PLACE_NEW, [payload, target], signal, stagedAccess)) === EXISTS) {
 						throw failure("EEXIST", `File exists: ${target}`)
 					}
 				} finally {
-					await done('rm -f -- "$1"; rmdir -- "$2"', payload, directory).catch(() => undefined)
+					await done('rm -f -- "$1"; rmdir -- "$2"', [payload, directory], undefined, {
+						internal: true,
+					}).catch(() => undefined)
 				}
 			} else {
 				await writeWithMode(target)
 			}
 		},
 		mkdir: async (rel, options) => {
-			await done(options.recursive === true ? 'mkdir -p -- "$1"' : 'mkdir -- "$1"', at(rel))
+			await done(
+				options.recursive === true ? 'mkdir -p -- "$1"' : 'mkdir -- "$1"',
+				[at(rel)],
+				callSignal(options.signal),
+			)
 		},
 		rm: async (rel, options) => {
-			const outcome = await done(RM, at(rel), options.recursive === true ? "recursive" : "")
+			const outcome = await done(
+				RM,
+				[at(rel), options.recursive === true ? "recursive" : ""],
+				callSignal(options.signal),
+			)
 			if (outcome === MISSING) {
 				throw absent(rel)
 			}
@@ -259,16 +353,16 @@ export const makeSandboxMount = (root: string, inSandbox: InSandbox): Passthroug
 				throw failure("EISDIR", `Is a directory: ${at(rel)}`)
 			}
 		},
-		rename: async (from, to) => {
-			if ((await done(RENAME, at(from), at(to))) === MISSING) {
+		rename: async (from, to, options) => {
+			if ((await done(RENAME, [at(from), at(to)], callSignal(options?.signal))) === MISSING) {
 				throw absent(from)
 			}
 		},
-		chmod: async (rel, mode) => {
+		chmod: async (rel, mode, options) => {
 			await done(
 				`[ -e "$1" ] || exit ${MISSING}; chmod "$2" -- "$1"`,
-				at(rel),
-				mode.toString(8),
+				[at(rel), mode.toString(8)],
+				callSignal(options?.signal),
 			).then((outcome) => {
 				if (outcome === MISSING) {
 					throw absent(rel)

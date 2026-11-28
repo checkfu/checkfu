@@ -12,7 +12,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { TIMED_OUT } from "../Sandbox/Sandboxes.ts"
 import type { Sandbox, Sandboxes } from "../Sandbox/Sandboxes.ts"
-import type { InSandbox } from "./SandboxMount.ts"
+import type { InSandbox, SandboxCallOptions } from "./SandboxMount.ts"
 import { inPieces } from "./SavedDisk.ts"
 import type { Archive, SavedDisk } from "./SavedDisk.ts"
 import { COMMAND_OUTPUT_BYTES, COMMAND_OUTPUT_LINES } from "./WorkspaceTools.ts"
@@ -373,16 +373,18 @@ export const makeWorkspaceMachine = (options: {
 		write(machineSlept(record()))
 	}
 
-	const attach = (): Promise<Sandbox> =>
+	const attach = (signal?: AbortSignal): Promise<Sandbox> =>
 		attached === undefined
 			? inTurn(async () => {
+					signal?.throwIfAborted()
 					attached ??= (await settle()).sandbox
 					return attached
 				})
 			: Promise.resolve(attached)
 
-	const forCall = async (): Promise<Sandbox> => {
-		const sandbox = await attach()
+	const forCall = async (signal?: AbortSignal): Promise<Sandbox> => {
+		const sandbox = await attach(signal)
+		signal?.throwIfAborted()
 		const now = record()
 		if (now.notice) {
 			write(machineNoticeRead(now))
@@ -394,14 +396,16 @@ export const makeWorkspaceMachine = (options: {
 	const inMachine = async <A, E>(
 		call: (sandbox: Sandbox) => Effect.Effect<A, E>,
 		signal?: AbortSignal,
-		access?: { readonly internal?: true },
+		access?: SandboxCallOptions,
 	): Promise<A> => {
-		const enter = access?.internal === true ? attach : forCall
+		signal?.throwIfAborted()
+		const enter = () => (access?.internal === true ? attach(signal) : forCall(signal))
 		active += 1
 		options.touched()
 		try {
 			const sandbox = await enter()
-			const running = run(call(sandbox), signal)
+			signal?.throwIfAborted()
+			const running = run(call(sandbox), access?.retainOutcome === true ? undefined : signal)
 			calls.add(running)
 			try {
 				return await running
