@@ -47,6 +47,7 @@ import {
 	AbortGrace,
 	RestoredHistoryLimit,
 	abortPiDurableTurn,
+	closeUnsubmittedPiDurableTurn,
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
@@ -2717,6 +2718,45 @@ describe("turn engine", () => {
 			})
 		} finally {
 			await second.close()
+		}
+	})
+
+	it("closes only a turn without a durable Pi submission", async () => {
+		const raw = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "Accepted", 1, 1)),
+		)
+		const cancelled = new Set<string>()
+		const backend = {
+			...raw,
+			isCancelled: (operationId: string) =>
+				cancelled.has(operationId) || raw.isCancelled(operationId),
+		}
+		const close = (operationId: string) =>
+			Effect.runPromise(
+				closeUnsubmittedPiDurableTurn(backend, operationId, (id) => {
+					cancelled.add(id)
+				}),
+			)
+		const run = (turn: number) =>
+			Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: `turn:${turn}`,
+					unpublishedOperationIds: [],
+					turn,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "hello",
+				}),
+			)
+		try {
+			expect(await close("turn:1")).toBe(true)
+			expect(await run(1)).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+			expect(await run(2)).toMatchObject({ ok: true })
+			expect(await close("turn:2")).toBe(false)
+			expect(cancelled).toEqual(new Set(["turn:1"]))
+		} finally {
+			await raw.close()
 		}
 	})
 

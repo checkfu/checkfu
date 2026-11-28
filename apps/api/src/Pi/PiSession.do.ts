@@ -32,6 +32,7 @@ import { actionsExtension, customToolsExtension } from "./PiActions.ts"
 import {
 	abortOperation,
 	abortPiDurableTurn,
+	closeUnsubmittedPiDurableTurn,
 	answerPiDurableCall,
 	pausePiDurableTurn,
 	recoverPiDurableTurn,
@@ -168,6 +169,7 @@ export interface PiSessionShape {
 	readonly watchPreviews: (sessionId: string) => Stream.Stream<PreviewPacket>
 	readonly alarm: (info?: Cloudflare.AlarmInvocationInfo) => Effect.Effect<void>
 	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
+	readonly closeUnsubmittedTurn: (operationId: string) => Effect.Effect<boolean>
 	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnOutcome>
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
 	readonly pauseUsage: (operationId: string, pause: string) => Effect.Effect<ModelUsage>
@@ -400,6 +402,8 @@ export const PiSessionLive = PiSession.make(
 						askedSessionId === sessionId ? Stream.fromPubSub(previews) : Stream.empty,
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
 					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
+					closeUnsubmittedTurn: (operationId) =>
+						closeUnsubmittedPiDurableTurn(backend, operationId, (id) => fence.markCancelled(id)),
 					runTurn: (request) => runPiDurableTurn(backend, request),
 					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
 					pauseUsage: (operationId, pause) => pausePiDurableTurn(backend, operationId, pause),

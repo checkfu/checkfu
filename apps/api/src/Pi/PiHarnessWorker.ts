@@ -39,6 +39,8 @@ export default PiHarnessWorker.make(
 			watchPreviews: (conversation) => piSession(conversation).watchPreviews(conversation),
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
+			closeUnsubmittedTurn: (conversation, operationId) =>
+				Effect.orDie(piSession(conversation).closeUnsubmittedTurn(operationId)),
 			runTurn: (conversation, request) => Effect.orDie(piSession(conversation).runTurn(request)),
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),

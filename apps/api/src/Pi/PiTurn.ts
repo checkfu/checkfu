@@ -99,6 +99,10 @@ export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
 
 export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
+	closeUnsubmittedTurn: {
+		args: Schema.Tuple([Schema.String, Schema.String]),
+		result: Schema.Boolean,
+	},
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	listOutputs: {

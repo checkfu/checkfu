@@ -709,6 +709,25 @@ const settledOutcome = (
 			: outcome
 	})
 
+/** Seal an operation before it has any durable submission, without aborting accepted work. */
+export const closeUnsubmittedPiDurableTurn = Effect.fn("PiDurableEngine.closeUnsubmitted")(
+	function* (
+		backend: PiDurableBackend,
+		operationId: string,
+		cancel: (operationId: string) => void,
+	): Effect.fn.Return<boolean> {
+		return yield* backend.withLock(
+			Effect.promise(async () => {
+				if ((await submissionOf(await backend.pi(), operationId)) !== undefined) {
+					return false
+				}
+				cancel(operationId)
+				return true
+			}),
+		)
+	},
+)
+
 export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(function* (
 	backend: PiDurableBackend,
 	operationId: string,

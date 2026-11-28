@@ -205,6 +205,7 @@ describe("PiProviderRuntime", () => {
 							return PiHarnessWorker.of({
 								watchPreviews: () => Stream.empty,
 								recoverTurn: () => Effect.succeed(null),
+								closeUnsubmittedTurn: () => Effect.succeed(false),
 								runTurn: () => Effect.die(new Error("plan only")),
 								abortTurn: () => Effect.succeed(false),
 								prepareWorkspace: () => Effect.succeed({ ok: true }),
