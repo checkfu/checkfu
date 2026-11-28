@@ -326,6 +326,55 @@ describe("Memory stores", () => {
 			}),
 		))
 
+	it("continues an ordered memory list across changes and scopes its token to the filters", () =>
+		withApi((apiFetch) =>
+			Effect.gen(function* () {
+				const store = yield* json<StoreBody>(
+					yield* request(apiFetch, "POST", "/v1/memory_stores", { name: "Notes" }),
+				)
+				const another = yield* json<StoreBody>(
+					yield* request(apiFetch, "POST", "/v1/memory_stores", { name: "Other" }),
+				)
+				const base = `/v1/memory_stores/${store.id}/memories`
+				const create = (path: string) => request(apiFetch, "POST", base, { path, content: "note" })
+				for (const path of [
+					"/todo/z.md",
+					"/todo/b.md",
+					"/todo/a.md",
+					"/todo/sub/child.md",
+					"/outside.md",
+				]) {
+					expect((yield* create(path)).status).toBe(201)
+				}
+				const filters = "path_prefix=%2Ftodo%2F&depth=1"
+				const first = yield* json<{
+					readonly data: ReadonlyArray<ListedMemory>
+					readonly next_page: string
+				}>(yield* request(apiFetch, "GET", `${base}?${filters}&limit=2`))
+				expect(first.data.map(({ path }) => path)).toEqual(["/todo/a.md", "/todo/b.md"])
+				expect(first.next_page).toEqual(expect.any(String))
+				expect((yield* request(apiFetch, "DELETE", `${base}/${first.data[1]?.id}`)).status).toBe(
+					200,
+				)
+				expect((yield* create("/todo/c.md")).status).toBe(201)
+				const suffix = `&page=${encodeURIComponent(first.next_page)}`
+				const tail = yield* json<{
+					readonly data: ReadonlyArray<ListedMemory>
+					readonly next_page: null
+				}>(yield* request(apiFetch, "GET", `${base}?${filters}&limit=3${suffix}`))
+				expect(tail.data.map(({ path }) => path)).toEqual(["/todo/c.md", "/todo/z.md"])
+				expect(tail.next_page).toBeNull()
+				for (const path of [
+					`${base}?path_prefix=%2Ftodo%2F&depth=0${suffix}`,
+					`${base}?path_prefix=%2Felse%2F&depth=1${suffix}`,
+					`/v1/memory_stores/${another.id}/memories?${filters}${suffix}`,
+					`${base}?${filters}&page=bad-token`,
+				]) {
+					expect((yield* request(apiFetch, "GET", path)).status).toBe(400)
+				}
+			}),
+		))
+
 	it("takes any memory within its size however it escapes, and refuses text that is not Unicode", () =>
 		withApi((apiFetch) =>
 			Effect.gen(function* () {

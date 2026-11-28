@@ -20,6 +20,7 @@ import { readSkill } from "@checkfu/api/Skills/ReadSkill"
 import { makeWebhooksTestSupport } from "@checkfu/api/Webhooks/WebhookTestLayer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
+import { MemoryIndex } from "@checkfu/domain/Memory/MemoryIndex.view"
 import { WebhookEventsNoop } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
@@ -53,7 +54,12 @@ export const MCP_URL = `${MCP_ORIGIN}${MCP_PATH}`
 const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
 	typeof input === "string" || "href" in input ? new Request(input, init) : input
 
+export const MemoryIndexInTest = Context.Reference<
+	(index: MemoryIndex["Service"]) => MemoryIndex["Service"]
+>("MemoryIndexInTest", { defaultValue: () => (index) => index })
+
 export const makeTestServer = Effect.gen(function* () {
+	const memoryIndexInTest = yield* MemoryIndexInTest
 	const HarnessLive = boundedHarness(
 		Effect.succeed({
 			runTurn: (args: { readonly input: ReadonlyArray<string> }) =>
@@ -118,7 +124,11 @@ export const makeTestServer = Effect.gen(function* () {
 		Layer.provideMerge(TestRuntimeContext),
 	)
 	const apiContext = yield* Layer.build(ApiLayer)
-	const api = yield* makeApiHandler.pipe(Effect.provide(apiContext))
+	const index = yield* MemoryIndex.pipe(Effect.provide(apiContext))
+	const api = yield* makeApiHandler.pipe(
+		Effect.provideService(MemoryIndex, memoryIndexInTest(index)),
+		Effect.provide(apiContext),
+	)
 	const runWithApi = Effect.runPromiseWith(apiContext)
 
 	const apiRequests: Array<Request> = []

@@ -2915,6 +2915,24 @@ const memoryStoresMemoriesListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
 			propName: "pathPrefix",
 			flagName: "path-prefix",
 			wireName: "path_prefix",
@@ -2940,6 +2958,17 @@ const memoryStoresMemoriesListCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Memory store ID"),
 		),
+		page: FlagString("page").pipe(
+			FlagWithDescription(
+				"Token from the previous response's next_page. Keep the same path filters.",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
 		pathPrefix: FlagString("path-prefix").pipe(
 			FlagWithDescription("List only memories under this directory. Must start and end with /"),
 			FlagOptional,
@@ -2950,7 +2979,11 @@ const memoryStoresMemoriesListCommand = CommandMake(
 		),
 	},
 	(flags) => invokeGeneratedOperation(memoryStoresMemoriesListCommandSpec, flags),
-).pipe(CommandWithDescription("List the memories in a store, without their content"))
+).pipe(
+	CommandWithDescription(
+		"List memories by path, without their content. Follow next_page to continue.",
+	),
+)
 
 const memoryStoresMemoriesRetrieveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "memory-stores:memories retrieve",

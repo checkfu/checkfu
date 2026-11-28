@@ -10,6 +10,7 @@ import {
 	MAX_INLINE_FILE_BYTES,
 	MAX_ARTIFACT_PATH_LENGTH,
 	MAX_INLINE_TOTAL_BYTES,
+	MemoryIndexEntry,
 } from "@checkfu/sdk/Schemas"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/domain/Agent/AgentTypes"
 import { describe, expect, it } from "@effect/vitest"
@@ -29,7 +30,13 @@ import {
 	makeToolHandler,
 } from "../src/GeneratedRuntime.ts"
 import { CREDENTIAL_CHECK_PATH, MAX_MCP_BODY_BYTES } from "../src/Server.ts"
-import { MCP_ORIGIN, MCP_URL, TEST_API_KEY, makeTestServer } from "./helpers/McpHarness.ts"
+import {
+	MCP_ORIGIN,
+	MCP_URL,
+	MemoryIndexInTest,
+	TEST_API_KEY,
+	makeTestServer,
+} from "./helpers/McpHarness.ts"
 
 type ToolArguments = NonNullable<Parameters<McpClient.McpClient["callTool"]>[0]["arguments"]>
 
@@ -1154,6 +1161,71 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				expect(read.slice(0, 2)).toEqual([label, true])
 				expect(read[2]).toContain("Retrying is safe")
 			}
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("traverses a full store through bounded memory tool pages", () =>
+		Effect.gen(function* () {
+			const rows = Schema.decodeUnknownEffect(Schema.toCodecJson(Schema.Array(MemoryIndexEntry)))
+			const date = "2026-01-01T00:00:00.000Z"
+			const entries = yield* rows(
+				Array.from({ length: 1000 }, (_, index) => ({
+					id: `mem_${String(index).padStart(32, "0")}`,
+					path: `/${String(index).padStart(4, "0")}-${'"'.repeat(250)}`,
+					content_sha256: "a".repeat(64),
+					content_size_bytes: 1,
+					created_at: date,
+					updated_at: date,
+				})),
+			)
+			const virtualStore = { id: Option.none<string>() }
+			const server = yield* makeTestServer.pipe(
+				Effect.provideService(MemoryIndexInTest, (index) => ({
+					...index,
+					waitFor: (ref, where, opts) =>
+						ref.id === Option.getOrUndefined(virtualStore.id)
+							? Effect.succeed({ entries, layout_version: 1 })
+							: index.waitFor(ref, where, opts),
+				})),
+			)
+			const client = yield* server.connect()
+			const created = yield* callOk(client, "memoryStores_createMemoryStore", {
+				body: { name: "Full store" },
+			})
+			expect(typeof created.id).toBe("string")
+			if (typeof created.id !== "string") {
+				return yield* Effect.die("Missing store ID")
+			}
+			const path = { memory_store_id: created.id }
+			yield* callOk(client, "memoryStores_createMemory", {
+				path,
+				body: { path: "/seed.md", content: "seed" },
+			})
+			virtualStore.id = Option.some(created.id)
+			const pageCodec = Schema.Struct({
+				data: Schema.Array(Schema.Struct({ path: Schema.String })),
+				next_page: Schema.NullOr(Schema.String),
+			})
+			const readPage = Schema.decodeUnknownEffect(pageCodec)
+			const encountered: Array<string> = []
+			let page: string | null = null
+			let bytes = 0
+			for (let count = 0; count < 10; count++) {
+				const body: unknown = yield* callOk(client, "memoryStores_listMemories", {
+					path,
+					query: { limit: 100, ...(page === null ? {} : { page }) },
+				})
+				const decoded: typeof pageCodec.Type = yield* readPage(body)
+				const wire = JSON.stringify(body)
+				expect(wire.length).toBeLessThan(200_000)
+				bytes += new TextEncoder().encode(wire).length
+				expect(decoded.data).toHaveLength(100)
+				encountered.push(...decoded.data.map(({ path }) => path))
+				page = decoded.next_page
+				expect(page === null).toBe(count === 9)
+			}
+			expect(bytes).toBeGreaterThan(500_000)
+			expect(encountered).toEqual(entries.map(({ path }) => path))
 		}).pipe(Effect.scoped),
 	)
 

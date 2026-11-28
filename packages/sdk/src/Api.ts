@@ -1868,6 +1868,13 @@ const listResponse = <A extends Schema.Top>(resource: A) =>
 export const ListSessionEventsResponse = listResponse(SessionEvent)
 export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
 
+const MemoryListPage = Schema.String.check(
+	Schema.isMaxLength(2400),
+	Schema.isPattern(/^[A-Za-z0-9_-]+$/u),
+).annotate({
+	description: "Token from the previous response's next_page. Keep the same path filters.",
+})
+
 export const ListAutomationRunsResponse = listResponse(AutomationRunResource)
 export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
@@ -3748,6 +3755,8 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 		HttpApiEndpoint.get("listMemories", "/v1/memory_stores/:memory_store_id/memories", {
 			params: memoryStoreParams,
 			query: {
+				page: Schema.optionalKey(MemoryListPage),
+				limit: Schema.optionalKey(ListLimitFromString),
 				path_prefix: Schema.optionalKey(
 					Schema.String.check(Schema.isStartingWith("/"), Schema.isEndingWith("/")).annotate({
 						description: "List only memories under this directory. Must start and end with /",
@@ -3759,16 +3768,20 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 					}),
 				),
 			},
-			success: Schema.Struct({ data: Schema.Array(MemoryListItem) }),
+			success: listResponse(MemoryListItem),
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "List memories")
-			.annotate(OpenApi.Description, "List the memories in a store, without their content")
+			.annotate(
+				OpenApi.Description,
+				"List memories by path, without their content. Follow next_page to continue.",
+			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "memoryStores.memories",
 				"x-forge-method-name": "list",
 				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "listMemories" },
 				"x-checkfu-mcp": { name: "memoryStores_listMemories" },
+				"x-checkfu-cli": resourceListCli,
 			}),
 	)
 	.add(

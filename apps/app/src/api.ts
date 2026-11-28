@@ -351,8 +351,23 @@ export const checkfu = {
 				await request("memoryStores.archive", { path: { memory_store_id } }),
 				isArchived,
 			),
-		memories: (memory_store_id: string, signal?: AbortSignal) =>
-			request("memoryStores.memories.list", { path: { memory_store_id }, ...withSignal(signal) }),
+		memories: async (memory_store_id: string, signal?: AbortSignal) => {
+			const data: Array<JsonMemoryEntry> = []
+			let page: string | null = null
+			do {
+				const result: FetchResult<"memoryStores.memories.list"> = await request(
+					"memoryStores.memories.list",
+					{
+						path: { memory_store_id },
+						query: { limit: 100, ...(page === null ? {} : { page }) },
+						...withSignal(signal),
+					},
+				)
+				data.push(...result.data)
+				page = result.next_page
+			} while (page !== null)
+			return { data }
+		},
 		memory: (memory_store_id: string, memory_id: string, signal?: AbortSignal) =>
 			request("memoryStores.memories.retrieve", {
 				path: { memory_store_id, memory_id },

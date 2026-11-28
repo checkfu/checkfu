@@ -3164,7 +3164,7 @@ export class EffectMemoryStoresMemoriesResource {
 		)
 	}
 
-	/** List the memories in a store, without their content */
+	/** List memories by path, without their content. Follow next_page to continue. */
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
 		params:
@@ -3210,6 +3210,8 @@ export class EffectMemoryStoresMemoriesResource {
 								this.#runtime.raw.memory_stores.listMemories({
 									params: pathParams,
 									query: {
+										...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+										...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 										...(params?.["path_prefix"] === undefined
 											? {}
 											: { path_prefix: params["path_prefix"] }),
@@ -3221,6 +3223,46 @@ export class EffectMemoryStoresMemoriesResource {
 					),
 			),
 			options,
+		)
+	}
+
+	/** Auto-paginate pages for List memories by path, without their content. Follow next_page to continue. */
+	listPages(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">>,
+		options?: RequestOptions<never>,
+	): Stream<EndpointSuccess<"memory_stores", "listMemories">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(page) =>
+				this.list(
+					memoryStoreId,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Auto-paginate items for List memories by path, without their content. Follow next_page to continue. */
+	listStream(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">>,
+		options?: RequestOptions<never>,
+	): Stream<ItemOf<EndpointSuccess<"memory_stores", "listMemories">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(page) =>
+				this.list(
+					memoryStoreId,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
 		)
 	}
 
@@ -6244,18 +6286,28 @@ export class MemoryStoresMemoriesResource {
 		)
 	}
 
-	/** List the memories in a store, without their content */
+	/** List memories by path, without their content. Follow next_page to continue. */
 	list(
 		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
-			PromiseRequestOptions<never>,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">>,
 		options?: PromiseRequestOptions<never>,
-	): APIPromise<EndpointJsonSuccess<"memory_stores", "listMemories">> {
-		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
-			new EffectMemoryStoresMemoriesResource(effectRuntime).list(memoryStoreId, params, {
-				...effectOpts,
-				withResponse: true,
-			}),
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"memory_stores", "listMemories">>>,
+		ItemOf<EndpointJsonSuccess<"memory_stores", "listMemories">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.page,
+			options,
+			(effectRuntime, page, effectOpts) =>
+				new EffectMemoryStoresMemoriesResource(effectRuntime).list(
+					memoryStoreId,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
 		)
 	}
 

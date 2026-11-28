@@ -8,7 +8,7 @@ import { MemoryId } from "@checkfu/domain/Memory/Memory.id"
 import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { MemoryStoreView } from "@checkfu/domain/Memory/MemoryStoreView.view"
-import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
+import { MAX_MEMORY_CONTENT_BYTES, MemoryPath } from "@checkfu/domain/Memory/MemoryTypes"
 import type { WritePrecondition } from "@checkfu/domain/Memory/MemoryTypes"
 import { MemoryView } from "@checkfu/domain/Memory/MemoryView.view"
 import { UpdateMemoryStore } from "@checkfu/domain/Memory/UpdateMemoryStore.command"
@@ -17,12 +17,15 @@ import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Base64Url from "effect/encoding/Base64Url"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import { MemoryAccess } from "../MemoryAccess.ts"
 import { measureContent, memoryIdOf } from "../MemoryIdentity.ts"
 import { CheckfuApi } from "./Api.ts"
-import { makeLister } from "./Listing.ts"
+import { listPage, makeLister } from "./Listing.ts"
 import {
 	archiveAndRead,
 	bestEffortAfterCommit,
@@ -45,6 +48,11 @@ export const MemoryReadWaitTimeout = Context.Reference<Duration.Input>(
 
 const isDirectChild = (path: string, prefix: string): boolean =>
 	!path.slice(prefix.length).includes("/")
+
+const memoryPageCursor = Schema.decodeUnknownOption(
+	Schema.fromJsonString(Schema.Struct({ scope: Schema.String, after: MemoryPath })),
+)
+const utf8 = new TextEncoder()
 
 export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores", (handlers) =>
 	Effect.gen(function* () {
@@ -255,6 +263,26 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 					const storeId = params.memory_store_id
 					yield* storeMissing(storeId)
 					const prefix = query.path_prefix ?? "/"
+					const depth = query.depth ?? "0"
+					const limit = query.limit ?? 50
+					const scope = yield* digest.digestHex(
+						Digest.sha256,
+						utf8.encode(JSON.stringify([storeId, prefix, depth])),
+					)
+					let after = ""
+					if (query.page !== undefined) {
+						const decoded = Base64Url.decodeString(query.page)
+						const cursor = Result.isSuccess(decoded)
+							? Option.getOrUndefined(memoryPageCursor(decoded.success))
+							: undefined
+						if (cursor === undefined || cursor.scope !== scope) {
+							return yield* reject(
+								400,
+								"Use a page token returned for the same memory store and path filters.",
+							)
+						}
+						after = cursor.after
+					}
 					const { entries } = yield* access
 						.currentIndex(storeId)
 						.pipe(
@@ -262,20 +290,26 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 								reject(503, "Timed out waiting for view consistency."),
 							),
 						)
-					return {
-						data: entries
-							.filter(
-								(entry) =>
-									entry.path.startsWith(prefix) &&
-									(query.depth !== "1" || isDirectChild(entry.path, prefix)),
-							)
-							.toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-							.map((entry) => ({
-								...entry,
-								type: "memory" as const,
-								memory_store_id: storeId,
-							})),
+					const page = entries
+						.filter(
+							(entry) =>
+								entry.path > after &&
+								entry.path.startsWith(prefix) &&
+								(depth !== "1" || isDirectChild(entry.path, prefix)),
+						)
+						.toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+						.slice(0, limit + 1)
+					const more = page.length > limit
+					if (more) {
+						page.pop()
 					}
+					const last = page.at(-1)
+					return listPage(
+						page.map((entry) => ({ ...entry, type: "memory" as const, memory_store_id: storeId })),
+						more && last !== undefined
+							? Base64Url.encode(JSON.stringify({ scope, after: last.path }))
+							: null,
+					)
 				}).pipe(handled),
 			)
 			.handle("getMemory", ({ params }) =>

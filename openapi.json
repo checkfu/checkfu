@@ -51437,6 +51437,27 @@
 						"required": true
 					},
 					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"maxLength": 2400,
+							"pattern": "^[A-Za-z0-9_-]+$",
+							"description": "Token from the previous response's next_page. Keep the same path filters."
+						},
+						"required": false
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^(?:[1-9]\\d?|100)$",
+							"description": "Maximum number of results to return (1-100, default 50)"
+						},
+						"required": false
+					},
+					{
 						"name": "path_prefix",
 						"in": "query",
 						"schema": {
@@ -51531,9 +51552,20 @@
 												],
 												"additionalProperties": false
 											}
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -51876,7 +51908,7 @@
 						}
 					}
 				},
-				"description": "List the memories in a store, without their content",
+				"description": "List memories by path, without their content. Follow next_page to continue.",
 				"summary": "List memories",
 				"x-forge-group-name": "memoryStores.memories",
 				"x-forge-method-name": "list",
@@ -51886,6 +51918,15 @@
 				},
 				"x-checkfu-mcp": {
 					"name": "memoryStores_listMemories"
+				},
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"limit": {
+							"min": 1,
+							"max": 100,
+							"metavar": "N"
+						}
+					}
 				}
 			}
 		},

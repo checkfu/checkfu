@@ -3055,7 +3055,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "memoryStores_listMemories",
 		title: "List memories",
-		description: "List the memories in a store, without their content",
+		description: "List memories by path, without their content. Follow next_page to continue.",
 		method: "GET",
 		path: "/v1/memory_stores/{memory_store_id}/memories",
 		readOnly: true,
@@ -3081,6 +3081,19 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
+						page: {
+							type: "string",
+							maxLength: 2400,
+							pattern: "^[A-Za-z0-9_-]+$",
+							description:
+								"Token from the previous response's next_page. Keep the same path filters.",
+						},
+						limit: {
+							type: "integer",
+							minimum: 1,
+							maximum: 100,
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
 						path_prefix: {
 							type: "string",
 							pattern: "^\\/",
