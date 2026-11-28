@@ -192,7 +192,7 @@ const collectRequestParts = (
 						isPlainRecord(val) &&
 						(Object.keys(val).length === 0 || Object.keys(val).some((key) => bodyFields.has(key)))
 					) {
-						body = { ...val }
+						body = Object.fromEntries(Object.entries(val))
 					} else if (isPlainRecord(val)) {
 						body = { [repeatFlag.wireName]: [val] }
 					} else {

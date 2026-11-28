@@ -4,12 +4,11 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
+import { visit } from "jsonc-parser/lib/esm/main.js"
 import * as YAML from "yaml"
 import { usageError } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { writeStderrLine } from "./TerminalOutput.ts"
-import { normalizeJsonValue } from "./Transform.ts"
-import type { NormalizedValue } from "./Transform.ts"
 
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024
 
@@ -32,7 +31,7 @@ const tooLarge = (label: string, budget: InputBudget) =>
 			: `${label} exceeds ${budget.limit} byte limit.`,
 	)
 
-export type StructuredValue = NormalizedValue
+export type StructuredValue = Schema.Json
 export type StructuredRecord = Record<string, StructuredValue>
 
 export const isPlainRecord = (value: unknown): value is StructuredRecord =>
@@ -110,36 +109,80 @@ export interface ParsedStructuredInput {
 	readonly warnings: ReadonlyArray<string>
 }
 
+const isJsonValue = Schema.is(Schema.Json)
+
+const requireJsonValue = (value: unknown): StructuredValue => {
+	if (!isJsonValue(value)) {
+		throw new Error("Expected JSON values. Quote date-like values and use finite numbers.")
+	}
+	return value
+}
+
+const rejectDuplicateJsonMembers = (raw: string): void => {
+	const keys: Array<Set<string>> = []
+	visit(raw, {
+		onObjectBegin: () => {
+			keys.push(new Set())
+		},
+		onObjectProperty: (key, _offset, _length, line, column) => {
+			const scope = keys.at(-1)
+			if (scope?.has(key) === true) {
+				throw new Error(`Duplicate object member at line ${line + 1}, column ${column + 1}.`)
+			}
+			scope?.add(key)
+		},
+		onObjectEnd: () => {
+			keys.pop()
+		},
+	})
+}
+
+const parseYamlDocument = (raw: string): ParsedStructuredInput => {
+	const doc = YAML.parseDocument(raw, { logLevel: "error", prettyErrors: false, merge: false })
+	const error =
+		doc.errors[0] ?? doc.warnings.find((warning) => warning.code === "TAG_RESOLVE_FAILED")
+	if (error?.code === "MULTIPLE_DOCS") {
+		throw new Error("Input contains multiple documents. Send one document.")
+	}
+	if (error !== undefined) {
+		throw new Error(`Invalid YAML (${error.code}) at character ${error.pos[0] + 1}.`)
+	}
+	YAML.visit(doc, {
+		Pair: (_index, pair) => {
+			if (!YAML.isScalar(pair.key) || typeof pair.key.value !== "string") {
+				throw new Error("Mapping keys must be strings. Quote a literal key.")
+			}
+		},
+	})
+	return {
+		value: requireJsonValue(doc.toJS({ maxAliasCount: 100 })),
+		warnings: doc.warnings.map((warning) => warning.message),
+	}
+}
+
 export const parseJsonOrYamlDocument = (
 	raw: string,
 	label: string,
 ): Effect.Effect<ParsedStructuredInput, CliFailure> =>
 	Effect.try({
-		try: () => ({
-			value: normalizeJsonValue(JSON.parse(raw)),
-			warnings: [] as ReadonlyArray<string>,
-		}),
-		catch: () => undefined,
-	}).pipe(
-		Effect.catch(() =>
-			Effect.try({
-				try: () => {
-					const doc = YAML.parseDocument(raw, { logLevel: "error" })
-					if (doc.errors.length > 0) {
-						throw new Error(doc.errors[0]?.message ?? "Invalid YAML document.")
-					}
-					return {
-						value: normalizeJsonValue(doc.toJS()),
-						warnings: doc.warnings.map((warning) => warning.message),
-					}
-				},
-				catch: (err) =>
-					usageError(
-						`Invalid JSON or YAML for ${label}: ${err instanceof Error ? err.message : String(err)}`,
-					),
-			}),
-		),
-	)
+		try: () => {
+			let parsed: unknown
+			try {
+				parsed = JSON.parse(raw)
+			} catch {
+				return parseYamlDocument(raw)
+			}
+			rejectDuplicateJsonMembers(raw)
+			return { value: requireJsonValue(parsed), warnings: [] }
+		},
+		catch: (error) => {
+			const message =
+				error instanceof Error && error.name === "Error"
+					? error.message
+					: "Expected a JSON-compatible document within the parser limits."
+			return usageError(`Invalid JSON or YAML for ${label}: ${message}`)
+		},
+	})
 
 export const emitYamlWarnings = (
 	label: string,
