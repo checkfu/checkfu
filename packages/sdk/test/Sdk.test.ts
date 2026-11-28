@@ -3328,7 +3328,10 @@ describe("@checkfu/sdk", () => {
 							)
 						}
 						if (req.method === "POST" && url.pathname === "/v1/agents/agent_upd") {
-							return jsonResponse({ id: "agent_upd", type: "agent", pending: true }, 202)
+							return jsonResponse(
+								{ id: "agent_upd", type: "agent", pending: true, version: 3 },
+								202,
+							)
 						}
 						if (req.method === "GET" && url.pathname === "/v1/agents/agent_upd") {
 							agentUpdatePolls += 1
@@ -3569,6 +3572,14 @@ describe("@checkfu/sdk", () => {
 
 		const eventStreamResponse = (body: string | ReadableStream<Uint8Array>) =>
 			new Response(body, { headers: { "content-type": "text/event-stream" } })
+
+		const transportSignal = (init: RequestInit | undefined): AbortSignal => {
+			const signal = init?.signal
+			if (!signal) {
+				throw new Error("The event stream request has no cancellation signal.")
+			}
+			return signal
+		}
 
 		const collectEvents = (fetch: typeof globalThis.fetch, options: StreamSseOptions) =>
 			Effect.flatMap(CheckfuClient, (client) =>
@@ -3842,7 +3853,7 @@ describe("@checkfu/sdk", () => {
 				const encoder = new TextEncoder()
 				const fetch: typeof globalThis.fetch = async (input, init) => {
 					const request = toWebRequest(input, init)
-					signals.push(request.signal)
+					signals.push(transportSignal(init))
 					cursorHeaders.push(request.headers.get("last-event-id"))
 					return signals.length === 1
 						? eventStreamResponse(
@@ -3865,8 +3876,8 @@ describe("@checkfu/sdk", () => {
 		it.live("fails with a timeout when a stream stays silent through every reconnect", () =>
 			Effect.gen(function* () {
 				const signals: Array<AbortSignal> = []
-				const fetch: typeof globalThis.fetch = async (input, init) => {
-					signals.push(toWebRequest(input, init).signal)
+				const fetch: typeof globalThis.fetch = async (_input, init) => {
+					signals.push(transportSignal(init))
 					return eventStreamResponse(new ReadableStream<Uint8Array>())
 				}
 				const error = yield* Effect.flip(
@@ -3888,8 +3899,8 @@ describe("@checkfu/sdk", () => {
 		it.live("aborts and retries an event stream open that never answers", () =>
 			Effect.gen(function* () {
 				const signals: Array<AbortSignal> = []
-				const fetch: typeof globalThis.fetch = async (input, init) => {
-					const { signal } = toWebRequest(input, init)
+				const fetch: typeof globalThis.fetch = async (_input, init) => {
+					const signal = transportSignal(init)
 					signals.push(signal)
 					return signals.length === 1
 						? new Promise<Response>((_resolve, reject) => {
@@ -3989,10 +4000,6 @@ describe("@checkfu/sdk", () => {
 						expect(copyErr.message).toContain("until")
 						expect(getPolls).toBe(0)
 
-						const versioned = { ...pendingArchive, version: 7 }
-						const versionedErr = yield* Effect.flip(client.waitForPending(versioned, pollOpts))
-						expect(versionedErr._tag).toBe("CheckfuConfigError")
-						expect(versionedErr.message).toContain("until")
 						expect(getPolls).toBe(0)
 
 						const cloneErr = yield* Effect.flip(client.waitForPending(cloned, pollOpts))

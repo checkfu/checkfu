@@ -449,12 +449,13 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							changes: model === undefined ? fields : { ...fields, model },
 						}),
 					)
-					return yield* loadCommittedAgentVersion(
+					const result = yield* loadCommittedAgentVersion(
 						id,
 						receipt.reply.version,
 						commitForStream(receipt.commits, `Agent/${id}`),
 						"Failed to load updated agent.",
 					)
+					return isPending(result) ? { ...result, version: receipt.reply.version } : result
 				}).pipe(handled),
 			)
 			.handle("archive", ({ params, query }) => archive(params.agent_id, query.version))

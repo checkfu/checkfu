@@ -4,7 +4,12 @@ import * as OpenApi from "effect/http-api/OpenApi"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { PendingArtifactVersion, PendingCredential, PendingWebhook } from "../src/Api.ts"
+import {
+	PendingArtifactVersion,
+	PendingAutomationUpdate,
+	PendingCredential,
+	PendingWebhook,
+} from "../src/Api.ts"
 import type { PendingResourceType, PendingVault, VaultCredential } from "../src/Api.ts"
 import type { CheckfuSdkClient, PendingResolvedResource } from "../src/Client.ts"
 import type { CheckfuSdkError } from "../src/Errors.ts"
@@ -249,66 +254,115 @@ describe("waitForPending", () => {
 	})
 
 	it.each([
-		{ name: "waits for the next automation revision", revision: 3, reads: 2 },
-		{
-			name: "requires an explicit predicate when the revision was omitted",
-			revision: undefined,
-			reads: 0,
-		},
-	])("$name", async ({ revision, reads }) => {
-		let polls = 0
-		const at = "2026-01-01T00:00:00.000Z"
-		const fetch: typeof globalThis.fetch = async (input, init) => {
-			const request = new Request(input, init)
-			expect(new URL(request.url).pathname).toBe("/v1/automations/auto_1")
-			if (request.method === "POST") {
-				expect(await request.json()).toEqual({
-					name: "Updated report",
-					...(revision === undefined ? {} : { revision }),
+		{ label: "no-op guard", target: 3, expected: 1 },
+		{ label: "advancing guard", target: 4, expected: 2 },
+	])(
+		"settles a $label at the target carried by the receipt on both facades",
+		async ({ target, expected }) => {
+			let polls = 0
+			const at = "2026-01-01T00:00:00.000Z"
+			const fetch: typeof globalThis.fetch = async (input, init) => {
+				const request = new Request(input, init)
+				expect(new URL(request.url).pathname).toBe("/v1/automations/auto_1")
+				if (request.method === "POST") {
+					expect(await request.json()).toEqual({
+						name: "Updated report",
+						revision: 3,
+					})
+					return Response.json(
+						{ id: "auto_1", type: "automation", pending: true, revision: target },
+						{ status: 202 },
+					)
+				}
+				polls += 1
+				return Response.json({
+					id: "auto_1",
+					type: "automation",
+					name: target === 3 || polls === 1 ? "Morning report" : "Updated report",
+					description: null,
+					agent: { id: "agent_1", version: 1 },
+					environment_id: "env_1",
+					initial_events: [{ type: "user.message", content: [{ type: "text", text: "Report." }] }],
+					schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+					status: "active",
+					pause_reason: null,
+					revision: target === 3 || polls === 1 ? 3 : 4,
+					run_count: 0,
+					last_run_at: null,
+					upcoming_runs_at: [],
+					created_at: at,
+					updated_at: at,
+					archived_at: null,
 				})
-				return Response.json({ id: "auto_1", type: "automation", pending: true }, { status: 202 })
 			}
-			polls += 1
-			return Response.json({
-				id: "auto_1",
-				type: "automation",
-				name: polls === 1 ? "Morning report" : "Updated report",
-				description: null,
-				agent: { id: "agent_1", version: 1 },
-				environment_id: "env_1",
-				initial_events: [{ type: "user.message", content: [{ type: "text", text: "Report." }] }],
-				schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
-				status: "active",
-				pause_reason: null,
-				revision: polls === 1 ? 3 : 4,
-				run_count: 0,
-				last_run_at: null,
-				upcoming_runs_at: [],
-				created_at: at,
-				updated_at: at,
-				archived_at: null,
-			})
-		}
-		const client = new Checkfu({ apiKey: "ck_test_key", baseUrl: "http://localhost:1337", fetch })
-		try {
-			const receipt = await client.automations.update("auto_1", {
-				name: "Updated report",
-				...(revision === undefined ? {} : { revision }),
-			})
-			expect(receipt).toMatchObject({ id: "auto_1", pending: true })
-			const settled = client.waitForPending(receipt, {
+
+			const body = { name: "Updated report", revision: 3 }
+			const settle = {
 				initialDelay: "1 millis",
 				timeout: "2 seconds",
-			})
-			if (revision === undefined) {
-				await expect(settled).rejects.toMatchObject({
-					_tag: "CheckfuConfigError",
-					message: expect.stringContaining('requires an explicit "until" predicate'),
+				until: () => true,
+			} as const
+			const decode = Schema.decodeUnknownSync(Schema.fromJsonString(PendingAutomationUpdate))
+			const client = new Checkfu({ apiKey: "ck_test_key", baseUrl: "http://localhost:1337", fetch })
+			try {
+				const receipt = await client.automations.update("auto_1", body)
+				expect(receipt).toMatchObject({ id: "auto_1", pending: true, revision: target })
+				const repacked = decode(JSON.stringify(receipt))
+				await expect(client.waitForPending(repacked, settle)).resolves.toMatchObject({
+					revision: target,
 				})
-			} else {
-				await expect(settled).resolves.toMatchObject({ name: "Updated report", revision: 4 })
+				expect(polls).toBe(expected)
+				polls = 0
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const effectClient = yield* CheckfuClient
+						const updated = yield* effectClient.automations.update("auto_1", body)
+						expect(updated).toMatchObject({ pending: true, revision: target })
+						const outcome = yield* effectClient.waitForPending(updated, settle)
+						expect(outcome.revision).toBe(target)
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: Redacted.make("ck_test_key"),
+								baseUrl: "http://localhost:1337",
+								fetch,
+							}),
+						),
+					),
+				)
+				expect(polls).toBe(expected)
+				await expect(
+					client.waitForPending(repacked, {
+						...settle,
+						timeout: "20 millis",
+						until: () => false,
+					}),
+				).rejects.toMatchObject({ _tag: "APIConnectionTimeoutError" })
+			} finally {
+				await client.close()
 			}
-			expect(polls).toBe(reads)
+		},
+	)
+
+	it("refuses invalid update targets in deserialized receipts before polling", async () => {
+		const client = new Checkfu({
+			apiKey: "ck_test_key",
+			baseUrl: "http://localhost:1337",
+			fetch: async () => {
+				throw new Error("Invalid receipts must not poll.")
+			},
+		})
+		try {
+			for (const target of [-7, 0, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+				for (const receipt of [
+					{ type: "agent", id: "agent_1", pending: true, version: target },
+					{ type: "automation", id: "auto_1", pending: true, revision: target },
+				] as const) {
+					await expect(client.waitForPending(receipt)).rejects.toMatchObject({
+						_tag: "CheckfuConfigError",
+					})
+				}
+			}
 		} finally {
 			await client.close()
 		}

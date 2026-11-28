@@ -470,17 +470,30 @@ export const attachPendingReadiness = <A>(value: A, readiness: PendingReadiness)
 	return value
 }
 
-export const getPendingReadiness = (value: unknown): PendingReadiness | undefined =>
-	typeof value === "object" && value !== null ? pendingReadinessByReceipt.get(value) : undefined
+const validVersion = (value: unknown): value is number =>
+	typeof value === "number" && Number.isSafeInteger(value) && value >= 1
+
+export const getPendingReadiness = (value: unknown): PendingReadiness | undefined => {
+	if (typeof value !== "object" || value === null) {
+		return undefined
+	}
+	if ("pending" in value && value.pending === true && "type" in value) {
+		if (value.type === "agent" && "version" in value && validVersion(value.version)) {
+			return { kind: "min-version", field: "version", minVersion: value.version }
+		}
+		if (value.type === "automation" && "revision" in value && validVersion(value.revision)) {
+			return { kind: "min-version", field: "revision", minVersion: value.revision }
+		}
+	}
+	return pendingReadinessByReceipt.get(value)
+}
 
 const minimumVersion = (body: unknown, field: VersionField): PendingReadiness | undefined => {
 	const current =
 		typeof body === "object" && body !== null && Predicate.hasProperty(body, field)
 			? body[field]
 			: undefined
-	return typeof current === "number" && Number.isInteger(current) && current >= 1
-		? { kind: "min-version", field, minVersion: current + 1 }
-		: undefined
+	return validVersion(current) ? { kind: "min-version", field, minVersion: current + 1 } : undefined
 }
 
 export const pendingUpdateReadiness = (body: unknown, operation: string): PendingReadiness =>

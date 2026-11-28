@@ -1343,6 +1343,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					expect(yield* Effect.promise(() => stalledRes.json())).toEqual({
 						id: created.id,
 						type: "agent",
+						version: 1,
 						pending: true,
 					})
 				}).pipe(

@@ -74,6 +74,7 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 			),
 		]
 	},
+	reply: (states) => ({ revision: states.automation.revision }),
 	transitions: {
 		AChangedAgentIsActiveAndHasThePinnedVersion: ({ before, after, command }) =>
 			[

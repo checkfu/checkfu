@@ -48,17 +48,26 @@ it.each([[404], [503], [404, 503]])(
 
 it("keeps the receipt after reads return a stale version", async () => {
 	vi.useFakeTimers()
+	let visibleVersion = 1
 	const sent = stubApi(({ method }) =>
 		method === "POST" || method === "PUT" || method === "PATCH"
-			? { status: 202, body: { id, pending: true } }
-			: { body: complete },
+			? { status: 202, body: { id, type: "agent", version: 2, pending: true } }
+			: { body: { ...complete, version: visibleVersion } },
 	)
 	const pending = checkfu.agents
 		.update(id, { version: 1, name: "Updated" })
 		.catch((error: unknown) => error)
 	await vi.runAllTimersAsync()
-	expect(await pending).toMatchObject({ id, message: expect.stringContaining("Change accepted") })
+	const receipt = await pending
+	if (!isAcceptedReceipt(receipt)) {
+		throw new Error("Missing acceptance receipt")
+	}
+	expect(receipt).toMatchObject({ id, message: expect.stringContaining("Change accepted") })
 	expect(sent.filter(({ method }) => method === "GET")).toHaveLength(41)
+	await expect(receipt.check()).resolves.toBe(false)
+	visibleVersion = 2
+	await expect(receipt.check()).resolves.toBe(true)
+	expect(sent.filter(({ method }) => method === "GET")).toHaveLength(43)
 	expect(sent.filter(({ method }) => method !== "GET")).toHaveLength(1)
 })
 

@@ -1124,20 +1124,17 @@ export class EffectAgentsResource {
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("agents", "update", { agent_id: agentId }), (pathParams) =>
 				EffectFlatMap(forbidIdempotencyKey("agents.update", options), () =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.agents.update",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.agents.update({
-									params: pathParams,
-									payload: params,
-									responseMode: "decoded-and-response",
-								}),
-						),
-						pendingUpdateReadiness(params, "agents.update"),
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.agents.update",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.agents.update({
+								params: pathParams,
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
 					),
 				),
 			),
@@ -2573,20 +2570,17 @@ export class EffectAutomationsResource {
 				decodeEndpointParams("automations", "update", { automation_id: automationId }),
 				(pathParams) =>
 					EffectFlatMap(forbidIdempotencyKey("automations.update", options), () =>
-						withPendingReadiness(
-							executeWithRetries(
-								this.#runtime,
-								"checkfu.automations.update",
-								"pre-commit-only",
-								options,
-								() =>
-									this.#runtime.raw.automations.update({
-										params: pathParams,
-										payload: params,
-										responseMode: "decoded-and-response",
-									}),
-							),
-							pendingUpdateReadiness(params, "automations.update"),
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.automations.update({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
 						),
 					),
 			),

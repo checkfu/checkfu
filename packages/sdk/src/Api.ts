@@ -1577,6 +1577,12 @@ const pendingResource = <const T extends PendingResourceType>(type: T) =>
 export const PendingAgent = pendingResource("agent")
 export type PendingAgent = typeof PendingAgent.Type
 
+export const PendingAgentUpdate = Schema.Struct({
+	...PendingAgent.fields,
+	version: PositiveInt.annotate({ description: "The agent version resulting from the update" }),
+}).pipe(HttpApiSchema.status(202))
+export type PendingAgentUpdate = typeof PendingAgentUpdate.Type
+
 export const PendingEnvironment = pendingResource("environment")
 export type PendingEnvironment = typeof PendingEnvironment.Type
 
@@ -1585,6 +1591,14 @@ export type PendingSession = typeof PendingSession.Type
 
 export const PendingAutomation = pendingResource("automation")
 export type PendingAutomation = typeof PendingAutomation.Type
+
+export const PendingAutomationUpdate = Schema.Struct({
+	...PendingAutomation.fields,
+	revision: PositiveInt.annotate({
+		description: "The automation revision resulting from the update",
+	}),
+}).pipe(HttpApiSchema.status(202))
+export type PendingAutomationUpdate = typeof PendingAutomationUpdate.Type
 export const PendingArtifact = pendingResource("artifact")
 export type PendingArtifact = typeof PendingArtifact.Type
 
@@ -1629,9 +1643,11 @@ export const PendingMemory = Schema.Struct({
 export type PendingMemory = typeof PendingMemory.Type
 
 export const PendingResource = Schema.Union([
+	PendingAgentUpdate,
 	PendingAgent,
 	PendingEnvironment,
 	PendingSession,
+	PendingAutomationUpdate,
 	PendingAutomation,
 	PendingArtifact,
 	PendingArtifactVersion,
@@ -2244,7 +2260,7 @@ const Agents = HttpApiGroup.make("agents")
 		HttpApiEndpoint.post("update", "/v1/agents/:agent_id", {
 			params: agentParams,
 			payload: UpdateAgentBody,
-			success: [AgentResource, PendingAgent],
+			success: [AgentResource, PendingAgentUpdate],
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Update an agent")
@@ -2779,7 +2795,7 @@ const Automations = HttpApiGroup.make("automations")
 		HttpApiEndpoint.post("update", "/v1/automations/:automation_id", {
 			params: automationParams,
 			payload: UpdateAutomationBody,
-			success: [AutomationResource, PendingAutomation],
+			success: [AutomationResource, PendingAutomationUpdate],
 			error: BodyErrors,
 		})
 			.annotate(OpenApi.Summary, "Update an automation")

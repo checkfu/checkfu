@@ -59,6 +59,7 @@ export class UpdateAutomation extends Domain.Command("UpdateAutomation", {
 		agent_version: Schema.NullOr(PositiveInt),
 	},
 	events: [AutomationUpdated],
+	reply: { revision: PositiveInt },
 	rejects: [
 		AutomationNotFound,
 		AutomationArchivedError,

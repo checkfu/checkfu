@@ -392,7 +392,10 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 								content_changed,
 							}),
 						)
-						return commitForStream(receipt.commits, `Automation/${id}`)
+						return {
+							commit: commitForStream(receipt.commits, `Automation/${id}`),
+							revision: receipt.reply.revision,
+						}
 					})
 					const committed = yield* Effect.retry(send, {
 						schedule: Schedule.recurs(UPDATE_RETRIES),
@@ -404,9 +407,15 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 										.pipe(Effect.as(true))
 								: false,
 					}).pipe(Effect.catchTag("AutomationScheduleUnusable", rejectUnusableSchedule))
-					return committed === undefined
-						? { id, type: "automation" as const, pending: true as const }
-						: yield* after(id, committed)
+					const result = yield* after(id, committed.commit)
+					return isPending(result) || result.revision < committed.revision
+						? {
+								id,
+								type: "automation" as const,
+								pending: true as const,
+								revision: committed.revision,
+							}
+						: result
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
