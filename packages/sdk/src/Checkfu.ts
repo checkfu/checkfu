@@ -252,7 +252,7 @@ export class Checkfu extends PromiseResources {
 	static readonly secret = secret
 
 	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */
-	declare readonly files: Files
+	override readonly files: Files
 	readonly baseUrl: string
 	readonly #config: ResolvedCheckfuOptions
 	readonly #runtime: ManagedRuntime.ManagedRuntime<CheckfuClient, CheckfuConfigError>
@@ -279,7 +279,7 @@ export class Checkfu extends PromiseResources {
 			Effect.map(CheckfuClient, (client) => client[INTERNAL_EFFECT_RUNTIME]),
 		)
 		super(promiseRuntime)
-		;(this as { files: Files }).files = new Files(promiseRuntime)
+		this.files = new Files(promiseRuntime)
 		this.#config = resolved
 		this.baseUrl = resolved.baseUrl
 		this.#runtime = managed

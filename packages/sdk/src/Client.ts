@@ -206,7 +206,7 @@ export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime
 
 export class CheckfuSdkClient extends EffectResources {
 	/** Generated file methods plus hand-written `upload` and `content` (see FileTransfer.ts). */
-	declare readonly files: EffectFiles
+	override readonly files: EffectFiles
 	readonly baseUrl: string
 	readonly raw: CheckfuHttpApiClient
 	readonly generateIdempotencyKey: Effect.Effect<string>
@@ -222,7 +222,7 @@ export class CheckfuSdkClient extends EffectResources {
 		) => Effect.Effect<CheckfuClientService, CheckfuConfigError>,
 	) {
 		super(runtime)
-		;(this as { files: EffectFiles }).files = new EffectFiles(runtime)
+		this.files = new EffectFiles(runtime)
 		this[INTERNAL_EFFECT_RUNTIME] = runtime
 		this.baseUrl = runtime.baseUrl
 		this.raw = runtime.raw
