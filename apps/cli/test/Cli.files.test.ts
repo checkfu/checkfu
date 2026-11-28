@@ -143,6 +143,47 @@ describe("CLI files", () => {
 					}
 				}
 
+				let unexpectedPulls = 0
+				let partialCancelled = false
+				const oversizedPartial = new ReadableStream<Uint8Array>(
+					{
+						pull(controller) {
+							unexpectedPulls += 1
+							controller.enqueue(new Uint8Array(8))
+							controller.close()
+						},
+						cancel() {
+							partialCancelled = true
+						},
+					},
+					{ highWaterMark: 0 },
+				)
+				for (const [response, diagnostic] of [
+					[new Response(null, { status: 304 }), "HTTP 304 for a full download"],
+					[
+						new Response(oversizedPartial, {
+							status: 206,
+							headers: {
+								"content-type": "application/octet-stream",
+								"content-range": "bytes 0-1/4",
+							},
+						}),
+						"HTTP 206 for a full download",
+					],
+				] as const) {
+					const unexpected = yield* cli.run(download(id), {
+						...options,
+						interceptFetch: (next, request) =>
+							request.url.endsWith("/content") ? Promise.resolve(response) : next(request),
+					})
+					expect(unexpected.exitCode).toBe(USAGE_EXIT_CODE)
+					expect(unexpected.errorMessage).toContain(diagnostic)
+					expect(yield* fs.readDirectory(root)).toEqual(["source.bin"])
+				}
+
+				expect(unexpectedPulls).toBe(0)
+				expect(partialCancelled).toBe(true)
+
 				yield* fs.writeFile(source, new Uint8Array())
 				const empty = yield* cli.run(["files", "upload", source], options)
 				expect(empty.exitCode).toBe(0)

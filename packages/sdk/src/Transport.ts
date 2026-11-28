@@ -533,6 +533,9 @@ export const shouldRetryError = (error: CheckfuSdkError, safety: RetrySafety): b
 		return false
 	}
 	if (isAPIError(error)) {
+		if (error.status === 416) {
+			return false
+		}
 		const hasPartialOrUnconfirmed =
 			(error.accepted !== undefined && error.accepted.length > 0) ||
 			error.unconfirmedIndex !== undefined

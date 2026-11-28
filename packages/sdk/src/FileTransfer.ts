@@ -2,8 +2,9 @@
 // raw byte bodies), so these sit beside the generated `list`/`retrieve`/`delete` with the same retry,
 // idempotency and error behavior. They are installed on `client.files` for both clients.
 import * as Effect from "effect/Effect"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Stream from "effect/Stream"
-import type * as HttpClientResponse from "effect/http/HttpClientResponse"
+import { CheckfuApi } from "./Api.ts"
 import type { IsoDateTimes } from "./Boundary.ts"
 import { CheckfuConfigError } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
@@ -14,6 +15,7 @@ import type { APIPromise, PromiseRequestOptions, PromiseSdkRuntime } from "./Pro
 import {
 	decodeEndpointParams,
 	executeWithRetries,
+	forbidIdempotencyKey,
 	resolveCallIdempotencyKey,
 	snapshotRequestOptions,
 	unwrapResponse,
@@ -29,6 +31,12 @@ import type {
 	WithResponse,
 	WithResponseRequestOptions,
 } from "./Runtime.ts"
+import { streamResponseBody } from "./Transport.ts"
+
+export const decodeFileContentResponse = HttpApiClient.decodeResponse(CheckfuApi, {
+	group: "files",
+	endpoint: "content",
+})
 
 export type FileBytes = Uint8Array | ArrayBuffer | Blob
 
@@ -123,38 +131,51 @@ export class EffectFiles extends EffectFilesResource {
 		)
 	}
 
-	/** Download a file's bytes. */
+	/** Download a file's bytes. An unchanged response has zero bytes and status 304. */
 	content(
 		fileId: PathParam<"files", "content", "file_id">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions<never>,
 	): Effect.Effect<WithResponse<Uint8Array>, CheckfuSdkError>
 	content(
 		fileId: PathParam<"files", "content", "file_id">,
-		options?: RequestOptions,
+		options?: RequestOptions<never>,
 	): Effect.Effect<Uint8Array, CheckfuSdkError>
 	content(
 		fileId: PathParam<"files", "content", "file_id">,
-		options?: AnyRequestOptions,
+		options?: AnyRequestOptions<never>,
 	): Effect.Effect<unknown, CheckfuSdkError> {
 		const rt = this.#rt
-		options = snapshotRequestOptions(options)
+		const requestOptions = snapshotRequestOptions(options)
 		return unwrapResponse(
-			Effect.flatMap(decodeEndpointParams("files", "content", { file_id: fileId }), (pathParams) =>
-				executeWithRetries(rt, "checkfu.files.content", "idempotent", options, () =>
-					Effect.flatMap(
-						rt.raw.files.content({ params: pathParams, responseMode: "decoded-and-response" }),
-						([stream, response]) =>
-							Effect.map(
-								Stream.runCollect(stream),
-								(chunks): readonly [Uint8Array, HttpClientResponse.HttpClientResponse] => [
-									concat(chunks),
-									response,
-								],
-							),
-					),
-				),
-			),
-			options,
+			Effect.gen(function* () {
+				yield* forbidIdempotencyKey("files.content", requestOptions)
+				const params = yield* decodeEndpointParams("files", "content", { file_id: fileId })
+				return yield* executeWithRetries(
+					rt,
+					"checkfu.files.content",
+					"idempotent",
+					requestOptions,
+					() =>
+						Effect.gen(function* () {
+							const response = yield* rt.raw.files.content({
+								params,
+								responseMode: "response-only",
+							})
+							if (response.status === 304) {
+								return [new Uint8Array(0), response] as const
+							}
+							if (response.status === 200 || response.status === 206) {
+								const bytes = concat(yield* Stream.runCollect(streamResponseBody(response)))
+								return [bytes, response] as const
+							}
+							yield* decodeFileContentResponse(response)
+							return yield* new CheckfuConfigError({
+								message: "Unexpected file download response.",
+							})
+						}),
+				)
+			}),
+			requestOptions,
 		)
 	}
 }
