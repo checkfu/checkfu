@@ -169,6 +169,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: bun run test:workerd ${{ matrix.leg.args }}
+        env:
+          CHECKFU_LOG_DOCKER_READINESS: "1"
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code

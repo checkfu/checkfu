@@ -218,6 +218,70 @@ export const webhookFanoutFixture = {
 	worker: "FanoutTestWorker",
 }
 
+const dockerStartupLimitMs = 15_000
+const dockerAttemptLimitMs = 2000
+const dockerRetryDelayMs = 250
+
+export const dockerServerVersion = (
+	timeout: number,
+	executable = "docker",
+	args: ReadonlyArray<string> = ["version", "--format", "{{.Server.Version}}"],
+) =>
+	execFileSync(executable, args, {
+		encoding: "utf8",
+		timeout,
+		killSignal: "SIGKILL",
+		stdio: "pipe",
+	}).trim()
+
+const dockerStarting = (error: unknown): boolean => {
+	if (!(error instanceof Error)) {
+		return false
+	}
+	if ("code" in error && error.code === "ETIMEDOUT") {
+		return true
+	}
+	const stderr =
+		"stderr" in error && typeof error.stderr === "string" ? error.stderr : error.message
+	return (
+		!/permission denied|access is denied/iu.test(stderr) &&
+		/cannot connect|connection refused|daemon is starting|no such file or directory|the system cannot find the file specified/iu.test(
+			stderr,
+		)
+	)
+}
+
+export const waitForDocker = async (
+	probe: (timeout: number) => string = dockerServerVersion,
+	budgetMs = dockerStartupLimitMs,
+): Promise<string> => {
+	const deadline = performance.now() + budgetMs
+	let cause: Error | undefined
+	while (true) {
+		const remaining = Math.floor(deadline - performance.now())
+		if (remaining < 1) {
+			break
+		}
+		try {
+			const version = probe(Math.min(remaining, dockerAttemptLimitMs))
+			if (version !== "" && version !== "<no value>") {
+				return version
+			}
+			cause = new Error("Docker did not return a daemon version.")
+		} catch (error) {
+			cause = error instanceof Error ? error : new Error(String(error))
+			if (!dockerStarting(error)) {
+				break
+			}
+		}
+		const delay = Math.min(dockerRetryDelayMs, Math.floor(deadline - performance.now()))
+		if (delay > 0) {
+			await sleep(delay)
+		}
+	}
+	throw new Error("The local sandbox tests need a running Docker daemon.", { cause })
+}
+
 interface WorkerdDevOptions {
 	readonly fixture?: typeof webhookFanoutFixture
 	readonly webhookEgressUrl?: string
@@ -231,15 +295,11 @@ export const startAlchemyDev = async (
 ) => {
 	const fixture = options?.fixture
 	if (fixture === undefined) {
-		try {
-			execFileSync("docker", ["info", "--format", "{{.ServerVersion}}"], {
-				timeout: 10_000,
-				stdio: "pipe",
-			})
-		} catch (error) {
-			throw new Error(
-				"The local sandbox tests need a running Docker daemon. Start Docker and rerun; no Cloudflare resources have been created.",
-				{ cause: error },
+		const start = performance.now()
+		const version = await waitForDocker()
+		if (process.env["CHECKFU_LOG_DOCKER_READINESS"] === "1") {
+			process.stderr.write(
+				`Docker daemon ${version} ready after ${Math.round(performance.now() - start)} ms.\n`,
 			)
 		}
 	}
